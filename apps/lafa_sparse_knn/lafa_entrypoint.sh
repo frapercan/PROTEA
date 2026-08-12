@@ -61,6 +61,17 @@ if [ "${has_bundle}" -eq 0 ]; then
     fi
     set -- "$@" --bundle "${BUNDLE}"
 fi
+# Check writability here rather than discovering it at the end. The container
+# runs as uid 1000, and a host directory owned by another uid is readable but
+# not writable, so without this the run embeds, retrieves and transfers before
+# failing on the last line with a bare PermissionError.
+if ! touch "${OUT_DIR}/.protea-write-test" 2>/dev/null; then
+    echo "[protea-sparse-knn] ${OUT_DIR} is not writable by uid $(id -u)." >&2
+    echo "[protea-sparse-knn] Mount a directory this uid can write, or run with" >&2
+    echo "[protea-sparse-knn] --user \$(id -u):\$(id -g)." >&2
+    exit 68
+fi
+rm -f "${OUT_DIR}/.protea-write-test"
 
 if [ "${has_query}" -eq 0 ]; then
     if [ ! -f "${QUERY}" ]; then

@@ -195,7 +195,9 @@ def load_bank(bundle: Path) -> tuple[Any, list[str], dict[str, Any]]:
         (val.ravel(), idx.ravel().astype(np.int32), indptr),
         shape=(n_rows, int(meta["dict_dim"])),
     )
-    log(f"bank {bank.shape[0]:,} x {bank.shape[1]} at {k} non-zeros, {bank.data.nbytes/1e6:.0f} MB")
+    log(
+        f"bank {bank.shape[0]:,} x {bank.shape[1]} at {k} non-zeros, {bank.data.nbytes / 1e6:.0f} MB"
+    )
     return bank, accessions, meta
 
 
@@ -322,21 +324,19 @@ def _embed_block(
     better outcome than losing the run.
     """
     try:
-        chunked = backend.embed_chunks(
-            model, tokenizer, [sequences[a] for a in block], config, dev
-        )
+        chunked = backend.embed_chunks(model, tokenizer, [sequences[a] for a in block], config, dev)
     except torch.OutOfMemoryError:
         torch.cuda.empty_cache()
         if len(block) == 1:
             log(f"  {block[0]} does not fit on the device on its own, skipped")
             return []
         half = len(block) // 2
-        log(f"  out of memory on {len(block)} sequences, splitting into {half} and {len(block)-half}")
+        log(
+            f"  out of memory on {len(block)} sequences, splitting into {half} and {len(block) - half}"
+        )
         return _embed_block(
             backend, model, tokenizer, sequences, block[:half], config, dev, torch
-        ) + _embed_block(
-            backend, model, tokenizer, sequences, block[half:], config, dev, torch
-        )
+        ) + _embed_block(backend, model, tokenizer, sequences, block[half:], config, dev, torch)
 
     out: list[tuple[str, np.ndarray]] = []
     for accession, chunks in zip(block, chunked, strict=True):
@@ -454,8 +454,8 @@ def transfer(
 ) -> dict[str, dict[str, float]]:
     """Turn neighbours into scored GO terms, propagated to ancestors.
 
-    Two scoring schemes, because they disagree about what a score means
-    and the disagreement is load-bearing:
+    Three scoring schemes, because the first two disagree about what a
+    score means and the disagreement is load-bearing:
 
     ``vote``
         The similarity-weighted fraction of the neighbours that carry the
@@ -482,11 +482,12 @@ def transfer(
     won seven of nine cells and maxsim the two no-knowledge cells where
     the answer was largely already stated at t0.
 
-    A term's score is the similarity-weighted fraction of the neighbours
-    that could vote at all, so it lands in ``[0, 1]`` by construction
-    rather than by a rescaling after the fact. Propagation takes the
-    maximum over descendants, which keeps an ancestor at least as
-    confident as anything implying it and satisfies the true path rule.
+    The vote component is the similarity-weighted fraction of the
+    neighbours that could vote at all, so it lands in ``[0, 1]`` by
+    construction rather than by a rescaling after the fact, and the other
+    two schemes inherit that range. Propagation takes the maximum over
+    descendants, which keeps an ancestor at least as confident as
+    anything implying it and satisfies the true path rule.
 
     Only neighbours carrying annotations enter the denominator. About 3%
     of the bank has an embedding but no GO term, and counting those in
@@ -605,18 +606,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--device", default=None)
     parser.add_argument("--score", choices=("vote", "maxsim", "blend"), default="blend")
-    parser.add_argument("--blend", type=float, default=DEFAULT_BLEND,
-                        help="weight on maxsim in the blend; 0 is pure vote, 1 pure maxsim")
-    parser.add_argument("--also_score", choices=("vote", "maxsim"), default=None,
-                        help="write a second file scored the other way, for comparison")
+    parser.add_argument(
+        "--blend",
+        type=float,
+        default=DEFAULT_BLEND,
+        help="weight on maxsim in the blend; 0 is pure vote, 1 pure maxsim",
+    )
+    parser.add_argument(
+        "--also_score",
+        choices=("vote", "maxsim"),
+        default=None,
+        help="write a second file scored the other way, for comparison",
+    )
     args = parser.parse_args(argv)
 
-    unused = [n for n in ("train_sequences", "annot_file", "train_terms", "train_taxonomy")
-              if getattr(args, n) is not None]
+    unused = [
+        n
+        for n in ("train_sequences", "annot_file", "train_terms", "train_taxonomy")
+        if getattr(args, n) is not None
+    ]
     if unused:
         log(f"accepted but not used by this method: {', '.join(unused)}")
     if args.num_threads:
         import torch
+
         torch.set_num_threads(args.num_threads)
         log(f"torch threads set to {args.num_threads}")
 
@@ -647,8 +660,9 @@ def main(argv: list[str] | None = None) -> int:
 
     codes = encode_sparse(embeddings, encoder, top_k, int(bank_meta["dict_dim"]))
     neighbours = search(codes, bank, accessions, args.k, query_accessions=kept)
-    scored = transfer(kept, neighbours, donors, parents, alt_ids,
-                      scheme=args.score, blend=args.blend)
+    scored = transfer(
+        kept, neighbours, donors, parents, alt_ids, scheme=args.score, blend=args.blend
+    )
     caps = {"P": args.max_bpo, "F": args.max_mfo, "C": args.max_cco}
     written = write_predictions(scored, aspect, kept, Path(args.output), caps)
 
@@ -663,7 +677,7 @@ def main(argv: list[str] | None = None) -> int:
         n = write_predictions(other, aspect, kept, second, caps)
         log(f"also wrote {n:,} predictions scored by {args.also_score} to {second.name}")
 
-    log(f"wrote {written:,} predictions for {len(kept):,} queries in {time.time()-started:.0f}s")
+    log(f"wrote {written:,} predictions for {len(kept):,} queries in {time.time() - started:.0f}s")
     return 0
 
 
