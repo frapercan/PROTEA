@@ -447,7 +447,7 @@ def report_self_check(
     query_accessions: list[str],
     neighbours: list[list[tuple[str, float]]],
     bank_accessions: set[str],
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Report, per query already in the bank, its own rank and cosine.
 
     The failure this catches is silent and total: if the queries are embedded
@@ -470,9 +470,11 @@ def report_self_check(
     """
     ranks: list[int] = []
     cosines: list[float] = []
+    checked_accessions: list[str] = []
     for accession, hits in zip(query_accessions, neighbours, strict=True):
         if accession not in bank_accessions:
             continue
+        checked_accessions.append(accession)
         own = next((i for i, (donor, _) in enumerate(hits) if donor == accession), None)
         if own is None:
             ranks.append(0)  # not retrieved at all, the worst outcome
@@ -498,12 +500,42 @@ def report_self_check(
         f"{missing:,} were not retrieved at all; "
         f"lowest self-cosine {low:.4f}"
     )
-    if first != len(ranks):
-        log("self-check: FAILED. The query recipe has drifted from EMBEDDING_RECIPE.json")
-        log("self-check: and the predictions should not be trusted.")
+    # Drift is SYSTEMIC or it is not drift. A recipe that disagrees with the one
+    # the bank was built with puts every query in a different geometry, where
+    # ranking first is chance: the broken case measured here was 0 of 25 at a
+    # negative self-cosine. An individual miss is a different animal, and the
+    # usual cause is mundane, that the query FASTA carries a different sequence
+    # for that accession than the release the bank was built from.
+    #
+    # Demanding all of them was the first version of this check and it was
+    # wrong for the same reason the cosine threshold it replaced was wrong: on
+    # 256 real benchmark targets, 254 rank first and it reported FAILURE, which
+    # sends a correctly configured evaluator away to debug a working setup. The
+    # exceptions are named instead, because which proteins they are is useful.
+    exceptions = [
+        accession for accession, rank in zip(checked_accessions, ranks, strict=True) if rank != 1
+    ]
+    if first * 2 < len(ranks):
+        log("self-check: FAILED. Fewer than half of the queries already in the")
+        log("self-check: bank are their own nearest neighbour, so the query recipe")
+        log("self-check: has drifted from EMBEDDING_RECIPE.json and no prediction")
+        log("self-check: in this run should be trusted.")
+    elif exceptions:
+        log("self-check: passed, with exceptions. The bulk of the queries are in")
+        log("self-check: the same geometry as the bank, so the recipe is sound.")
+        shown = ", ".join(exceptions[:10]) + (" ..." if len(exceptions) > 10 else "")
+        log(f"self-check: {len(exceptions):,} did not rank first: {shown}")
+        log("self-check: usually their sequence differs from the one the bank holds")
+        log("self-check: for that accession, which is worth knowing but is not drift.")
     else:
         log("self-check: passed. Query and bank are in the same geometry.")
-    return {"checked": len(ranks), "rank_one": first, "missing": missing, "lowest_cosine": low}
+    return {
+        "checked": len(ranks),
+        "rank_one": first,
+        "missing": missing,
+        "lowest_cosine": low,
+        "exceptions": exceptions,
+    }
 
 
 def transfer(
