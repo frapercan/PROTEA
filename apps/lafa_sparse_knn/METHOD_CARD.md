@@ -193,10 +193,10 @@ count as rank one.
 **A few misses are reported and do not fail the check.** Drift is systemic
 or it is not drift: a recipe that disagrees with the bank's puts every
 query in a different geometry, where ranking first is chance. Measured on
-256 real benchmark targets, 254 rank first and two do not, because the
-benchmark's FASTA carries a different sequence for those two accessions
-than the release the bank was built from. The check names them rather
-than condemning the run.
+256 real benchmark targets, 254 rank first and two do not. The check names
+the two rather than condemning the run. The bundle ships codes and not
+sequences, so why an individual accession misses is not something this
+container can establish.
 
 ## The scoring weight
 
