@@ -322,6 +322,12 @@ def _embed_block(
     falls back only where it is needed. A single sequence that still does
     not fit is reported and skipped, because losing one protein is a
     better outcome than losing the run.
+
+    That last branch says less about the protein than it looks. The recipe
+    truncates at 2048, so the cost of one sequence is bounded whatever its
+    true length, and a card that cannot hold that bounded worst case is a
+    card with something else on it. Read a skip here as contention, not as
+    an unscorable target.
     """
     try:
         chunked = backend.embed_chunks(model, tokenizer, [sequences[a] for a in block], config, dev)
