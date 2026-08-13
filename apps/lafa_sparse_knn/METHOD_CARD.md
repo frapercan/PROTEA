@@ -102,12 +102,36 @@ the per-aspect closure depths.
 
 The bank is held as a CSR matrix, about 295 MB for 575,503 rows at 128
 non-zeros each. Queries are scored in blocks of 256, so the dense
-similarity buffer stays near 590 MB whatever the query count. Peak
-resident memory is therefore roughly 1.5 GB plus the backbone.
+similarity buffer stays near 590 MB whatever the query count.
+
+**Give it 16 GB.** The estimate that used to stand here, roughly 1.5 GB
+plus the backbone, was arithmetic rather than measurement and it is wrong
+by most of an order of magnitude. Measured on 256 real benchmark targets,
+median length 541 residues, on the processor with the network disabled:
+
+| container memory limit | outcome | peak observed |
+| --- | --- | --- |
+| 4 GB | killed, exit 137 | not reached |
+| 8 GB | killed, exit 137 | 8.7 GB |
+| 16 GB | completed | 10.0 GB |
+
+Nothing about that failure is graceful. The kernel kills the process, so
+there is no message, no traceback and no partial output: an evaluator
+sizing a job from the old figure would see a container that appears to
+hang and then vanish.
+
+The earlier numbers were taken on a fixture whose sequences were all one
+residue long, which the container accepted without complaint. Sequence
+length is what drives the embedding cost, so those runs measured almost
+nothing. The self-check above is what exposed it, by reporting a negative
+self-cosine on proteins that should have matched themselves exactly.
 
 Measured end to end on one RTX 3060, 20 queries of 150 to 400 residues:
 11 seconds including loading the bank, the donors, the ontology and the
-backbone. Retrieval itself was under a second.
+backbone. Retrieval itself was under a second. On the processor the same
+work is far slower: 256 real targets took 66 minutes, so a full benchmark
+set of 7,401 is a day and a half without a card and about 40 minutes with
+one.
 
 The backbone runs in bfloat16 on CUDA and float32 on the processor, which
 is the backend's own rule: FP16 LayerNorm collapses to NaN on this
@@ -165,6 +189,14 @@ than no check, because it sends a working setup back to debug itself.
 Accessions sharing a sequence share a code exactly, so a query is often
 preceded by its own twins at an identical cosine. Those are ties and
 count as rank one.
+
+**A few misses are reported and do not fail the check.** Drift is systemic
+or it is not drift: a recipe that disagrees with the bank's puts every
+query in a different geometry, where ranking first is chance. Measured on
+256 real benchmark targets, 254 rank first and two do not, because the
+benchmark's FASTA carries a different sequence for those two accessions
+than the release the bank was built from. The check names them rather
+than condemning the run.
 
 ## The scoring weight
 

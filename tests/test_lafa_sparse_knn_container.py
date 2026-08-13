@@ -403,6 +403,37 @@ def test_the_blend_ends_are_the_two_pure_schemes(ontology: Path) -> None:
             assert blended["Q1"][term] == pytest.approx(value), f"{scheme} at w={w}, {term}"
 
 
+def test_a_handful_of_misses_is_reported_but_does_not_fail_the_check() -> None:
+    """Drift is systemic or it is not drift.
+
+    Measured on 256 real benchmark targets, 254 rank first and two do not,
+    because the benchmark's FASTA carries a different sequence for those two
+    accessions than the release the bank was built from. The first version of
+    this check demanded all of them and reported FAILURE on that run, which is
+    the same mistake as the cosine threshold it replaced: it sends a correctly
+    configured evaluator away to debug a working setup.
+    """
+    from apps.lafa_sparse_knn.sparse_driver import report_self_check
+
+    hits = [[(f"P{i}", 0.99)] for i in range(10)]
+    hits[3] = [("OTHER", 0.99), ("P3", 0.40)]
+    accs = [f"P{i}" for i in range(10)]
+    out = report_self_check(accs, hits, set(accs) | {"OTHER"})
+    assert out["rank_one"] == 9
+    assert out["exceptions"] == ["P3"], "the miss is named, not swallowed"
+
+
+def test_a_systemic_miss_still_fails_the_check() -> None:
+    """The broken case measured here was 0 of 25 at a negative self-cosine."""
+    from apps.lafa_sparse_knn.sparse_driver import report_self_check
+
+    accs = [f"P{i}" for i in range(10)]
+    hits = [[("OTHER", 0.9), (a, -0.03)] for a in accs]
+    out = report_self_check(accs, hits, set(accs) | {"OTHER"})
+    assert out["rank_one"] == 0
+    assert len(out["exceptions"]) == 10
+
+
 def test_the_self_check_passes_when_every_query_is_its_own_neighbour() -> None:
     """The parity report the method card tells a recipient to run.
 
