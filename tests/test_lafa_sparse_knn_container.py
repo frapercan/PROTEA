@@ -487,3 +487,40 @@ def test_a_query_not_in_the_bank_is_not_checked() -> None:
     from apps.lafa_sparse_knn.sparse_driver import report_self_check
 
     assert report_self_check(["NEW"], [[("A", 0.7)]], {"A", "B"}) == {}
+
+
+def test_a_uniprot_header_yields_the_accession_not_the_whole_field() -> None:
+    """The benchmark ships `>sp|ACC|NAME`, and the first token is not the ID.
+
+    Taking the first token gives `sp|Q6GZX4|001R_FRG3G`, which matches nothing
+    in a ground truth keyed by accession, so every row in the output file is
+    silently unscorable. Confirmed against the published image before the fix.
+    """
+    from apps.lafa_sparse_knn.sparse_driver import accession_of
+
+    assert accession_of("sp|Q6GZX4|001R_FRG3G Putative transcription factor") == "Q6GZX4"
+    assert accession_of("tr|A0A075B6T8|A0A075B6T8_HUMAN Something") == "A0A075B6T8"
+
+
+def test_a_bare_header_is_unchanged() -> None:
+    """The form the locally derived target files use must keep working."""
+    from apps.lafa_sparse_knn.sparse_driver import accession_of
+
+    assert accession_of("A0A075B6T8") == "A0A075B6T8"
+    assert accession_of("A0A075B6T8 some description here") == "A0A075B6T8"
+
+
+def test_an_identifier_containing_a_pipe_is_left_alone() -> None:
+    """Anchored on sp and tr, so a pipe in someone else's identifier survives."""
+    from apps.lafa_sparse_knn.sparse_driver import accession_of
+
+    assert accession_of("weird|id|here description") == "weird|id|here"
+    assert accession_of("gnl|MYDB|thing") == "gnl|MYDB|thing"
+
+
+def test_read_fasta_keys_a_uniprot_file_by_accession(tmp_path: Path) -> None:
+    from apps.lafa_sparse_knn.sparse_driver import read_fasta
+
+    p = tmp_path / "q.fasta"
+    p.write_text(">sp|Q6GZX4|001R_FRG3G desc\nMAFS\n>sp|Q6GZX3|002L_FRG3G desc\nMSII\n")
+    assert read_fasta(p) == {"Q6GZX4": "MAFS", "Q6GZX3": "MSII"}

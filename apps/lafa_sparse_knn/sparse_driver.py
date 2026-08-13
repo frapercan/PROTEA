@@ -34,6 +34,7 @@ import argparse
 import gzip
 import json
 import os
+import re
 import sys
 import time
 from collections import defaultdict
@@ -70,12 +71,38 @@ def log(message: str) -> None:
 # --- inputs -----------------------------------------------------------
 
 
-def read_fasta(path: Path) -> dict[str, str]:
-    """Read a FASTA file into ``{accession: sequence}``, in file order.
+#: A UniProt FASTA header, whose accession is the middle field rather than
+#: the first token: ``>sp|Q6GZX4|001R_FRG3G Putative transcription factor``.
+#: Deliberately anchored on ``sp`` and ``tr``, the Swiss-Prot and TrEMBL
+#: prefixes, rather than on any ``a|b|c`` shape, so an identifier that
+#: legitimately contains a pipe is left alone.
+_UNIPROT_HEADER = re.compile(r"^(?:sp|tr)\|([^|\s]+)\|\S*")
 
-    The accession is the first whitespace-delimited token of the header,
-    with a leading ``>`` stripped. LAFA headers carry the EntryID there.
+
+def accession_of(header: str) -> str:
+    """Pull the identifier out of one FASTA header, without the ``>``.
+
+    Two forms are recognised, because the benchmark ships one and this
+    container used to assume the other.
+
+    A bare identifier, ``>Q6GZX4 anything after``, gives its first token.
+
+    A UniProt header, ``>sp|Q6GZX4|001R_FRG3G Putative...``, gives the
+    middle field. Taking the first token there yields
+    ``sp|Q6GZX4|001R_FRG3G``, which matches nothing in a ground truth keyed
+    by accession, so every prediction in the file is silently unscorable.
+    The benchmark's own ``test_sequences.fasta`` is in this form; the
+    locally derived target files this container was tested against had
+    already been rewritten to bare accessions, which is why the assumption
+    survived.
     """
+    first = header.split()[0]
+    match = _UNIPROT_HEADER.match(first)
+    return match.group(1) if match else first
+
+
+def read_fasta(path: Path) -> dict[str, str]:
+    """Read a FASTA file into ``{accession: sequence}``, in file order."""
     seqs: dict[str, str] = {}
     acc: str | None = None
     parts: list[str] = []
@@ -87,7 +114,7 @@ def read_fasta(path: Path) -> dict[str, str]:
             if line.startswith(">"):
                 if acc is not None:
                     seqs[acc] = "".join(parts)
-                acc = line[1:].split()[0]
+                acc = accession_of(line[1:])
                 parts = []
             else:
                 parts.append(line)
