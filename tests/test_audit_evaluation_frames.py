@@ -38,6 +38,9 @@ class _FakeResult:
     def one(self) -> dict[str, Any]:
         return self._rows[0]
 
+    def keys(self) -> Any:  # the operation reads column names off the mapping
+        return self._rows[0].keys()
+
     def all(self) -> list[dict[str, Any]]:
         return self._rows
 
@@ -72,7 +75,14 @@ def _run(totals: dict[str, Any], reachable: int, combos: list[dict[str, Any]]) -
 def test_a_row_whose_parents_are_gone_counts_as_deletable_only() -> None:
     """It can be described but not reproduced, so it can only be removed."""
     out = _run(
-        {"rows": 100, "with_frame": 40, "with_window": 0, "with_role": 0, "with_arms": 0},
+        {
+            "n_rows": 100,
+            "with_frame": 40,
+            "with_window": 0,
+            "with_role": 0,
+            "with_arms": 0,
+            "without_job": 0,
+        },
         reachable=70,
         combos=[],
     )
@@ -84,7 +94,14 @@ def test_more_framed_rows_than_recomputable_never_goes_negative() -> None:
     """Legacy rows can carry a frame label while their parents are gone. The
     verdict must not report a negative amount of work."""
     out = _run(
-        {"rows": 10, "with_frame": 9, "with_window": 0, "with_role": 0, "with_arms": 0},
+        {
+            "n_rows": 10,
+            "with_frame": 9,
+            "with_window": 0,
+            "with_role": 0,
+            "with_arms": 0,
+            "without_job": 0,
+        },
         reachable=2,
         combos=[],
     )
@@ -95,7 +112,14 @@ def test_more_framed_rows_than_recomputable_never_goes_negative() -> None:
 def test_combinations_are_reported_verbatim() -> None:
     """How many frames exist in fact, not how many we imagine."""
     out = _run(
-        {"rows": 3, "with_frame": 3, "with_window": 3, "with_role": 3, "with_arms": 3},
+        {
+            "n_rows": 3,
+            "with_frame": 3,
+            "with_window": 3,
+            "with_role": 3,
+            "with_arms": 3,
+            "without_job": 0,
+        },
         reachable=3,
         combos=[
             {

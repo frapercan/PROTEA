@@ -13,12 +13,12 @@ labelled ``lafa`` can still be incomparable. All four provenance markers are
 nullable with no default, so the guarantee is opt-in, which means it is not a
 guarantee.
 
-This operation changes nothing. It answers the four questions that decide
-whether making the frame mandatory is an afternoon of recomputation or a week of
-it, and it exists as an operation rather than a script because a procedure
-outside the platform is a capability that dies with the disk. It will be run
-again after the migration and again after any deletion, and its output is the
-before-and-after that makes those safe.
+This operation changes nothing. It answers the questions that decide whether
+making the frame mandatory is an afternoon of recomputation or a week of it, and
+it exists as an operation rather than a script because a procedure outside the
+platform is a capability that dies with the disk. It will be run again after the
+migration and again after any deletion, and its output is the before-and-after
+that makes those safe.
 """
 
 from __future__ import annotations
@@ -29,6 +29,60 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult
+
+_TOTALS = (
+    "SELECT count(*) AS n_rows,"
+    "       count(frame) AS with_frame,"
+    "       count(temporal_window) AS with_window,"
+    "       count(leakage_role) AS with_role,"
+    "       count(arms_enabled) AS with_arms,"
+    "       count(*) FILTER (WHERE job_id IS NULL) AS without_job"
+    "  FROM evaluation_result"
+)
+
+#: Recomputable means both parents are still reachable. A row whose prediction
+#: set or evaluation set is gone can be described but not reproduced, so it can
+#: only be deleted, never re-framed.
+_REACHABLE = (
+    "SELECT count(*) AS recomputable"
+    "  FROM evaluation_result r"
+    "  JOIN prediction_set p ON p.id = r.prediction_set_id"
+    "  JOIN evaluation_set e ON e.id = r.evaluation_set_id"
+)
+
+#: How many distinct frames exist in fact, as opposed to how many we imagine.
+#: Grouped on all four markers because any one of them can make two rows
+#: incomparable.
+_COMBINATIONS = (
+    "SELECT frame, temporal_window, leakage_role,"
+    "       (arms_enabled IS NOT NULL) AS has_arms,"
+    "       count(*) AS n"
+    "  FROM evaluation_result"
+    " GROUP BY 1, 2, 3, 4"
+    " ORDER BY n DESC"
+)
+
+
+def _read_totals(session: Session) -> dict[str, int]:
+    row = session.execute(text(_TOTALS)).mappings().one()
+    return {key: int(row[key]) for key in row.keys()}
+
+
+def _read_recomputable(session: Session) -> int:
+    return int(session.execute(text(_REACHABLE)).mappings().one()["recomputable"])
+
+
+def _read_combinations(session: Session) -> list[dict[str, Any]]:
+    return [
+        {
+            "frame": row["frame"],
+            "temporal_window": row["temporal_window"],
+            "leakage_role": row["leakage_role"],
+            "has_arms": bool(row["has_arms"]),
+            "n": int(row["n"]),
+        }
+        for row in session.execute(text(_COMBINATIONS)).mappings().all()
+    ]
 
 
 class AuditEvaluationFramesOperation(Operation):
@@ -44,98 +98,19 @@ class AuditEvaluationFramesOperation(Operation):
     ) -> OperationResult:
         emit("audit.start", "Counting the evaluation layer", {}, "info")
 
-        totals = (
-            session.execute(
-                text(
-                    "SELECT count(*) AS rows,"
-                    "       count(frame) AS with_frame,"
-                    "       count(temporal_window) AS with_window,"
-                    "       count(leakage_role) AS with_role,"
-                    "       count(arms_enabled) AS with_arms"
-                    "  FROM evaluation_result"
-                )
-            )
-            .mappings()
-            .one()
-        )
+        totals = _read_totals(session)
+        recomputable = _read_recomputable(session)
+        combinations = _read_combinations(session)
 
-        # Recomputable means both parents are still reachable. A row whose
-        # prediction set or evaluation set is gone can be described but not
-        # reproduced, so it can only be deleted, never re-framed.
-        reachable = (
-            session.execute(
-                text(
-                    "SELECT count(*) AS recomputable"
-                    "  FROM evaluation_result r"
-                    "  JOIN prediction_set p ON p.id = r.prediction_set_id"
-                    "  JOIN evaluation_set e ON e.id = r.evaluation_set_id"
-                )
-            )
-            .mappings()
-            .one()
-        )
-
-        # How many distinct frames exist in fact, as opposed to how many we
-        # imagine. Grouped on all four markers because any of them can make two
-        # rows incomparable.
-        combos = (
-            session.execute(
-                text(
-                    "SELECT frame, temporal_window, leakage_role,"
-                    "       (arms_enabled IS NOT NULL) AS has_arms,"
-                    "       count(*) AS n"
-                    "  FROM evaluation_result"
-                    " GROUP BY 1, 2, 3, 4"
-                    " ORDER BY n DESC"
-                )
-            )
-            .mappings()
-            .all()
-        )
-
-        # Anything that would break if a row were deleted. A result referenced
-        # by a published figure is not ours to remove quietly.
-        orphan_risk = (
-            session.execute(
-                text(
-                    "SELECT count(*) AS results_without_job"
-                    "  FROM evaluation_result WHERE job_id IS NULL"
-                )
-            )
-            .mappings()
-            .one()
-        )
-
-        rows = int(totals["rows"])
-        with_frame = int(totals["with_frame"])
-        recomputable = int(reachable["recomputable"])
+        n_rows = totals["n_rows"]
+        with_frame = totals["with_frame"]
 
         emit(
             "audit.totals",
-            f"{rows} results, {with_frame} carry a frame, {recomputable} recomputable",
-            {
-                "rows": rows,
-                "with_frame": with_frame,
-                "with_temporal_window": int(totals["with_window"]),
-                "with_leakage_role": int(totals["with_role"]),
-                "with_arms_enabled": int(totals["with_arms"]),
-                "recomputable": recomputable,
-                "unreachable_parents": rows - recomputable,
-                "results_without_job": int(orphan_risk["results_without_job"]),
-            },
+            f"{n_rows} results, {with_frame} carry a frame, {recomputable} recomputable",
+            {**totals, "recomputable": recomputable, "unreachable_parents": n_rows - recomputable},
             "info",
         )
-
-        combinations = [
-            {
-                "frame": c["frame"],
-                "temporal_window": c["temporal_window"],
-                "leakage_role": c["leakage_role"],
-                "has_arms": bool(c["has_arms"]),
-                "n": int(c["n"]),
-            }
-            for c in combos
-        ]
         emit(
             "audit.combinations",
             f"{len(combinations)} distinct provenance combinations",
@@ -144,29 +119,26 @@ class AuditEvaluationFramesOperation(Operation):
         )
 
         # The number that decides the shape of the work, stated once and plainly
-        # so nobody has to derive it from the rest.
-        unframed_but_recomputable = max(0, recomputable - with_frame)
+        # so nobody has to derive it from the rest. A row can carry a frame label
+        # and still have lost its parents, so this is clamped rather than
+        # subtracted blind.
+        re_framable = max(0, recomputable - with_frame)
+        deletable_only = n_rows - recomputable
         emit(
             "audit.verdict",
-            (
-                f"{unframed_but_recomputable} rows can be re-framed by recomputing; "
-                f"{rows - recomputable} can only be deleted"
-            ),
-            {
-                "re_framable_by_recompute": unframed_but_recomputable,
-                "deletable_only": rows - recomputable,
-            },
+            f"{re_framable} rows can be re-framed by recomputing; {deletable_only} can only be deleted",
+            {"re_framable_by_recompute": re_framable, "deletable_only": deletable_only},
             "info",
         )
 
         return OperationResult(
             result={
-                "rows": rows,
+                "rows": n_rows,
                 "with_frame": with_frame,
                 "recomputable": recomputable,
                 "combinations": combinations,
-                "re_framable_by_recompute": unframed_but_recomputable,
-                "deletable_only": rows - recomputable,
+                "re_framable_by_recompute": re_framable,
+                "deletable_only": deletable_only,
             }
         )
 
