@@ -24,6 +24,7 @@ plausible table of mostly-zero weights.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import sys
 import tempfile
@@ -85,6 +86,23 @@ class ComputeInformationAccretionPayload(ProteaPayload, frozen=True):
 
 class InformationAccretionGateError(RuntimeError):
     """A structural invariant of the computed table did not hold."""
+
+
+@dataclasses.dataclass(frozen=True)
+class _Dag:
+    """The propagated ontology the gates inspect.
+
+    Five structures that are always computed together and always passed
+    together. Bundling them is not to shorten a signature: it is that none of
+    the gates is meaningful against a subset of them, so a caller holding four
+    of the five has nothing it can legally check.
+    """
+
+    terms: list[str]
+    parents: dict[str, set[str]]
+    ancestors: dict[str, frozenset[str]]
+    proteins_per_term: dict[str, set[str]]
+    ia: dict[str, float]
 
 
 class ComputeInformationAccretionOperation:
@@ -171,23 +189,41 @@ class ComputeInformationAccretionOperation:
     # --------------------------------------------------------------- gates
     def _gate(
         self,
-        terms: list[str],
-        parents: dict[str, set[str]],
-        ancestors: dict[str, frozenset[str]],
-        proteins_per_term: dict[str, set[str]],
-        ia: dict[str, float],
+        dag: "_Dag",
         raw: int,
         dropped: int,
         max_drop_rate_pct: float,
     ) -> dict[str, Any]:
-        """Structural invariants. Each raises rather than warns."""
+        """Structural invariants. Each raises rather than warns.
+
+        Split by what each check inspects rather than by length. The corpus
+        checks read only the annotation counts, the shape check reads only the
+        parent and ancestor maps, propagation reads the protein sets, and the
+        value checks read the computed IA. Nothing here shares state with the
+        next thing, which is why it was six checks in one method rather than
+        one check that needed ninety-seven lines.
+        """
+        drop_rate = self._gate_corpus(raw, dropped, max_drop_rate_pct)
+        self._gate_acyclic(dag)
+        self._gate_propagation(dag)
+        roots, nonzero = self._gate_values(dag)
+        return {
+            "drop_rate_pct": drop_rate,
+            "cycles": 0,
+            "tpr_violations": 0,
+            "roots": roots,
+            "nonzero": nonzero,
+        }
+
+    @staticmethod
+    def _gate_corpus(raw: int, dropped: int, max_drop_rate_pct: float) -> float:
+        """The corpus exists and matches the snapshot. Returns the drop rate."""
         if raw == 0:
             raise InformationAccretionGateError(
                 "corpus is empty for this annotation set and evidence regime; "
                 "an IA table over no annotations would be all zeros and would "
                 "score as uniform IC=1 without ever saying so"
             )
-
         drop_rate = 100.0 * dropped / raw
         if drop_rate > max_drop_rate_pct:
             raise InformationAccretionGateError(
@@ -196,12 +232,15 @@ class ComputeInformationAccretionOperation:
                 f"{max_drop_rate_pct} percent limit; the corpus and the "
                 f"snapshot are probably not congruent"
             )
+        return drop_rate
 
-        # A term must not be its own strict ancestor.
+    @staticmethod
+    def _gate_acyclic(dag: "_Dag") -> None:
+        """A term must not be its own strict ancestor."""
         cycles = [
-            t for t in terms
-            if t in parents
-            and t in {a for p in parents[t] for a in ancestors.get(p, frozenset())}
+            t for t in dag.terms
+            if t in dag.parents
+            and t in {a for p in dag.parents[t] for a in dag.ancestors.get(p, frozenset())}
         ]
         if cycles:
             raise InformationAccretionGateError(
@@ -209,20 +248,25 @@ class ComputeInformationAccretionOperation:
                 f"e.g. {cycles[:5]}; the DAG is not acyclic"
             )
 
-        # After propagation a child's protein set is a subset of every parent's,
-        # so num <= denom always holds. term_ia clamps a violation to 0.0
-        # silently, which is why this is checked here instead.
+    @staticmethod
+    def _gate_propagation(dag: "_Dag") -> None:
+        """No term holds more proteins than its parents' intersection.
+
+        After propagation a child's protein set is a subset of every parent's,
+        so num <= denom always holds. ``term_ia`` clamps a violation to 0.0
+        silently, which is why this is checked here instead.
+        """
         violations: list[tuple[str, int, int]] = []
-        for t in terms:
-            ps = parents.get(t)
+        for t in dag.terms:
+            ps = dag.parents.get(t)
             if not ps:
                 continue
-            parent_sets = [proteins_per_term.get(p) for p in ps]
+            parent_sets = [dag.proteins_per_term.get(p) for p in ps]
             if any(not s for s in parent_sets):
                 denom = 1
             else:
                 denom = len(set.intersection(*parent_sets)) + 1  # type: ignore[arg-type]
-            num = len(proteins_per_term.get(t, ())) + 1
+            num = len(dag.proteins_per_term.get(t, ())) + 1
             if num > denom:
                 violations.append((t, num, denom))
                 if len(violations) >= 20:
@@ -234,38 +278,32 @@ class ComputeInformationAccretionOperation:
                 f"propagation is broken and term_ia would clamp these to 0.0"
             )
 
-        negative = [t for t in terms if ia[t] < 0.0]
+    @staticmethod
+    def _gate_values(dag: "_Dag") -> tuple[int, int]:
+        """The computed values are possible. Returns (roots, nonzero)."""
+        negative = [t for t in dag.terms if dag.ia[t] < 0.0]
         if negative:
             raise InformationAccretionGateError(
                 f"{len(negative)} terms have negative IA, e.g. {negative[:5]}"
             )
-
-        roots = [t for t in terms if not parents.get(t)]
+        roots = [t for t in dag.terms if not dag.parents.get(t)]
         if not roots:
             raise InformationAccretionGateError(
                 "no root term (a term with no True Path Rule parent) exists; "
                 "the relationship table is probably empty for this snapshot"
             )
-        bad_roots = [t for t in roots if ia[t] != 0.0]
+        bad_roots = [t for t in roots if dag.ia[t] != 0.0]
         if bad_roots:
             raise InformationAccretionGateError(
                 f"{len(bad_roots)} roots have non-zero IA, e.g. {bad_roots[:5]}"
             )
-
-        nonzero = sum(1 for v in ia.values() if v > 0.0)
+        nonzero = sum(1 for v in dag.ia.values() if v > 0.0)
         if nonzero == 0:
             raise InformationAccretionGateError(
                 "every term has IA 0.0; the table would weight identically to "
                 "the uniform IC=1 fallback it is meant to replace"
             )
-
-        return {
-            "drop_rate_pct": drop_rate,
-            "cycles": 0,
-            "tpr_violations": 0,
-            "roots": len(roots),
-            "nonzero": nonzero,
-        }
+        return len(roots), nonzero
 
     # ------------------------------------------------------------- execute
     def summarize_payload(self, payload: dict[str, Any]) -> str:
@@ -368,10 +406,8 @@ class ComputeInformationAccretionOperation:
 
         ia = {t: term_ia(t, parents.get(t), proteins_per_term) for t in terms}
 
-        gate_stats = self._gate(
-            terms, parents, ancestors, proteins_per_term, ia,
-            raw, dropped, p.max_drop_rate_pct,
-        )
+        dag = _Dag(terms, parents, ancestors, proteins_per_term, ia)
+        gate_stats = self._gate(dag, raw, dropped, p.max_drop_rate_pct)
         emit("compute_information_accretion.gates_passed", None, gate_stats, "info")
 
         ia_set = existing or InformationAccretionSet(id=uuid.uuid4())

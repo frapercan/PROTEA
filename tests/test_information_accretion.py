@@ -25,6 +25,7 @@ from protea.core.ia_regimes import (
     resolve_regime,
 )
 from protea.core.operations.compute_information_accretion import (
+    _Dag,
     ComputeInformationAccretionOperation,
     ComputeInformationAccretionPayload,
     InformationAccretionGateError,
@@ -198,13 +199,20 @@ def _gate(**over):
         ancestors.setdefault(t, frozenset({t}))
     ppt = {"R": {"p1", "p2", "p3"}, "A": {"p1", "p2"}, "B": {"p1"}}
     ia = {"R": 0.0, "A": 0.5, "B": 0.4}
-    kwargs = dict(
+    # The gate now takes the propagated DAG as one object and the corpus
+    # accounting separately. Split the overrides the same way so every test
+    # below keeps overriding whichever field it cares about, unchanged.
+    dag_fields = dict(
         terms=terms, parents=parents, ancestors=ancestors,
-        proteins_per_term=ppt, ia=ia, raw=100, dropped=0,
-        max_drop_rate_pct=1.0,
+        proteins_per_term=ppt, ia=ia,
     )
-    kwargs.update(over)
-    return op._gate(**kwargs)
+    counts = dict(raw=100, dropped=0, max_drop_rate_pct=1.0)
+    for key, value in over.items():
+        if key in dag_fields:
+            dag_fields[key] = value
+        else:
+            counts[key] = value
+    return op._gate(_Dag(**dag_fields), **counts)
 
 
 def test_gate_passes_on_a_healthy_table() -> None:
