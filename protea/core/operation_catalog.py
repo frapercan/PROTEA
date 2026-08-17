@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderOperation
+from protea.core.operations.archive_ontology_snapshot import (
+    ArchiveOntologySnapshotOperation,
+)
 from protea.core.operations.audit_evaluation_frames import (
     AuditEvaluationFramesOperation,
 )
@@ -22,6 +25,10 @@ from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsOperation,
     StoreEmbeddingsOperation,
 )
+from protea.core.operations.compute_information_accretion import (
+    ComputeInformationAccretionOperation,
+)
+from protea.core.operations.export_gate_bundle import ExportGateBundleOperation
 from protea.core.operations.export_minijobs import (
     ExportCoordinatorOperation,
     ExportFeaturesBatchOperation,
@@ -40,6 +47,9 @@ from protea.core.operations.load_interpro_go_mapping import (
 )
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
+from protea.core.operations.measure_embedding_magnitude import (
+    MeasureEmbeddingMagnitudeOperation,
+)
 from protea.core.operations.ping import PingOperation
 from protea.core.operations.predict_go_terms import (
     PredictGOTermsBatchOperation,
@@ -59,6 +69,7 @@ from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOp
 def build_operation_registry() -> OperationRegistry:
     registry = OperationRegistry()
     registry.register(PingOperation())
+    registry.register(ExportGateBundleOperation())
     registry.register(AuditEvaluationFramesOperation())
     registry.register(ApplyLearnedEncoderOperation())
     registry.register(InsertProteinsOperation())
@@ -73,6 +84,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(BatchRescoreEvaluationOperation())
     registry.register(ComputeEmbeddingsOperation())
     registry.register(ComputeEmbeddingsBatchOperation())
+    registry.register(MeasureEmbeddingMagnitudeOperation())
     registry.register(StoreEmbeddingsOperation())
     registry.register(PredictGOTermsOperation())
     registry.register(PredictGOTermsBatchOperation())
@@ -80,6 +92,8 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(PredictGOTermsFromInterProOperation())
     registry.register(RefreshGoaReleaseDatesOperation())
     registry.register(BuildGoCooccurrenceOperation())
+    registry.register(ComputeInformationAccretionOperation())
+    registry.register(ArchiveOntologySnapshotOperation())
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
     # publicly registered: all re-ranker training moves to
     # protea-reranker-lab. They remain importable as internal helpers —

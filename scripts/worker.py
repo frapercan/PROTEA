@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -138,7 +139,23 @@ def main() -> None:
         )
 
     # Pre-warm taxonomy DB for prediction workers that may need it.
-    if args.queue in ("protea.predictions.batch", "protea.jobs", "protea.training"):
+    #
+    # PROTEA_SKIP_TAXONOMY_WARMUP exists for the deploy smoke. The warm-up
+    # downloads about 100 MB and parses 2.9 million nodes before the worker
+    # consumes anything, which is right in production and fatal in CI: the
+    # smoke posts a ping to protea.jobs and waits 60 seconds for it to
+    # succeed, and this is the queue whose worker is still parsing taxonomy.
+    # Ping needs no taxonomy, so the smoke skips the warm-up rather than
+    # waiting for it. Raising the timeout instead would only make the failure
+    # intermittent, since the download time is not ours to bound.
+    skip_warmup = os.environ.get("PROTEA_SKIP_TAXONOMY_WARMUP", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if skip_warmup:
+        logging.info("Taxonomy DB warmup skipped: PROTEA_SKIP_TAXONOMY_WARMUP is set")
+    elif args.queue in ("protea.predictions.batch", "protea.jobs", "protea.training"):
         try:
             from protea.core.feature_engineering import warmup_taxonomy_db
 

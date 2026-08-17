@@ -59,8 +59,10 @@ existing on-platform operation, every one UI-actionable (FR-1) and tracked
 - boosters: trained in ``protea-reranker-lab`` from a published
   ``Dataset``, registered via ``POST /reranker-models/import`` (the
   ``feature_schema_sha`` guard refuses a drifted booster, NFR-REPRO);
-- OBO snapshot: ``load_ontology_snapshot``;
-- IA: ``compute_ia_for_snapshot`` over the snapshot + corpus.
+- OBO snapshot: ``load_ontology_snapshot``, archived by
+  ``archive_ontology_snapshot`` (ADR-D47);
+- IA: ``compute_information_accretion`` over the snapshot + corpus + evidence
+  regime (ADR-D46).
 
 The data does NOT live inside the image (ADR-D23 container contract: data
 is bind-mounted, ``-v /host/data:/app/data:ro``). The deployed bundle is a

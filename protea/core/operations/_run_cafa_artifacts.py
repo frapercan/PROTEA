@@ -92,16 +92,65 @@ def download_obo(url: str, dest: str) -> None:
             f.write(resp.text)
 
 
+def _copy_local(local_path: str, dest: str, *, gzipped: bool) -> None:
+    """Copy a path already on this filesystem, decompressing if needed."""
+    if gzipped:
+        with gzip.open(local_path, "rb") as src, open(dest, "wb") as f:
+            shutil.copyfileobj(src, f)
+    else:
+        shutil.copy2(local_path, dest)
+
+
+def _fetch_from_store(url: str, dest: str) -> None:
+    """Read an ``s3://`` URI through the configured artifact store.
+
+    The bucket in the URI is checked against the configured one rather than
+    trusted. A key that exists in two buckets is two different files, and
+    reading the wrong one would produce a plausible artifact under the right
+    name, which is the failure this whole module exists to prevent.
+    """
+    from pathlib import Path as _Path
+
+    from protea.infrastructure.settings import load_settings
+    from protea.infrastructure.storage import get_artifact_store
+
+    bucket, _, key = url[len("s3://") :].partition("/")
+    if not key:
+        raise ValueError(f"malformed s3 URI (no key): {url}")
+    store = get_artifact_store(load_settings(_Path(__file__).resolve().parents[3]))
+    configured = getattr(store, "bucket", None)
+    if configured is not None and configured != bucket:
+        raise ValueError(
+            f"s3 URI bucket {bucket!r} does not match the configured "
+            f"artifact-store bucket {configured!r}; refusing to read a "
+            f"same-named key out of a different bucket"
+        )
+    blob = store.get(key)
+    if url.endswith(".gz"):
+        blob = gzip.decompress(blob)
+    with open(dest, "wb") as f:
+        f.write(blob)
+
+
 def download_tsv(url: str, dest: str) -> None:
     """Copy or download a plain-text TSV file (gzip-transparent) to dest.
 
-    Accepts both HTTP(S) URLs and local filesystem paths (absolute or
-    ``file://`` scheme).  Local paths are resolved without any network
-    request, which is useful during development when the IA file lives
-    inside the repository (``data/benchmarks/IA_cafa6.tsv``) and
-    ``ia_url`` is set to its absolute path.  Once the file is pushed to
-    GitHub the URL can be switched to the raw.githubusercontent.com
-    address and the same code path handles it transparently.
+    Accepts HTTP(S) URLs, ``s3://bucket/key`` artifact-store URIs, and local
+    filesystem paths (absolute or ``file://`` scheme).  Local paths are
+    resolved without any network request, which is useful during development
+    when the IA file lives inside the repository
+    (``data/benchmarks/IA_cafa6.tsv``) and ``ia_url`` is set to its absolute
+    path.  Once the file is pushed to GitHub the URL can be switched to the
+    raw.githubusercontent.com address and the same code path handles it
+    transparently.
+
+    ``s3://`` is resolved through the configured ``ArtifactStore`` rather than
+    over HTTP, which is what makes an artifact published by
+    ``compute_information_accretion`` readable from any machine that shares the
+    object store.  The bucket in the URI must match the configured bucket: a
+    mismatch means the URI was produced against a different deployment, and
+    silently reading the same key out of the local bucket would hand back a
+    different file under the right-looking name.
     """
     local_path: str | None = None
     if url.startswith("file://"):
@@ -110,11 +159,11 @@ def download_tsv(url: str, dest: str) -> None:
         local_path = url
 
     if local_path is not None:
-        if url.endswith(".gz"):
-            with gzip.open(local_path, "rb") as src, open(dest, "wb") as f:
-                shutil.copyfileobj(src, f)
-        else:
-            shutil.copy2(local_path, dest)
+        _copy_local(local_path, dest, gzipped=url.endswith(".gz"))
+        return
+
+    if url.startswith("s3://"):
+        _fetch_from_store(url, dest)
         return
 
     resp = requests.get(url, stream=True, timeout=300)

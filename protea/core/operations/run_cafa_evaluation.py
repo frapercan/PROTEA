@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import tempfile
 import uuid
@@ -79,6 +80,18 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "Without this file cafaeval assigns uniform weight (IC=1) to every term, which "
             "inflates Fmax because high-frequency terms dominate the metric. "
             "For CAFA6 evaluations use the IA_cafa6.tsv file supplied with the benchmark."
+        ),
+    )
+    information_accretion_set_id: str | None = Field(
+        default=None,
+        description=(
+            "Id of an InformationAccretionSet produced by the "
+            "compute_information_accretion operation. Preferred over ia_file: the "
+            "row pins all three axes IA actually depends on (ontology snapshot, "
+            "annotation corpus, evidence regime) as foreign keys, the artifact is "
+            "fetched from the shared object store so any machine resolves the same "
+            "bytes, and the stored sha256 is verified after download. A bare path "
+            "records none of that. Mutually exclusive with ia_file."
         ),
     )
     restrict_gt_to_predicted: bool = Field(
@@ -504,11 +517,8 @@ class RunCafaEvaluationOperation:
         bundle every cafaeval input into a ``CafaEvalRunContext``."""
         inputs = ctx.inputs
         tmpdir = str(artifacts_root.parent)
-        emit("run_cafa_evaluation.downloading_obo", None, {"url": inputs.snapshot.obo_url}, "info")
-        obo_path = os.path.join(tmpdir, "go.obo")
-        _artifacts.download_obo(inputs.snapshot.obo_url, obo_path)
-        ia_path = self._resolve_ia_file(tmpdir, inputs.snapshot, p.ia_file, emit)
-        self._enforce_band(p.band, inputs.snapshot, p.ia_file, emit)
+        obo_path = self._resolve_obo(tmpdir, inputs.snapshot, emit)
+        ia_path = self._resolve_and_gate_ia(tmpdir, inputs.snapshot, p, emit, session)
         data = inputs.data
         if p.restrict_gt_to_predicted:
             data = _data.restrict_data_to_predicted(
@@ -596,14 +606,149 @@ class RunCafaEvaluationOperation:
         )
 
     @staticmethod
+    def _resolve_obo(tmpdir: str, snapshot: OntologySnapshot, emit: EmitFn) -> str:
+        """Resolve the OBO, preferring the archived copy over the upstream URL.
+
+        ``obo_url`` points at a third party that can revise or withdraw the file,
+        so a run that refetches it is only reproducible for as long as EBI keeps
+        serving the same bytes. When ``archive_ontology_snapshot`` has run, the
+        bytes come from the artifact store instead and the recorded sha256 is
+        verified. The fallback is kept because the snapshots loaded before
+        ADR-D47 have no archive.
+        """
+        obo_path = os.path.join(tmpdir, "go.obo")
+        if snapshot.obo_uri:
+            emit(
+                "run_cafa_evaluation.downloading_obo",
+                None,
+                {"uri": snapshot.obo_uri, "source": "artifact_store"},
+                "info",
+            )
+            _artifacts.download_tsv(snapshot.obo_uri, obo_path)
+            if snapshot.obo_sha256:
+                with open(obo_path, "rb") as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()
+                if digest != snapshot.obo_sha256:
+                    raise ValueError(
+                        f"archived OBO for snapshot {snapshot.id} hashes to "
+                        f"{digest}, but the row records {snapshot.obo_sha256}; "
+                        f"the stored artifact has drifted"
+                    )
+            return obo_path
+        emit(
+            "run_cafa_evaluation.downloading_obo",
+            None,
+            {"url": snapshot.obo_url, "source": "upstream",
+             "warning": "snapshot has no archived OBO; this run depends on the "
+                        "upstream URL still serving the same bytes"},
+            "warning",
+        )
+        _artifacts.download_obo(snapshot.obo_url, obo_path)
+        return obo_path
+
+    @classmethod
+    def _resolve_and_gate_ia(
+        cls,
+        tmpdir: str,
+        snapshot: OntologySnapshot,
+        p: RunCafaEvaluationPayload,
+        emit: EmitFn,
+        session: Session | None = None,
+    ) -> str | None:
+        """Resolve the IA table and apply the band guard to it, in that order."""
+        ia_path = cls._resolve_ia_file(
+            tmpdir, snapshot, p.ia_file, emit,
+            session, p.information_accretion_set_id,
+        )
+        cls._enforce_band(p.band, snapshot, p.ia_file, emit)
+        return ia_path
+
+    @staticmethod
+    def _resolve_ia_from_set(
+        tmpdir: str,
+        snapshot: OntologySnapshot,
+        session: Session | None,
+        ia_set_id: str,
+        emit: EmitFn,
+    ) -> str:
+        """Fetch an ``InformationAccretionSet`` artifact and verify its hash.
+
+        This is the traceable route. The row pins the three axes IA depends on
+        (snapshot, corpus, evidence regime), the bytes come from the shared
+        object store so both machines resolve the same file, and the recorded
+        sha256 is checked after download. The path-based routes record none of
+        that, which is the failure ``docs/IA_PROVENANCE_v227.md`` documents.
+        """
+        from protea.infrastructure.orm.models.annotation.information_accretion_set import (  # noqa: E501
+            InformationAccretionSet,
+        )
+
+        if session is None:
+            raise ValueError("information_accretion_set_id requires a database session")
+        ia_set = session.get(InformationAccretionSet, uuid.UUID(ia_set_id))
+        if ia_set is None:
+            raise ValueError(f"InformationAccretionSet {ia_set_id} not found")
+        if ia_set.ontology_snapshot_id != snapshot.id:
+            raise ValueError(
+                f"InformationAccretionSet {ia_set_id} was computed on ontology "
+                f"snapshot {ia_set.ontology_snapshot_id}, but this evaluation "
+                f"propagates under {snapshot.id}; the term universes differ"
+            )
+        ia_path = os.path.join(tmpdir, "ia.tsv")
+        emit(
+            "run_cafa_evaluation.downloading_ia",
+            None,
+            {"information_accretion_set_id": ia_set_id, "uri": ia_set.artifact_uri},
+            "info",
+        )
+        _artifacts.download_tsv(ia_set.artifact_uri, ia_path)
+        with open(ia_path, "rb") as fh:
+            digest = hashlib.sha256(fh.read()).hexdigest()
+        if digest != ia_set.content_sha256:
+            raise ValueError(
+                f"InformationAccretionSet {ia_set_id} content hash mismatch: "
+                f"row records {ia_set.content_sha256}, fetched bytes hash to "
+                f"{digest}; the stored artifact has drifted"
+            )
+        emit(
+            "run_cafa_evaluation.ia_resolved",
+            None,
+            {
+                "ia_path": ia_path,
+                "information_accretion_set_id": ia_set_id,
+                "evidence_regime": ia_set.evidence_regime,
+                "annotation_set_id": str(ia_set.annotation_set_id),
+                "content_sha256": digest,
+            },
+            "info",
+        )
+        return ia_path
+
+    @staticmethod
     def _resolve_ia_file(
-        tmpdir: str, snapshot: OntologySnapshot, payload_ia_file: str | None, emit: EmitFn
+        tmpdir: str,
+        snapshot: OntologySnapshot,
+        payload_ia_file: str | None,
+        emit: EmitFn,
+        session: Session | None = None,
+        ia_set_id: str | None = None,
     ) -> str | None:
         """Resolve the Information Accretion file for cafaeval.
 
-        Priority: explicit ``payload.ia_file`` > snapshot ``ia_url`` (downloaded
-        once) > ``None`` (cafaeval falls back to uniform IC=1, with a warning).
+        Priority: ``information_accretion_set_id`` > explicit ``payload.ia_file``
+        > snapshot ``ia_url`` (downloaded once) > ``None`` (cafaeval falls back
+        to uniform IC=1, with a warning).
         """
+        if ia_set_id and payload_ia_file:
+            raise ValueError(
+                "pass either information_accretion_set_id or ia_file, not both: "
+                "they would silently disagree about which table was scored"
+            )
+        if ia_set_id:
+            return RunCafaEvaluationOperation._resolve_ia_from_set(
+                tmpdir, snapshot, session, ia_set_id, emit
+            )
+
         ia_path: str | None = payload_ia_file
         if ia_path is None and snapshot.ia_url:
             ia_path = os.path.join(tmpdir, "ia.tsv")
@@ -640,6 +785,14 @@ class RunCafaEvaluationOperation:
         IA *reference* (payload ``ia_file`` first, else snapshot ``ia_url``) so
         the band is checked against the source artifact, not a downloaded
         tempfile copy. No-op when ``declared_band`` is None (ad-hoc episode).
+
+        Note that the IA half of this guard resolves by BASENAME
+        (``band_registry.ia_token``), which cannot distinguish two tables built
+        from different corpora that happen to share a filename. An
+        ``InformationAccretionSet`` always serialises to ``IA.tsv``, so a band
+        whose token set omits that name rejects it. That is the safe direction:
+        promoting a computed table to authoritative for a band is a registry
+        decision, not something this resolver should infer.
         """
         if not declared_band:
             return

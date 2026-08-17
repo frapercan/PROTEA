@@ -397,15 +397,21 @@ class ComputeEmbeddingsBatchOperation:
         else:
             write_sequences = self._infer_all(config, sequences, p, emit)
 
-        emit(
-            "compute_embeddings_batch.done",
-            None,
-            {
-                "sequences_inferred": len(write_sequences),
-                "elapsed_seconds": time.perf_counter() - t0,
-            },
-            "info",
-        )
+        total_s = time.perf_counter() - t0
+        phases = getattr(self, "_last_phase_timings", None) or {}
+        fields: dict[str, Any] = {
+            "sequences_inferred": len(write_sequences),
+            "elapsed_seconds": total_s,
+            **phases,
+        }
+        # The fraction the substrate plan turns on. Reported per batch so it can
+        # be aggregated per model and per device without re-deriving it from
+        # timestamps, which do not survive concurrent workers.
+        if phases and total_s > 0:
+            accounted = sum(phases.values())
+            fields["inference_fraction"] = round(phases["inference_s"] / total_s, 4)
+            fields["unaccounted_s"] = round(total_s - accounted, 3)
+        emit("compute_embeddings_batch.done", None, fields, "info")
         return OperationResult(
             result={"sequences_inferred": len(write_sequences)},
             publish_operations=[build_store_message(parent_job_id, p, write_sequences)],
@@ -418,14 +424,37 @@ class ComputeEmbeddingsBatchOperation:
         p: ComputeEmbeddingsBatchPayload,
         emit: EmitFn,
     ) -> list[dict]:
-        """Run model inference over ``sequences`` in batches of ``p.batch_size``."""
+        """Run model inference over ``sequences`` in batches of ``p.batch_size``.
+
+        Phase timings are accumulated into ``self._last_phase_timings`` so the
+        caller can report them. They answer one question the substrate plan
+        rests on and nobody had measured on this hardware: what fraction of a
+        job is the forward pass. The multi-configuration emitter
+        (``embed_chunks_multi``) is only worth building if that fraction
+        dominates, because what it saves is exactly the redundant passes.
+        """
+        t_load0 = time.perf_counter()
         model, tokenizer = self._load_model(config, p.device, emit)
+        load_s = time.perf_counter() - t_load0
+
         write_sequences: list[dict] = []
+        infer_s = 0.0
+        serialize_s = 0.0
         for i in range(0, len(sequences), p.batch_size):
             batch = sequences[i : i + p.batch_size]
             seq_strs = [s.sequence for s in batch]
+            t = time.perf_counter()
             batch_chunks = self._embed_batch(model, tokenizer, seq_strs, config, p.device)
+            infer_s += time.perf_counter() - t
+            t = time.perf_counter()
             write_sequences.extend(serialize_inferred_chunks(batch, batch_chunks))
+            serialize_s += time.perf_counter() - t
+
+        self._last_phase_timings = {
+            "model_load_s": round(load_s, 3),
+            "inference_s": round(infer_s, 3),
+            "serialize_s": round(serialize_s, 3),
+        }
         return write_sequences
 
     def _infer_all_learned_code(

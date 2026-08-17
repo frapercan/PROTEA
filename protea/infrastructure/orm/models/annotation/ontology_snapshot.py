@@ -24,6 +24,15 @@ class OntologySnapshot(Base):
     rows can reference the same snapshot when they were built against the same
     ontology release.
 
+    ``obo_uri`` and ``obo_sha256`` archive the RAW OBO bytes in the artifact
+    store (ADR-D47). Without them the only record of the ontology behind a score
+    is ``obo_url``, a link to a third party that ``run_cafa_evaluation``
+    re-fetches on every run: if the upstream file changes or disappears, past
+    scores stop being reproducible and nothing says so. Both are nullable
+    because the ten snapshots loaded before that ADR predate archival; the
+    ``archive_ontology_snapshot`` operation backfills them and gates the fetched
+    bytes against the term set already in the database.
+
     ``ia_url`` optionally points to the Information Accretion (IA) TSV file
     associated with this ontology release.  IA files are published alongside
     each CAFA benchmark (e.g. ``IA_cafa6.tsv``) and contain per-term
@@ -44,6 +53,19 @@ class OntologySnapshot(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     obo_url: Mapped[str] = mapped_column(String, nullable=False)
     obo_version: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    obo_uri: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+        comment=(
+            "Artifact-store URI of the archived raw OBO (gzipped). NULL means "
+            "the ontology behind this snapshot exists only as an upstream URL."
+        ),
+    )
+    obo_sha256: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="sha256 of the UNCOMPRESSED OBO bytes archived at obo_uri.",
+    )
     ia_url: Mapped[str | None] = mapped_column(
         String,
         nullable=True,

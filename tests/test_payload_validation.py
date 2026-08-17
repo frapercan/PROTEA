@@ -49,6 +49,12 @@ from pydantic import BaseModel, ValidationError
 
 from protea.core.operation_catalog import build_operation_registry
 from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderPayload
+from protea.core.operations.archive_ontology_snapshot import (
+    ArchiveOntologySnapshotPayload,
+)
+from protea.core.operations.audit_evaluation_frames import (
+    AuditEvaluationFramesPayload,
+)
 from protea.core.operations.batch_rescore_evaluation import BatchRescoreEvaluationPayload
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrencePayload
 from protea.core.operations.compute_embeddings import (
@@ -56,6 +62,10 @@ from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsPayload,
     StoreEmbeddingsPayload,
 )
+from protea.core.operations.compute_information_accretion import (
+    ComputeInformationAccretionPayload,
+)
+from protea.core.operations.export_gate_bundle import ExportGateBundlePayload
 from protea.core.operations.export_minijobs._export_features_batch import (
     ExportFeaturesBatchPayload,
 )
@@ -90,14 +100,14 @@ from protea.core.operations.load_ontology_snapshot import (
 from protea.core.operations.load_quickgo_annotations import (
     LoadQuickGOAnnotationsPayload,
 )
+from protea.core.operations.measure_embedding_magnitude import (
+    MeasureEmbeddingMagnitudePayload,
+)
 from protea.core.operations.predict_go_terms_from_interpro import (
     PredictGOTermsFromInterProPayload,
 )
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesPayload,
-)
-from protea.core.operations.audit_evaluation_frames import (
-    AuditEvaluationFramesPayload,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.core.operations.run_interproscan_batch import (
@@ -114,6 +124,23 @@ from protea.core.operations.run_interproscan_batch import (
 # pydantic's locator for model level validators.
 PayloadNegativeCase = tuple[str, type[BaseModel], dict[str, Any], tuple[str | int, ...]]
 PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
+    # invariant: a reference pool of zero would publish a bundle with no donors,
+    # which a consumer cannot distinguish from an empty store
+    (
+        "export_gate_bundle",
+        ExportGateBundlePayload,
+        {"embedding_config_id": "cfg", "annotation_set_id": "ann",
+         "queries": ["P1"], "ref_n": 0},
+        ("ref_n",),
+    ),
+    # invariant: a sample of zero per band would measure nothing and then
+    # recommend scale 1.0, which is the dangerous answer arrived at by accident
+    (
+        "measure_embedding_magnitude",
+        MeasureEmbeddingMagnitudePayload,
+        {"embedding_config_id": "cfg", "per_band": 0},
+        ("per_band",),
+    ),
     # missing-required: embedding_config_id
     (
         "compute_embeddings",
@@ -340,6 +367,25 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ApplyLearnedEncoderPayload,
         {"encoder_artifact_path": "/tmp/enc.pt"},
         ("source_embedding_config_id",),
+    ),
+    # bad-vocabulary: evidence_regime must name a known regime. Falling back to
+    # a default here would silently widen the IA corpus (ADR-D46).
+    (
+        "compute_information_accretion",
+        ComputeInformationAccretionPayload,
+        {
+            "ontology_snapshot_id": "snap",
+            "annotation_set_id": "ann",
+            "evidence_regime": "everything",
+        },
+        ("evidence_regime",),
+    ),
+    # missing-required: ontology_snapshot_id
+    (
+        "archive_ontology_snapshot",
+        ArchiveOntologySnapshotPayload,
+        {"force": True},
+        ("ontology_snapshot_id",),
     ),
     # invariant: the combination cap must be positive. The census takes no
     # required inputs, so this is the only thing it can refuse, and it is a
