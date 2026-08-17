@@ -166,12 +166,19 @@ def _build_pair_features_from_neighbors(
     The dict is later passed to ``pipeline.predict(pair_features=...)``
     which propagates them onto every emitted row whose donor ref
     matches the pair.
+
+    The zip is strict. ``valid_accessions`` and ``query_embeddings`` are built
+    from the same rows, so the two lengths can only disagree if the search
+    returned fewer neighbour lists than it was given queries. Pairing them
+    leniently does not then drop the tail, it shifts the alignment and files
+    one protein's neighbours under another protein's accession, which scores
+    as a weak model rather than as a failure.
     """
     p = inputs.p
     pair_features: dict[tuple[str, str], dict[str, Any]] = {}
     if not p.compute_alignments and not p.compute_taxonomy:
         return pair_features
-    for q_acc, hits in zip(inputs.valid_accessions, neighbors_per_query, strict=False):
+    for q_acc, hits in zip(inputs.valid_accessions, neighbors_per_query, strict=True):
         for ref_acc, _distance in hits:
             key = (q_acc, ref_acc)
             if key in pair_features:
@@ -209,13 +216,17 @@ def _build_pair_features_from_aspect_neighbors(
     Walks the per-aspect neighbour lists once across aspects so each
     ``(q_acc, ref_acc)`` is computed at most once even when a donor
     ref appears in multiple aspect banks.
+
+    Strict for the same reason as the unified path, and with one aspect bank
+    per zip so a short return from any single aspect is caught rather than
+    averaged away by the aspects that came back whole.
     """
     p = inputs.p
     pair_features: dict[tuple[str, str], dict[str, Any]] = {}
     if not p.compute_alignments and not p.compute_taxonomy:
         return pair_features
     for hits_per_query in neighbors_by_aspect.values():
-        for q_acc, hits in zip(inputs.valid_accessions, hits_per_query, strict=False):
+        for q_acc, hits in zip(inputs.valid_accessions, hits_per_query, strict=True):
             for ref_acc, _distance in hits:
                 key = (q_acc, ref_acc)
                 if key in pair_features:
