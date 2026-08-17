@@ -158,6 +158,23 @@ class ArchiveOntologySnapshotOperation:
         emit("archive_ontology_snapshot.congruence_ok", None, stats, "info")
         return stats
 
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        """One line naming the snapshot being archived.
+
+        The drift tolerance is included when it is not the default, since a
+        run that accepted drift and one that refused it are different acts on
+        the same snapshot and the history should not show them alike.
+        """
+        p = payload or {}
+        snapshot = str(p.get("ontology_snapshot_id") or "")[:8]
+        bits = [f"snapshot={snapshot}"] if snapshot else []
+        drift = p.get("max_term_drift_pct")
+        if drift not in (None, 0.0):
+            bits.append(f"drift<={drift}%")
+        if p.get("force"):
+            bits.append("force")
+        return " ".join(bits)
+
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:

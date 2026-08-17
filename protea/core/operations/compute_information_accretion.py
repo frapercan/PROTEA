@@ -268,6 +268,27 @@ class ComputeInformationAccretionOperation:
         }
 
     # ------------------------------------------------------------- execute
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        """One line naming the three axes IA is identified by.
+
+        The regime is first because it is the axis most often left implicit:
+        the same snapshot and corpus give ia_max 18.956 over all evidence and
+        15.943 under the LAFA regime, so a history entry that omitted it would
+        make two different tables look like the same job run twice.
+        """
+        p = payload or {}
+        regime = p.get("evidence_regime") or DEFAULT_REGIME
+        snapshot = str(p.get("ontology_snapshot_id") or "")[:8]
+        corpus = str(p.get("annotation_set_id") or "")[:8]
+        bits = [f"regime={regime}"]
+        if snapshot:
+            bits.append(f"snapshot={snapshot}")
+        if corpus:
+            bits.append(f"corpus={corpus}")
+        if p.get("force"):
+            bits.append("force")
+        return " ".join(bits)
+
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
