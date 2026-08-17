@@ -32,7 +32,7 @@ import time
 import uuid
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import field_validator
 from sqlalchemy import bindparam, text
@@ -86,6 +86,32 @@ class ComputeInformationAccretionPayload(ProteaPayload, frozen=True):
 
 class InformationAccretionGateError(RuntimeError):
     """A structural invariant of the computed table did not hold."""
+
+
+class _Inputs(NamedTuple):
+    """What this run was asked to do, once resolved against the database."""
+
+    p: "ComputeInformationAccretionPayload"
+    payload: dict[str, Any]
+    snapshot: Any
+    corpus: Any
+    evidence_codes: tuple[str, ...] | None
+    existing: Any
+
+
+class _Measured(NamedTuple):
+    """What the run found while building the table.
+
+    Separate from :class:`_Dag` because these are counts about the work rather
+    than the ontology itself, and they are what the persisted row reports.
+    """
+
+    gate_stats: dict[str, Any]
+    raw: int
+    proteins: set[str]
+    propagated_pairs: int
+    aspect_of: dict[str, str | None]
+    started: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -308,8 +334,8 @@ class ComputeInformationAccretionOperation:
     # ------------------------------------------------------------- execute
     @staticmethod
     def _resolve(
-        session: Session, p: ComputeInformationAccretionPayload
-    ) -> tuple[Any, Any, tuple[str, ...] | None, Any]:
+        session: Session, p: ComputeInformationAccretionPayload, payload: dict[str, Any]
+    ) -> "_Inputs":
         """Resolve the three axes IA is identified by, plus any existing table.
 
         Missing snapshot or corpus raises here rather than later: a table
@@ -332,7 +358,7 @@ class ComputeInformationAccretionOperation:
             )
             .one_or_none()
         )
-        return snapshot, corpus, evidence_codes, existing
+        return _Inputs(p, payload, snapshot, corpus, evidence_codes, existing)
 
     @staticmethod
     def _reuse_result(existing: Any, emit: EmitFn) -> OperationResult:
@@ -356,6 +382,103 @@ class ComputeInformationAccretionOperation:
                 "content_sha256": existing.content_sha256,
                 "reused": True,
             }
+        )
+
+    @staticmethod
+    def _record_shape(
+        ia_set: InformationAccretionSet,
+        inp: "_Inputs",
+        dag: "_Dag",
+        measured: "_Measured",
+        uri: str,
+        digest: str,
+    ) -> None:
+        """Write the shape of the table onto its own row.
+
+        These counters are what make wrong provenance visible without fetching
+        the artifact. Two tables over the same snapshot and corpus but
+        different evidence regimes differ here and nowhere else in the row.
+        """
+        ia = dag.ia
+        values = list(ia.values())
+        ia_set.artifact_uri = uri
+        ia_set.content_sha256 = digest
+        ia_set.term_count = len(dag.terms)
+        ia_set.nonzero_count = measured.gate_stats["nonzero"]
+        ia_set.annotation_count = measured.raw
+        ia_set.protein_count = len(measured.proteins)
+        ia_set.propagated_pairs = measured.propagated_pairs
+        ia_set.ia_max = max(values)
+        ia_set.ia_mean = sum(values) / len(values)
+        ia_set.stats = {
+            **measured.gate_stats,
+            "obo_version": inp.snapshot.obo_version,
+            "corpus_source_version": inp.corpus.source_version,
+            "terms_with_proteins": len(dag.proteins_per_term),
+            "aspects": sorted({a for a in measured.aspect_of.values() if a}),
+            "elapsed_s": round(time.time() - measured.started, 1),
+        }
+
+    @staticmethod
+    def _persist(
+        session: Session,
+        inp: "_Inputs",
+        dag: "_Dag",
+        measured: "_Measured",
+        emit: EmitFn,
+    ) -> OperationResult:
+        """Write the row and the artifact, and report what was written.
+
+        The shape counters live on the row rather than only in the artifact so
+        wrong provenance is visible without fetching the file: the same
+        snapshot and corpus give ia_max 18.956 over all evidence and 15.943
+        under the LAFA regime, and a row that did not carry them would look
+        identical either way.
+        """
+        p, existing = inp.p, inp.existing
+        raw, terms, ia = measured.raw, dag.terms, dag.ia
+        ia_set = existing or InformationAccretionSet(id=uuid.uuid4())
+        ia_set.ontology_snapshot_id = inp.snapshot.id
+        ia_set.annotation_set_id = inp.corpus.id
+        ia_set.evidence_regime = p.evidence_regime
+        ia_set.evidence_codes = (
+            list(inp.evidence_codes) if inp.evidence_codes else None
+        )
+        ia_set.job_id = job_id_from_payload(inp.payload)
+
+        key, uri, digest = self._write_artifact(ia, ia_set.id)
+
+        ComputeInformationAccretionOperation._record_shape(
+            ia_set, inp, dag, measured, uri, digest
+        )
+        if existing is None:
+            session.add(ia_set)
+        session.flush()
+
+        emit(
+            "compute_information_accretion.persisted",
+            None,
+            {"information_accretion_set_id": str(ia_set.id),
+             "artifact_uri": uri, "key": key, "content_sha256": digest,
+             "ia_max": ia_set.ia_max, "ia_mean": ia_set.ia_mean},
+            "info",
+        )
+        return OperationResult(
+            result={
+                "information_accretion_set_id": str(ia_set.id),
+                "artifact_uri": uri,
+                "content_sha256": digest,
+                "term_count": ia_set.term_count,
+                "nonzero_count": ia_set.nonzero_count,
+                "annotation_count": raw,
+                "protein_count": ia_set.protein_count,
+                "ia_max": ia_set.ia_max,
+                "ia_mean": ia_set.ia_mean,
+                "evidence_regime": p.evidence_regime,
+                "reused": False,
+            },
+            progress_current=len(terms),
+            progress_total=len(terms),
         )
 
     @staticmethod
@@ -405,9 +528,12 @@ class ComputeInformationAccretionOperation:
         p = ComputeInformationAccretionPayload.model_validate(payload)
         started = time.time()
 
-        snapshot, corpus, evidence_codes, existing = self._resolve(session, p)
-        if existing is not None and not p.force:
-            return self._reuse_result(existing, emit)
+        inp = self._resolve(session, p, payload)
+        if inp.existing is not None and not p.force:
+            return self._reuse_result(inp.existing, emit)
+        snapshot, corpus, evidence_codes, existing = (
+            inp.snapshot, inp.corpus, inp.evidence_codes, inp.existing
+        )
 
         emit(
             "compute_information_accretion.started",
@@ -451,59 +577,5 @@ class ComputeInformationAccretionOperation:
         gate_stats = self._gate(dag, raw, dropped, p.max_drop_rate_pct)
         emit("compute_information_accretion.gates_passed", None, gate_stats, "info")
 
-        ia_set = existing or InformationAccretionSet(id=uuid.uuid4())
-        ia_set.ontology_snapshot_id = snapshot.id
-        ia_set.annotation_set_id = corpus.id
-        ia_set.evidence_regime = p.evidence_regime
-        ia_set.evidence_codes = list(evidence_codes) if evidence_codes else None
-        ia_set.job_id = job_id_from_payload(payload)
-
-        key, uri, digest = self._write_artifact(ia, ia_set.id)
-
-        values = list(ia.values())
-        ia_set.artifact_uri = uri
-        ia_set.content_sha256 = digest
-        ia_set.term_count = len(terms)
-        ia_set.nonzero_count = gate_stats["nonzero"]
-        ia_set.annotation_count = raw
-        ia_set.protein_count = len(proteins)
-        ia_set.propagated_pairs = propagated_pairs
-        ia_set.ia_max = max(values)
-        ia_set.ia_mean = sum(values) / len(values)
-        ia_set.stats = {
-            **gate_stats,
-            "obo_version": snapshot.obo_version,
-            "corpus_source_version": corpus.source_version,
-            "terms_with_proteins": len(proteins_per_term),
-            "aspects": sorted({a for a in aspect_of.values() if a}),
-            "elapsed_s": round(time.time() - started, 1),
-        }
-        if existing is None:
-            session.add(ia_set)
-        session.flush()
-
-        emit(
-            "compute_information_accretion.persisted",
-            None,
-            {"information_accretion_set_id": str(ia_set.id),
-             "artifact_uri": uri, "key": key, "content_sha256": digest,
-             "ia_max": ia_set.ia_max, "ia_mean": ia_set.ia_mean},
-            "info",
-        )
-        return OperationResult(
-            result={
-                "information_accretion_set_id": str(ia_set.id),
-                "artifact_uri": uri,
-                "content_sha256": digest,
-                "term_count": ia_set.term_count,
-                "nonzero_count": ia_set.nonzero_count,
-                "annotation_count": raw,
-                "protein_count": ia_set.protein_count,
-                "ia_max": ia_set.ia_max,
-                "ia_mean": ia_set.ia_mean,
-                "evidence_regime": p.evidence_regime,
-                "reused": False,
-            },
-            progress_current=len(terms),
-            progress_total=len(terms),
-        )
+        measured = _Measured(gate_stats, raw, proteins, propagated_pairs, aspect_of, started)
+        return self._persist(session, inp, dag, measured, emit)

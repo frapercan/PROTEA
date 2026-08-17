@@ -124,6 +124,47 @@ class ArchiveOntologySnapshotOperation:
             ids.add(current)
         return ids, version
 
+    @staticmethod
+    def _reuse_result(snapshot: OntologySnapshot, emit: EmitFn) -> OperationResult:
+        """Report the existing archive instead of fetching again.
+
+        ``reused`` is in the result and not only in the log, so a caller can
+        tell a fresh fetch from a hit without parsing events.
+        """
+        emit(
+            "archive_ontology_snapshot.reused",
+            "already archived",
+            {"obo_uri": snapshot.obo_uri, "obo_sha256": snapshot.obo_sha256},
+            "info",
+        )
+        return OperationResult(
+            result={
+                "ontology_snapshot_id": str(snapshot.id),
+                "obo_uri": snapshot.obo_uri,
+                "obo_sha256": snapshot.obo_sha256,
+                "reused": True,
+            }
+        )
+
+    @staticmethod
+    def _store_obo(obo_bytes: bytes, snapshot_id: uuid.UUID) -> tuple[str, str, int]:
+        """Compress and publish the OBO. Returns (key, uri, stored bytes).
+
+        The sha256 recorded on the snapshot is of the UNCOMPRESSED bytes, taken
+        by the caller before this runs, so it identifies the ontology rather
+        than one particular gzip of it.
+        """
+        project_root = Path(__file__).resolve().parents[3]
+        store = get_artifact_store(load_settings(project_root))
+        key = obo_key_for(snapshot_id)
+        with tempfile.TemporaryDirectory(prefix="protea_obo_") as tmp:
+            local = Path(tmp) / "go.obo.gz"
+            with gzip.open(local, "wb") as fh:
+                fh.write(obo_bytes)
+            uri = store.put(key, local)
+            compressed = local.stat().st_size
+        return key, uri, compressed
+
     def _gate_congruence(
         self,
         session: Session,
@@ -196,20 +237,7 @@ class ArchiveOntologySnapshotOperation:
             raise ValueError(f"OntologySnapshot {p.ontology_snapshot_id} not found")
 
         if snapshot.obo_uri and not p.force:
-            emit(
-                "archive_ontology_snapshot.reused",
-                "already archived",
-                {"obo_uri": snapshot.obo_uri, "obo_sha256": snapshot.obo_sha256},
-                "info",
-            )
-            return OperationResult(
-                result={
-                    "ontology_snapshot_id": str(snapshot.id),
-                    "obo_uri": snapshot.obo_uri,
-                    "obo_sha256": snapshot.obo_sha256,
-                    "reused": True,
-                }
-            )
+            return self._reuse_result(snapshot, emit)
 
         emit(
             "archive_ontology_snapshot.download_start",
@@ -235,15 +263,7 @@ class ArchiveOntologySnapshotOperation:
             session, snapshot, fetched, p.max_term_drift_pct, emit
         )
 
-        project_root = Path(__file__).resolve().parents[3]
-        store = get_artifact_store(load_settings(project_root))
-        key = obo_key_for(snapshot.id)
-        with tempfile.TemporaryDirectory(prefix="protea_obo_") as tmp:
-            local = Path(tmp) / "go.obo.gz"
-            with gzip.open(local, "wb") as fh:
-                fh.write(obo_bytes)
-            uri = store.put(key, local)
-            compressed = local.stat().st_size
+        key, uri, compressed = self._store_obo(obo_bytes, snapshot.id)
 
         snapshot.obo_uri = uri
         snapshot.obo_sha256 = digest

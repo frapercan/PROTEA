@@ -92,6 +92,46 @@ def download_obo(url: str, dest: str) -> None:
             f.write(resp.text)
 
 
+def _copy_local(local_path: str, dest: str, *, gzipped: bool) -> None:
+    """Copy a path already on this filesystem, decompressing if needed."""
+    if gzipped:
+        with gzip.open(local_path, "rb") as src, open(dest, "wb") as f:
+            shutil.copyfileobj(src, f)
+    else:
+        shutil.copy2(local_path, dest)
+
+
+def _fetch_from_store(url: str, dest: str) -> None:
+    """Read an ``s3://`` URI through the configured artifact store.
+
+    The bucket in the URI is checked against the configured one rather than
+    trusted. A key that exists in two buckets is two different files, and
+    reading the wrong one would produce a plausible artifact under the right
+    name, which is the failure this whole module exists to prevent.
+    """
+    from pathlib import Path as _Path
+
+    from protea.infrastructure.settings import load_settings
+    from protea.infrastructure.storage import get_artifact_store
+
+    bucket, _, key = url[len("s3://") :].partition("/")
+    if not key:
+        raise ValueError(f"malformed s3 URI (no key): {url}")
+    store = get_artifact_store(load_settings(_Path(__file__).resolve().parents[3]))
+    configured = getattr(store, "bucket", None)
+    if configured is not None and configured != bucket:
+        raise ValueError(
+            f"s3 URI bucket {bucket!r} does not match the configured "
+            f"artifact-store bucket {configured!r}; refusing to read a "
+            f"same-named key out of a different bucket"
+        )
+    blob = store.get(key)
+    if url.endswith(".gz"):
+        blob = gzip.decompress(blob)
+    with open(dest, "wb") as f:
+        f.write(blob)
+
+
 def download_tsv(url: str, dest: str) -> None:
     """Copy or download a plain-text TSV file (gzip-transparent) to dest.
 
@@ -119,35 +159,11 @@ def download_tsv(url: str, dest: str) -> None:
         local_path = url
 
     if local_path is not None:
-        if url.endswith(".gz"):
-            with gzip.open(local_path, "rb") as src, open(dest, "wb") as f:
-                shutil.copyfileobj(src, f)
-        else:
-            shutil.copy2(local_path, dest)
+        _copy_local(local_path, dest, gzipped=url.endswith(".gz"))
         return
 
     if url.startswith("s3://"):
-        from pathlib import Path as _Path
-
-        from protea.infrastructure.settings import load_settings
-        from protea.infrastructure.storage import get_artifact_store
-
-        bucket, _, key = url[len("s3://") :].partition("/")
-        if not key:
-            raise ValueError(f"malformed s3 URI (no key): {url}")
-        store = get_artifact_store(load_settings(_Path(__file__).resolve().parents[3]))
-        configured = getattr(store, "bucket", None)
-        if configured is not None and configured != bucket:
-            raise ValueError(
-                f"s3 URI bucket {bucket!r} does not match the configured "
-                f"artifact-store bucket {configured!r}; refusing to read a "
-                f"same-named key out of a different bucket"
-            )
-        blob = store.get(key)
-        if url.endswith(".gz"):
-            blob = gzip.decompress(blob)
-        with open(dest, "wb") as f:
-            f.write(blob)
+        _fetch_from_store(url, dest)
         return
 
     resp = requests.get(url, stream=True, timeout=300)

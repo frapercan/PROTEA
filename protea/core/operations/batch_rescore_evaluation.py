@@ -39,10 +39,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.utils import job_id_from_payload
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
 from protea.core.operations._run_cafa_eval_driver import _run_cafaeval_for_setting
@@ -93,6 +94,15 @@ class BatchRescoreEvaluationPayload(ProteaPayload, frozen=True):
     protein_folds: int = Field(default=1, ge=1, le=20)
     protein_fold: int = Field(default=0, ge=0)
     protein_seed: int = Field(default=0, ge=0)
+    # Stratum restriction. The fold above is a hash partition of the accession;
+    # this is an explicit membership list, which is what the neighbourhood
+    # strata need, since length, homology, taxonomy and the propagation gap are
+    # properties of the retrieved donors and not of the accession.
+    # ``protein_subset_label`` is mandatory alongside it: a subset result that
+    # does not name its subset is indistinguishable from a full-population one
+    # in ``evaluation_result``, and the matrix takes the best row per cell.
+    protein_subset: list[str] | None = Field(default=None)
+    protein_subset_label: str | None = Field(default=None)
 
     @field_validator("protein_fold")
     @classmethod
@@ -101,6 +111,23 @@ class BatchRescoreEvaluationPayload(ProteaPayload, frozen=True):
         if folds and v >= folds:
             raise ValueError(f"protein_fold {v} must be < protein_folds {folds}")
         return v
+
+    @model_validator(mode="after")
+    def _label_accompanies_subset(self) -> "BatchRescoreEvaluationPayload":
+        """A subset must name itself.
+
+        This is a model validator and not a field validator on purpose: a field
+        validator does not run when the field is left at its default, which is
+        exactly the case this has to catch, since omitting the label is how the
+        mistake happens.
+        """
+        if self.protein_subset and not (self.protein_subset_label or "").strip():
+            raise ValueError(
+                "protein_subset was given without protein_subset_label; an "
+                "unnamed subset produces an evaluation_result that cannot be "
+                "told from a full-population one"
+            )
+        return self
 
     @field_validator("evaluation_set_id", "prediction_set_id", mode="before")
     @classmethod
@@ -133,6 +160,11 @@ class _StageCtx:
     inputs: Any
     needs_term_ia: bool = False
     fold_spec: tuple[int, int, int] = (1, 0, 0)
+    # ``(accessions, label)`` for a stratum restriction; ``(None, None)`` is the
+    # full cohort. Kept beside ``fold_spec`` because they compose: a stratum can
+    # be split into folds, and the order is subset first so the folds partition
+    # the stratum rather than the population.
+    subset_spec: tuple[list[str] | None, str | None] = (None, None)
 
 
 @dataclass(frozen=True)
@@ -148,6 +180,12 @@ class _BatchRun:
     inputs: Any
     staged: dict[str, Any]
     artifact_store: Any
+    # Resolved once in ``execute`` from the worker-enhanced raw payload, because
+    # ``p`` is the validated model and no longer carries ``_job_id``. The single
+    # run already threads this onto its result row; the batch path did not, so
+    # every row it wrote was an orphan and the payload that produced it, which
+    # is where the fold and subset live, could not be recovered from the row.
+    job_id: uuid.UUID | None = None
 
 
 class BatchRescoreEvaluationOperation:
@@ -194,6 +232,7 @@ class BatchRescoreEvaluationOperation:
                 inputs=inputs,
                 needs_term_ia=needs_term_ia,
                 fold_spec=(p.protein_folds, p.protein_fold, p.protein_seed),
+                subset_spec=(p.protein_subset, p.protein_subset_label),
             )
             staged = self._stage_shared_inputs(session, stage_ctx, Path(tmpdir), emit)
             # Release the DB connection before cafaeval forks its pool (same
@@ -206,7 +245,13 @@ class BatchRescoreEvaluationOperation:
                 {"configs": len(configs), "delta_proteins": len(staged["delta_proteins"])},
                 "info",
             )
-            run = _BatchRun(p=p, inputs=inputs, staged=staged, artifact_store=artifact_store)
+            run = _BatchRun(
+                p=p,
+                inputs=inputs,
+                staged=staged,
+                artifact_store=artifact_store,
+                job_id=job_id_from_payload(payload),
+            )
             for idx, (cfg_id, snapshot) in enumerate(configs):
                 result_id = self._evaluate_one_config(
                     session, run, cfg_id=cfg_id, snapshot=snapshot, emit=emit
@@ -298,7 +343,9 @@ class BatchRescoreEvaluationOperation:
         )
         self._single._enforce_band(base_payload.band, inputs.snapshot, base_payload.ia_file, emit)
 
-        data = self._restrict_cohort(session, base_payload, inputs, ctx.fold_spec, emit)
+        data = self._restrict_cohort(
+            session, base_payload, inputs, ctx.fold_spec, emit, ctx.subset_spec
+        )
         gt_root = tmpdir / "gt"
         gt_root.mkdir(parents=True, exist_ok=True)
         gt_paths = _data.write_ground_truth_files(gt_root, data)
@@ -327,12 +374,18 @@ class BatchRescoreEvaluationOperation:
         inputs: Any,
         fold_spec: tuple[int, int, int],
         emit: EmitFn,
+        subset_spec: tuple[list[str] | None, str | None] = (None, None),
     ) -> Any:
-        """Restrict the GT cohort to the predicted set, then the internal fold."""
+        """Restrict the GT cohort to the predicted set, then the stratum, then the fold."""
         data = inputs.data
         if base_payload.restrict_gt_to_predicted:
             data = _data.restrict_data_to_predicted(
                 session, prediction_set_id=inputs.pred_set_id, data=data, emit=emit
+            )
+        accessions, label = subset_spec
+        if accessions:
+            data = _data.restrict_data_to_protein_set(
+                data, accessions=accessions, label=label or "unnamed", emit=emit
             )
         folds, fold, fold_seed = fold_spec
         if folds > 1:
@@ -440,6 +493,7 @@ class BatchRescoreEvaluationOperation:
             temporal_window=temporal_window,
             leakage_role=leakage_role,
             arms_enabled=arms_enabled,
+            job_id=run.job_id,
         )
         session.add(eval_result)
         session.flush()
