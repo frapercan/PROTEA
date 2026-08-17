@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderOperation
+from protea.core.operations.archive_ontology_snapshot import (
+    ArchiveOntologySnapshotOperation,
+)
 from protea.core.operations.batch_rescore_evaluation import (
     BatchRescoreEvaluationOperation,
 )
@@ -18,6 +21,9 @@ from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsBatchOperation,
     ComputeEmbeddingsOperation,
     StoreEmbeddingsOperation,
+)
+from protea.core.operations.compute_information_accretion import (
+    ComputeInformationAccretionOperation,
 )
 from protea.core.operations.export_minijobs import (
     ExportCoordinatorOperation,
@@ -80,6 +86,8 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(PredictGOTermsFromInterProOperation())
     registry.register(RefreshGoaReleaseDatesOperation())
     registry.register(BuildGoCooccurrenceOperation())
+    registry.register(ComputeInformationAccretionOperation())
+    registry.register(ArchiveOntologySnapshotOperation())
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
     # publicly registered: all re-ranker training moves to
     # protea-reranker-lab. They remain importable as internal helpers —

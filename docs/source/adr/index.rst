@@ -336,3 +336,5 @@ later revision) or *Superseded* (a named later decision replaces it).
    D43-stacked-meta-reranker
    D44-continuous-lafa-container
    D45-jsonb-blob-feature-governance
+   D46-information-accretion-as-tracked-artifact
+   D47-archive-the-obo-behind-every-snapshot

@@ -1,4 +1,4 @@
-"""The four axes, and the refusal to report a number that names no stratum."""
+"""The six axes, and the refusal to report a number that names no stratum."""
 
 from __future__ import annotations
 
@@ -10,15 +10,21 @@ from protea.core.strata import (
     DonorEvidence,
     HomologyBand,
     LengthBand,
+    Neighbourhood,
+    PropagationBand,
     Stratum,
+    TaxonomyBand,
     UnstratifiedResultError,
     all_strata,
     assert_stratified,
     homology_band_for,
     length_band_for,
     pooled_mean,
+    propagation_band_for,
     report_order,
+    reportable_strata,
     stratum_for,
+    taxonomy_band_for,
 )
 
 
@@ -93,8 +99,7 @@ class TestPlacingAnObservation:
             category="NK",
             aspect="P",
             residues=3000,
-            best_identity=25.0,
-            donor_is_experimental=True,
+            neighbourhood=Neighbourhood(best_identity=25.0, donor_is_experimental=True),
         )
         assert s.category is Category.NO_KNOWLEDGE
         assert s.aspect is Aspect.BIOLOGICAL_PROCESS
@@ -104,12 +109,16 @@ class TestPlacingAnObservation:
 
     def test_typed_axes_are_accepted_as_well_as_codes(self) -> None:
         by_code = stratum_for(
-            category="LK", aspect="F", residues=100, best_identity=None,
-            donor_is_experimental=None,
+            category="LK",
+            aspect="F",
+            residues=100,
+            neighbourhood=Neighbourhood(best_identity=None, donor_is_experimental=None),
         )
         by_enum = stratum_for(
-            category=Category.LIMITED_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION, residues=100,
-            best_identity=None, donor_is_experimental=None,
+            category=Category.LIMITED_KNOWLEDGE,
+            aspect=Aspect.MOLECULAR_FUNCTION,
+            residues=100,
+            neighbourhood=Neighbourhood(best_identity=None, donor_is_experimental=None),
         )
         assert by_code == by_enum
 
@@ -117,23 +126,29 @@ class TestPlacingAnObservation:
         """Silently resolving the contradiction would invent a population."""
         with pytest.raises(ValueError, match="disagree about whether a donor exists"):
             stratum_for(
-                category="NK", aspect="P", residues=100, best_identity=None,
-                donor_is_experimental=True,
-            )
+            category="NK",
+            aspect="P",
+            residues=100,
+            neighbourhood=Neighbourhood(best_identity=None, donor_is_experimental=True),
+        )
 
     def test_a_donor_without_a_verdict_is_refused_too(self) -> None:
         with pytest.raises(ValueError, match="disagree about whether a donor exists"):
             stratum_for(
-                category="NK", aspect="P", residues=100, best_identity=55.0,
-                donor_is_experimental=None,
-            )
+            category="NK",
+            aspect="P",
+            residues=100,
+            neighbourhood=Neighbourhood(best_identity=55.0, donor_is_experimental=None),
+        )
 
     def test_the_string_form_names_every_axis(self) -> None:
         s = stratum_for(
-            category="PK", aspect="C", residues=100, best_identity=95.0,
-            donor_is_experimental=False,
+            category="PK",
+            aspect="C",
+            residues=100,
+            neighbourhood=Neighbourhood(best_identity=95.0, donor_is_experimental=False),
         )
-        assert str(s) == "PK/C/<=512/>90/other"
+        assert str(s) == "PK/C/<=512/>90/other/none/none"
 
 
 class TestTheGridIsDerivedNotEnumerated:
@@ -154,15 +169,25 @@ class TestTheGridIsDerivedNotEnumerated:
         assert {s.aspect for s in grid} == set(Aspect)
         assert {s.length for s in grid} == set(LengthBand)
         assert {s.homology for s in grid} == set(HomologyBand)
+        assert {s.taxonomy for s in grid} == set(TaxonomyBand)
+        assert {s.propagation for s in grid} == set(PropagationBand)
 
     def test_the_size_is_what_the_axes_imply(self) -> None:
-        """3 categories x 3 aspects x 4 lengths x (1 + 4x2) donor states."""
-        assert len(all_strata()) == 3 * 3 * 4 * 9
+        """3 categories x 3 aspects x 4 lengths x (1 + 4x2) donor states
+        x 6 taxonomy bands x 5 propagation bands.
+
+        The number is large on purpose and is not a reporting frame. See
+        ``reportable_strata``: of the 1,920 combinations the five
+        protein-level axes admit, 77 were populated when this was measured.
+        """
+        assert len(all_strata()) == 3 * 3 * 4 * 9 * 6 * 5
 
     def test_a_placed_observation_is_in_the_grid(self) -> None:
         s = stratum_for(
-            category="LK", aspect="F", residues=700, best_identity=45.0,
-            donor_is_experimental=False,
+            category="LK",
+            aspect="F",
+            residues=700,
+            neighbourhood=Neighbourhood(best_identity=45.0, donor_is_experimental=False),
         )
         assert s in set(all_strata())
 
@@ -174,8 +199,10 @@ class TestTheGridIsDerivedNotEnumerated:
 class TestPoolingIsRefusedRatherThanDiscouraged:
     def _stratum(self, category: str = "NK") -> Stratum:
         return stratum_for(
-            category=category, aspect="P", residues=100, best_identity=50.0,
-            donor_is_experimental=True,
+            category=category,
+            aspect="P",
+            residues=100,
+            neighbourhood=Neighbourhood(best_identity=50.0, donor_is_experimental=True),
         )
 
     def test_an_empty_report_raises(self) -> None:
@@ -205,3 +232,72 @@ class TestPoolingIsRefusedRatherThanDiscouraged:
         s = self._stratum()
         with pytest.raises(UnstratifiedResultError, match="no observations"):
             pooled_mean({s: 0.5}, {s: 0}, context="c")
+
+
+class TestTaxonomyIsResolvedOverNonSelfDonors:
+    """The stored relation is usable as-is; the reduction rule is the choice."""
+
+    def test_the_five_common_relations_map_to_their_own_band(self) -> None:
+        for relation in ("same", "close", "intermediate", "distant", "root-only"):
+            assert taxonomy_band_for(relation).value == relation
+
+    def test_lineal_relations_join_the_band_that_claims_least(self) -> None:
+        """ancestor and descendant are 0.04 percent of donor rows each.
+
+        Too few to carry a band, and DISTANT would overstate the separation.
+        """
+        assert taxonomy_band_for("ancestor") is TaxonomyBand.INTERMEDIATE
+        assert taxonomy_band_for("descendant") is TaxonomyBand.INTERMEDIATE
+
+    def test_no_donor_is_a_band_and_not_a_missing_value(self) -> None:
+        assert taxonomy_band_for(None) is TaxonomyBand.NONE
+
+    def test_an_unknown_relation_raises_rather_than_defaulting(self) -> None:
+        with pytest.raises(ValueError, match="unknown taxonomic relation"):
+            taxonomy_band_for("sibling")
+
+
+class TestPropagationSeparatesTheZeroMassFirst:
+    """53.5 percent of proteins have a gap of exactly zero, so it is a band."""
+
+    def test_a_gap_of_zero_is_its_own_band(self) -> None:
+        assert propagation_band_for(0.05, 0.05) is PropagationBand.ZERO
+
+    def test_the_positive_tail_is_cut_at_the_fixed_boundaries(self) -> None:
+        assert propagation_band_for(0.05, 0.07) is PropagationBand.NEAR
+        assert propagation_band_for(0.05, 0.15) is PropagationBand.MID
+        assert propagation_band_for(0.05, 0.30) is PropagationBand.FAR
+
+    def test_no_experimental_donor_is_censored_and_not_infinite(self) -> None:
+        """Right-censored at K. Folding it into FAR would invent a distance."""
+        assert propagation_band_for(0.05, None) is PropagationBand.NONE
+        assert propagation_band_for(None, None) is PropagationBand.NONE
+
+    def test_a_negative_gap_means_two_different_donor_sets(self) -> None:
+        with pytest.raises(ValueError, match="different donor sets"):
+            propagation_band_for(0.20, 0.05)
+
+
+class TestReportableStrataNamesWhatItWithholds:
+    def _stratum(self, category: str = "NK") -> Stratum:
+        return stratum_for(
+            category=category,
+            aspect="F",
+            residues=400,
+            neighbourhood=Neighbourhood(best_identity=55.0, donor_is_experimental=True, taxonomic_relation="close", nearest_any=0.05, nearest_experimental=0.12),
+        )
+
+    def test_thin_strata_are_returned_as_withheld_rather_than_dropped(self) -> None:
+        big, small = self._stratum("NK"), self._stratum("LK")
+        reportable, withheld = reportable_strata({big: 120, small: 4}, min_population=30)
+        assert reportable == (big,)
+        assert withheld == (small,)
+
+    def test_both_halves_are_in_canonical_order(self) -> None:
+        a, b = self._stratum("NK"), self._stratum("PK")
+        reportable, _ = reportable_strata({b: 50, a: 50}, min_population=1)
+        assert reportable == report_order([a, b])
+
+    def test_a_floor_below_one_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="at least 1"):
+            reportable_strata({}, min_population=0)

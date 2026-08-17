@@ -49,7 +49,13 @@ from pydantic import BaseModel, ValidationError
 
 from protea.core.operation_catalog import build_operation_registry
 from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderPayload
+from protea.core.operations.archive_ontology_snapshot import (
+    ArchiveOntologySnapshotPayload,
+)
 from protea.core.operations.batch_rescore_evaluation import BatchRescoreEvaluationPayload
+from protea.core.operations.compute_information_accretion import (
+    ComputeInformationAccretionPayload,
+)
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrencePayload
 from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsBatchPayload,
@@ -348,6 +354,25 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ApplyLearnedEncoderPayload,
         {"encoder_artifact_path": "/tmp/enc.pt"},
         ("source_embedding_config_id",),
+    ),
+    # bad-vocabulary: evidence_regime must name a known regime. Falling back to
+    # a default here would silently widen the IA corpus (ADR-D46).
+    (
+        "compute_information_accretion",
+        ComputeInformationAccretionPayload,
+        {
+            "ontology_snapshot_id": "snap",
+            "annotation_set_id": "ann",
+            "evidence_regime": "everything",
+        },
+        ("evidence_regime",),
+    ),
+    # missing-required: ontology_snapshot_id
+    (
+        "archive_ontology_snapshot",
+        ArchiveOntologySnapshotPayload,
+        {"force": True},
+        ("ontology_snapshot_id",),
     ),
 ]
 

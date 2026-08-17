@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Collection
 from typing import Any
 
 from sqlalchemy import distinct, select
@@ -114,6 +115,64 @@ def restrict_data_to_protein_fold(
             "folds": folds,
             "fold": fold,
             "seed": seed,
+            "nk_before": orig_counts[0],
+            "nk_after": len(new_data.nk),
+            "lk_before": orig_counts[1],
+            "lk_after": len(new_data.lk),
+            "pk_before": orig_counts[2],
+            "pk_after": len(new_data.pk),
+        },
+        "info",
+    )
+    return new_data
+
+
+def restrict_data_to_protein_set(
+    data: EvaluationData,
+    *,
+    accessions: Collection[str],
+    label: str,
+    emit: EmitFn,
+) -> EvaluationData:
+    """Keep only proteins named in ``accessions``.
+
+    The general form of the fold restriction. A fold is a deterministic hash
+    partition and answers "is this protein in slice N"; this answers "is this
+    protein in a set someone computed elsewhere", which is what a stratum needs.
+    The strata in :mod:`protea.core.strata` are resolved from the retrieved
+    neighbourhood (length, homology, taxonomy, propagation gap), and none of
+    those are derivable from the accession alone, so the membership has to
+    arrive as data rather than as a predicate.
+
+    ``label`` names the stratum in the emitted event. It is required because an
+    unlabelled subset restriction produces a result that cannot be told from a
+    full-population one afterwards, and this campaign has already lost a grid to
+    exactly that.
+
+    An empty ``accessions`` raises. Silently evaluating nothing and reporting a
+    score over it is the failure this argument exists to prevent.
+    """
+    wanted = frozenset(accessions)
+    if not wanted:
+        raise ValueError(
+            f"the protein subset {label!r} is empty, so there is nothing to "
+            f"evaluate; an empty restriction would score zero proteins and "
+            f"report it as a result"
+        )
+    orig_counts = (len(data.nk), len(data.lk), len(data.pk))
+    new_data = type(data)(
+        nk={k: v for k, v in data.nk.items() if k in wanted},
+        lk={k: v for k, v in data.lk.items() if k in wanted},
+        pk={k: v for k, v in data.pk.items() if k in wanted},
+        pk_known={k: v for k, v in data.pk_known.items() if k in wanted},
+        known={k: v for k, v in data.known.items() if k in wanted},
+    )
+    emit(
+        "run_cafa_evaluation.gt_restricted_to_subset",
+        None,
+        {
+            "subset": label,
+            "requested": len(wanted),
             "nk_before": orig_counts[0],
             "nk_after": len(new_data.nk),
             "lk_before": orig_counts[1],
