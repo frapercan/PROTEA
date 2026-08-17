@@ -37,6 +37,9 @@ from protea.core.operations.load_interpro_go_mapping import (
 )
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
+from protea.core.operations.measure_embedding_magnitude import (
+    MeasureEmbeddingMagnitudeOperation,
+)
 from protea.core.operations.ping import PingOperation
 from protea.core.operations.predict_go_terms import (
     PredictGOTermsBatchOperation,
@@ -69,6 +72,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(BatchRescoreEvaluationOperation())
     registry.register(ComputeEmbeddingsOperation())
     registry.register(ComputeEmbeddingsBatchOperation())
+    registry.register(MeasureEmbeddingMagnitudeOperation())
     registry.register(StoreEmbeddingsOperation())
     registry.register(PredictGOTermsOperation())
     registry.register(PredictGOTermsBatchOperation())
