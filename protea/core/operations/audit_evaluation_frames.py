@@ -23,12 +23,13 @@ that makes those safe.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
+from pydantic import Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from protea.core.contracts.operation import EmitFn, Operation, OperationResult
+from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
 
 _TOTALS = (
     "SELECT count(*) AS n_rows,"
@@ -72,8 +73,15 @@ def _read_recomputable(session: Session) -> int:
     return int(session.execute(text(_REACHABLE)).mappings().one()["recomputable"])
 
 
-def _read_combinations(session: Session) -> list[dict[str, Any]]:
-    return [
+def _read_combinations(session: Session, limit: int) -> tuple[list[dict[str, Any]], int]:
+    """Return at most ``limit`` combinations, and how many were dropped.
+
+    The full list goes into a ``JobEvent`` as JSONB, so it is unbounded input
+    to a row. The count is returned alongside rather than logged and forgotten:
+    a truncated census that does not say it was truncated reads exactly like a
+    complete one, and this operation exists to be trusted as a before and after.
+    """
+    rows = [
         {
             "frame": row["frame"],
             "temporal_window": row["temporal_window"],
@@ -83,6 +91,23 @@ def _read_combinations(session: Session) -> list[dict[str, Any]]:
         }
         for row in session.execute(text(_COMBINATIONS)).mappings().all()
     ]
+    return rows[:limit], max(0, len(rows) - limit)
+
+
+PositiveInt = Annotated[int, Field(gt=0)]
+
+
+class AuditEvaluationFramesPayload(ProteaPayload, frozen=True):
+    """Inputs for the census.
+
+    The census needs nothing to run, which is why it originally took a bare
+    dict. That is also why it accepted any dict silently, and an operation with
+    no contract cannot be told from one whose contract is never checked. The
+    one knob it does need is a cap, because the combination list is written into
+    a JobEvent as JSONB and nothing bounded it.
+    """
+
+    max_combinations: PositiveInt = 200
 
 
 class AuditEvaluationFramesOperation(Operation):
@@ -96,11 +121,19 @@ class AuditEvaluationFramesOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
+        p = AuditEvaluationFramesPayload.model_validate(payload)
         emit("audit.start", "Counting the evaluation layer", {}, "info")
 
         totals = _read_totals(session)
         recomputable = _read_recomputable(session)
-        combinations = _read_combinations(session)
+        combinations, dropped = _read_combinations(session, p.max_combinations)
+        if dropped:
+            emit(
+                "audit.combinations_truncated",
+                f"{dropped} combinations beyond the cap of {p.max_combinations} are not reported",
+                {"dropped": dropped, "max_combinations": p.max_combinations},
+                "warning",
+            )
 
         n_rows = totals["n_rows"]
         with_frame = totals["with_frame"]

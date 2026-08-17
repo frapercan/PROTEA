@@ -96,6 +96,9 @@ from protea.core.operations.predict_go_terms_from_interpro import (
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesPayload,
 )
+from protea.core.operations.audit_evaluation_frames import (
+    AuditEvaluationFramesPayload,
+)
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
@@ -337,6 +340,15 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ApplyLearnedEncoderPayload,
         {"encoder_artifact_path": "/tmp/enc.pt"},
         ("source_embedding_config_id",),
+    ),
+    # invariant: the combination cap must be positive. The census takes no
+    # required inputs, so this is the only thing it can refuse, and it is a
+    # real knob: the combination list is written into a JobEvent as JSONB.
+    (
+        "audit_evaluation_frames",
+        AuditEvaluationFramesPayload,
+        {"max_combinations": 0},
+        ("max_combinations",),
     ),
 ]
 
