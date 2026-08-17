@@ -13,6 +13,9 @@ from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderOper
 from protea.core.operations.archive_ontology_snapshot import (
     ArchiveOntologySnapshotOperation,
 )
+from protea.core.operations.audit_evaluation_frames import (
+    AuditEvaluationFramesOperation,
+)
 from protea.core.operations.batch_rescore_evaluation import (
     BatchRescoreEvaluationOperation,
 )
@@ -67,6 +70,7 @@ def build_operation_registry() -> OperationRegistry:
     registry = OperationRegistry()
     registry.register(PingOperation())
     registry.register(ExportGateBundleOperation())
+    registry.register(AuditEvaluationFramesOperation())
     registry.register(ApplyLearnedEncoderOperation())
     registry.register(InsertProteinsOperation())
     registry.register(FetchUniProtMetadataOperation())

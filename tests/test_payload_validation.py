@@ -52,6 +52,9 @@ from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderPayl
 from protea.core.operations.archive_ontology_snapshot import (
     ArchiveOntologySnapshotPayload,
 )
+from protea.core.operations.audit_evaluation_frames import (
+    AuditEvaluationFramesPayload,
+)
 from protea.core.operations.batch_rescore_evaluation import BatchRescoreEvaluationPayload
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrencePayload
 from protea.core.operations.compute_embeddings import (
@@ -383,6 +386,15 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ArchiveOntologySnapshotPayload,
         {"force": True},
         ("ontology_snapshot_id",),
+    ),
+    # invariant: the combination cap must be positive. The census takes no
+    # required inputs, so this is the only thing it can refuse, and it is a
+    # real knob: the combination list is written into a JobEvent as JSONB.
+    (
+        "audit_evaluation_frames",
+        AuditEvaluationFramesPayload,
+        {"max_combinations": 0},
+        ("max_combinations",),
     ),
 ]
 
