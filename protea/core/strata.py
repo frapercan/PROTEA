@@ -196,7 +196,7 @@ class TaxonomyBand(StrEnum):
     NONE = "none"
 
 
-_TAXONOMY_ALIASES: Mapping[str, "TaxonomyBand"] = {
+_TAXONOMY_ALIASES: Mapping[str, TaxonomyBand] = {
     "same": TaxonomyBand.SAME,
     "close": TaxonomyBand.CLOSE,
     "intermediate": TaxonomyBand.INTERMEDIATE,
@@ -257,7 +257,7 @@ class PropagationBand(StrEnum):
     FAR = ">0.15"
 
 
-_PROPAGATION_BANDS: tuple[tuple["PropagationBand", _Band], ...] = (
+_PROPAGATION_BANDS: tuple[tuple[PropagationBand, _Band], ...] = (
     (PropagationBand.NEAR, _Band("0-0.05", 0.0, 0.05)),
     (PropagationBand.MID, _Band("0.05-0.15", 0.05, 0.15)),
     (PropagationBand.FAR, _Band(">0.15", 0.15, float("inf"))),
