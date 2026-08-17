@@ -43,7 +43,6 @@ from pydantic import Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.utils import job_id_from_payload
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
 from protea.core.operations._run_cafa_eval_driver import _run_cafaeval_for_setting
@@ -51,6 +50,7 @@ from protea.core.operations.run_cafa_evaluation import (
     RunCafaEvaluationOperation,
     RunCafaEvaluationPayload,
 )
+from protea.core.utils import job_id_from_payload
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.settings import load_settings
@@ -113,7 +113,7 @@ class BatchRescoreEvaluationPayload(ProteaPayload, frozen=True):
         return v
 
     @model_validator(mode="after")
-    def _label_accompanies_subset(self) -> "BatchRescoreEvaluationPayload":
+    def _label_accompanies_subset(self) -> BatchRescoreEvaluationPayload:
         """A subset must name itself.
 
         This is a model validator and not a field validator on purpose: a field

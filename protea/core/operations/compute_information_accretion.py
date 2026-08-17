@@ -91,7 +91,7 @@ class InformationAccretionGateError(RuntimeError):
 class _Inputs(NamedTuple):
     """What this run was asked to do, once resolved against the database."""
 
-    p: "ComputeInformationAccretionPayload"
+    p: ComputeInformationAccretionPayload
     payload: dict[str, Any]
     snapshot: Any
     corpus: Any
@@ -215,7 +215,7 @@ class ComputeInformationAccretionOperation:
     # --------------------------------------------------------------- gates
     def _gate(
         self,
-        dag: "_Dag",
+        dag: _Dag,
         raw: int,
         dropped: int,
         max_drop_rate_pct: float,
@@ -261,7 +261,7 @@ class ComputeInformationAccretionOperation:
         return drop_rate
 
     @staticmethod
-    def _gate_acyclic(dag: "_Dag") -> None:
+    def _gate_acyclic(dag: _Dag) -> None:
         """A term must not be its own strict ancestor."""
         cycles = [
             t for t in dag.terms
@@ -275,7 +275,7 @@ class ComputeInformationAccretionOperation:
             )
 
     @staticmethod
-    def _gate_propagation(dag: "_Dag") -> None:
+    def _gate_propagation(dag: _Dag) -> None:
         """No term holds more proteins than its parents' intersection.
 
         After propagation a child's protein set is a subset of every parent's,
@@ -305,7 +305,7 @@ class ComputeInformationAccretionOperation:
             )
 
     @staticmethod
-    def _gate_values(dag: "_Dag") -> tuple[int, int]:
+    def _gate_values(dag: _Dag) -> tuple[int, int]:
         """The computed values are possible. Returns (roots, nonzero)."""
         negative = [t for t in dag.terms if dag.ia[t] < 0.0]
         if negative:
@@ -335,7 +335,7 @@ class ComputeInformationAccretionOperation:
     @staticmethod
     def _resolve(
         session: Session, p: ComputeInformationAccretionPayload, payload: dict[str, Any]
-    ) -> "_Inputs":
+    ) -> _Inputs:
         """Resolve the three axes IA is identified by, plus any existing table.
 
         Missing snapshot or corpus raises here rather than later: a table
@@ -387,9 +387,9 @@ class ComputeInformationAccretionOperation:
     @staticmethod
     def _record_shape(
         ia_set: InformationAccretionSet,
-        inp: "_Inputs",
-        dag: "_Dag",
-        measured: "_Measured",
+        inp: _Inputs,
+        dag: _Dag,
+        measured: _Measured,
         uri: str,
         digest: str,
     ) -> None:
@@ -419,12 +419,13 @@ class ComputeInformationAccretionOperation:
             "elapsed_s": round(time.time() - measured.started, 1),
         }
 
-    @staticmethod
+    @classmethod
     def _persist(
+        cls,
         session: Session,
-        inp: "_Inputs",
-        dag: "_Dag",
-        measured: "_Measured",
+        inp: _Inputs,
+        dag: _Dag,
+        measured: _Measured,
         emit: EmitFn,
     ) -> OperationResult:
         """Write the row and the artifact, and report what was written.
@@ -446,11 +447,9 @@ class ComputeInformationAccretionOperation:
         )
         ia_set.job_id = job_id_from_payload(inp.payload)
 
-        key, uri, digest = self._write_artifact(ia, ia_set.id)
+        key, uri, digest = cls._write_artifact(ia, ia_set.id)
 
-        ComputeInformationAccretionOperation._record_shape(
-            ia_set, inp, dag, measured, uri, digest
-        )
+        cls._record_shape(ia_set, inp, dag, measured, uri, digest)
         if existing is None:
             session.add(ia_set)
         session.flush()
@@ -531,8 +530,8 @@ class ComputeInformationAccretionOperation:
         inp = self._resolve(session, p, payload)
         if inp.existing is not None and not p.force:
             return self._reuse_result(inp.existing, emit)
-        snapshot, corpus, evidence_codes, existing = (
-            inp.snapshot, inp.corpus, inp.evidence_codes, inp.existing
+        snapshot, corpus, evidence_codes = (
+            inp.snapshot, inp.corpus, inp.evidence_codes
         )
 
         emit(
