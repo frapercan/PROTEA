@@ -125,6 +125,12 @@ def serialize_inferred_chunks(
     flattens each ``ChunkEmbedding`` into JSON-friendly fields. The
     write worker uses these dicts directly without re-fetching from
     the DB.
+
+    The pairing is strict. It is positional, and the ``sequence_id`` comes from
+    one side while the vectors come from the other, so a short inference result
+    would not drop the tail: it would store one sequence's embedding under a
+    different sequence's id. The write worker takes these dicts on trust, so
+    nothing downstream would notice.
     """
     return [
         {
@@ -139,7 +145,7 @@ def serialize_inferred_chunks(
                 for c in chunks
             ],
         }
-        for seq, chunks in zip(sequences, batch_chunks, strict=False)
+        for seq, chunks in zip(sequences, batch_chunks, strict=True)
     ]
 
 
