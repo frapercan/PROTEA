@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from protea.core.operations.archive_ontology_snapshot import (
+    _Fetched,
     ArchiveOntologySnapshotOperation,
     ArchiveOntologySnapshotPayload,
     OntologyDriftError,
@@ -101,8 +102,11 @@ def test_parser_returns_none_version_when_header_absent() -> None:
 # --------------------------------------------------------------------------
 def _gate(db_ids, fetched_ids, version="releases/2025-03-16", max_drift=0.0):
     op = ArchiveOntologySnapshotOperation()
+    # The gate now takes what was fetched as one object, since the ids and the
+    # version are read in one pass and judged together. Every test below keeps
+    # passing them separately through this helper.
     return op._gate_congruence(
-        _Session(db_ids), _Snapshot(), fetched_ids, version, max_drift, _emit
+        _Session(db_ids), _Snapshot(), _Fetched(fetched_ids, version), max_drift, _emit
     )
 
 

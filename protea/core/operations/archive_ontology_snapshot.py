@@ -25,7 +25,7 @@ import hashlib
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import requests
 from pydantic import field_validator
@@ -64,6 +64,19 @@ class OntologyDriftError(RuntimeError):
     """The bytes at ``obo_url`` no longer match the loaded snapshot."""
 
 
+class _Fetched(NamedTuple):
+    """What the downloaded OBO says about itself.
+
+    The ids and the version are read in one pass and judged together: a file
+    whose version matches but whose terms do not is the same failure as the
+    reverse, so passing them separately invites a caller to check one and
+    forget the other.
+    """
+
+    ids: set[str]
+    version: str | None
+
+
 class ArchiveOntologySnapshotOperation:
     name = "archive_ontology_snapshot"
     description = (
@@ -73,7 +86,7 @@ class ArchiveOntologySnapshotOperation:
     )
 
     @staticmethod
-    def _parse_ids_and_version(obo_text: str) -> tuple[set[str], str | None]:
+    def _parse_ids_and_version(obo_text: str) -> _Fetched:
         """Extract the live term ids and the data-version from OBO text.
 
         Deliberately minimal and independent of
@@ -115,14 +128,13 @@ class ArchiveOntologySnapshotOperation:
         self,
         session: Session,
         snapshot: OntologySnapshot,
-        fetched_ids: set[str],
-        fetched_version: str | None,
+        fetched: _Fetched,
         max_drift_pct: float,
         emit: EmitFn,
     ) -> dict[str, Any]:
-        if fetched_version is not None and fetched_version != snapshot.obo_version:
+        if fetched.version is not None and fetched.version != snapshot.obo_version:
             raise OntologyDriftError(
-                f"fetched OBO declares data-version {fetched_version!r} but the "
+                f"fetched OBO declares data-version {fetched.version!r} but the "
                 f"snapshot was loaded as {snapshot.obo_version!r}; the upstream "
                 f"URL now serves a different release"
             )
@@ -137,12 +149,12 @@ class ArchiveOntologySnapshotOperation:
                 {"s": str(snapshot.id)},
             )
         }
-        missing = db_ids - fetched_ids
-        added = fetched_ids - db_ids
+        missing = db_ids - fetched.ids
+        added = fetched.ids - db_ids
         drift_pct = 100.0 * len(missing) / len(db_ids) if db_ids else 0.0
         stats = {
             "db_terms": len(db_ids),
-            "fetched_terms": len(fetched_ids),
+            "fetched_terms": len(fetched.ids),
             "missing_from_fetch": len(missing),
             "added_by_fetch": len(added),
             "drift_pct": drift_pct,
@@ -216,11 +228,11 @@ class ArchiveOntologySnapshotOperation:
             "info",
         )
 
-        fetched_ids, fetched_version = self._parse_ids_and_version(
+        fetched = self._parse_ids_and_version(
             obo_bytes.decode("utf-8", errors="replace")
         )
         stats = self._gate_congruence(
-            session, snapshot, fetched_ids, fetched_version, p.max_term_drift_pct, emit
+            session, snapshot, fetched, p.max_term_drift_pct, emit
         )
 
         project_root = Path(__file__).resolve().parents[3]

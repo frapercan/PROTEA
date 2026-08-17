@@ -306,6 +306,78 @@ class ComputeInformationAccretionOperation:
         return len(roots), nonzero
 
     # ------------------------------------------------------------- execute
+    @staticmethod
+    def _resolve(
+        session: Session, p: ComputeInformationAccretionPayload
+    ) -> tuple[Any, Any, tuple[str, ...] | None, Any]:
+        """Resolve the three axes IA is identified by, plus any existing table.
+
+        Missing snapshot or corpus raises here rather than later: a table
+        computed against a half-resolved identity would be indistinguishable
+        from a correct one once written.
+        """
+        snapshot = session.get(OntologySnapshot, uuid.UUID(p.ontology_snapshot_id))
+        if snapshot is None:
+            raise ValueError(f"OntologySnapshot {p.ontology_snapshot_id} not found")
+        corpus = session.get(AnnotationSet, uuid.UUID(p.annotation_set_id))
+        if corpus is None:
+            raise ValueError(f"AnnotationSet {p.annotation_set_id} not found")
+        evidence_codes = resolve_regime(p.evidence_regime)
+        existing = (
+            session.query(InformationAccretionSet)
+            .filter_by(
+                ontology_snapshot_id=snapshot.id,
+                annotation_set_id=corpus.id,
+                evidence_regime=p.evidence_regime,
+            )
+            .one_or_none()
+        )
+        return snapshot, corpus, evidence_codes, existing
+
+    @staticmethod
+    def _reuse_result(existing: Any, emit: EmitFn) -> OperationResult:
+        """Report the existing table instead of recomputing it.
+
+        ``reused`` is in the result rather than only in the log, so a caller
+        reading the job outcome can tell a fresh computation from a hit without
+        parsing events.
+        """
+        emit(
+            "compute_information_accretion.reused",
+            "table already exists for these three axes",
+            {"information_accretion_set_id": str(existing.id),
+             "artifact_uri": existing.artifact_uri},
+            "info",
+        )
+        return OperationResult(
+            result={
+                "information_accretion_set_id": str(existing.id),
+                "artifact_uri": existing.artifact_uri,
+                "content_sha256": existing.content_sha256,
+                "reused": True,
+            }
+        )
+
+    @staticmethod
+    def _write_artifact(ia: dict[str, float], ia_set_id: uuid.UUID) -> tuple[str, str, str]:
+        """Serialise the table and publish it. Returns (key, uri, sha256).
+
+        The digest is taken from the bytes that were written rather than
+        recomputed from the mapping, so it certifies the file the store
+        received and not an equivalent one this process could have produced.
+        """
+        project_root = Path(__file__).resolve().parents[3]
+        store = get_artifact_store(load_settings(project_root))
+        key = ia_key_for(ia_set_id)
+        with tempfile.TemporaryDirectory(prefix="protea_ia_") as tmp:
+            local_path = Path(tmp) / "IA.tsv"
+            with local_path.open("w", encoding="utf-8") as fh:
+                for go_id in sorted(ia):
+                    fh.write(f"{go_id}\t{ia[go_id]}\n")
+            digest = hashlib.sha256(local_path.read_bytes()).hexdigest()
+            uri = store.put(key, local_path)
+        return key, uri, digest
+
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         """One line naming the three axes IA is identified by.
 
@@ -333,40 +405,9 @@ class ComputeInformationAccretionOperation:
         p = ComputeInformationAccretionPayload.model_validate(payload)
         started = time.time()
 
-        snapshot = session.get(OntologySnapshot, uuid.UUID(p.ontology_snapshot_id))
-        if snapshot is None:
-            raise ValueError(f"OntologySnapshot {p.ontology_snapshot_id} not found")
-        corpus = session.get(AnnotationSet, uuid.UUID(p.annotation_set_id))
-        if corpus is None:
-            raise ValueError(f"AnnotationSet {p.annotation_set_id} not found")
-
-        evidence_codes = resolve_regime(p.evidence_regime)
-
-        existing = (
-            session.query(InformationAccretionSet)
-            .filter_by(
-                ontology_snapshot_id=snapshot.id,
-                annotation_set_id=corpus.id,
-                evidence_regime=p.evidence_regime,
-            )
-            .one_or_none()
-        )
+        snapshot, corpus, evidence_codes, existing = self._resolve(session, p)
         if existing is not None and not p.force:
-            emit(
-                "compute_information_accretion.reused",
-                "table already exists for these three axes",
-                {"information_accretion_set_id": str(existing.id),
-                 "artifact_uri": existing.artifact_uri},
-                "info",
-            )
-            return OperationResult(
-                result={
-                    "information_accretion_set_id": str(existing.id),
-                    "artifact_uri": existing.artifact_uri,
-                    "content_sha256": existing.content_sha256,
-                    "reused": True,
-                }
-            )
+            return self._reuse_result(existing, emit)
 
         emit(
             "compute_information_accretion.started",
@@ -417,16 +458,7 @@ class ComputeInformationAccretionOperation:
         ia_set.evidence_codes = list(evidence_codes) if evidence_codes else None
         ia_set.job_id = job_id_from_payload(payload)
 
-        project_root = Path(__file__).resolve().parents[3]
-        store = get_artifact_store(load_settings(project_root))
-        key = ia_key_for(ia_set.id)
-        with tempfile.TemporaryDirectory(prefix="protea_ia_") as tmp:
-            local_path = Path(tmp) / "IA.tsv"
-            with local_path.open("w", encoding="utf-8") as fh:
-                for go_id in sorted(ia):
-                    fh.write(f"{go_id}\t{ia[go_id]}\n")
-            digest = hashlib.sha256(local_path.read_bytes()).hexdigest()
-            uri = store.put(key, local_path)
+        key, uri, digest = self._write_artifact(ia, ia_set.id)
 
         values = list(ia.values())
         ia_set.artifact_uri = uri
