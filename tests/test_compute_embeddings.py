@@ -758,11 +758,20 @@ class TestComputeEmbeddingsBatchExecute:
         session = self._make_session(cfg, seqs)
 
         fake_vec = np.array([0.1, 0.2, 0.3], dtype=np.float32)
-        fake_batch = [self._fake_chunks(fake_vec), self._fake_chunks(fake_vec)]
 
+        # One chunk list per sequence in the batch, which is what the real
+        # ``_embed_batch`` returns. A fixed-length return would hand a
+        # single-sequence batch two chunk lists, and the serializer now refuses
+        # that rather than silently keeping the first.
         with (
             patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())),
-            patch.object(op, "_embed_batch", return_value=fake_batch),
+            patch.object(
+                op,
+                "_embed_batch",
+                side_effect=lambda _m, _t, seq_strs, _c, _d: [
+                    self._fake_chunks(fake_vec) for _ in seq_strs
+                ],
+            ),
         ):
             result = op.execute(session, self._base_payload(cfg), emit=_noop_emit)
 
