@@ -219,6 +219,34 @@ def _resolve_db_targets() -> list[tuple[str, str, str, str]]:
     return out
 
 
+def _reachable(url: str) -> bool:
+    """Can we open a connection to this target at all?
+
+    Gate 2 judges by name, and a name is only worth judging when the thing it
+    names exists. ``_populated_target`` already states the principle: a database
+    we cannot reach is one we cannot destroy. Without this check the name gate
+    fires on a DSN that resolves to nothing, which is what it did in CI, where
+    the default test database name is also on the protected list and no server
+    is listening.
+    """
+    try:
+        from sqlalchemy import create_engine, text
+    except Exception:
+        return False
+    try:
+        engine = create_engine(url, connect_args={"connect_timeout": 3})
+        with engine.connect() as conn:
+            conn.execute(text("select 1"))
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            engine.dispose()
+        except Exception:
+            pass
+
+
 def _populated_target(url: str) -> str | None:
     """Ask the database whether it already holds a schema. Do not infer it.
 
@@ -302,6 +330,16 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
     # Gate 2, by name/host. Kept as a backstop for a live store that happens to
     # be empty right now, which gate 1 cannot see.
+    #
+    # Only for targets we can actually reach. A protected name pointing at
+    # nothing is not a risk, and treating it as one blocks CI, where the
+    # default test database is called BioData and is on the protected list
+    # while no server is listening. Gate 1 already refuses anything reachable
+    # that holds tables, so this narrow case is all that is left: reachable,
+    # empty, and named like production.
+    reachable = {url for url in _resolve_db_urls() if _reachable(url)}
+    if not reachable:
+        return
     for user, host, port, db in _resolve_db_targets():
         live = (
             db.strip().lower() in _PROTECTED_DB_NAMES
