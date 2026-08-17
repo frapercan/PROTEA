@@ -25,6 +25,7 @@ from protea.core.operations.compute_embeddings import (
 from protea.core.operations.compute_information_accretion import (
     ComputeInformationAccretionOperation,
 )
+from protea.core.operations.export_gate_bundle import ExportGateBundleOperation
 from protea.core.operations.export_minijobs import (
     ExportCoordinatorOperation,
     ExportFeaturesBatchOperation,
@@ -65,6 +66,7 @@ from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOp
 def build_operation_registry() -> OperationRegistry:
     registry = OperationRegistry()
     registry.register(PingOperation())
+    registry.register(ExportGateBundleOperation())
     registry.register(ApplyLearnedEncoderOperation())
     registry.register(InsertProteinsOperation())
     registry.register(FetchUniProtMetadataOperation())
