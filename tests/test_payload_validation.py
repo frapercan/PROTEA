@@ -96,6 +96,9 @@ from protea.core.operations.load_ontology_snapshot import (
 from protea.core.operations.load_quickgo_annotations import (
     LoadQuickGOAnnotationsPayload,
 )
+from protea.core.operations.measure_embedding_magnitude import (
+    MeasureEmbeddingMagnitudePayload,
+)
 from protea.core.operations.predict_go_terms_from_interpro import (
     PredictGOTermsFromInterProPayload,
 )
@@ -117,6 +120,14 @@ from protea.core.operations.run_interproscan_batch import (
 # pydantic's locator for model level validators.
 PayloadNegativeCase = tuple[str, type[BaseModel], dict[str, Any], tuple[str | int, ...]]
 PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
+    # invariant: a sample of zero per band would measure nothing and then
+    # recommend scale 1.0, which is the dangerous answer arrived at by accident
+    (
+        "measure_embedding_magnitude",
+        MeasureEmbeddingMagnitudePayload,
+        {"embedding_config_id": "cfg", "per_band": 0},
+        ("per_band",),
+    ),
     # missing-required: embedding_config_id
     (
         "compute_embeddings",

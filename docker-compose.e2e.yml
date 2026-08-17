@@ -14,3 +14,13 @@ services:
     environment:
       PROTEA_AUTHN_REQUIRED: "false"
       PROTEA_STORAGE_BACKEND: local
+
+  # The deploy smoke posts a ping to protea.jobs and waits 60 seconds for it.
+  # Without this the worker spends that window downloading and parsing the NCBI
+  # taxonomy dump (about 100 MB, 2.9 million nodes) before it consumes anything,
+  # so the ping never runs and the smoke fails on a warm-up that ping does not
+  # use. Production keeps the warm-up: doing it at startup rather than mid-batch
+  # is the point of it.
+  worker-jobs:
+    environment:
+      PROTEA_SKIP_TAXONOMY_WARMUP: "1"
