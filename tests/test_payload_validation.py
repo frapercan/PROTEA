@@ -68,6 +68,9 @@ from protea.core.operations.compute_information_accretion import (
 from protea.core.operations.count_backend_parameters import (
     CountBackendParametersPayload,
 )
+from protea.core.operations.export_evaluation_targets import (
+    ExportEvaluationTargetsPayload,
+)
 from protea.core.operations.export_gate_bundle import ExportGateBundlePayload
 from protea.core.operations.export_minijobs._export_features_batch import (
     ExportFeaturesBatchPayload,
@@ -409,6 +412,16 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         CountBackendParametersPayload,
         {"embedding_config_ids": []},
         ("embedding_config_ids",),
+    ),
+    # invariant: ``removed`` holds proteins that LOST annotation over the window.
+    # The evaluation reports them and never scores them, so accepting them as
+    # targets would be a plausible request that silently changes the population
+    # being measured.
+    (
+        "export_evaluation_targets",
+        ExportEvaluationTargetsPayload,
+        {"evaluation_set_id": "e", "categories": ["removed"]},
+        ("categories",),
     ),
 ]
 
