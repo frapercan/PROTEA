@@ -68,6 +68,23 @@ SCORED_CATEGORIES = ("nk", "lk", "pk")
 #: fixed width keeps the bytes reproducible rather than dependent on a writer.
 WRAP = 60
 
+
+def canonical_residues(sequence: str) -> str:
+    """The sequence as LAFA will actually read it: upper case, no gap characters.
+
+    LAFA's parser does ``line.upper().replace("-", "")`` on every residue line, so
+    a stored sequence carrying lower-case masking or an alignment gap reaches the
+    model in a different form from the one we published. The sha256 would still
+    describe our file faithfully and would still be wrong about what was embedded,
+    which is the worst shape a checksum can have: authoritative over the wrong
+    object.
+
+    Normalising here rather than at the reader makes the published bytes the same
+    object the model sees. The count of altered sequences is reported by the
+    caller, so the transformation is visible rather than silent.
+    """
+    return sequence.upper().replace("-", "")
+
 PositiveInt = Annotated[int, Field(gt=0)]
 
 
@@ -108,8 +125,9 @@ def format_fasta(records: list[tuple[str, str]]) -> bytes:
     """
     lines: list[str] = []
     for accession, sequence in records:
+        residues = canonical_residues(sequence)
         lines.append(f">{accession}")
-        lines.extend(sequence[i : i + WRAP] for i in range(0, len(sequence), WRAP))
+        lines.extend(residues[i : i + WRAP] for i in range(0, len(residues), WRAP))
     return ("\n".join(lines) + "\n").encode() if lines else b""
 
 
@@ -156,6 +174,25 @@ def _report_missing(
             "warning",
         )
     return missing
+
+
+def _report_altered(records: list[tuple[str, str]], emit: EmitFn) -> list[str]:
+    """Say which sequences the canonical form changed, rather than changing them quietly.
+
+    Lower case in a protein FASTA often marks a masked or low-complexity region,
+    and a dash is an alignment gap. LAFA discards both, so the information is lost
+    downstream whatever we do; what must not be lost is the fact that it happened.
+    """
+    altered = [a for a, seq in records if canonical_residues(seq) != seq]
+    if altered:
+        emit(
+            "targets.canonicalised",
+            f"{len(altered)} sequences were upper-cased or had gap characters removed "
+            "to match the form LAFA reads",
+            {"canonicalised": len(altered), "examples": altered[:10]},
+            "warning",
+        )
+    return altered
 
 
 class ExportEvaluationTargetsOperation(Operation):
@@ -214,6 +251,7 @@ class ExportEvaluationTargetsOperation(Operation):
         """
         missing = _report_missing(accessions, sequences, emit)
         written = [(a, sequences[a]) for a in accessions if a in sequences]
+        altered = _report_altered(written, emit)
         raw = format_fasta(written)
         digest = hashlib.sha256(raw).hexdigest()
 
@@ -239,6 +277,7 @@ class ExportEvaluationTargetsOperation(Operation):
                 "sha256": digest,
                 "targets": len(written),
                 "missing_sequence": len(missing),
+                "canonicalised": len(altered),
                 "categories": p.categories,
                 # The sha256 is the point, so it is said rather than left to be
                 # noticed: it is what lets the grid and the submission prove they

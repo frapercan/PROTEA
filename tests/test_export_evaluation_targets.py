@@ -161,3 +161,88 @@ def test_it_is_registered_so_it_can_be_dispatched():
     registry = build_operation_registry()
 
     assert registry.get("export_evaluation_targets").name == "export_evaluation_targets"
+
+
+# ------------------------------------------------------- the round trip through LAFA
+
+def _lafa_parser():
+    """LAFA's own parser, imported from the image source rather than reimplemented.
+
+    A copy here would keep agreeing with itself after the real one changed, which
+    is the exact failure this section exists to catch.
+    """
+    import sys
+    from pathlib import Path
+
+    runtime = Path(__file__).resolve().parents[1] / "apps" / "method_runtime"
+    if str(runtime) not in sys.path:
+        sys.path.insert(0, str(runtime))
+    prott5_encoder = pytest.importorskip("prott5_encoder")
+    return prott5_encoder.parse_fasta, prott5_encoder.fasta_accessions
+
+
+def _round_trip(tmp_path, records):
+    parse_fasta, fasta_accessions = _lafa_parser()
+    path = tmp_path / "targets.fasta"
+    path.write_bytes(format_fasta(records))
+    return parse_fasta(str(path)), fasta_accessions(str(path))
+
+
+def test_the_published_file_round_trips_through_lafas_own_parser(tmp_path):
+    """The claim the whole operation rests on, checked against the real reader."""
+    records = [("P12345", "MKVLAA"), ("Q9Y6K9", "A" * (WRAP + 17))]
+
+    parsed, _ = _round_trip(tmp_path, records)
+
+    assert parsed == dict(records)
+
+
+def test_an_isoform_accession_survives_the_pipe_rule(tmp_path):
+    """LAFA takes the field between the first two pipes when they exist. A bare
+    accession has none, so a dash-bearing isoform id must come back whole."""
+    parsed, _ = _round_trip(tmp_path, [("P12345-2", "MKV")])
+
+    assert list(parsed) == ["P12345-2"]
+
+
+def test_file_order_is_what_lafa_reads_as_output_order(tmp_path):
+    records = [("P1", "MK"), ("P2", "VA"), ("P3", "LL")]
+
+    _, order = _round_trip(tmp_path, records)
+
+    assert order == ["P1", "P2", "P3"]
+
+
+def test_a_lower_case_sequence_is_published_in_the_form_that_gets_embedded(tmp_path):
+    """The regression. LAFA upper-cases every residue line, so publishing lower
+    case would mean the sha256 describes a file that is not what the model reads."""
+    parsed, _ = _round_trip(tmp_path, [("P1", "mkvlaa")])
+
+    assert parsed["P1"] == "MKVLAA"
+    assert format_fasta([("P1", "mkvlaa")]) == format_fasta([("P1", "MKVLAA")])
+
+
+def test_a_gap_character_is_removed_before_the_hash_rather_than_after(tmp_path):
+    """Same argument: LAFA strips dashes, so a gap left in the file makes the
+    checksum authoritative about the wrong object."""
+    parsed, _ = _round_trip(tmp_path, [("P1", "MKV-LAA")])
+
+    assert parsed["P1"] == "MKVLAA"
+    assert format_fasta([("P1", "MKV-LAA")]) == format_fasta([("P1", "MKVLAA")])
+
+
+def test_canonicalisation_is_idempotent():
+    from protea.core.operations.export_evaluation_targets import canonical_residues
+
+    once = canonical_residues("mkv-laa")
+
+    assert canonical_residues(once) == once
+
+
+def test_wrapping_counts_canonical_residues_not_raw_ones():
+    """A gap inside the first line would otherwise push a residue onto the next
+    line and change the bytes without changing the sequence."""
+    with_gap = format_fasta([("P1", "A" * 30 + "-" + "A" * 30)])
+    without = format_fasta([("P1", "A" * 60)])
+
+    assert with_gap == without
