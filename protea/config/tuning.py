@@ -263,6 +263,22 @@ class OperationTuning(BaseModel):
             "Override: PROTEA_TUNING__operation__ref_cache_freshness_seconds."
         ),
     )
+    max_implicit_query_population: int = Field(
+        default=50_000,
+        ge=0,
+        description=(
+            "Largest query population a predict dispatch may select WITHOUT naming "
+            "it. Giving neither query_set_id nor query_accessions selects every "
+            "protein with an embedding, which reads as a filter that matched "
+            "everything rather than as a filter that was never applied. On "
+            "2026-08-18 that silently ran twelve jobs over 616,846 proteins when "
+            "6,216 were intended, discarding 3.3 million rows. Above this count "
+            "the coordinator refuses and names both numbers. A run that genuinely "
+            "wants the corpus states it by passing the accessions. 0 disables the "
+            "guard. Override: "
+            "PROTEA_TUNING__operation__max_implicit_query_population."
+        ),
+    )
     aspect_knn_workers: int = Field(
         default=3,
         ge=1,

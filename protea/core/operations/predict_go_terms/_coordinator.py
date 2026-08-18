@@ -47,6 +47,39 @@ def _category_payload_fields(
     return fields
 
 
+def _refuse_an_undeclared_corpus(count: int) -> None:
+    """Stop a dispatch that selected a large population without naming one.
+
+    Giving neither ``query_set_id`` nor ``query_accessions`` selects every protein
+    that has an embedding. That reads like a filter which matched everything and
+    is in fact a filter that was never applied, and the two are indistinguishable
+    from the outside: the job succeeds, the rows are correct, and only the
+    population is wrong.
+
+    On 2026-08-18 it ran twelve jobs over 616,846 proteins where 6,216 were
+    intended. Nothing failed. One run reached 37 minutes and 3.3 million rows
+    before anyone noticed, and it was noticed by comparing two numbers reported an
+    hour apart rather than by anything the system said.
+
+    The submission path has never had this hole: ``protea-predict`` requires
+    ``--query_file``. This brings the internal path to the same stance, and the
+    refusal names both counts so the caller can see at a glance whether the number
+    is the one they meant.
+    """
+    from protea.config.tuning import get_tuning
+
+    limit = get_tuning().operation.max_implicit_query_population
+    if limit <= 0 or count <= limit:
+        return
+    raise ValueError(
+        f"this dispatch named no query population and selected {count:,} proteins, "
+        f"above the {limit:,} allowed implicitly. Pass query_accessions or "
+        "query_set_id to state the population. To score the whole corpus "
+        "deliberately, pass its accessions explicitly, or raise "
+        "PROTEA_TUNING__operation__max_implicit_query_population"
+    )
+
+
 class PredictGOTermsOperation:
     """Coordinator: validates, creates PredictionSet, dispatches N batch messages.
 
@@ -404,10 +437,13 @@ class PredictGOTermsOperation:
                 q = q.filter(Protein.accession.in_(p.query_accessions))
             rows = q.all()
         accessions = [r[0] for r in rows]
+        implicit = not p.query_set_id and not p.query_accessions
         emit(
             "predict_go_terms.load_queries_done",
             None,
-            {"queries": len(accessions)},
+            {"queries": len(accessions), "population_declared": not implicit},
             "info",
         )
+        if implicit:
+            _refuse_an_undeclared_corpus(len(accessions))
         return accessions
