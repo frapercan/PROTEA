@@ -35,6 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -75,6 +76,23 @@ class CountBackendParametersPayload(ProteaPayload, frozen=True):
     only_missing: bool = True
     device: str = "cpu"
     dry_run: bool = False
+
+    @field_validator("embedding_config_ids")
+    @classmethod
+    def _reject_an_empty_selection(cls, value: list[str] | None) -> list[str] | None:
+        """An empty list is refused because it reads as the opposite of itself.
+
+        ``None`` means every configuration and an empty list looks like it means
+        none, but an empty list is falsy, so a selection that narrowed to nothing
+        upstream would silently widen to everything here and load every
+        checkpoint in the registry. Omit the field to mean all.
+        """
+        if value is not None and not value:
+            raise ValueError(
+                "embedding_config_ids cannot be an empty list; omit it to count "
+                "every configuration"
+            )
+        return value
 
 
 @dataclass(frozen=True)

@@ -80,6 +80,20 @@ def test_it_counts_on_cpu_by_default():
     assert CountBackendParametersPayload().device == "cpu"
 
 
+def test_an_empty_selection_is_refused_because_it_reads_as_its_own_opposite():
+    """Omitting the field means all; an empty list looks like none but is falsy.
+
+    Without this, a selection that narrowed to nothing upstream would widen to
+    everything here and load every checkpoint in the registry, ProstT5 included.
+    """
+    with pytest.raises(ValueError, match="empty list"):
+        CountBackendParametersPayload(embedding_config_ids=[])
+
+
+def test_omitting_the_selection_still_means_every_configuration():
+    assert CountBackendParametersPayload().embedding_config_ids is None
+
+
 # --------------------------------------------------------------------------- grouping
 
 class _Config:
