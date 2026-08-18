@@ -25,7 +25,21 @@ export type EvalProvenance = {
   temporal_window?: string | null;
   arms_enabled?: EvalArms | null;
   leakage_role?: EvalLeakageRole | string | null;
+  /** Which generation of the prediction set produced the row, from the
+   *  self-hit audit. A cell can hold several generations of one measurement,
+   *  and the API now hands us the winner rather than the highest scorer, so
+   *  the reader should be able to see which one they are looking at. */
+  prediction_set_status?: EvalGeneration | string | null;
+  /** Share of queries that retrieved themselves. Near 0.99 on a healthy run;
+   *  a low value is the signature of the search misattributing neighbours. */
+  self_hit_rate?: number | null;
 };
+
+export type EvalGeneration =
+  | "current"
+  | "superseded"
+  | "damaged"
+  | "incomplete";
 
 export type Badge = {
   label: string;
@@ -174,6 +188,60 @@ export function leakageBadge(role: string | null | undefined): Badge {
   return LEAKAGE_UNKNOWN;
 }
 
+// ── Generation ───────────────────────────────────────────────────────────
+
+const GENERATION_BADGE: Record<EvalGeneration, Badge> = {
+  current: {
+    label: "current",
+    className: "bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200",
+    title:
+      "From the live generation of this cell. The self-hit audit found no sign of the search misattributing neighbours.",
+  },
+  superseded: {
+    label: "superseded",
+    className: "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300",
+    title:
+      "A clean earlier generation, kept as evidence and displaced by a later recompute of the same cell.",
+  },
+  damaged: {
+    label: "damaged",
+    className: "bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200",
+    title:
+      "Fewer than 95 per cent of queries retrieved themselves, the signature of the out-of-memory defect that assigned each query a later query's neighbours. Do not read this number.",
+  },
+  incomplete: {
+    label: "incomplete",
+    className: "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200",
+    title:
+      "The run never covered the whole evaluation population, so the score is over a subset nobody chose.",
+  },
+};
+
+const GENERATION_UNKNOWN: Badge = {
+  label: "ungraded",
+  className: UNKNOWN_BADGE_CLASS,
+  title:
+    "This prediction set predates the self-hit audit, so nothing is known for or against it.",
+};
+
+/** Badge for the generation a row came from, plus its self-hit rate when known.
+ *
+ *  Returns null only when the field is absent entirely, so a graded row always
+ *  shows its verdict and an ungraded one says so rather than looking clean. */
+export function generationBadge(
+  status: EvalGeneration | string | null | undefined,
+  selfHitRate?: number | null,
+): Badge | null {
+  if (status === undefined) return null;
+  const base =
+    status && status in GENERATION_BADGE
+      ? GENERATION_BADGE[status as EvalGeneration]
+      : GENERATION_UNKNOWN;
+  if (selfHitRate == null) return base;
+  const pct = (selfHitRate * 100).toFixed(1);
+  return { ...base, title: `${base.title} Self-hit rate ${pct} per cent.` };
+}
+
 /** True when at least one provenance field is populated. Lets callers skip
  *  the badge strip entirely (vs. rendering four "unknown" chips) on rows
  *  that predate the fields. */
@@ -183,6 +251,7 @@ export function hasAnyProvenance(p: EvalProvenance | null | undefined): boolean 
     (p.frame ?? null) !== null ||
     (p.temporal_window ?? null) !== null ||
     (p.leakage_role ?? null) !== null ||
-    (p.arms_enabled != null && typeof p.arms_enabled === "object")
+    (p.arms_enabled != null && typeof p.arms_enabled === "object") ||
+    (p.prediction_set_status ?? null) !== null
   );
 }

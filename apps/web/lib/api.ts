@@ -1193,6 +1193,19 @@ export type BenchmarkRow = {
   temporal_window?: string | null;
   arms_enabled?: Record<string, boolean> | null;
   leakage_role?: string | null;
+  /**
+   * Which generation of the prediction set this cell came from, and how
+   * healthy that generation was. A cell can hold several generations of one
+   * measurement; the API returns the most trusted and most recent rather than
+   * the highest-scoring, and these two fields let the reader see which.
+   * `prediction_set_status` = current | superseded | damaged | incomplete,
+   * from the self-hit audit; `self_hit_rate` is the share of queries that
+   * retrieved themselves, near 0.99 on a healthy run. Null on sets that
+   * predate the audit.
+   */
+  prediction_set_id?: string | null;
+  prediction_set_status?: string | null;
+  self_hit_rate?: number | null;
 };
 
 export type BenchmarkBestCell = {
