@@ -328,6 +328,15 @@ class PredictGOTermsOperation:
             "compute_classifier": p.compute_classifier,
             "compute_self_prior": p.compute_self_prior,
             "compute_association": p.compute_association,
+            # Forwarded because the batch payload accepts them and the batch is
+            # where they act: donor_policy gates the reference pool in
+            # _restrict_annotations, compute_protst gates the text tower. Until
+            # this line they were validated on the coordinator, persisted into
+            # its payload, and then dropped, so a run that asked for an
+            # experimental-evidence donor bank got an unfiltered one and nothing
+            # said so. See test_coordinator_forwards_payload_fields.
+            "donor_policy": p.donor_policy,
+            "compute_protst": getattr(p, "compute_protst", False),
             "compute_ia": getattr(p, "compute_ia", False),
             "ia_file": getattr(p, "ia_file", None),
             "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
