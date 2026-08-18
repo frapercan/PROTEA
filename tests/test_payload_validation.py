@@ -65,6 +65,9 @@ from protea.core.operations.compute_embeddings import (
 from protea.core.operations.compute_information_accretion import (
     ComputeInformationAccretionPayload,
 )
+from protea.core.operations.count_backend_parameters import (
+    CountBackendParametersPayload,
+)
 from protea.core.operations.export_gate_bundle import ExportGateBundlePayload
 from protea.core.operations.export_minijobs._export_features_batch import (
     ExportFeaturesBatchPayload,
@@ -395,6 +398,17 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         AuditEvaluationFramesPayload,
         {"max_combinations": 0},
         ("max_combinations",),
+    ),
+    # invariant: an empty selection reads as the opposite of itself. Omitting the
+    # field means every configuration, and an empty list looks like it means
+    # none, but an empty list is falsy, so a selection that narrowed to nothing
+    # upstream would silently widen to everything and load every checkpoint in
+    # the registry.
+    (
+        "count_backend_parameters",
+        CountBackendParametersPayload,
+        {"embedding_config_ids": []},
+        ("embedding_config_ids",),
     ),
 ]
 

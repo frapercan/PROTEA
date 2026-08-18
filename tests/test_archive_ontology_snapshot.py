@@ -12,10 +12,10 @@ from __future__ import annotations
 import pytest
 
 from protea.core.operations.archive_ontology_snapshot import (
-    _Fetched,
     ArchiveOntologySnapshotOperation,
     ArchiveOntologySnapshotPayload,
     OntologyDriftError,
+    _Fetched,
     obo_key_for,
 )
 

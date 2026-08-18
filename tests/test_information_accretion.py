@@ -25,10 +25,10 @@ from protea.core.ia_regimes import (
     resolve_regime,
 )
 from protea.core.operations.compute_information_accretion import (
-    _Dag,
     ComputeInformationAccretionOperation,
     ComputeInformationAccretionPayload,
     InformationAccretionGateError,
+    _Dag,
     ia_key_for,
 )
 
