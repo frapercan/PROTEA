@@ -328,20 +328,12 @@ class PredictGOTermsOperation:
             "compute_classifier": p.compute_classifier,
             "compute_self_prior": p.compute_self_prior,
             "compute_association": p.compute_association,
-            # Forwarded because the batch payload accepts them and the batch is
-            # where they act: donor_policy gates the reference pool in
-            # _restrict_annotations, compute_protst gates the text tower. Until
-            # this line they were validated on the coordinator, persisted into
-            # its payload, and then dropped, so a run that asked for an
-            # experimental-evidence donor bank got an unfiltered one and nothing
-            # said so. See test_coordinator_forwards_payload_fields.
-            # model_dump, not the object: this payload is JSON-serialised onto
-            # AMQP, and DonorPolicy is not JSON serialisable. Forwarding the
-            # object made every predict_go_terms run fail at dispatch, because
-            # the field defaults to a DonorPolicy instance rather than to None.
-            "donor_policy": p.donor_policy.model_dump(mode="json")
-            if p.donor_policy is not None
-            else None,
+            # Forwarded, and dumped rather than passed as objects: this payload
+            # is JSON-serialised onto AMQP. Both were silently dropped before,
+            # see test_coordinator_forwards_payload_fields.
+            "donor_policy": (
+                p.donor_policy.model_dump(mode="json") if p.donor_policy else None
+            ),
             "compute_protst": getattr(p, "compute_protst", False),
             "compute_ia": getattr(p, "compute_ia", False),
             "ia_file": getattr(p, "ia_file", None),
