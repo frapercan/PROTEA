@@ -22,6 +22,60 @@ from protea.core.contracts.operation import EmitFn
 from protea.core.evaluation import EvaluationData
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 
+#: Below this many ground-truth proteins the restriction gate stays silent. The
+#: real incidents were over 6,216; anything two orders of magnitude smaller is not
+#: an evaluation whose cohort ratio means anything.
+MIN_GATED_COHORT = 50
+
+
+def restriction_fraction(before: int, after: int) -> float:
+    """Share of the evaluation cohort the restriction removed."""
+    if before <= 0:
+        return 0.0
+    return (before - after) / before
+
+
+def _refuse_a_restricted_cohort(before: int, after: int, dropped: float) -> None:
+    """Stop an evaluation whose cohort no longer describes the evaluation set.
+
+    Dropping ground-truth proteins the prediction set never covered is correct
+    CAFA practice for a FINISHED run, and it is a trap for an unfinished one. It
+    turns "we predicted only two thirds of the targets" into "we scored the cohort
+    we predicted", so a partially written prediction set produces a metric that is
+    plausible, well formed, and indistinguishable on the board from a complete one.
+
+    On 2026-08-18 two evaluations scored 66 and 83 per cent of the population and
+    reached the board that way. The counts this function now gates on were already
+    being emitted at the time. Nothing divided them.
+
+    A run that means to score a reduced cohort raises the threshold deliberately,
+    which puts the decision in the payload's environment rather than in an
+    unexamined default.
+    """
+    from protea.config.tuning import get_tuning
+
+    if before < MIN_GATED_COHORT:
+        # Calibration, kept rather than hidden: the guard first hit five existing
+        # tests whose mocked sessions return no predicted accessions at all, over
+        # ground truths of two proteins. Reading every hit is what the standing
+        # rule asks for, and what they say is that a cohort this small is a
+        # fixture or a degenerate case, not a measurement. A CAFA evaluation over
+        # a handful of proteins has worse problems than its restriction ratio.
+        return
+
+    limit = get_tuning().operation.max_ground_truth_restriction
+    if limit >= 1.0 or dropped <= limit:
+        return
+    raise ValueError(
+        f"restricting the ground truth to the predicted cohort dropped "
+        f"{dropped:.1%} of it, {before:,} proteins down to {after:,}, above the "
+        f"{limit:.0%} allowed. The usual cause is evaluating a prediction set "
+        "that is still being written: gate on the prediction job reaching "
+        "SUCCEEDED rather than on rows existing. To score a reduced cohort "
+        "deliberately, raise "
+        "PROTEA_TUNING__operation__max_ground_truth_restriction"
+    )
+
 
 def restrict_data_to_predicted(
     session: Session,
@@ -60,6 +114,9 @@ def restrict_data_to_predicted(
         pk_known={k: v for k, v in data.pk_known.items() if k in predicted_set},
         known={k: v for k, v in data.known.items() if k in predicted_set},
     )
+    before = sum(orig_counts)
+    after = len(new_data.nk) + len(new_data.lk) + len(new_data.pk)
+    dropped = restriction_fraction(before, after)
     emit(
         "run_cafa_evaluation.gt_restricted_to_predicted",
         None,
@@ -71,9 +128,13 @@ def restrict_data_to_predicted(
             "lk_after": len(new_data.lk),
             "pk_before": orig_counts[2],
             "pk_after": len(new_data.pk),
+            # The fraction is computed here rather than left to a reader, because
+            # the counts were always emitted and nobody ever divided them.
+            "dropped_fraction": round(dropped, 4),
         },
-        "info",
+        "warning" if dropped > 0 else "info",
     )
+    _refuse_a_restricted_cohort(before, after, dropped)
     return new_data
 
 

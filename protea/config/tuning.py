@@ -263,6 +263,24 @@ class OperationTuning(BaseModel):
             "Override: PROTEA_TUNING__operation__ref_cache_freshness_seconds."
         ),
     )
+    max_ground_truth_restriction: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Largest share of evaluation-set proteins that may be dropped by "
+            "restrict_gt_to_predicted before the evaluation refuses. The "
+            "restriction is correct CAFA practice for a FINISHED run and is a trap "
+            "for an unfinished one: it silently turns 'we predicted only 66 per "
+            "cent of the targets' into 'we scored the cohort we predicted', so a "
+            "partially written prediction set yields a plausible metric that is "
+            "indistinguishable from a complete one. On 2026-08-18 two evaluations "
+            "scored 66 and 83 per cent of the population and reached the board. "
+            "The counts were already emitted and nothing acted on them. 1.0 "
+            "disables the gate. Override: "
+            "PROTEA_TUNING__operation__max_ground_truth_restriction."
+        ),
+    )
     aspect_knn_workers: int = Field(
         default=3,
         ge=1,
