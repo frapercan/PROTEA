@@ -71,3 +71,49 @@ def test_the_serialiser_is_still_where_this_test_thinks_it_is() -> None:
     names = _forwarded_field_names()
     assert "embedding_config_id" in names
     assert len(names) > 20
+
+
+def test_the_dispatch_payload_survives_json() -> None:
+    """Forwarding a field is not enough; it has to reach the other side.
+
+    The batch payload is JSON-serialised onto AMQP. My first version of this fix
+    forwarded ``p.donor_policy`` as the pydantic object, which is not JSON
+    serialisable, and since the field defaults to a DonorPolicy instance rather
+    than to None, EVERY predict_go_terms run failed at dispatch.
+
+    The name-based check above passed that version happily, because the key was
+    in the source. This test is the one that would have caught it: it builds the
+    real payload and puts it through json.dumps, which is what the dispatcher
+    does.
+    """
+    import json
+    import uuid as _uuid
+
+    from protea.core.operations.predict_go_terms import PredictGOTermsPayload
+    from protea.core.operations.predict_go_terms._coordinator import (
+        PredictGOTermsOperation,
+    )
+
+    p = PredictGOTermsPayload.model_validate(
+        {
+            "embedding_config_id": str(_uuid.uuid4()),
+            "annotation_set_id": str(_uuid.uuid4()),
+            "ontology_snapshot_id": str(_uuid.uuid4()),
+            "query_accessions": ["P00001"],
+        }
+    )
+    assert p.donor_policy is not None, (
+        "this test assumes the field defaults to an object rather than to None; "
+        "if that changed, the failure mode it guards has changed too"
+    )
+    msg = PredictGOTermsOperation._build_batch_message(
+        p, _uuid.uuid4(), _uuid.uuid4(), ["P00001"], _RerankerDispatchStub()
+    )
+    json.dumps(msg)
+
+
+class _RerankerDispatchStub:
+    """Minimal stand-in: the serialiser only reads ``single`` and ``per_category``."""
+
+    single = None
+    per_category: dict = {}
