@@ -1,7 +1,9 @@
 // Method-surface provenance badge strip (slice F-METHOD-EVAL-SURFACE).
 //
 // Renders the four optional EvaluationResult provenance markers as a
-// compact, tasteful badge row: a frame badge (LAFA-frame vs internal),
+// compact, tasteful badge row: a generation badge (which recompute of the
+// cell this number is, from the self-hit audit), a frame badge (LAFA-frame
+// vs internal),
 // an explicit train/SELECT/FINAL window label, per-arm chips (KNN /
 // Reranker / MLP / InterPro), and a leakage-hygiene marker
 // (select / test / probe). Every field degrades to an explicit "unknown"
@@ -14,6 +16,7 @@
 import {
   armsList,
   frameBadge,
+  generationBadge,
   hasAnyProvenance,
   leakageBadge,
   windowLabel,
@@ -47,12 +50,24 @@ export function EvalProvenanceBadges({
   const win = windowLabel(p.temporal_window);
   const role = leakageBadge(p.leakage_role);
   const arms = armsList(p.arms_enabled);
+  // Placed first: which generation a number came from decides whether the rest
+  // of the strip is worth reading at all.
+  const generation = generationBadge(p.prediction_set_status, p.self_hit_rate);
 
   return (
     <div
       className={`flex flex-wrap items-center gap-1 ${className}`}
       data-testid="eval-provenance-badges"
     >
+      {generation ? (
+        <span
+          className={`${CHIP} ${generation.className}`}
+          title={generation.title}
+          data-testid="generation-badge"
+        >
+          {generation.label}
+        </span>
+      ) : null}
       <span className={`${CHIP} ${frame.className}`} title={frame.title}>
         {frame.label}
       </span>

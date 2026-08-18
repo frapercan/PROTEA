@@ -193,6 +193,8 @@ function rowsToCsv(
     "temporal_window",
     "arms_enabled",
     "leakage_role",
+    "prediction_set_status",
+    "self_hit_rate",
     "evaluation_set_id",
     "evaluation_result_id",
   ].join(",");
@@ -226,6 +228,8 @@ function rowsToCsv(
               .join("+")
           : "",
         r.leakage_role ?? "",
+        r.prediction_set_status ?? "",
+        r.self_hit_rate ?? "",
         r.evaluation_set_id,
         r.evaluation_result_id,
       ]
