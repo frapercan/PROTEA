@@ -16,6 +16,7 @@ from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_e
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue import _failure_aggregation as _agg
+from protea.infrastructure.queue._host import compute_host
 from protea.infrastructure.queue.publisher import publish_operation, safe_republish_job
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
 from protea.workers.base_worker import BaseWorker
@@ -593,7 +594,7 @@ class OperationConsumer:
                         job_id=parent_job_id,
                         event=f"child.{event}",
                         message=message,
-                        fields=fields or {},
+                        fields={**(fields or {}), "host": compute_host()},
                         level=level,
                     )
                 )
