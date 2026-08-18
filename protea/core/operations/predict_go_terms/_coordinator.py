@@ -335,7 +335,13 @@ class PredictGOTermsOperation:
             # its payload, and then dropped, so a run that asked for an
             # experimental-evidence donor bank got an unfiltered one and nothing
             # said so. See test_coordinator_forwards_payload_fields.
-            "donor_policy": p.donor_policy,
+            # model_dump, not the object: this payload is JSON-serialised onto
+            # AMQP, and DonorPolicy is not JSON serialisable. Forwarding the
+            # object made every predict_go_terms run fail at dispatch, because
+            # the field defaults to a DonorPolicy instance rather than to None.
+            "donor_policy": p.donor_policy.model_dump(mode="json")
+            if p.donor_policy is not None
+            else None,
             "compute_protst": getattr(p, "compute_protst", False),
             "compute_ia": getattr(p, "compute_ia", False),
             "ia_file": getattr(p, "ia_file", None),
