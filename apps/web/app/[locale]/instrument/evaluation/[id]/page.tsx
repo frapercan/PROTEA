@@ -78,6 +78,11 @@ export default function EvaluationDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const highlightRef = useRef<HTMLTableRowElement | null>(null);
+  // Which result has its strata panel open. Separate from `highlightId`,
+  // which comes from the ?result= query param and exists so another page can
+  // link INTO a row. Gating the panel on that alone made it unreachable for
+  // anyone who navigated here normally: there was no control to open it.
+  const [openStrata, setOpenStrata] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -370,6 +375,22 @@ export default function EvaluationDetailPage() {
                                   leakage_role: r.leakage_role,
                                 }}
                               />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setOpenStrata((cur) =>
+                                    cur === r.id ? null : r.id,
+                                  )
+                                }
+                                className="ml-auto rounded-md px-2 py-0.5 text-[10px] font-medium text-slate-600 ring-1 ring-inset ring-slate-300 hover:bg-slate-50"
+                                aria-expanded={
+                                  isHighlight || openStrata === r.id
+                                }
+                              >
+                                {isHighlight || openStrata === r.id
+                                  ? "hide strata"
+                                  : "show strata"}
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -377,7 +398,7 @@ export default function EvaluationDetailPage() {
                           rendered panel, so mounting it on every row would issue
                           a request per result for a table nobody has asked to
                           read yet. */}
-                        {isHighlight && (
+                        {(isHighlight || openStrata === r.id) && (
                           <tr className="border-b bg-amber-50">
                             <td
                               colSpan={
