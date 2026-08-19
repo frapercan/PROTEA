@@ -200,7 +200,7 @@ class TestSyntheticFrameParity:
 
     def test_nk_driver_matches_lafa_invocation(self, synthetic_frame):
         ctx = _make_ctx(synthetic_frame)
-        _df, dfs_best = driver._invoke_cafaeval_signal_safe(
+        _df, dfs_best, _sink = driver._invoke_cafaeval_signal_safe(
             ctx=ctx,
             pred_dir=synthetic_frame["pred_dir"],
             gt_file=synthetic_frame["gt"],
@@ -215,7 +215,7 @@ class TestSyntheticFrameParity:
 
     def test_pk_driver_matches_lafa_invocation_with_known_exclusion(self, synthetic_frame):
         ctx = _make_ctx(synthetic_frame)
-        _df, dfs_best = driver._invoke_cafaeval_signal_safe(
+        _df, dfs_best, _sink = driver._invoke_cafaeval_signal_safe(
             ctx=ctx,
             pred_dir=synthetic_frame["pred_dir"],
             gt_file=synthetic_frame["gt"],
@@ -232,13 +232,13 @@ class TestSyntheticFrameParity:
         floor (which would silently turn PK into NK).
         """
         ctx = _make_ctx(synthetic_frame)
-        _df_nk, best_nk = driver._invoke_cafaeval_signal_safe(
+        _df_nk, best_nk, _sink_nk = driver._invoke_cafaeval_signal_safe(
             ctx=ctx,
             pred_dir=synthetic_frame["pred_dir"],
             gt_file=synthetic_frame["gt"],
             known_file=None,
         )
-        _df_pk, best_pk = driver._invoke_cafaeval_signal_safe(
+        _df_pk, best_pk, _sink_pk = driver._invoke_cafaeval_signal_safe(
             ctx=ctx,
             pred_dir=synthetic_frame["pred_dir"],
             gt_file=synthetic_frame["gt"],
@@ -256,13 +256,13 @@ class TestSyntheticFrameParity:
         """
         ctx_lafa = _make_ctx(synthetic_frame, th_step=0.01)
         ctx_fine = _make_ctx(synthetic_frame, th_step=0.001)
-        _d1, best_lafa = driver._invoke_cafaeval_signal_safe(
+        _d1, best_lafa, _sink_lafa = driver._invoke_cafaeval_signal_safe(
             ctx=ctx_lafa,
             pred_dir=synthetic_frame["pred_dir"],
             gt_file=synthetic_frame["gt"],
             known_file=None,
         )
-        _d2, best_fine = driver._invoke_cafaeval_signal_safe(
+        _d2, best_fine, _sink_fine = driver._invoke_cafaeval_signal_safe(
             ctx=ctx_fine,
             pred_dir=synthetic_frame["pred_dir"],
             gt_file=synthetic_frame["gt"],
@@ -335,7 +335,7 @@ def test_real_lafa_leaderboard_parity(tmp_path: Path):
             toi_path=toi,
             shared_pred_dir=str(pred_dir),
         )
-        _df, dfs_best = driver._invoke_cafaeval_signal_safe(
+        _df, dfs_best, _sink = driver._invoke_cafaeval_signal_safe(
             ctx=ctx, pred_dir=str(pred_dir), gt_file=gt, known_file=known
         )
         got = _f_micro_w_by_ns(dfs_best)
