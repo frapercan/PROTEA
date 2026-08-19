@@ -228,7 +228,11 @@ class TestListBenchmarkEmbeddings:
 class TestBenchmarkMatrix:
     """The endpoint now executes two queries:
 
-    1. Main matrix: 4-tuples ``(er, embedding_id, k, scoring_name)``.
+    1. Main matrix: 7-tuples ``(er, embedding_id, k, scoring_name,
+       pred_set_id, pred_set_meta, pred_set_created)``. The last three carry
+       which generation of the prediction set produced the row, which is what
+       lets the folder prefer the current generation over the highest-scoring
+       one.
     2. Eval set metadata enrichment: 7-tuples
        ``(es, old_source, old_source_version, new_source, new_source_version,
        old_obo_version, new_obo_version)``.
@@ -237,8 +241,26 @@ class TestBenchmarkMatrix:
     """
 
     @staticmethod
-    def _row(er, embedding_id, k=5, scoring_name="alignment_weighted"):
-        return (er, embedding_id, k, scoring_name)
+    def _row(
+        er,
+        embedding_id,
+        k=5,
+        scoring_name="alignment_weighted",
+        pred_set_id=None,
+        pred_set_meta=None,
+        pred_set_created=None,
+    ):
+        """One scan row. The generation fields default to an ungraded set, which
+        is what a prediction set written before the self-hit audit looks like."""
+        return (
+            er,
+            embedding_id,
+            k,
+            scoring_name,
+            pred_set_id if pred_set_id is not None else uuid4(),
+            pred_set_meta if pred_set_meta is not None else {},
+            pred_set_created,
+        )
 
     @staticmethod
     def _dual_execute(session, matrix_rows, eval_set_rows):
@@ -273,6 +295,18 @@ class TestBenchmarkMatrix:
         assert data["stages"] == []
 
     def test_row_per_cell_and_deduplication(self, client):
+        """One row per cell, and the survivor is the CURRENT generation.
+
+        This assertion used to read ``== 0.55``, the higher of the two. That was
+        a maximum over repeated measurements of one quantity: it can only move
+        up as a cell is recomputed, so a cell recomputed often reads high for
+        that reason alone. The recompute of 2026-08-18 left 140 cells holding
+        more than one generation, which made the bias live.
+
+        The rule is now trust then recency, never score, so the lower-scoring
+        current generation wins over the higher-scoring damaged one. That is the
+        point: a correction that lowers a number has to be able to land.
+        """
         c, session = client
         embedding_id = uuid4()
 
@@ -285,8 +319,8 @@ class TestBenchmarkMatrix:
         self._dual_execute(
             session,
             matrix_rows=[
-                self._row(er_low, embedding_id),
-                self._row(er_high, embedding_id),
+                self._row(er_low, embedding_id, pred_set_meta={"status": "current"}),
+                self._row(er_high, embedding_id, pred_set_meta={"status": "damaged"}),
             ],
             eval_set_rows=[self._eval_set_row(eval_set_id)],
         )
@@ -295,7 +329,8 @@ class TestBenchmarkMatrix:
         data = resp.json()
         assert data["total"] == 1
         row = data["rows"][0]
-        assert row["fmax"] == 0.55
+        assert row["fmax"] == 0.4
+        assert row["prediction_set_status"] == "current"
         assert row["category"] == "NK"
         assert row["aspect"] == "BPO"
         assert row["stage"] == "alignment_weighted"

@@ -445,8 +445,11 @@ def _benchmark_aggregation_stmt(evaluation_set_id: uuid.UUID | None) -> Any:
     """Build the row-fetching select for the benchmark matrix.
 
     Returns a Select that yields ``(EvaluationResult, embedding_config_id,
-    k, scoring_name)`` rows, optionally filtered to a single
-    ``evaluation_set_id``. Kept separate from
+    k, scoring_name, prediction_set_id, prediction_set_meta,
+    prediction_set_created_at)`` rows, optionally filtered to a single
+    ``evaluation_set_id``. The last three identify which generation of the
+    prediction set produced the row, which :func:`_prefers` needs in order to
+    pick the current one rather than the highest-scoring one. Kept separate from
     :func:`_aggregate_benchmark_matrix` so the SQL surface is auditable
     in isolation and the matrix folder stays under the §3 60-LOC ceiling.
     """
