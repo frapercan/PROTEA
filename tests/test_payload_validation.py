@@ -122,6 +122,7 @@ from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
 )
+from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
 
 # (op_name, payload_class, bad_payload, expected_error_field)
 #
@@ -133,6 +134,15 @@ from protea.core.operations.run_interproscan_batch import (
 # pydantic's locator for model level validators.
 PayloadNegativeCase = tuple[str, type[BaseModel], dict[str, Any], tuple[str | int, ...]]
 PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
+    # invariant: a population floor of zero would report every cell, including
+    # the ones holding a single protein, at the same weight as one holding
+    # thousands. The floor is the whole point of withholding.
+    (
+        "stratify_evaluation",
+        StratifyEvaluationPayload,
+        {"prediction_set_id": "pset", "artifacts_root": "/tmp/x", "min_population": 0},
+        ("min_population",),
+    ),
     # invariant: a reference pool of zero would publish a bundle with no donors,
     # which a consumer cannot distinguish from an empty store
     (
