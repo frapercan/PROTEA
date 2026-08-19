@@ -34,7 +34,11 @@ from protea.core.operations.predict_go_terms import (
     _clean_float,
     _row_from_prediction,
 )
-from protea.core.operations.predict_go_terms._batch_op_reference import _PoolRequest
+from protea.core.operations.predict_go_terms._batch_op_reference import (
+    _assemble_aspect_view,
+    _find_missing_aspects,
+    _PoolRequest,
+)
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
@@ -591,7 +595,7 @@ class TestFindMissingAspects:
         monkeypatch.setattr(disk_cache_module, "_DISK_CACHE_DIR", tmp_path)
         ec_id = uuid.uuid4()
         as_id = uuid.uuid4()
-        missing = PredictGOTermsBatchOperation._find_missing_aspects(ec_id, as_id)
+        missing = _find_missing_aspects(_PoolRequest(ec_id, as_id))
         assert sorted(missing) == sorted(ASPECT_CODES)
 
 
@@ -803,7 +807,7 @@ class TestAssembleAspectView:
             },
         )
         _save_anno_csr_to_disk(ec_id, as_id, "P", csr)
-        view, n = PredictGOTermsBatchOperation._assemble_aspect_view("P", unified, ec_id, as_id)
+        view, n = _assemble_aspect_view("P", unified, _PoolRequest(ec_id, as_id))
         assert n == 2
         assert view["accessions"] == ["R1", "R3"]
         assert view["embeddings_f32"].shape == (2, 2)

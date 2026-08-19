@@ -183,10 +183,16 @@ def _load_anno_csr_from_disk(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
     aspect: str,
+    donor_discriminator: str = "",
 ) -> AnnoCsr | None:
-    """Load annotation CSR arrays from disk. Returns None on miss or error."""
+    """Load annotation CSR arrays from disk. Returns None on miss or error.
+
+    The CSR is positional against the pool it was built from, so it is keyed by
+    the donor discriminator like every other pool artefact. Reading a permissive
+    CSR against a restricted pool does not raise, it misattributes.
+    """
     gtids_p, quals_p, ecodes_p, offsets_p = _anno_disk_cache_paths(
-        embedding_config_id, annotation_set_id, aspect
+        embedding_config_id, annotation_set_id, aspect, donor_discriminator
     )
     if not all(p.exists() for p in (gtids_p, quals_p, ecodes_p, offsets_p)):
         return None
@@ -206,9 +212,10 @@ def _save_anno_csr_to_disk(
     annotation_set_id: uuid.UUID,
     aspect: str,
     csr: AnnoCsr,
+    donor_discriminator: str = "",
 ) -> None:
     gtids_p, quals_p, ecodes_p, offsets_p = _anno_disk_cache_paths(
-        embedding_config_id, annotation_set_id, aspect
+        embedding_config_id, annotation_set_id, aspect, donor_discriminator
     )
     gtids_p.parent.mkdir(parents=True, exist_ok=True)
     np.save(gtids_p, csr.gtids)
