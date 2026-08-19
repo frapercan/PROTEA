@@ -110,13 +110,36 @@ def _write_setting_predictions(
     return pred_dir
 
 
+
+
+def _new_per_protein_sink() -> Any:
+    """Build the sink, failing loudly if the installed cafaeval cannot make one.
+
+    Imported through a function rather than inline because the only caller sits
+    inside ``_run_cafaeval_for_setting``'s broad ``except Exception``. An
+    ImportError raised there would be swallowed and reported as "this setting
+    produced no results", so a wrong dependency version would look exactly like
+    an evaluation that legitimately scored nothing. This raises a message that
+    names the actual problem instead.
+    """
+    try:
+        from cafaeval.evaluation import PerProteinSink
+    except ImportError as exc:  # pragma: no cover - depends on the installed pin
+        raise RuntimeError(
+            "the installed cafaeval cannot emit per-protein scores; the pin in "
+            "pyproject expects a build with PerProteinSink. Reinstall the "
+            "dependency rather than reading this run's empty settings as a result."
+        ) from exc
+    return PerProteinSink()
+
+
 def _invoke_cafaeval_signal_safe(
     *,
     ctx: CafaEvalRunContext,
     pred_dir: str,
     gt_file: str,
     known_file: str | None,
-) -> tuple[Any, Any]:
+) -> tuple[Any, Any, Any]:
     """Run ``cafa_eval`` with default SIGTERM/SIGINT handlers restored.
 
     Our ``_handle_stop`` handler only sets a flag without calling
@@ -126,10 +149,16 @@ def _invoke_cafaeval_signal_safe(
     """
     from cafaeval.evaluation import cafa_eval
 
+    # Collected on every run rather than behind a flag. The cost is one array
+    # per namespace held for the length of the call, and the alternative is a
+    # setting that is off exactly when someone wants to stratify a result that
+    # has already been computed.
+    sink = _new_per_protein_sink()
+
     old_sigterm = signal.signal(signal.SIGTERM, signal.SIG_DFL)
     old_sigint = signal.signal(signal.SIGINT, signal.SIG_DFL)
     try:
-        return cafa_eval(
+        df, dfs_best = cafa_eval(
             ctx.obo_path,
             pred_dir,
             gt_file,
@@ -142,7 +171,9 @@ def _invoke_cafaeval_signal_safe(
             max_terms=ctx.max_terms,
             th_step=ctx.th_step,
             n_cpu=1,
+            per_protein_sink=sink,
         )
+        return df, dfs_best, sink
     finally:
         signal.signal(signal.SIGTERM, old_sigterm)
         signal.signal(signal.SIGINT, old_sigint)
@@ -164,6 +195,64 @@ def _persist_setting_artifacts(
     _write_results(df, dfs_best, str(setting_dir))
 
 
+
+
+def _persist_per_protein(
+    ctx: CafaEvalRunContext,
+    setting: str,
+    sink: Any,
+    result: dict[str, Any],
+    emit: EmitFn,
+) -> None:
+    """Write the per-protein scores beside the setting's other artefacts.
+
+    Never fatal. A run whose aggregate is sound should not be discarded because
+    the extra table could not be written, and the failure is emitted rather than
+    swallowed so an absent file is distinguishable from one nobody asked for.
+    """
+    # ``result`` is keyed by the short CAFA code (BPO/MFO/CCO); the sink reports
+    # cafaeval's long namespace ("biological_process"). Invert the project's own
+    # mapping rather than writing a second one, so the two cannot drift.
+    from protea.core.operations._run_cafa_helpers import _NS_LABELS
+    from protea.core.operations._run_cafa_per_protein import rows_from_sink
+
+    long_for_short = {short: long for long, short in _NS_LABELS.items()}
+    tau_by_ns = {
+        long_for_short[ns]: float(v["tau"])
+        for ns, v in (result or {}).items()
+        if ns in long_for_short and isinstance(v, dict) and v.get("tau") is not None
+    }
+    try:
+        rows = rows_from_sink(sink, th_step=ctx.th_step, tau_by_ns=tau_by_ns)
+        if not rows:
+            emit(
+                "run_cafa_evaluation.per_protein_empty",
+                None,
+                {"setting": setting, "namespaces": sorted(tau_by_ns)},
+                "warning",
+            )
+            return
+        import pandas as pd
+
+        setting_dir = ctx.artifacts_root / setting
+        setting_dir.mkdir(parents=True, exist_ok=True)
+        out = setting_dir / "per_protein.parquet"
+        pd.DataFrame(rows).to_parquet(out, index=False)
+        emit(
+            "run_cafa_evaluation.per_protein_written",
+            None,
+            {"setting": setting, "rows": len(rows), "path": str(out)},
+            "info",
+        )
+    except Exception as exc:
+        emit(
+            "run_cafa_evaluation.per_protein_failed",
+            None,
+            {"setting": setting, "error": str(exc)},
+            "warning",
+        )
+
+
 def _run_cafaeval_for_setting(
     *,
     setting: str,
@@ -179,11 +268,12 @@ def _run_cafaeval_for_setting(
     """
     emit("run_cafa_evaluation.evaluating", None, {"setting": setting}, "info")
     try:
-        df, dfs_best = _invoke_cafaeval_signal_safe(
+        df, dfs_best, sink = _invoke_cafaeval_signal_safe(
             ctx=ctx, pred_dir=pred_dir, gt_file=gt_file, known_file=known_file
         )
         result = _artifacts.parse_results(dfs_best)
         _persist_setting_artifacts(ctx, setting, df, dfs_best)
+        _persist_per_protein(ctx, setting, sink, result, emit)
         emit(
             "run_cafa_evaluation.setting_done",
             None,
