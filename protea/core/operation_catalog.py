@@ -31,6 +31,9 @@ from protea.core.operations.compute_information_accretion import (
 from protea.core.operations.count_backend_parameters import (
     CountBackendParametersOperation,
 )
+from protea.core.operations.encode_residue_sparse import (
+    EncodeResidueSparseOperation,
+)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsOperation,
 )
@@ -102,6 +105,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(ArchiveOntologySnapshotOperation())
     registry.register(CountBackendParametersOperation())
     registry.register(ExportEvaluationTargetsOperation())
+    registry.register(EncodeResidueSparseOperation())
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
     # publicly registered: all re-ranker training moves to
     # protea-reranker-lab. They remain importable as internal helpers —

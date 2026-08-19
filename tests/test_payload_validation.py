@@ -68,6 +68,9 @@ from protea.core.operations.compute_information_accretion import (
 from protea.core.operations.count_backend_parameters import (
     CountBackendParametersPayload,
 )
+from protea.core.operations.encode_residue_sparse import (
+    EncodeResidueSparsePayload,
+)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsPayload,
 )
@@ -422,6 +425,24 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ExportEvaluationTargetsPayload,
         {"evaluation_set_id": "e", "categories": ["removed"]},
         ("categories",),
+    ),
+    (
+        # An unnamed encoder would silently pick nothing to project through.
+        "encode_residue_sparse",
+        EncodeResidueSparsePayload,
+        {"source_embedding_config_id": "cfg", "encoder_artifact_path": "   "},
+        ("encoder_artifact_path",),
+    ),
+    (
+        # A batch of zero is an infinite loop that reports success.
+        "encode_residue_sparse",
+        EncodeResidueSparsePayload,
+        {
+            "source_embedding_config_id": "cfg",
+            "encoder_artifact_path": "e.npz",
+            "batch_size": 0,
+        },
+        ("batch_size",),
     ),
 ]
 
