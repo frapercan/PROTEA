@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from protea.core.operations.encode_residue_sparse import (
+    AGGREGATES,
     REQUIRED_META,
     TARGET_BACKEND,
     EncodeResidueSparseOperation,
@@ -21,12 +22,20 @@ from protea.core.operations.encode_residue_sparse import (
     code_density,
     encode_one,
     load_frozen_encoder,
+    reduce_residues,
     topk_real,
 )
 
 
 def _artifact(tmp_path, **overrides):
-    meta = {"k_residue": 4, "k_sequence": 8, "dict_dim": 16, "in_dim": 3, "layer_indices": [-1]}
+    meta = {
+        "k_residue": 4,
+        "k_sequence": 8,
+        "dict_dim": 16,
+        "in_dim": 3,
+        "layer_indices": [-1],
+        "aggregate": "mean",
+    }
     meta.update(overrides)
     path = tmp_path / "encoder.npz"
     np.savez(
@@ -105,7 +114,14 @@ def test_asking_for_more_atoms_than_exist_returns_the_input():
 def test_an_artifact_that_does_not_declare_its_recipe_is_refused(tmp_path, missing):
     """A pooled-encoder artifact has the same tensor shapes, so only the declaration
     separates them and defaulting it would hide the mistake behind valid output."""
-    meta = {"k_residue": 4, "k_sequence": 8, "dict_dim": 16, "in_dim": 3, "layer_indices": [-1]}
+    meta = {
+        "k_residue": 4,
+        "k_sequence": 8,
+        "dict_dim": 16,
+        "in_dim": 3,
+        "layer_indices": [-1],
+        "aggregate": "mean",
+    }
     del meta[missing]
     path = tmp_path / "bad.npz"
     np.savez(path, W=np.ones((3, 16), np.float32), b=np.zeros(16, np.float32), **meta)
@@ -143,6 +159,51 @@ def test_a_declared_recipe_loads_with_its_numbers(tmp_path):
     assert weight.shape == (3, 16)
     assert bias.shape == (16,)
     assert meta["k_residue"] == 4 and meta["k_sequence"] == 8
+    assert meta["aggregate"] == "mean"
+
+
+# --------------------------------------------------------------------------- the aggregate
+
+
+def test_an_unknown_aggregate_is_refused(tmp_path):
+    """The aggregate decides the code's WIDTH, so guessing it would halve or double a
+    corpus without anything failing."""
+    with pytest.raises(ValueError, match="aggregate"):
+        load_frozen_encoder(_artifact(tmp_path, aggregate="median"))
+
+
+def test_the_second_moment_doubles_the_width():
+    """A code of two moments is twice a code of one, which is why the aggregate has to
+    be declared rather than inferred from the weights: both have the same weights."""
+    residues = np.array([[1.0, 0.0], [0.0, 1.0]], np.float32)
+    weight, bias = np.eye(2, dtype=np.float32), np.zeros(2, np.float32)
+
+    mean = reduce_residues(residues, "mean")
+    both = reduce_residues(residues, "moments")
+
+    assert mean.size == 2
+    assert both.size == 4
+
+
+def test_the_dispersion_separates_two_proteins_the_mean_cannot():
+    """The whole reason to carry it. Both have the same mean for the atom and arrive
+    at it in opposite ways: spread thinly, or concentrated in one place."""
+    even = np.tile(np.array([[0.5, 0.0]], np.float32), (4, 1))
+    spiky = np.array([[2.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]], np.float32)
+
+    a, b = reduce_residues(even, "moments"), reduce_residues(spiky, "moments")
+
+    assert a[0] == pytest.approx(b[0])  # la media no las distingue
+    assert b[2] > a[2]  # la dispersión sí
+
+
+def test_every_declared_aggregate_is_implemented():
+    """A name in the list that the reducer does not handle would fail at corpus scale
+    and pass every test that never names it."""
+    residues = np.array([[1.0, 2.0], [3.0, 4.0]], np.float32)
+
+    for name in AGGREGATES:
+        assert reduce_residues(residues, name).size in (2, 4)
 
 
 # --------------------------------------------------------------------------- reporting

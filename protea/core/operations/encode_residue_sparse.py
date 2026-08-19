@@ -66,7 +66,24 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence
 #: Fields the artifact must declare. Absent any of them the artifact is refused:
 #: defaulting them would let a pooled-encoder artifact run through the residue path
 #: and produce codes that look right and were computed from something else.
-REQUIRED_META = ("k_residue", "k_sequence", "dict_dim", "in_dim", "layer_indices")
+#:
+#: ``aggregate`` joined this list once the aggregate stopped being a constant. A code
+#: built from two moments and one built from the mean have the same weights and
+#: different widths, so a default here would silently halve or double a corpus.
+REQUIRED_META = (
+    "k_residue",
+    "k_sequence",
+    "dict_dim",
+    "in_dim",
+    "layer_indices",
+    "aggregate",
+)
+
+#: How the per-residue codes become one code. ``mean`` is the first moment alone;
+#: ``moments`` concatenates the mean with the per-atom dispersion and therefore emits
+#: twice the dictionary width. Both are a fixed-width reduction over residues, which is
+#: what keeps a corpus pass costing one protein of memory rather than the corpus.
+AGGREGATES = ("mean", "moments")
 
 #: Backend tag on the produced config, so a code produced here is never confused
 #: with one produced from pooled vectors when both are in the same table.
@@ -116,6 +133,12 @@ def load_frozen_encoder(path: str) -> tuple[np.ndarray, np.ndarray, dict]:
             f"the map is {weight.shape} but the recipe declares "
             f"({meta['in_dim']}, {meta['dict_dim']})"
         )
+    if str(meta["aggregate"]) not in AGGREGATES:
+        raise ValueError(
+            f"{path} declares aggregate {meta['aggregate']!r}, which is not one of "
+            f"{list(AGGREGATES)}. The aggregate decides the code's width, so an "
+            "unknown one cannot be guessed"
+        )
     if int(meta["k_residue"]) >= int(meta["dict_dim"]):
         raise ValueError(
             f"k_residue {meta['k_residue']} selects the whole {meta['dict_dim']}-atom "
@@ -134,18 +157,44 @@ def topk_real(matrix: np.ndarray, keep: int) -> np.ndarray:
     return out
 
 
-def encode_one(
-    residues: np.ndarray, weight: np.ndarray, bias: np.ndarray, k_residue: int, k_sequence: int
-) -> np.ndarray:
-    """One protein's code: project, select per residue, average, select again.
+def reduce_residues(selected: np.ndarray, aggregate: str) -> np.ndarray:
+    """Fold per-residue codes into one vector, by the aggregate the recipe declares.
 
-    The order is the finding. Selecting per residue first makes the average a
+    ``moments`` carries the per-atom dispersion beside the mean and so returns twice
+    the dictionary width. It is worth the width for a reason that shows only when the
+    code is read as a FEATURE rather than used as a metric: a cosine is one scalar over
+    the whole code and cannot separate a dispersion that the mean already encodes
+    another way, while a model reading every column can. Measured, the two are
+    indistinguishable for retrieval and the second moment is clearly the better input
+    to a downstream learner.
+
+    Both reductions are fixed width in the number of residues, so neither changes what
+    a corpus pass costs.
+    """
+    mean = selected.mean(axis=0)
+    if aggregate == "mean":
+        return mean
+    var = np.maximum((selected * selected).mean(axis=0) - mean * mean, 0.0)
+    return np.concatenate([mean, np.sqrt(var + 1e-12)])
+
+
+def encode_one(
+    residues: np.ndarray,
+    weight: np.ndarray,
+    bias: np.ndarray,
+    k_residue: int,
+    k_sequence: int,
+    aggregate: str = "mean",
+) -> np.ndarray:
+    """One protein's code: project, select per residue, reduce, select again.
+
+    The order is the finding. Selecting per residue first makes the reduction a
     magnitude-weighted usage histogram over the dictionary, where a feature intense
     in one region survives; averaging first blends it away before anything is
     selected, and no later selection brings it back.
     """
     projected = residues.astype(np.float32) @ weight + bias
-    pooled = topk_real(projected, k_residue).mean(axis=0)
+    pooled = reduce_residues(topk_real(projected, k_residue), aggregate)
     return topk_real(pooled[None, :], k_sequence)[0]
 
 
@@ -262,6 +311,7 @@ def _encode_batch(run: _Run, batch: list[tuple[int, str]], emit: EmitFn) -> tupl
             run.bias,
             int(run.meta["k_residue"]),
             int(run.meta["k_sequence"]),
+            str(run.meta["aggregate"]),
         )
         densities.append(code_density(code))
         vector, n_clipped = scale_and_clip_embedding(code.tolist(), run.scale)
