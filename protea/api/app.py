@@ -44,6 +44,7 @@ from protea.api.routers import reranker_models as reranker_models_router
 from protea.api.routers import scoring as scoring_router
 from protea.api.routers import showcase as showcase_router
 from protea.api.routers import stack as stack_router
+from protea.api.routers import strata as strata_router
 from protea.api.routers import support as support_router
 from protea.api.routers.annotations.sets import (
     ANNOTATION_SETS_TTL_SECONDS,
@@ -191,6 +192,7 @@ _ROUTER_MODULES = (
     scoring_router,
     showcase_router,
     benchmark_router,
+    strata_router,
     support_router,
     datasets_router,
     reranker_models_router,
