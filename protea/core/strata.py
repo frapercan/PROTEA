@@ -208,6 +208,18 @@ _TAXONOMY_ALIASES: Mapping[str, TaxonomyBand] = {
     # the band that makes the weaker claim.
     "ancestor": TaxonomyBand.INTERMEDIATE,
     "descendant": TaxonomyBand.INTERMEDIATE,
+    # child and parent are the one-step cases of the same lineal relation and
+    # take the same band for the same reason. They are listed because
+    # feature_engineering can emit them: a vocabulary that covers only what has
+    # been seen so far fails on the first run that sees the rest.
+    "child": TaxonomyBand.INTERMEDIATE,
+    "parent": TaxonomyBand.INTERMEDIATE,
+    # "unrelated" is emitted when either taxon is missing, not when two taxa are
+    # far apart (feature_engineering returns it before any lineage is compared).
+    # It is therefore absence of information, and belongs with the other NONE
+    # rather than in a distance band, which would assert a separation nobody
+    # measured.
+    "unrelated": TaxonomyBand.NONE,
 }
 
 
