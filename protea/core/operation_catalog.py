@@ -73,6 +73,7 @@ from protea.core.operations.refresh_goa_release_dates import (
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
+from protea.core.operations.stratify_evaluation import StratifyEvaluationOperation
 
 
 def build_operation_registry() -> OperationRegistry:
@@ -80,6 +81,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(PingOperation())
     registry.register(ExportGateBundleOperation())
     registry.register(AuditEvaluationFramesOperation())
+    registry.register(StratifyEvaluationOperation())
     registry.register(ApplyLearnedEncoderOperation())
     registry.register(InsertProteinsOperation())
     registry.register(FetchUniProtMetadataOperation())
