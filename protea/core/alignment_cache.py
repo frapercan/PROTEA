@@ -48,9 +48,24 @@ ALIGNMENT_FIELDS: tuple[str, ...] = (
     "length_ref",
 )
 
-# One statement per chunk; Postgres refuses very large parameter lists and a
-# batch can ask for tens of thousands of pairs.
-_CHUNK = 5_000
+# Postgres refuses a statement with more than 65535 bind parameters, and the
+# limit is on PARAMETERS, not rows. An insert binds one parameter per column,
+# so the row budget is the parameter budget divided by the column count.
+# Sizing this in rows is how it first shipped, and 5,000 rows x 14 columns =
+# 70,000 parameters, which fails at execute time rather than at import.
+_PARAM_LIMIT = 65_535
+_SAFETY = 0.9
+
+#: Columns per inserted row: the two hash keys plus every metric.
+_INSERT_COLUMNS = len(ALIGNMENT_FIELDS) + 2
+
+#: Parameters per looked-up pair: the two hashes of the tuple comparison.
+_LOOKUP_COLUMNS = 2
+
+
+def _chunk_for(columns: int) -> int:
+    """Rows per statement that keep the bind list under Postgres's ceiling."""
+    return max(1, int(_PARAM_LIMIT * _SAFETY) // columns)
 
 
 def lookup(
@@ -62,8 +77,9 @@ def lookup(
     """
     wanted = list(dict.fromkeys(pairs))
     found: dict[tuple[str, str], dict[str, Any]] = {}
-    for start in range(0, len(wanted), _CHUNK):
-        chunk = wanted[start : start + _CHUNK]
+    size = _chunk_for(_LOOKUP_COLUMNS)
+    for start in range(0, len(wanted), size):
+        chunk = wanted[start : start + size]
         rows = session.execute(
             select(SequenceAlignment).where(
                 tuple_(SequenceAlignment.query_hash, SequenceAlignment.ref_hash).in_(chunk)
@@ -94,8 +110,9 @@ def store(
         for (q, r), feats in computed.items()
         if all(field in feats for field in ALIGNMENT_FIELDS)
     ]
-    for start in range(0, len(payload), _CHUNK):
-        chunk = payload[start : start + _CHUNK]
+    size = _chunk_for(_INSERT_COLUMNS)
+    for start in range(0, len(payload), size):
+        chunk = payload[start : start + size]
         session.execute(
             insert(SequenceAlignment)
             .values(chunk)

@@ -194,3 +194,33 @@ class TestTheModelAndTheMigrationAgree:
 
         table = Base.metadata.tables["sequence_alignment"]
         assert [c.name for c in table.primary_key] == ["query_hash", "ref_hash"]
+
+
+class TestTheStatementFitsPostgresParameterCeiling:
+    """Postgres refuses more than 65535 bind parameters per statement, and the
+    limit counts PARAMETERS, not rows.
+
+    Shipped sized in rows: 5,000 rows x 14 columns = 70,000 parameters, which
+    fails at execute time on the first real batch and not in any unit test,
+    because a test with two rows never approaches it. That is why this asserts
+    the arithmetic rather than the behaviour.
+    """
+
+    def test_an_insert_chunk_stays_under_the_ceiling(self) -> None:
+        rows = ac._chunk_for(ac._INSERT_COLUMNS)
+        assert rows * ac._INSERT_COLUMNS < 65_535
+
+    def test_a_lookup_chunk_stays_under_the_ceiling(self) -> None:
+        pairs = ac._chunk_for(ac._LOOKUP_COLUMNS)
+        assert pairs * ac._LOOKUP_COLUMNS < 65_535
+
+    def test_the_row_budget_tracks_the_column_count(self) -> None:
+        """Adding a metric must shrink the chunk, not silently overflow it."""
+        assert ac._chunk_for(28) < ac._chunk_for(14)
+
+    def test_the_insert_column_count_matches_the_table(self) -> None:
+        """Two hash keys plus every metric; a drift here mis-sizes the chunk."""
+        assert ac._INSERT_COLUMNS == len(ac.ALIGNMENT_FIELDS) + 2
+
+    def test_a_wide_row_still_yields_at_least_one(self) -> None:
+        assert ac._chunk_for(100_000) == 1
