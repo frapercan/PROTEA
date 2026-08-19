@@ -201,3 +201,44 @@ class TestItIsRegistered:
         from protea.core.operation_catalog import build_operation_registry
 
         assert "stratify_evaluation" in build_operation_registry()._ops
+
+
+class TestReadingFromTheArtifactStore:
+    """The normal path: a finished evaluation's temporary directory is gone,
+    and its files live in the store under eval_artifacts/<result_id>/."""
+
+    def test_neither_source_is_refused_rather_than_guessed(self) -> None:
+        from protea.core.operations.stratify_evaluation import _resolve_source
+
+        p = StratifyEvaluationPayload(prediction_set_id="x")
+        with pytest.raises(ValueError, match="nothing to read"):
+            _resolve_source(p, lambda *a, **k: None)
+
+    def test_a_local_root_needs_no_store(self, tmp_path) -> None:
+        from protea.core.operations.stratify_evaluation import _resolve_source
+
+        root, store, tmp = _resolve_source(
+            StratifyEvaluationPayload(prediction_set_id="x", artifacts_root=str(tmp_path)),
+            lambda *a, **k: None,
+        )
+        assert (root, store, tmp) == (tmp_path, None, None)
+
+    def test_only_the_settings_present_in_the_store_are_fetched(self, tmp_path) -> None:
+        from protea.core.operations.stratify_evaluation import _settings_from_store
+
+        class _Store:
+            def __init__(self): self.asked: list[str] = []
+            def exists(self, key: str) -> bool:
+                self.asked.append(key)
+                return "/NK/" in key
+            def get(self, key: str) -> bytes: return b"parquet-bytes"
+
+        store = _Store()
+        rid = str(uuid.uuid4())
+        found = _settings_from_store(store, rid, tmp_path)
+
+        assert found == ["NK"]
+        assert (tmp_path / "NK" / "per_protein.parquet").read_bytes() == b"parquet-bytes"
+        # the three CAFA categories are probed, and nothing else
+        assert len(store.asked) == 3
+        assert all(rid in key for key in store.asked)

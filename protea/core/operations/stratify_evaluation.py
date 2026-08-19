@@ -13,6 +13,8 @@ different number under the same name; :func:`micro_cells` does the summing.
 
 from __future__ import annotations
 
+import tempfile
+import uuid
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -21,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
+from protea.core.operations._run_cafa_helpers import eval_artifact_key
 from protea.core.operations._run_cafa_strata import micro_cells, neighbourhoods_for, project
 from protea.core.strata import (
     Aspect,
@@ -43,7 +46,21 @@ class StratifyEvaluationPayload(ProteaPayload):
     """What to stratify, and how finely."""
 
     prediction_set_id: Annotated[str, Field(description="the run whose neighbourhood is read")]
-    artifacts_root: Annotated[str, Field(description="directory holding <setting>/per_protein.parquet")]
+    artifacts_root: Annotated[
+        str | None,
+        Field(default=None, description="local directory holding <setting>/per_protein.parquet"),
+    ]
+    evaluation_result_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "read and write the artefacts in the store under this result's "
+                "prefix; the normal path, since a finished evaluation's files "
+                "live there and its temporary directory is already gone"
+            ),
+        ),
+    ]
     axes: Annotated[
         list[str],
         Field(
@@ -96,6 +113,60 @@ def _strata_for_rows(
     return placed
 
 
+def _settings_from_store(store: Any, result_id: str, work: Path) -> list[str]:
+    """Fetch every ``<setting>/per_protein.parquet`` under a result's prefix.
+
+    The settings are not listed from the store: the store protocol has no list,
+    and the three CAFA knowledge categories are the only settings an evaluation
+    writes. A setting whose file is absent is simply not returned.
+    """
+    found: list[str] = []
+    for setting in ("NK", "LK", "PK"):
+        key = eval_artifact_key(uuid.UUID(result_id), f"{setting}/per_protein.parquet")
+        if not store.exists(key):
+            continue
+        target = work / setting
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "per_protein.parquet").write_bytes(store.get(key))
+        found.append(setting)
+    return found
+
+
+def _resolve_source(
+    p: StratifyEvaluationPayload, emit: EmitFn
+) -> tuple[Path, Any, Any]:
+    """Where the per-protein tables are read from, and where results go back.
+
+    Two modes on purpose. A local directory is what a test or an ad-hoc run
+    has; a result id is what a finished evaluation has, since its temporary
+    directory is long gone and the files live in the store.
+    """
+    if not p.artifacts_root and not p.evaluation_result_id:
+        raise ValueError(
+            "give either artifacts_root (a local directory) or "
+            "evaluation_result_id (the store prefix); with neither there is "
+            "nothing to read"
+        )
+    if not p.evaluation_result_id:
+        return Path(str(p.artifacts_root)), None, None
+
+    from protea.infrastructure.settings import load_settings
+    from protea.infrastructure.storage.factory import get_artifact_store
+
+    # protea/core/operations/<this>.py -> parents[3] is the repo root, the same
+    # walk export_evaluation_targets and compute_information_accretion do.
+    store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
+    tmp = tempfile.TemporaryDirectory(prefix="protea_strata_")
+    root = Path(tmp.name)
+    emit(
+        "stratify_evaluation.fetched",
+        None,
+        {"settings": _settings_from_store(store, p.evaluation_result_id, root)},
+        "info",
+    )
+    return root, store, tmp
+
+
 class StratifyEvaluationOperation(Operation):
     """Pool a finished evaluation into per-stratum cells."""
 
@@ -117,7 +188,7 @@ class StratifyEvaluationOperation(Operation):
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = StratifyEvaluationPayload.model_validate(payload)
-        root = Path(p.artifacts_root)
+        root, store, tmp = _resolve_source(p, emit)
         neighbourhoods = neighbourhoods_for(session, p.prediction_set_id)
         lengths = _protein_lengths(session)
         emit(
@@ -154,6 +225,14 @@ class StratifyEvaluationOperation(Operation):
             summary["settings"][setting] = self._write(
                 parquet.parent, cells, p, emit, len(rows), len(placed)
             )
+            if store is not None and p.evaluation_result_id:
+                key = eval_artifact_key(
+                    uuid.UUID(p.evaluation_result_id), f"{setting}/strata.parquet"
+                )
+                store.put(key, parquet.parent / "strata.parquet")
+                summary["settings"][setting]["key"] = key
+        if tmp is not None:
+            tmp.cleanup()
         return OperationResult(result=summary)
 
     @staticmethod
