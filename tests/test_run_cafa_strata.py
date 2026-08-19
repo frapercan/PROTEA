@@ -13,7 +13,13 @@ from __future__ import annotations
 
 import pytest
 
-from protea.core.operations._run_cafa_strata import Cell, micro_cells, project
+from protea.core.operations._run_cafa_strata import (
+    _NEIGHBOURHOOD_SQL,
+    Cell,
+    micro_cells,
+    neighbourhoods_for,
+    project,
+)
 from protea.core.strata import (
     Aspect,
     Category,
@@ -173,3 +179,70 @@ class TestIdentityIsAPercentage:
                 category=Category.NO_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION, residues=100,
                 neighbourhood=Neighbourhood(best_identity=140.0, donor_is_experimental=True),
             )
+
+
+class TestOneDonorDefinesTheStratum:
+    """Identity, evidence and taxonomy must describe the SAME donor.
+
+    Taking identity from the most homologous donor and evidence from the
+    nearest-by-embedding one describes a donor that does not exist. Those two
+    are different for 7,764 of 22,490 queries on the 220-230 window (34.5%), so
+    it is the common case rather than an edge.
+
+    Asserted on the query text because the selection happens in SQL. That is a
+    weaker test than one over behaviour, and it is here because the alternative,
+    pulling ~675k donor rows into Python to choose in a testable place, would
+    cost more than the bug it guards.
+    """
+
+    def test_the_three_fields_come_from_one_alias(self) -> None:
+        for field in ("identity_pct", "evidence_code", "taxonomic_relation"):
+            assert f"h.{field}" in _NEIGHBOURHOOD_SQL, field
+
+    def test_the_two_distances_come_from_the_distance_ctes(self) -> None:
+        """Propagation is the one axis that legitimately spans two donors: the
+        nearest of any kind and the nearest experimental one."""
+        assert "n.distance          AS nearest_any" in _NEIGHBOURHOOD_SQL
+        assert "e.distance          AS nearest_experimental" in _NEIGHBOURHOOD_SQL
+
+    def test_nulls_sort_last_when_picking_the_most_homologous(self) -> None:
+        """Postgres orders NULLs FIRST on DESC. Without NULLS LAST a donor with
+        no identity recorded wins, and the query is filed as having no homology
+        at all. It cost 23 proteins their band when it was missing."""
+        assert "identity_pct DESC NULLS LAST" in _NEIGHBOURHOOD_SQL
+
+    def test_the_self_hit_is_excluded_by_sequence_not_accession(self) -> None:
+        assert "qp.sequence_id <> rp.sequence_id" in _NEIGHBOURHOOD_SQL
+
+
+class _FakeResult:
+    def __init__(self, rows): self._rows = rows
+    def mappings(self): return self._rows
+
+
+class _FakeSession:
+    def __init__(self, rows): self._rows = rows
+    def execute(self, *_a, **_k): return _FakeResult(self._rows)
+
+
+class TestTheRowsBecomeNeighbourhoods:
+    def test_an_experimental_donor_is_marked_experimental(self) -> None:
+        rows = [{"acc": "Q1", "best_identity": 72.5, "evidence_code": "IDA",
+                 "taxonomic_relation": "close", "nearest_any": 0.1,
+                 "nearest_experimental": 0.1}]
+        n = neighbourhoods_for(_FakeSession(rows), "pset")["Q1"]
+        assert n.donor_is_experimental is True
+        assert n.best_identity == pytest.approx(72.5)
+
+    def test_a_computational_donor_is_not(self) -> None:
+        rows = [{"acc": "Q1", "best_identity": 72.5, "evidence_code": "IEA",
+                 "taxonomic_relation": "close", "nearest_any": 0.1,
+                 "nearest_experimental": None}]
+        n = neighbourhoods_for(_FakeSession(rows), "pset")["Q1"]
+        assert n.donor_is_experimental is False
+        assert n.nearest_experimental is None
+
+    def test_a_query_with_no_non_self_donor_is_absent_not_defaulted(self) -> None:
+        """Absent and 'no neighbour' are different facts; only the caller knows
+        which one it is looking at."""
+        assert neighbourhoods_for(_FakeSession([]), "pset") == {}

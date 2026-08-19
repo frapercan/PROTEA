@@ -44,7 +44,7 @@ WITH donors AS (
       AND qp.sequence_id <> rp.sequence_id
 ),
 nearest AS (
-    SELECT DISTINCT ON (acc) acc, evidence_code, taxonomic_relation, distance
+    SELECT DISTINCT ON (acc) acc, distance
     FROM donors ORDER BY acc, distance ASC
 ),
 nearest_exp AS (
@@ -52,18 +52,34 @@ nearest_exp AS (
     FROM donors WHERE evidence_code = ANY(:exp_codes)
     ORDER BY acc, distance ASC
 ),
-best AS (
-    SELECT acc, max(identity_pct) AS best_identity FROM donors GROUP BY acc
+-- Identity AND evidence AND taxonomy all come from THIS row, the most
+-- homologous donor. Taking identity from one donor and evidence from another
+-- describes no donor that exists: on the 220-230 window the most homologous
+-- donor differs from the nearest-by-embedding one for 7,764 of 22,490 queries
+-- (34.5%), so the mismatch is the common case, not an edge.
+--
+-- The most homologous donor rather than the nearest one, because the axis it
+-- defines asks "the best homology available, is it backed by experiment?", and
+-- that question is about a single donor. How far the nearest EXPERIMENTAL
+-- donor sits relative to the nearest donor of any kind is a different question
+-- and has its own axis, PropagationBand, fed by the two distances below.
+most_homologous AS (
+    SELECT DISTINCT ON (acc)
+           acc, identity_pct, evidence_code, taxonomic_relation
+    -- NULLS LAST is load-bearing: Postgres orders NULLs FIRST on DESC, so a
+    -- donor with no identity recorded would be picked as the most homologous
+    -- one and the query would be filed as having no homology at all.
+    FROM donors ORDER BY acc, identity_pct DESC NULLS LAST, distance ASC
 )
-SELECT b.acc,
-       b.best_identity,
-       n.evidence_code,
-       n.taxonomic_relation,
+SELECT h.acc,
+       h.identity_pct      AS best_identity,
+       h.evidence_code,
+       h.taxonomic_relation,
        n.distance          AS nearest_any,
        e.distance          AS nearest_experimental
-FROM best b
-JOIN nearest n ON n.acc = b.acc
-LEFT JOIN nearest_exp e ON e.acc = b.acc
+FROM most_homologous h
+JOIN nearest n ON n.acc = h.acc
+LEFT JOIN nearest_exp e ON e.acc = h.acc
 """
 
 
