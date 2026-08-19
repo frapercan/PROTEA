@@ -87,6 +87,14 @@ class _RowKey(NamedTuple):
     esid: str
     st: str
     row_k: int
+    #: Which prediction set produced the row, and what we know about it. A cell
+    #: can hold several generations of the same measurement (140 of them did
+    #: after the 2026-08-18 recompute) and the winner rule below needs to tell
+    #: them apart rather than taking whichever scored highest.
+    pred_set_id: str = ""
+    pred_status: str = ""
+    self_hit_rate: float | None = None
+    pred_created: Any = None
 
 
 class _BenchAggregation(NamedTuple):
@@ -173,6 +181,8 @@ def _make_leaderboard(
             "temporal_window": entry.get("temporal_window"),
             "arms_enabled": entry.get("arms_enabled"),
             "leakage_role": entry.get("leakage_role"),
+            "prediction_set_status": entry.get("prediction_set_status"),
+            "self_hit_rate": entry.get("self_hit_rate"),
         }
         for cat in categories
         for asp in aspects
@@ -390,8 +400,9 @@ def _build_matrix_response(
             agg.stages_seen, key=lambda x: _stage_sort_index(x, cfg.preferred_default_stages)
         )
     ]
+    # Underscore keys are winner-selection plumbing, not contract. See _prefers.
     rows = sorted(
-        agg.best.values(),
+        ({k: v for k, v in r.items() if not k.startswith("_")} for r in agg.best.values()),
         key=lambda r: (
             r["evaluation_set_id"],
             _stage_sort_index(r["stage"], cfg.preferred_default_stages),
@@ -434,8 +445,11 @@ def _benchmark_aggregation_stmt(evaluation_set_id: uuid.UUID | None) -> Any:
     """Build the row-fetching select for the benchmark matrix.
 
     Returns a Select that yields ``(EvaluationResult, embedding_config_id,
-    k, scoring_name)`` rows, optionally filtered to a single
-    ``evaluation_set_id``. Kept separate from
+    k, scoring_name, prediction_set_id, prediction_set_meta,
+    prediction_set_created_at)`` rows, optionally filtered to a single
+    ``evaluation_set_id``. The last three identify which generation of the
+    prediction set produced the row, which :func:`_prefers` needs in order to
+    pick the current one rather than the highest-scoring one. Kept separate from
     :func:`_aggregate_benchmark_matrix` so the SQL surface is auditable
     in isolation and the matrix folder stays under the §3 60-LOC ceiling.
     """
@@ -445,6 +459,9 @@ def _benchmark_aggregation_stmt(evaluation_set_id: uuid.UUID | None) -> Any:
             PredictionSet.embedding_config_id,
             PredictionSet.limit_per_entry.label("k"),
             ScoringConfig.name.label("scoring_name"),
+            PredictionSet.id.label("pred_set_id"),
+            PredictionSet.meta.label("pred_set_meta"),
+            PredictionSet.created_at.label("pred_set_created"),
         )
         .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
         .outerjoin(ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id)
@@ -476,7 +493,9 @@ def _aggregate_benchmark_matrix(
     eval_set_ids: set[str] = set()
     stages_seen: set[str] = set()
     ks_seen: set[int] = set()
-    for er, embedding_config_id, row_k, scoring_name in session.execute(stmt).all():
+    for (er, embedding_config_id, row_k, scoring_name,
+         pred_set_id, pred_set_meta, pred_set_created) in session.execute(stmt).all():
+        meta = pred_set_meta or {}
         eid = str(embedding_config_id)
         if eid.lower() in cfg.hidden_embeddings:
             continue
@@ -491,7 +510,13 @@ def _aggregate_benchmark_matrix(
         eval_set_ids.add(esid)
         _fold_evaluation_cells(
             er,
-            _RowKey(eid=eid, esid=esid, st=st, row_k=int(row_k)),
+            _RowKey(
+                eid=eid, esid=esid, st=st, row_k=int(row_k),
+                pred_set_id=str(pred_set_id),
+                pred_status=str(meta.get("status") or ""),
+                self_hit_rate=meta.get("self_hit_rate"),
+                pred_created=pred_set_created,
+            ),
             cfg,
             best,
             best_global,
@@ -505,6 +530,45 @@ def _aggregate_benchmark_matrix(
         stages_seen=stages_seen,
         ks_seen=ks_seen,
     )
+
+
+#: How much a generation is trusted, highest first. ``current`` is the live
+#: recompute, ``superseded`` a clean earlier one, ``damaged`` a run whose
+#: self-hit rate says the search misattributed neighbours, ``incomplete`` one
+#: that never covered the whole population. Unlabelled sets predate the audit
+#: and sit between clean and damaged: nothing is known against them.
+_GENERATION_RANK: dict[str, int] = {
+    "current": 4,
+    "superseded": 3,
+    "": 2,
+    "damaged": 1,
+    "incomplete": 0,
+}
+
+
+def _prefers(candidate: dict[str, Any], incumbent: dict[str, Any] | None) -> bool:
+    """Should ``candidate`` replace ``incumbent`` as the winner of a cell?
+
+    NOT by score. A cell can hold several generations of the same measurement,
+    and picking the highest is a maximum over repeated measurements of one
+    quantity, which is optimistic by construction and gets more optimistic the
+    more often a cell is recomputed. After the 2026-08-18 recompute 140 cells
+    held more than one generation, so this was not hypothetical.
+
+    The order is trust first, then recency. Two rows of the same generation and
+    the same instant keep the incumbent, so the result does not depend on the
+    order the database happened to return.
+    """
+    if incumbent is None:
+        return True
+    cand_rank = _GENERATION_RANK.get(candidate.get("prediction_set_status") or "", 2)
+    inc_rank = _GENERATION_RANK.get(incumbent.get("prediction_set_status") or "", 2)
+    if cand_rank != inc_rank:
+        return cand_rank > inc_rank
+    cand_at, inc_at = candidate.get("_created_at"), incumbent.get("_created_at")
+    if cand_at is not None and inc_at is not None and cand_at != inc_at:
+        return cand_at > inc_at
+    return False
 
 
 def _fold_evaluation_cells(
@@ -557,14 +621,16 @@ def _fold_evaluation_cells(
                 # this result. ``None`` flags an orphan artifact (the
                 # job_id=None archaeology trap) vs a job-backed, traceable run.
                 "job_id": str(er.job_id) if er.job_id else None,
+                # Which generation produced the cell. See _prefers.
+                "prediction_set_id": row.pred_set_id or None,
+                "prediction_set_status": row.pred_status or None,
+                "self_hit_rate": row.self_hit_rate,
+                "_created_at": row.pred_created,
             }
-            cur_g = best_global.get(key)
-            if cur_g is None or payload["primary"] > cur_g["primary"]:
+            if _prefers(payload, best_global.get(key)):
                 best_global[key] = payload
-            if passes_filter:
-                cur = best.get(key)
-                if cur is None or payload["primary"] > cur["primary"]:
-                    best[key] = payload
+            if passes_filter and _prefers(payload, best.get(key)):
+                best[key] = payload
 
 
 def _load_eval_set_metadata(
