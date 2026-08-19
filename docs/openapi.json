@@ -10220,6 +10220,69 @@
         ]
       }
     },
+    "/v1/strata/{evaluation_result_id}": {
+      "get": {
+        "description": "Return the cells per knowledge setting, plus which axes were crossed.\n\n404 when no setting has been stratified, because an empty body and a run\nnobody stratified would otherwise look the same.",
+        "operationId": "get_strata_v1_strata__evaluation_result_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_result_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Evaluation Result Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Drop cells below the population floor. Off by default: a table that shows only what survived looks identical to one that covered everything, so the caller has to ask for the narrower view.",
+            "in": "query",
+            "name": "reportable_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Drop cells below the population floor. Off by default: a table that shows only what survived looks identical to one that covered everything, so the caller has to ask for the narrower view.",
+              "title": "Reportable Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Strata V1 Strata  Evaluation Result Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Per-stratum cells for one evaluation result",
+        "tags": [
+          "strata"
+        ]
+      }
+    },
     "/v1/support": {
       "get": {
         "description": "Return total thumbs-up count and comments.\n\nPass ``all_comments=true`` to get all comments (up to the configured\npage limit) instead of the recent_limit most recent.",
