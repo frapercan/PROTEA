@@ -49,6 +49,7 @@ import numpy as np
 from protea_method.pipeline import PredictConfig, PredictDiagnostics
 from protea_method.pipeline import predict as pipeline_predict
 
+from protea.core import alignment_cache
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.knn_search import search_knn
 
@@ -78,6 +79,10 @@ class AdapterInputs(NamedTuple):
     query_sequences: dict[str, str]
     ref_tax_ids: dict[str, int | None]
     query_tax_ids: dict[str, int | None]
+    # Optional side channel, default None so every existing caller is
+    # unchanged. Holds a lookup/store port rather than a Session: alignments
+    # are reused across runs, but the adapter has no business knowing where.
+    alignment_cache: Any = None
 
 
 class AdapterResult(NamedTuple):
@@ -183,21 +188,85 @@ def _build_pair_features_from_neighbors(
             key = (q_acc, ref_acc)
             if key in pair_features:
                 continue
-            pair_features[key] = _pair_features_for(inputs, q_acc, ref_acc)
+            pair_features[key] = None  # placeholder, filled below
+    alignments = _alignments_for_pairs(inputs, list(pair_features))
+    for (q_acc, ref_acc) in list(pair_features):
+        pair_features[(q_acc, ref_acc)] = _pair_features_for(
+            inputs, q_acc, ref_acc, alignments
+        )
     return pair_features
 
 
+def _alignments_for_pairs(
+    inputs: AdapterInputs, pairs: list[tuple[str, str]]
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Alignment features for every pair, cached ones fetched in one query.
+
+    Resolves the whole batch at once rather than pair by pair, because the
+    saving is only real if the lookup is not itself per pair. Pairs whose
+    sequence is missing are skipped here exactly as they were skipped before.
+
+    Returns {} when alignments are switched off, so the caller's shape is
+    unchanged either way.
+    """
+    if not inputs.p.compute_alignments:
+        return {}
+
+    q_hash = alignment_cache.hashes_for(inputs.query_sequences)
+    r_hash = alignment_cache.hashes_for(inputs.ref_sequences)
+    # Only pairs whose two sequences are both present can be aligned at all.
+    keyed = {
+        (q, r): (q_hash[q], r_hash[r])
+        for q, r in pairs
+        if q in q_hash and r in r_hash
+    }
+
+    port = inputs.alignment_cache
+    cached: dict[tuple[str, str], dict[str, Any]] = {}
+    if port is not None and keyed:
+        cached = port.lookup(keyed.values())
+
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    fresh: dict[tuple[str, str], dict[str, Any]] = {}
+    for pair, hashes in keyed.items():
+        hit = cached.get(hashes)
+        if hit is not None:
+            out[pair] = dict(hit)
+            continue
+        feats = compute_alignment(
+            inputs.query_sequences[pair[0]], inputs.ref_sequences[pair[1]]
+        )
+        out[pair] = feats
+        fresh[hashes] = feats
+
+    if port is not None and fresh:
+        port.store(fresh)
+    return out
+
+
 def _pair_features_for(
-    inputs: AdapterInputs, q_acc: str, ref_acc: str,
+    inputs: AdapterInputs,
+    q_acc: str,
+    ref_acc: str,
+    alignments: dict[tuple[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Compute one pair's alignment + taxonomy feature dict."""
+    """One pair's feature dict: alignment (already resolved) + taxonomy.
+
+    Taxonomy stays per pair because it is keyed by taxon, not by sequence, and
+    it does not show up in the profile. Only the alignment half is worth
+    hoisting.
+    """
     p = inputs.p
     features: dict[str, Any] = {}
     if p.compute_alignments:
-        q_seq = inputs.query_sequences.get(q_acc, "")
-        r_seq = inputs.ref_sequences.get(ref_acc, "")
-        if q_seq and r_seq:
-            features.update(compute_alignment(q_seq, r_seq))
+        pre = (alignments or {}).get((q_acc, ref_acc))
+        if pre is not None:
+            features.update(pre)
+        else:
+            q_seq = inputs.query_sequences.get(q_acc, "")
+            r_seq = inputs.ref_sequences.get(ref_acc, "")
+            if q_seq and r_seq:
+                features.update(compute_alignment(q_seq, r_seq))
     if p.compute_taxonomy:
         q_tid = inputs.query_tax_ids.get(q_acc)
         r_tid = inputs.ref_tax_ids.get(ref_acc)
@@ -231,7 +300,12 @@ def _build_pair_features_from_aspect_neighbors(
                 key = (q_acc, ref_acc)
                 if key in pair_features:
                     continue
-                pair_features[key] = _pair_features_for(inputs, q_acc, ref_acc)
+                pair_features[key] = None  # placeholder, filled below
+    alignments = _alignments_for_pairs(inputs, list(pair_features))
+    for (q_acc, ref_acc) in list(pair_features):
+        pair_features[(q_acc, ref_acc)] = _pair_features_for(
+            inputs, q_acc, ref_acc, alignments
+        )
     return pair_features
 
 
