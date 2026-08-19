@@ -27,7 +27,7 @@ import hashlib
 import os
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -129,6 +129,32 @@ def _aspect_index_path(
     """Return the path for the per-aspect index array (int32 indices into the unified cache)."""
     key = _cache_key(embedding_config_id, annotation_set_id, donor_discriminator)
     return _DISK_CACHE_DIR / f"{key}__{aspect}_indices.npy"
+
+
+def _aspect_index_pool_path(
+    embedding_config_id: uuid.UUID,
+    annotation_set_id: uuid.UUID,
+    aspect: str,
+    donor_discriminator: str = "",
+) -> Path:
+    """Return the path recording which pool an aspect index was built against."""
+    key = _cache_key(embedding_config_id, annotation_set_id, donor_discriminator)
+    return _DISK_CACHE_DIR / f"{key}__{aspect}_indices.pool"
+
+
+def pool_fingerprint(accessions: Sequence[str]) -> str:
+    """Identify a reference pool by its contents.
+
+    Deliberately not the pool's LENGTH. The bug this defends against was two
+    pools of different sizes, and a length check is that difference promoted
+    to a guard: two pools that filter to the same count would pass it and the
+    corruption would be silent again. The contents cannot collide that way.
+    """
+    h = hashlib.sha256()
+    for acc in accessions:
+        h.update(acc.encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()[:16]
 
 
 def _anno_disk_cache_paths(

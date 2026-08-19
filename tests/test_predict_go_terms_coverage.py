@@ -785,9 +785,11 @@ class TestAssembleAspectView:
     ) -> None:
         from protea.core.disk_cache import (
             _aspect_index_path,
+            _aspect_index_pool_path,
             _build_anno_csr,
             _derive_reference_views,
             _save_anno_csr_to_disk,
+            pool_fingerprint,
         )
 
         monkeypatch.setattr(disk_cache_module, "_DISK_CACHE_DIR", tmp_path)
@@ -799,6 +801,10 @@ class TestAssembleAspectView:
         idx_path = _aspect_index_path(ec_id, as_id, "P")
         idx_path.parent.mkdir(parents=True, exist_ok=True)
         np.save(idx_path, np.array([0, 2], dtype=np.int32))
+        # the index now travels with the pool it was built against
+        _aspect_index_pool_path(ec_id, as_id, "P").write_text(
+            pool_fingerprint(unified_accs), encoding="utf-8"
+        )
         csr = _build_anno_csr(
             ["R1", "R3"],
             {

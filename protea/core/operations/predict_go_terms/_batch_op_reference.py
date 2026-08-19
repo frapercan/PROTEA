@@ -19,11 +19,13 @@ from protea.core.contracts.operation import EmitFn
 from protea.core.disk_cache import (
     RefPoolKey,
     _aspect_index_path,
+    _aspect_index_pool_path,
     _build_anno_csr,
     _derive_reference_views,
     _load_anno_csr_from_disk,
     _load_reference_pool_cached,
     _save_anno_csr_to_disk,
+    pool_fingerprint,
 )
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.operations.predict_go_terms._common import (
@@ -63,19 +65,41 @@ class _PoolRequest(NamedTuple):
         return RefPoolKey(self.embedding_config_id, self.annotation_set_id, self.discriminator)
 
 
-def _find_missing_aspects(request: _PoolRequest) -> list[str]:
-    """Return aspects whose index file or annotation CSR is absent on disk.
-    These still need the DB query path to repopulate the on-disk cache.
-    Takes the request so the discriminator travels with the ids: a
-    permissive cache must not answer for a restricted pool.
+def _find_missing_aspects(request: _PoolRequest, pool: str | None = None) -> list[str]:
+    """Return aspects that cannot be served from disk for THIS pool.
+
+    Takes the request so the discriminator travels with the ids: a permissive
+    cache must not answer for a restricted pool. Takes the pool fingerprint so
+    an index built against a different pool counts as missing and is rebuilt,
+    rather than reaching the view and raising there. The reference pool grows
+    whenever proteins are ingested, and a stale cache should cost one query,
+    not a manual deletion before anything can run.
+
+    ``pool`` of None skips that comparison, for callers with no pool in hand.
     """
     ecid, asid, d = request.embedding_config_id, request.annotation_set_id, request.discriminator
-    return [
-        asp
-        for asp in _ASPECTS
-        if not _aspect_index_path(ecid, asid, asp, d).exists()
-        or _load_anno_csr_from_disk(ecid, asid, asp, d) is None
-    ]
+
+    def usable(asp: str) -> bool:
+        if not _aspect_index_path(ecid, asid, asp, d).exists():
+            return False
+        recorded = _recorded_pool(ecid, asid, asp, d)
+        if recorded is None or (pool is not None and recorded != pool):
+            return False
+        return _load_anno_csr_from_disk(ecid, asid, asp, d) is not None
+
+    return [asp for asp in _ASPECTS if not usable(asp)]
+
+
+def _recorded_pool(
+    ecid: uuid.UUID, asid: uuid.UUID, aspect: str, discriminator: str
+) -> str | None:
+    """The fingerprint an aspect index was built against, or None if absent.
+
+    Absent means the index predates the fingerprint, so it cannot be told
+    apart from one built against a different pool. Rebuilt, not trusted.
+    """
+    path = _aspect_index_pool_path(ecid, asid, aspect, discriminator)
+    return path.read_text(encoding="utf-8").strip() if path.exists() else None
 
 
 def _assemble_aspect_view(
@@ -97,7 +121,9 @@ def _assemble_aspect_view(
     ecid, asid, d = request.embedding_config_id, request.annotation_set_id, request.discriminator
     idx_path = _aspect_index_path(ecid, asid, aspect, d)
     indices = np.load(idx_path)
-    _check_index_addresses_pool(indices, unified["accessions"], aspect, d)
+    _check_index_addresses_pool(
+        indices, unified["accessions"], aspect, _recorded_pool(ecid, asid, aspect, d)
+    )
     aspect_accessions = [unified["accessions"][i] for i in indices]
     unified_f32 = unified.get("embeddings_f32")
     unified_cos = unified.get("embeddings_f32_cos")
@@ -127,21 +153,28 @@ def _assemble_aspect_view(
 
 
 def _check_index_addresses_pool(
-    indices: np.ndarray, accessions: list[str], aspect: str, discriminator: str
+    indices: np.ndarray, accessions: list[str], aspect: str, built_against: str | None
 ) -> None:
-    """Fail when an aspect index cannot address the pool it is applied to.
+    """Fail unless this index was built against exactly this pool.
 
-    The index is positional into the unified pool, so it is only meaningful
-    against the pool it was built from. When the two disagree in size this
-    raises; when they happen to agree it cannot help, which is why the cache
-    key carries the discriminator and this is only the backstop.
+    Compares the pool's fingerprint, not its length. Length only catches the
+    case where the two pools happen to differ in size, and an index built
+    under a donor policy and served permissively does not: it addresses a
+    prefix of the larger pool, raises nothing, and scores plausibly on a
+    fraction of the references. That is the mode that reaches a thesis.
+
+    ``built_against`` is None for an index written before the fingerprint
+    existed. Those are unverifiable rather than known-good, so they are
+    refused and rebuilt; a cache is cheap and a silent misattribution is not.
     """
-    if not indices.size or int(indices.max()) < len(accessions):
+    actual = pool_fingerprint(accessions)
+    if built_against == actual:
         return
     raise ValueError(
-        f"aspect index for {aspect} does not address this pool: max index "
-        f"{int(indices.max())} against {len(accessions)} accessions (donor "
-        f"discriminator {discriminator!r}); it was built from another pool."
+        f"aspect index for {aspect} was not built against this pool "
+        f"(index carries {built_against or 'no fingerprint'}, pool is {actual}, "
+        f"{len(accessions)} accessions, max index "
+        f"{int(indices.max()) if indices.size else -1}); refusing to use it."
     )
 
 
@@ -450,7 +483,7 @@ class _ReferenceMixin:
             return empty
 
         acc_to_idx: dict[str, int] = {acc: i for i, acc in enumerate(unified["accessions"])}
-        missing_aspects = _find_missing_aspects(request)
+        missing_aspects = _find_missing_aspects(request, pool_fingerprint(unified["accessions"]))
         if missing_aspects:
             self._query_and_persist_aspect_caches(
                 session,
@@ -553,6 +586,9 @@ class _ReferenceMixin:
             )
             idx_path.parent.mkdir(parents=True, exist_ok=True)
             np.save(idx_path, indices)
+            _aspect_index_pool_path(ecid, asid, asp, d).write_text(
+                pool_fingerprint(unified_accessions), encoding="utf-8"
+            )
             asp_accessions = [unified_accessions[i] for i in indices]
             anno_csr = _build_anno_csr(asp_accessions, aspect_to_go_map[asp])
             _save_anno_csr_to_disk(ecid, asid, asp, anno_csr, d)
