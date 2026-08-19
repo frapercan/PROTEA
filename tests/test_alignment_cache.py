@@ -210,9 +210,17 @@ class TestTheStatementFitsPostgresParameterCeiling:
         rows = ac._chunk_for(ac._INSERT_COLUMNS)
         assert rows * ac._INSERT_COLUMNS < 65_535
 
-    def test_a_lookup_chunk_stays_under_the_ceiling(self) -> None:
-        pairs = ac._chunk_for(ac._LOOKUP_COLUMNS)
-        assert pairs * ac._LOOKUP_COLUMNS < 65_535
+    def test_the_lookup_chunk_is_small_enough_to_parse(self) -> None:
+        """The read hits a different ceiling from the write.
+
+        A row-values IN list is parsed as a nested expression tree, so Postgres
+        raises StatementTooComplex long before the parameter cap matters.
+        Deriving this from the parameter budget gives 29,490 pairs and fails on
+        a real batch; the real budget is the parser's stack, which no column
+        count can predict. Verified at 30,720 pairs against a live database.
+        """
+        assert ac._LOOKUP_CHUNK <= 5_000
+        assert ac._LOOKUP_CHUNK * ac._LOOKUP_COLUMNS < 65_535
 
     def test_the_row_budget_tracks_the_column_count(self) -> None:
         """Adding a metric must shrink the chunk, not silently overflow it."""
