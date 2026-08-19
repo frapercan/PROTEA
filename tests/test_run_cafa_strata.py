@@ -242,6 +242,23 @@ class TestTheRowsBecomeNeighbourhoods:
         assert n.donor_is_experimental is False
         assert n.nearest_experimental is None
 
+    def test_a_donor_without_an_alignment_is_omitted(self) -> None:
+        """It stopped two of the 32 rung-1 stratifications, loudly.
+
+        best_identity is NULL when the most homologous donor has no alignment
+        recorded, which is the 0.015% of rows whose pair never reached the
+        feature path. Building a Neighbourhood anyway gave band=none with a
+        boolean evidence verdict, and stratum_for refuses that pair as the
+        contradiction it is: no-donor and this-donor-is-experimental cannot
+        both hold. Omitting is right because "a donor exists but was not
+        aligned" is a third state, and folding it into either of the other two
+        would move a published cell.
+        """
+        rows = [{"acc": "Q1", "best_identity": None, "evidence_code": "IEA",
+                 "taxonomic_relation": "close", "nearest_any": 0.2,
+                 "nearest_experimental": None}]
+        assert neighbourhoods_for(_FakeSession(rows), "pset") == {}
+
     def test_a_query_with_no_non_self_donor_is_absent_not_defaulted(self) -> None:
         """Absent and 'no neighbour' are different facts; only the caller knows
         which one it is looking at."""

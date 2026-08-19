@@ -97,8 +97,15 @@ def neighbourhoods_for(session: Session, prediction_set_id: str) -> dict[str, Ne
     ).mappings()
     out: dict[str, Neighbourhood] = {}
     for r in rows:
+        # A donor with no alignment recorded cannot place the query on the
+        # homology axis, and calling that "no donor" would be a different claim
+        # from the truth, which is that a donor exists and was not aligned.
+        # Omitted rather than guessed: _strata_for_rows skips what it cannot
+        # place, and the read-versus-placed counts make the omission visible.
+        if r["best_identity"] is None:
+            continue
         out[r["acc"]] = Neighbourhood(
-            best_identity=None if r["best_identity"] is None else float(r["best_identity"]),
+            best_identity=float(r["best_identity"]),
             donor_is_experimental=r["evidence_code"] in EXPERIMENTAL_EVIDENCE,
             taxonomic_relation=r["taxonomic_relation"],
             nearest_any=None if r["nearest_any"] is None else float(r["nearest_any"]),
