@@ -62,6 +62,16 @@ _INSERT_COLUMNS = len(ALIGNMENT_FIELDS) + 2
 #: Parameters per looked-up pair: the two hashes of the tuple comparison.
 _LOOKUP_COLUMNS = 2
 
+#: Pairs per lookup statement, fixed rather than derived.
+#:
+#: The read hits a DIFFERENT ceiling from the write. A row-values IN list is
+#: parsed as a nested expression tree, so Postgres raises
+#: ``StatementTooComplex: stack depth limit exceeded`` long before the 65,535
+#: parameter cap is anywhere near. Deriving this from the parameter budget
+#: gives 29,490 pairs and fails; the budget is the parser's stack, which is not
+#: something the column count can predict.
+_LOOKUP_CHUNK = 1_000
+
 
 def _chunk_for(columns: int) -> int:
     """Rows per statement that keep the bind list under Postgres's ceiling."""
@@ -77,7 +87,7 @@ def lookup(
     """
     wanted = list(dict.fromkeys(pairs))
     found: dict[tuple[str, str], dict[str, Any]] = {}
-    size = _chunk_for(_LOOKUP_COLUMNS)
+    size = _LOOKUP_CHUNK
     for start in range(0, len(wanted), size):
         chunk = wanted[start : start + size]
         rows = session.execute(
