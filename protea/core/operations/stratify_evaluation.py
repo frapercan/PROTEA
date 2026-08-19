@@ -100,7 +100,18 @@ class StratifyEvaluationOperation(Operation):
     """Pool a finished evaluation into per-stratum cells."""
 
     name = "stratify_evaluation"
+    description = (
+        "Pool a finished evaluation's per-protein scores into one micro-averaged "
+        "cell per stratum, withholding cells below the population floor."
+    )
     payload_model = StratifyEvaluationPayload
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        """One line naming what is being crossed, which is the thing that
+        distinguishes two otherwise identical runs of this operation."""
+        axes = payload.get("axes") or ["category", "aspect", "length", "homology"]
+        pset = str(payload.get("prediction_set_id", "?"))[:8]
+        return f"{pset} by {' x '.join(axes)} (floor {payload.get('min_population', 30)})"
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
