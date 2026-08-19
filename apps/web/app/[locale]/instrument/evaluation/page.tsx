@@ -96,7 +96,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 const listEvaluationSets = () => apiFetch<EvaluationSet[]>("/annotations/evaluation-sets");
 const listResults = (evalId: string) =>
-  apiFetch<EvaluationResult[]>(`/instrument/annotations/evaluation-sets/${evalId}/results`);
+  apiFetch<EvaluationResult[]>(`/annotations/evaluation-sets/${evalId}/results`);
 const deleteEvaluationSet = (evalId: string) =>
   fetch(`${baseUrl()}/annotations/evaluation-sets/${evalId}`, { method: "DELETE" });
 
@@ -348,7 +348,7 @@ function EvaluationSetCard({
         body.scoring_config_id = scoringConfigId;
       }
       const res = await apiFetch<{ id: string; status: string }>(
-        `/instrument/annotations/evaluation-sets/${e.id}/run`,
+        `/annotations/evaluation-sets/${e.id}/run`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
