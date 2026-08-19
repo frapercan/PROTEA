@@ -21,6 +21,8 @@
 import { useEffect, useState } from "react";
 
 import { baseUrl } from "@/lib/api";
+import StrataChart from "@/components/StrataChart";
+import { CATEGORY_NAME, coverage } from "@/lib/strataView";
 import {
   axisLabel,
   cellKey,
@@ -49,63 +51,71 @@ function SettingTable({
 }) {
   const ordered = inReportOrder(cells, axes);
   const shaded = ordered.filter((c) => c.reportable);
-  const withheld = withheldShare(cells);
+  const cov = coverage(cells);
   return (
-    <div className="mb-4">
+    <div className="mb-5">
       <div className="mb-1 flex items-baseline gap-2">
-        <h4 className="text-[12px] font-semibold text-slate-800">{setting}</h4>
+        <h4 className="text-[12px] font-semibold text-slate-800">
+          {CATEGORY_NAME[setting] ?? setting}
+        </h4>
         <span className="text-[11px] text-slate-500">
-          {cells.length} cells
-          {withheld > 0
-            ? `, ${(withheld * 100).toFixed(1)}% of the population withheld`
-            : ""}
+          {cov.total.toLocaleString()} proteins in {cov.cells} strata
+          {cov.withheld > 0
+            ? `, ${((cov.withheld / cov.total) * 100).toFixed(1)}% withheld across ${cov.withheldCells} thin cells`
+            : ", every cell above the floor"}
         </span>
       </div>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr className="border-b border-slate-200">
-            {axes.map((a) => (
-              <th key={a} className={TH}>
-                {a}
-              </th>
-            ))}
-            <th className={`${TH} text-right`}>proteins</th>
-            <th className={`${TH} text-right`}>f_micro_w</th>
-            <th className={TH} />
-          </tr>
-        </thead>
-        <tbody>
-          {ordered.map((cell) => (
-            <tr
-              key={cellKey(cell, axes)}
-              className={cell.reportable ? "" : "opacity-60"}
-            >
-              {axes.map((axis) => (
-                <td key={axis} className={`${TD} text-slate-700`}>
-                  {axisLabel(axis, String(cell[axis] ?? ""))}
-                </td>
+      <StrataChart cells={cells} />
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[11px] text-slate-600">
+          every cell as a table
+        </summary>
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200">
+              {axes.map((a) => (
+                <th key={a} className={TH}>
+                  {a}
+                </th>
               ))}
-              <td className={`${TD} text-right text-slate-500`}>
-                {cell.n_proteins.toLocaleString()}
-              </td>
-              <td
-                className={`${TD} text-right ${
-                  cell.reportable ? scoreShade(cell.f_micro_w, shaded) : ""
-                }`}
-              >
-                {formatScore(cell.f_micro_w)}
-              </td>
-              <td className={TD}>
-                {cell.reportable ? null : (
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-                    withheld
-                  </span>
-                )}
-              </td>
+              <th className={`${TH} text-right`}>proteins</th>
+              <th className={`${TH} text-right`}>f_micro_w</th>
+              <th className={TH} />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {ordered.map((cell) => (
+              <tr
+                key={cellKey(cell, axes)}
+                className={cell.reportable ? "" : "opacity-60"}
+              >
+                {axes.map((axis) => (
+                  <td key={axis} className={`${TD} text-slate-700`}>
+                    {axisLabel(axis, String(cell[axis] ?? ""))}
+                  </td>
+                ))}
+                <td className={`${TD} text-right text-slate-500`}>
+                  {cell.n_proteins.toLocaleString()}
+                </td>
+                <td
+                  className={`${TD} text-right ${
+                    cell.reportable ? scoreShade(cell.f_micro_w, shaded) : ""
+                  }`}
+                >
+                  {formatScore(cell.f_micro_w)}
+                </td>
+                <td className={TD}>
+                  {cell.reportable ? null : (
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+                      withheld
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
     </div>
   );
 }
