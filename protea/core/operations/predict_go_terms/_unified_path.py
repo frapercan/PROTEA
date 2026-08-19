@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.orm import Session
 
+from protea.core.alignment_cache import SessionAlignmentCache
 from protea.core.contracts.operation import EmitFn
 from protea.core.operations._predict_go_terms_adapter import (
     AdapterInputs,
@@ -118,6 +119,7 @@ def unified_predict_via_pipeline(
             query_sequences=query_sequences,
             ref_tax_ids=ref_tax_ids,
             query_tax_ids=query_tax_ids,
+            alignment_cache=SessionAlignmentCache(session),
         )
     )
 

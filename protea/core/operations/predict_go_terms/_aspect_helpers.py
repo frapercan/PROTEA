@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from sqlalchemy.orm import Session
 
+from protea.core.alignment_cache import SessionAlignmentCache
 from protea.core.disk_cache import AnnoCsr, _csr_lookup
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.knn_search import search_knn
@@ -216,6 +217,7 @@ def _build_aspect_adapter_inputs(
         query_sequences=query_sequences,
         ref_tax_ids=ref_tax_ids,
         query_tax_ids=query_tax_ids,
+        alignment_cache=SessionAlignmentCache(session),
     )
 
 
