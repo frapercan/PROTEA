@@ -173,6 +173,15 @@ def main() -> None:
         except Exception as exc:
             logging.error("Consumer crashed: %s — reconnecting in 5s", exc)
             time.sleep(5)
+            continue
+        # run() returns without raising both when the connection drops and
+        # when a signal stopped it deliberately. Reconnecting is right in the
+        # first case and wrong in the second: SIGTERM would stop the consumer,
+        # fall through to the loop, and start a fresh one with the old code
+        # still loaded, so a deploy could not restart the worker at all.
+        if consumer.stopped:
+            logging.info("Worker stopped.")
+            break
 
 
 if __name__ == "__main__":

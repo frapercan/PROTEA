@@ -16,7 +16,9 @@ from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_e
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue import _failure_aggregation as _agg
+from protea.infrastructure.queue._deadletter import DLX_NAME, setup_dead_letter
 from protea.infrastructure.queue._host import compute_host
+from protea.infrastructure.queue._stoppable import Stoppable
 from protea.infrastructure.queue.publisher import publish_operation, safe_republish_job
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
 from protea.workers.base_worker import BaseWorker
@@ -42,8 +44,6 @@ def _consumer_span(
     return _TRACER.start_as_current_span(span_name, context=ctx)
 
 
-_DLX_NAME = "protea.dlx"
-_DLQ_NAME = "protea.dead-letter"
 
 # CUDA OOM retry policy for OperationConsumer. Configured via QueueTuning
 # (oom_max_retries / oom_base_delay / oom_max_delay). Defaults: 5 retries,
@@ -74,14 +74,7 @@ class _DecodedMessage(NamedTuple):
     oom_retry_count: int
 
 
-def _setup_dead_letter(channel: BlockingChannel) -> None:
-    """Declare the dead-letter exchange and queue (idempotent)."""
-    channel.exchange_declare(exchange=_DLX_NAME, exchange_type="fanout", durable=True)
-    channel.queue_declare(queue=_DLQ_NAME, durable=True)
-    channel.queue_bind(queue=_DLQ_NAME, exchange=_DLX_NAME)
-
-
-class QueueConsumer:
+class QueueConsumer(Stoppable):
     """
     Thin RabbitMQ consumer that delegates job execution to BaseWorker.
 
@@ -141,11 +134,11 @@ class QueueConsumer:
         channel = connection.channel()
         self._channel = channel
 
-        _setup_dead_letter(channel)
+        setup_dead_letter(channel)
         channel.queue_declare(
             queue=self._queue_name,
             durable=True,
-            arguments={"x-dead-letter-exchange": _DLX_NAME},
+            arguments={"x-dead-letter-exchange": DLX_NAME},
         )
         channel.basic_qos(prefetch_count=self._prefetch_count)
         channel.basic_consume(
@@ -321,7 +314,7 @@ class QueueConsumer:
                 self._guard.untrack()
 
 
-class OperationConsumer:
+class OperationConsumer(Stoppable):
     """
     RabbitMQ consumer for ephemeral operation messages.
 
@@ -367,11 +360,11 @@ class OperationConsumer:
         connection = pika.BlockingConnection(params)
         channel = connection.channel()
 
-        _setup_dead_letter(channel)
+        setup_dead_letter(channel)
         channel.queue_declare(
             queue=self._queue_name,
             durable=True,
-            arguments={"x-dead-letter-exchange": _DLX_NAME},
+            arguments={"x-dead-letter-exchange": DLX_NAME},
         )
         channel.basic_qos(prefetch_count=self._prefetch_count)
         channel.basic_consume(
