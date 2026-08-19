@@ -20,6 +20,15 @@ import {
   stageLabel,
 } from "@/lib/benchmarkHelpers";
 import { downloadCsv, rowsToCsv } from "@/lib/benchmarkCsv";
+import {
+  activeEvalSet,
+  emptyKind,
+  preferCatalog,
+  resolveLineage,
+  rowsInCategories,
+  stageContext,
+  visibleEvalSets,
+} from "@/lib/benchmarkView";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
 import {
   bestPerCellFromRows,
@@ -375,49 +384,36 @@ export default function BenchmarkPage() {
   }
 
   const hasData = curatedRows.length > 0;
-  // True when curation hid every row but the raw matrix still has data — the
-  // empty state then nudges the user to the "Show all" escape hatch instead of
-  // implying the benchmark is empty.
-  const curatedToEmpty = !hasData && matrix.rows.length > 0;
-  const stageList = catalog.stages.length > 0 ? catalog.stages : matrix.stages;
-  const allEvalSetList = catalog.evalSets.length > 0 ? catalog.evalSets : matrix.evaluation_sets;
-  // Hide eval sets that have no curated rows (probe / test-only sets) from the
-  // selector in the default view; the currently selected set is always kept so
-  // the dropdown never loses its own value. Reversible via "Show all".
-  const curatedEsIds = evalSetIdsWithRows(curatedRows);
-  const evalSetList = showAll
-    ? allEvalSetList
-    : allEvalSetList.filter((es) => curatedEsIds.has(es.id) || es.id === evalSetId);
+  const empty = emptyKind(curatedRows, matrix.rows.length);
+  const curatedToEmpty = empty === "curated-to-empty";
+
+  const { stages: stageList, label: currentStageLabel } = stageContext(
+    catalog.stages,
+    matrix.stages,
+    stage,
+  );
+  const allEvalSetList = preferCatalog(catalog.evalSets, matrix.evaluation_sets);
+  const evalSetList = visibleEvalSets(
+    allEvalSetList,
+    evalSetIdsWithRows(curatedRows),
+    evalSetId,
+    showAll,
+  );
   const hiddenEvalSetCount = allEvalSetList.length - evalSetList.length;
-  const allCategories = catalog.categories.length > 0 ? catalog.categories : matrix.categories;
-  const aspects = catalog.aspects.length > 0 ? catalog.aspects : matrix.aspects;
-  const currentStageLabel = stageLabel(stageList, stage);
+  const allCategories = preferCatalog(catalog.categories, matrix.categories);
+  const aspects = preferCatalog(catalog.aspects, matrix.aspects);
 
-  // Lineage chip filter — applied to every category-keyed visualisation
-  // below (champions grid, leaderboard, heatmap, full table). When the
-  // chip would null out the entire view we fall back to the unfiltered
-  // category list so the page never goes blank: this happens, for
-  // example, on a benchmark that has only NK rows when the user clicks
-  // "PK only". A subtle banner explains the fallback.
   const activeChip = LINEAGE_CHIPS.find((c) => c.key === lineage) ?? LINEAGE_CHIPS[0];
-  const chipCats = new Set(activeChip.cats);
-  const categories = allCategories.filter((c) => chipCats.has(c));
-  const lineageHasNoMatch = categories.length === 0 && allCategories.length > 0;
-  const effectiveCategories = lineageHasNoMatch ? allCategories : categories;
-  // Used by row-level lookups (heatmap, table) to skip rows whose
-  // category was filtered out. Identical to chipCats on the happy path,
-  // but defaults to "all known" when the fallback fires above.
+  const lineageResolution = resolveLineage(allCategories, activeChip);
+  const effectiveCategories = lineageResolution.categories;
+  const lineageHasNoMatch = lineageResolution.fellBack;
+  // Row-level lookups (heatmap, table) skip rows whose category the chip
+  // filtered out. Identical to the chip on the happy path, and the full set
+  // when the fallback above fired.
   const effectiveCatSet = new Set(effectiveCategories);
-  const filteredRows = curatedRows.filter((r) => effectiveCatSet.has(r.category));
+  const filteredRows = rowsInCategories(curatedRows, effectiveCategories);
 
-  // Active eval set banner: when "all" is selected and there's only one set,
-  // show that one; when a specific one is selected, show its full metadata.
-  const activeEvalSet =
-    evalSetId !== "all"
-      ? evalSetList.find((e) => e.id === evalSetId) ?? null
-      : evalSetList.length === 1
-        ? evalSetList[0]
-        : null;
+  const activeEvalSetRow = activeEvalSet(evalSetList, evalSetId);
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
@@ -535,7 +531,7 @@ export default function BenchmarkPage() {
       )}
 
       {/* Eval set context banner */}
-      {activeEvalSet && (
+      {activeEvalSetRow && (
         <section className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <div>
@@ -543,15 +539,15 @@ export default function BenchmarkPage() {
                 Evaluation split
               </span>
               <div className="text-sm font-semibold text-blue-900 mt-0.5">
-                {activeEvalSet.label}
+                {activeEvalSetRow.label}
               </div>
             </div>
             <div className="flex gap-3 text-xs text-blue-800">
-              {activeEvalSet.stats.delta_proteins != null && (
+              {activeEvalSetRow.stats.delta_proteins != null && (
                 <span>
                   <span className="text-blue-500">Δ</span>{" "}
                   <span className="font-mono font-semibold">
-                    {activeEvalSet.stats.delta_proteins.toLocaleString()}
+                    {activeEvalSetRow.stats.delta_proteins.toLocaleString()}
                   </span>{" "}
                   proteins
                 </span>
@@ -559,43 +555,43 @@ export default function BenchmarkPage() {
               {/* NK/LK/PK counters dim when the lineage chip filters
                   them out, so the banner doubles as the chip's effective
                   scope readout. The active chip's categories stay bold. */}
-              {activeEvalSet.stats.nk_proteins != null && (
+              {activeEvalSetRow.stats.nk_proteins != null && (
                 <span
                   className={effectiveCatSet.has("NK") ? "" : "opacity-40"}
                   title={effectiveCatSet.has("NK") ? undefined : "Hidden by lineage chip"}
                 >
                   <span className="text-blue-500">NK</span>{" "}
                   <span className="font-mono font-semibold">
-                    {formatProteins(activeEvalSet.stats.nk_proteins)}
+                    {formatProteins(activeEvalSetRow.stats.nk_proteins)}
                   </span>
                 </span>
               )}
-              {activeEvalSet.stats.lk_proteins != null && (
+              {activeEvalSetRow.stats.lk_proteins != null && (
                 <span
                   className={effectiveCatSet.has("LK") ? "" : "opacity-40"}
                   title={effectiveCatSet.has("LK") ? undefined : "Hidden by lineage chip"}
                 >
                   <span className="text-blue-500">LK</span>{" "}
                   <span className="font-mono font-semibold">
-                    {formatProteins(activeEvalSet.stats.lk_proteins)}
+                    {formatProteins(activeEvalSetRow.stats.lk_proteins)}
                   </span>
                 </span>
               )}
-              {activeEvalSet.stats.pk_proteins != null && (
+              {activeEvalSetRow.stats.pk_proteins != null && (
                 <span
                   className={effectiveCatSet.has("PK") ? "" : "opacity-40"}
                   title={effectiveCatSet.has("PK") ? undefined : "Hidden by lineage chip"}
                 >
                   <span className="text-blue-500">PK</span>{" "}
                   <span className="font-mono font-semibold">
-                    {formatProteins(activeEvalSet.stats.pk_proteins)}
+                    {formatProteins(activeEvalSetRow.stats.pk_proteins)}
                   </span>
                 </span>
               )}
-              {activeEvalSet.new_obo_version && (
+              {activeEvalSetRow.new_obo_version && (
                 <span>
                   <span className="text-blue-500">OBO</span>{" "}
-                  <span className="font-mono">{activeEvalSet.new_obo_version}</span>
+                  <span className="font-mono">{activeEvalSetRow.new_obo_version}</span>
                 </span>
               )}
             </div>
