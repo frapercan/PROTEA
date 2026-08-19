@@ -8,6 +8,18 @@ import { BenchmarkHeatmap } from "@/components/BenchmarkHeatmap";
 import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import { Skeleton } from "@/components/Skeleton";
 import { Tooltip } from "@/components/Tooltip";
+import {
+  cellKey,
+  formatParams,
+  formatProteins,
+  formatStd,
+  hasCiBand,
+  indexBestPerCell,
+  indexRows,
+  pickDefaultStage,
+  stageLabel,
+} from "@/lib/benchmarkHelpers";
+import { downloadCsv, rowsToCsv } from "@/lib/benchmarkCsv";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
 import {
   bestPerCellFromRows,
@@ -95,168 +107,6 @@ const NOT_IA_TOOLTIP =
   "Not IA-weighted: this cell predates real information-accretion scoring and reports the unweighted Fmax, which is not directly comparable to the LAFA / CAFA leaderboards.";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
-
-function formatParams(n: number | null): string {
-  if (n == null) return "";
-  if (n >= 1_000_000_000) {
-    const v = n / 1_000_000_000;
-    return v >= 10 ? `${Math.round(v)}B` : `${v.toFixed(1)}B`;
-  }
-  if (n >= 1_000_000) return `${Math.round(n / 1_000_000)}M`;
-  return `${n}`;
-}
-
-function formatProteins(n: number | undefined): string {
-  if (n == null) return "";
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
-function cellKey(eid: string, cat: string, asp: string): string {
-  return `${eid}|${cat}|${asp}`;
-}
-
-/** Format the optional fmax_std as a compact "± 0.003" suffix. Returns
- *  an empty string when the std is missing, so callers can append
- *  unconditionally without conditional whitespace. */
-function formatStd(std: number | null | undefined): string {
-  if (std == null || !Number.isFinite(std)) return "";
-  return `± ${std.toFixed(3)}`;
-}
-
-/** True when the row carries both bootstrap bounds. The CI band only
- *  renders when both are present and form a valid interval. */
-function hasCiBand(row: BenchmarkRow): boolean {
-  return (
-    row.fmax_ci_low != null &&
-    row.fmax_ci_high != null &&
-    Number.isFinite(row.fmax_ci_low) &&
-    Number.isFinite(row.fmax_ci_high) &&
-    row.fmax_ci_high >= row.fmax_ci_low
-  );
-}
-
-/** Index rows by (embedding, cat, asp) for O(1) cell lookup. The matrix
- *  endpoint already dedupes to a single best row per tuple. */
-function indexRows(rows: BenchmarkRow[]): Map<string, BenchmarkRow> {
-  const out = new Map<string, BenchmarkRow>();
-  for (const r of rows) {
-    out.set(cellKey(r.embedding_config_id, r.category, r.aspect), r);
-  }
-  return out;
-}
-
-/** Index the leaderboard by (cat, asp) so the table can highlight winners. */
-function indexBestPerCell(cells: BenchmarkBestCell[]): Map<string, BenchmarkBestCell> {
-  const out = new Map<string, BenchmarkBestCell>();
-  for (const c of cells) {
-    out.set(`${c.category}|${c.aspect}`, c);
-  }
-  return out;
-}
-
-function stageLabel(stages: BenchmarkStage[], name: string): string {
-  return stages.find((s) => s.name === name)?.label ?? name;
-}
-
-/** Pick the initial stage once the catalog is loaded. Backend already
- *  returns stages sorted by YAML preferred_default_stages, so the first
- *  entry IS the preferred one if it has data. */
-function pickDefaultStage(stages: BenchmarkStage[]): string | null {
-  return stages.length > 0 ? stages[0].name : null;
-}
-
-/** CSV export of the currently filtered rows — one line per cell. */
-function rowsToCsv(
-  embeddings: BenchmarkEmbedding[],
-  rows: BenchmarkRow[],
-  stage: string,
-): string {
-  const embById = new Map(embeddings.map((e) => [e.id, e]));
-  const header = [
-    "display_name",
-    "family",
-    "param_count",
-    "model_name",
-    "stage",
-    "category",
-    "aspect",
-    "primary",
-    "primary_metric",
-    "f_micro_w",
-    "fmax",
-    "precision",
-    "recall",
-    "coverage",
-    "n_proteins",
-    "frame",
-    "temporal_window",
-    "arms_enabled",
-    "leakage_role",
-    "prediction_set_status",
-    "self_hit_rate",
-    "evaluation_set_id",
-    "evaluation_result_id",
-  ].join(",");
-  const lines = [header];
-  for (const r of rows) {
-    if (r.stage !== stage) continue;
-    const e = embById.get(r.embedding_config_id);
-    lines.push(
-      [
-        e?.display_name ?? "",
-        e?.family ?? "",
-        e?.param_count ?? "",
-        e?.model_name ?? "",
-        r.stage,
-        r.category,
-        r.aspect,
-        r.primary,
-        r.primary_metric,
-        r.f_micro_w ?? "",
-        r.fmax,
-        r.precision ?? "",
-        r.recall ?? "",
-        r.coverage ?? "",
-        r.n_proteins ?? "",
-        r.frame ?? "",
-        r.temporal_window ?? "",
-        r.arms_enabled
-          ? Object.entries(r.arms_enabled)
-              .filter(([, on]) => on)
-              .map(([k]) => k)
-              .join("+")
-          : "",
-        r.leakage_role ?? "",
-        r.prediction_set_status ?? "",
-        r.self_hit_rate ?? "",
-        r.evaluation_set_id,
-        r.evaluation_result_id,
-      ]
-        .map((v) => {
-          const s = String(v);
-          if (/[,"\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-          return s;
-        })
-        .join(","),
-    );
-  }
-  return lines.join("\n");
-}
-
-function downloadCsv(filename: string, content: string): void {
-  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-// ── Page ─────────────────────────────────────────────────────────────────
 
 export default function BenchmarkPage() {
   const params = useParams<{ locale: string }>();
