@@ -63,6 +63,88 @@ class _PoolRequest(NamedTuple):
         return RefPoolKey(self.embedding_config_id, self.annotation_set_id, self.discriminator)
 
 
+def _find_missing_aspects(request: _PoolRequest) -> list[str]:
+    """Return aspects whose index file or annotation CSR is absent on disk.
+    These still need the DB query path to repopulate the on-disk cache.
+    Takes the request so the discriminator travels with the ids: a
+    permissive cache must not answer for a restricted pool.
+    """
+    ecid, asid, d = request.embedding_config_id, request.annotation_set_id, request.discriminator
+    return [
+        asp
+        for asp in _ASPECTS
+        if not _aspect_index_path(ecid, asid, asp, d).exists()
+        or _load_anno_csr_from_disk(ecid, asid, asp, d) is None
+    ]
+
+
+def _assemble_aspect_view(
+    aspect: str,
+    unified: dict[str, Any],
+    request: _PoolRequest,
+    *,
+    need_cos: bool = True,
+    need_plain: bool = True,
+) -> tuple[dict[str, Any], int]:
+    """Slice the unified embeddings by the aspect's on-disk index array and
+    attach the CSR annotation cache. Returns ``(view, n_refs)``.
+
+    Each fancy-index slice is a full copy, so for high-dim PLMs a per-aspect
+    f32 view is tens of GB. Only the copies this run reads are materialised
+    (``need_cos`` → the cosine view, ``need_plain`` → the raw view); the f16
+    slice is never read downstream and is left as an empty placeholder.
+    """
+    ecid, asid, d = request.embedding_config_id, request.annotation_set_id, request.discriminator
+    idx_path = _aspect_index_path(ecid, asid, aspect, d)
+    indices = np.load(idx_path)
+    _check_index_addresses_pool(indices, unified["accessions"], aspect, d)
+    aspect_accessions = [unified["accessions"][i] for i in indices]
+    unified_f32 = unified.get("embeddings_f32")
+    unified_cos = unified.get("embeddings_f32_cos")
+    view: dict[str, Any] = {
+        "accessions": aspect_accessions,
+        "embeddings": np.empty((0,), dtype=np.float16),
+        "embeddings_f32": (
+            unified_f32[indices] if need_plain and unified_f32 is not None else None
+        ),
+        "embeddings_f32_cos": (
+            unified_cos[indices] if need_cos and unified_cos is not None else None
+        ),
+    }
+    anno_csr = _load_anno_csr_from_disk(ecid, asid, aspect, d)
+    if anno_csr is not None:
+        gtids, quals, ecodes, offsets = anno_csr
+        view.update(
+            {
+                "anno_gtids": gtids,
+                "anno_quals": quals,
+                "anno_ecodes": ecodes,
+                "anno_offsets": offsets,
+                "acc_to_anno_idx": {acc: i for i, acc in enumerate(aspect_accessions)},
+            }
+        )
+    return view, len(indices)
+
+
+def _check_index_addresses_pool(
+    indices: np.ndarray, accessions: list[str], aspect: str, discriminator: str
+) -> None:
+    """Fail when an aspect index cannot address the pool it is applied to.
+
+    The index is positional into the unified pool, so it is only meaningful
+    against the pool it was built from. When the two disagree in size this
+    raises; when they happen to agree it cannot help, which is why the cache
+    key carries the discriminator and this is only the backstop.
+    """
+    if not indices.size or int(indices.max()) < len(accessions):
+        return
+    raise ValueError(
+        f"aspect index for {aspect} does not address this pool: max index "
+        f"{int(indices.max())} against {len(accessions)} accessions (donor "
+        f"discriminator {discriminator!r}); it was built from another pool."
+    )
+
+
 def _restrict_annotations(annotations: Any, donor_policy: Any) -> Any:
     """Narrow the donating annotations to those the policy admits.
 
@@ -368,22 +450,20 @@ class _ReferenceMixin:
             return empty
 
         acc_to_idx: dict[str, int] = {acc: i for i, acc in enumerate(unified["accessions"])}
-        missing_aspects = self._find_missing_aspects(request.embedding_config_id, request.annotation_set_id)
+        missing_aspects = _find_missing_aspects(request)
         if missing_aspects:
             self._query_and_persist_aspect_caches(
                 session,
                 missing_aspects,
                 unified["accessions"],
                 acc_to_idx,
-                request.embedding_config_id,
-                request.annotation_set_id,
+                request,
             )
 
         result, total_refs = self._assemble_all_aspect_views(
             unified,
             missing_aspects,
-            request.embedding_config_id,
-            request.annotation_set_id,
+            request,
             emit,
             need_cos=need_cos,
             need_plain=need_plain,
@@ -401,8 +481,7 @@ class _ReferenceMixin:
         self,
         unified: dict[str, Any],
         missing_aspects: list[str],
-        embedding_config_id: uuid.UUID,
-        annotation_set_id: uuid.UUID,
+        request: _PoolRequest,
         emit: EmitFn,
         *,
         need_cos: bool = True,
@@ -413,11 +492,10 @@ class _ReferenceMixin:
         result: dict[str, dict[str, Any]] = {}
         total_refs = 0
         for aspect in _ASPECTS:
-            view, n_refs = self._assemble_aspect_view(
+            view, n_refs = _assemble_aspect_view(
                 aspect,
                 unified,
-                embedding_config_id,
-                annotation_set_id,
+                request,
                 need_cos=need_cos,
                 need_plain=need_plain,
             )
@@ -436,26 +514,12 @@ class _ReferenceMixin:
         return result, total_refs
 
     @staticmethod
-    def _find_missing_aspects(
-        embedding_config_id: uuid.UUID, annotation_set_id: uuid.UUID
-    ) -> list[str]:
-        """Return aspects whose index file or annotation CSR is absent on disk.
-        These still need the DB query path to repopulate the on-disk cache."""
-        return [
-            asp
-            for asp in _ASPECTS
-            if not _aspect_index_path(embedding_config_id, annotation_set_id, asp).exists()
-            or _load_anno_csr_from_disk(embedding_config_id, annotation_set_id, asp) is None
-        ]
-
-    @staticmethod
     def _query_and_persist_aspect_caches(
         session: Session,
         missing_aspects: list[str],
         unified_accessions: list[str],
         acc_to_idx: dict[str, int],
-        embedding_config_id: uuid.UUID,
-        annotation_set_id: uuid.UUID,
+        request: _PoolRequest,
     ) -> None:
         """Single-pass DB scan + per-aspect on-disk persistence for the missing aspects.
 
@@ -473,13 +537,16 @@ class _ReferenceMixin:
             PredictGOTermsBatchOperation,
         )
 
+        ecid, asid, d = (
+            request.embedding_config_id,
+            request.annotation_set_id,
+            request.discriminator,
+        )
         aspect_to_accset, aspect_to_go_map = (
-            PredictGOTermsBatchOperation._collect_aspect_annotations(
-                session, missing_aspects, annotation_set_id
-            )
+            PredictGOTermsBatchOperation._collect_aspect_annotations(session, missing_aspects, asid)
         )
         for asp in missing_aspects:
-            idx_path = _aspect_index_path(embedding_config_id, annotation_set_id, asp)
+            idx_path = _aspect_index_path(ecid, asid, asp, d)
             indices = np.array(
                 [acc_to_idx[acc] for acc in aspect_to_accset[asp] if acc in acc_to_idx],
                 dtype=np.int32,
@@ -488,7 +555,7 @@ class _ReferenceMixin:
             np.save(idx_path, indices)
             asp_accessions = [unified_accessions[i] for i in indices]
             anno_csr = _build_anno_csr(asp_accessions, aspect_to_go_map[asp])
-            _save_anno_csr_to_disk(embedding_config_id, annotation_set_id, asp, anno_csr)
+            _save_anno_csr_to_disk(ecid, asid, asp, anno_csr, d)
 
     @staticmethod
     def _collect_aspect_annotations(
@@ -538,50 +605,3 @@ class _ReferenceMixin:
                 }
             )
         return aspect_to_accset, aspect_to_go_map
-
-    @staticmethod
-    def _assemble_aspect_view(
-        aspect: str,
-        unified: dict[str, Any],
-        embedding_config_id: uuid.UUID,
-        annotation_set_id: uuid.UUID,
-        *,
-        need_cos: bool = True,
-        need_plain: bool = True,
-    ) -> tuple[dict[str, Any], int]:
-        """Slice the unified embeddings by the aspect's on-disk index array and
-        attach the CSR annotation cache. Returns ``(view, n_refs)``.
-
-        Each fancy-index slice is a full copy, so for high-dim PLMs a per-aspect
-        f32 view is tens of GB. Only the copies this run reads are materialised
-        (``need_cos`` → the cosine view, ``need_plain`` → the raw view); the f16
-        slice is never read downstream and is left as an empty placeholder.
-        """
-        idx_path = _aspect_index_path(embedding_config_id, annotation_set_id, aspect)
-        indices = np.load(idx_path)
-        aspect_accessions = [unified["accessions"][i] for i in indices]
-        unified_f32 = unified.get("embeddings_f32")
-        unified_cos = unified.get("embeddings_f32_cos")
-        view: dict[str, Any] = {
-            "accessions": aspect_accessions,
-            "embeddings": np.empty((0,), dtype=np.float16),
-            "embeddings_f32": (
-                unified_f32[indices] if need_plain and unified_f32 is not None else None
-            ),
-            "embeddings_f32_cos": (
-                unified_cos[indices] if need_cos and unified_cos is not None else None
-            ),
-        }
-        anno_csr = _load_anno_csr_from_disk(embedding_config_id, annotation_set_id, aspect)
-        if anno_csr is not None:
-            gtids, quals, ecodes, offsets = anno_csr
-            view.update(
-                {
-                    "anno_gtids": gtids,
-                    "anno_quals": quals,
-                    "anno_ecodes": ecodes,
-                    "anno_offsets": offsets,
-                    "acc_to_anno_idx": {acc: i for i, acc in enumerate(aspect_accessions)},
-                }
-            )
-        return view, len(indices)
