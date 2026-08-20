@@ -81,3 +81,49 @@ def test_every_status_the_audit_writes_has_a_rank() -> None:
     """
     for status in ("current", "superseded", "damaged", "incomplete"):
         assert status in _GENERATION_RANK
+
+
+class TestSeveralEvaluationsOfOnePredictionSet:
+    """The tie the generation rule could not break.
+
+    A prediction set can be evaluated more than once, and rung 1 had three
+    evaluations of one ankh-base run. All three share the prediction set's
+    timestamp, so trust and prediction-set recency both tie and the winner
+    was whichever row the database returned first. It returned the oldest,
+    written before the IA-weighted metrics existed, and nine cells of the
+    board then carried no primary metric with nothing saying why.
+    """
+
+    @staticmethod
+    def _eval(created: datetime, evaluated: datetime) -> dict:
+        return {
+            "prediction_set_status": "",
+            "primary": 0.5,
+            "_created_at": created,
+            "_evaluated_at": evaluated,
+        }
+
+    def test_the_later_evaluation_of_the_same_run_wins(self) -> None:
+        newer = self._eval(T0, T1)
+        older = self._eval(T0, T0)
+        assert _prefers(newer, older) is True
+
+    def test_the_earlier_evaluation_does_not_displace_the_later(self) -> None:
+        assert _prefers(self._eval(T0, T0), self._eval(T0, T1)) is False
+
+    def test_prediction_set_recency_still_outranks_evaluation_recency(self) -> None:
+        # A newer run evaluated long ago still beats an old run evaluated
+        # yesterday: the question is which generation of the measurement
+        # this is, not when someone last scored it.
+        newer_run = self._eval(T1, T0)
+        older_run = self._eval(T0, T1)
+        assert _prefers(newer_run, older_run) is True
+
+    def test_rows_tied_on_everything_keep_the_incumbent(self) -> None:
+        assert _prefers(self._eval(T0, T0), self._eval(T0, T0)) is False
+
+    def test_a_row_with_no_evaluation_instant_does_not_displace(self) -> None:
+        # Legacy rows carry no timestamp. Treating absent as newer would let
+        # them win by having less information.
+        legacy = {"prediction_set_status": "", "primary": 0.9, "_created_at": T0}
+        assert _prefers(legacy, self._eval(T0, T1)) is False

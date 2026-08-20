@@ -121,11 +121,13 @@ class TestStageOf:
         er = _make_eval({}, scoring_config_id=uuid4(), reranker_model_id=uuid4())
         assert _stage_of(er, "alignment_weighted") == "reranker"
 
-    def test_returns_none_when_neither_scoring_nor_reranker(self):
-        # Evaluations without a scoring config or reranker are excluded from
-        # the matrix.
+    def test_bare_knn_is_a_named_stage_not_an_absence(self):
+        # This returned None until the rung-1 grid went looking for itself
+        # on the board and was not there. None makes the matrix drop the
+        # row as incomplete, and a plain KNN run is not incomplete: it is
+        # the baseline every other stage is measured against.
         er = _make_eval({})
-        assert _stage_of(er, None) is None
+        assert _stage_of(er, None) == "knn"
 
 
 # ---------------------------------------------------------------------------
