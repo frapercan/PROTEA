@@ -517,3 +517,59 @@ class TestBenchmarkMatrix:
         assert cell["max"] == 0.30
         assert cell["n_models"] == 2
         assert cell["ci95"] > 0
+
+
+class TestPreferredSeen:
+    """Which stage a caller with no opinion is shown.
+
+    One evaluation set now carries nine stages of 432 cells. Unfiltered
+    that is a 3 MB payload against 383 kB for one stage, and the whole of
+    it was being sent so the client could pick a stage and discard eight
+    ninths. The ordering rule lives in the server's config, so the server
+    is where it can be applied without shipping everything first.
+    """
+
+    @staticmethod
+    def _cfg(preferred):
+        from protea.infrastructure.benchmark_config import BenchmarkConfig
+
+        return BenchmarkConfig(
+            preferred_default_stages=tuple(preferred),
+            baseline_scoring_name=None,
+            hidden_stages=frozenset(),
+            hidden_embeddings=frozenset(),
+            stage_labels={},
+            eval_set_labels={},
+            categories=("NK",),
+            aspects=("MFO",),
+        )
+
+    def test_picks_the_first_preferred_stage_that_exists(self):
+        from protea.api.routers.benchmark import _preferred_seen
+
+        cfg = self._cfg(["composite", "vote_fraction", "embedding_only"])
+        assert _preferred_seen({"embedding_only", "composite"}, cfg) == "composite"
+
+    def test_skips_a_preferred_stage_with_no_data(self):
+        # Preferring a stage that did not run would return an empty matrix
+        # and read as "the benchmark has nothing".
+        from protea.api.routers.benchmark import _preferred_seen
+
+        cfg = self._cfg(["reranker", "composite"])
+        assert _preferred_seen({"composite", "knn"}, cfg) == "composite"
+
+    def test_falls_back_to_a_stable_order_for_unlisted_stages(self):
+        # A stage nobody ranked still has to resolve to the same one every
+        # time, or the landing view changes between identical requests.
+        from protea.api.routers.benchmark import _preferred_seen
+
+        cfg = self._cfg([])
+        seen = {"zebra", "alpha", "middle"}
+        assert _preferred_seen(seen, cfg) == _preferred_seen(seen, cfg)
+
+    def test_returns_none_when_nothing_was_seen(self):
+        # The caller gets the empty matrix it would have got anyway, rather
+        # than a filter for a stage that is not there.
+        from protea.api.routers.benchmark import _preferred_seen
+
+        assert _preferred_seen(set(), self._cfg(["composite"])) is None

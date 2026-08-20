@@ -325,6 +325,17 @@ def prewarm_benchmark_embeddings(
     )
 
 
+def _preferred_seen(stages_seen: set[str], cfg: BenchmarkConfig) -> str | None:
+    """The stage a reader with no opinion should be shown, or None.
+
+    None when nothing was seen, so the caller gets the empty matrix it would
+    have got anyway rather than a stage that is not there.
+    """
+    if not stages_seen:
+        return None
+    return sorted(stages_seen, key=lambda x: _stage_sort_index(x, cfg.preferred_default_stages))[0]
+
+
 @router.get(
     "/matrix",
     summary="Per-embedding / per-stage Fmax matrix across all evaluation results",
@@ -348,6 +359,15 @@ def get_benchmark_matrix(
             "``limit_per_entry`` (K). Typical values: 3, 5, 10."
         ),
     ),
+    resolve_stage: bool = Query(
+        default=False,
+        description=(
+            "When no stage is pinned, filter to the preferred default stage "
+            "instead of returning every stage. The catalogue is unaffected, so "
+            "the caller still learns which stages exist. Which one was chosen "
+            "is echoed in filters.stage."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     cfg: BenchmarkConfig = Depends(get_benchmark_config),
 ) -> dict[str, Any]:
@@ -358,6 +378,16 @@ def get_benchmark_matrix(
     """
     with session_scope(factory) as session:
         agg = _aggregate_benchmark_matrix(session, evaluation_set_id, cfg, stage, k)
+        # Resolving here rather than in the caller, because the ordering rule
+        # lives in this config and the caller would have to fetch every stage
+        # to apply it. One evaluation set now carries nine stages of 432
+        # cells; unfiltered that is 3 MB against 353 kB for one stage, and
+        # the whole payload was being sent so the client could pick a stage
+        # and throw eight ninths of it away.
+        if stage is None and resolve_stage:
+            stage = _preferred_seen(agg.stages_seen, cfg)
+            if stage is not None:
+                agg = _aggregate_benchmark_matrix(session, evaluation_set_id, cfg, stage, k)
         eval_sets_payload = _load_eval_set_metadata(session, agg.eval_set_ids, cfg)
     return _build_matrix_response(agg, eval_sets_payload, cfg, evaluation_set_id, stage, k)
 
