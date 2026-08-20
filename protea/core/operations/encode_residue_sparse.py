@@ -197,13 +197,15 @@ def resolve_encoder_artifact(path: str | None, uri: str | None) -> str:
     """
     if path:
         return path
+    if not uri:
+        raise ValueError("resolve_encoder_artifact needs a path or a uri and was given neither")
     from pathlib import Path as _Path
 
-    from protea.infrastructure.settings import get_settings
+    from protea.infrastructure.settings import load_settings
     from protea.infrastructure.storage import get_artifact_store
 
-    assert uri is not None
-    store = get_artifact_store(get_settings())
+    project_root = _Path(__file__).resolve().parents[3]
+    store = get_artifact_store(load_settings(project_root))
     cache = _Path(tempfile.gettempdir()) / "protea-encoder-artifacts"
     cache.mkdir(parents=True, exist_ok=True)
     local = cache / uri.replace("/", "_")
