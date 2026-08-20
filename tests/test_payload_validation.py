@@ -69,6 +69,7 @@ from protea.core.operations.count_backend_parameters import (
     CountBackendParametersPayload,
 )
 from protea.core.operations.encode_residue_sparse import (
+    EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
 )
 from protea.core.operations.export_evaluation_targets import (
@@ -148,8 +149,7 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
     (
         "export_gate_bundle",
         ExportGateBundlePayload,
-        {"embedding_config_id": "cfg", "annotation_set_id": "ann",
-         "queries": ["P1"], "ref_n": 0},
+        {"embedding_config_id": "cfg", "annotation_set_id": "ann", "queries": ["P1"], "ref_n": 0},
         ("ref_n",),
     ),
     # invariant: a sample of zero per band would measure nothing and then
@@ -438,10 +438,39 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
     ),
     (
         # An unnamed encoder would silently pick nothing to project through.
+        # The error is model-level rather than field-level because the rule is
+        # between two fields: a blank path with no URI is no address at all, and
+        # naming one of the two would suggest the other was not an option.
         "encode_residue_sparse",
         EncodeResidueSparsePayload,
         {"source_embedding_config_id": "cfg", "encoder_artifact_path": "   "},
-        ("encoder_artifact_path",),
+        (),
+    ),
+    (
+        # A batch with no sequences is a message that reports success having done
+        # nothing, and the parent's progress would advance for it.
+        "encode_residue_sparse_batch",
+        EncodeResidueSparseBatchPayload,
+        {
+            "source_embedding_config_id": "src",
+            "target_embedding_config_id": "tgt",
+            "sequence_ids": [1],
+            "parent_job_id": "job",
+            "encoder_artifact_path": "e.npz",
+            "batch_size": 0,
+        },
+        ("batch_size",),
+    ),
+    (
+        # Two addresses can disagree and nothing downstream could say which was meant.
+        "encode_residue_sparse",
+        EncodeResidueSparsePayload,
+        {
+            "source_embedding_config_id": "cfg",
+            "encoder_artifact_path": "e.npz",
+            "encoder_artifact_uri": "encoders/e.npz",
+        },
+        (),
     ),
     (
         # A batch of zero is an infinite loop that reports success.

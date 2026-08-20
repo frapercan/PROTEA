@@ -17,12 +17,15 @@ from protea.core.operations.encode_residue_sparse import (
     AGGREGATES,
     REQUIRED_META,
     TARGET_BACKEND,
+    EncodeResidueSparseBatchOperation,
+    EncodeResidueSparseBatchPayload,
     EncodeResidueSparseOperation,
     EncodeResidueSparsePayload,
     code_density,
     encode_one,
     load_frozen_encoder,
     reduce_residues,
+    refuse_backend_without_residues,
     topk_real,
 )
 
@@ -178,7 +181,6 @@ def test_the_second_moment_doubles_the_width():
     """A code of two moments is twice a code of one, which is why the aggregate has to
     be declared rather than inferred from the weights: both have the same weights."""
     residues = np.array([[1.0, 0.0], [0.0, 1.0]], np.float32)
-    weight, bias = np.eye(2, dtype=np.float32), np.zeros(2, np.float32)
 
     mean = reduce_residues(residues, "mean")
     both = reduce_residues(residues, "moments")
@@ -223,8 +225,109 @@ def test_an_empty_code_has_no_density_rather_than_dividing_by_zero():
 
 
 def test_the_payload_refuses_an_empty_artifact_path():
-    with pytest.raises(ValueError, match="non-empty"):
+    """An empty path is no address at all, so it is refused as one.
+
+    It used to be refused for being blank. Now that a URI is an alternative address,
+    a blank path means neither was given, and the message says which two things to
+    choose between rather than complaining about whitespace.
+    """
+    with pytest.raises(ValueError, match="exactly one"):
         EncodeResidueSparsePayload(source_embedding_config_id="c", encoder_artifact_path="  ")
+
+
+def test_the_payload_refuses_both_addresses_at_once():
+    """Two addresses can disagree, and nothing downstream could tell which was meant."""
+    with pytest.raises(ValueError, match="exactly one"):
+        EncodeResidueSparsePayload(
+            source_embedding_config_id="c",
+            encoder_artifact_path="e.npz",
+            encoder_artifact_uri="encoders/e.npz",
+        )
+
+
+def test_the_payload_accepts_a_uri_alone():
+    """The address that survives the dispatcher and the card being different machines."""
+    p = EncodeResidueSparsePayload(
+        source_embedding_config_id="c", encoder_artifact_uri="encoders/e.npz"
+    )
+
+    assert p.encoder_artifact_uri == "encoders/e.npz"
+    assert p.encoder_artifact_path is None
+
+
+def test_the_device_is_a_field_rather_than_a_constant():
+    """A host without a card has to be able to say so, and a host with two has to choose."""
+    assert (
+        EncodeResidueSparsePayload(
+            source_embedding_config_id="c", encoder_artifact_path="e.npz"
+        ).device
+        == "cuda"
+    )
+    assert (
+        EncodeResidueSparsePayload(
+            source_embedding_config_id="c", encoder_artifact_path="e.npz", device="cpu"
+        ).device
+        == "cpu"
+    )
+
+
+def test_a_backend_without_residues_is_refused_by_name():
+    """Refused at dispatch, before a model is loaded, naming the reason and the way out.
+
+    Without the check the failure is an attribute error inside a forward pass, once
+    per batch, on a worker, and it names a missing method rather than the fact that
+    the request could never have worked.
+    """
+
+    class _Pooled:
+        pass
+
+    with pytest.raises(ValueError, match="embed_batch_per_residue"):
+        refuse_backend_without_residues(_Pooled(), "t5")
+
+
+def test_a_backend_with_residues_is_accepted():
+    class _Residues:
+        def embed_batch_per_residue(self, *a, **k):
+            return []
+
+    refuse_backend_without_residues(_Residues(), "t5")
+
+
+def test_the_batch_payload_carries_everything_the_worker_needs():
+    """No lookup between coordinator and worker beyond reading the sequences.
+
+    The target config is passed rather than derived, so two batches never race each
+    other to create it.
+    """
+    b = EncodeResidueSparseBatchPayload(
+        source_embedding_config_id="src",
+        target_embedding_config_id="tgt",
+        sequence_ids=[1, 2, 3],
+        parent_job_id="job",
+        encoder_artifact_uri="encoders/e.npz",
+        device="cpu",
+    )
+
+    assert b.sequence_ids == [1, 2, 3]
+    assert b.target_embedding_config_id == "tgt"
+    assert b.device == "cpu"
+
+
+def test_both_operations_are_registered_so_the_fan_out_can_land():
+    from protea.core.operation_catalog import build_operation_registry
+
+    registry = build_operation_registry()
+
+    assert registry.get("encode_residue_sparse").name == "encode_residue_sparse"
+    assert registry.get("encode_residue_sparse_batch").name == "encode_residue_sparse_batch"
+
+
+def test_the_batch_operation_says_where_it_runs():
+    op = EncodeResidueSparseBatchOperation()
+
+    assert "card" in op.description or "GPU" in op.description
+    assert "n=2" in op.summarize_payload({"sequence_ids": [1, 2], "device": "cuda"})
 
 
 def test_the_payload_refuses_a_batch_of_zero():
