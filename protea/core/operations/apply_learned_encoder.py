@@ -25,7 +25,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -34,6 +34,10 @@ from protea.core.operations._compute_embeddings_helpers import (
     fetch_embedding_scale,
     scale_and_clip_embedding,
 )
+from protea.core.operations._encoder_artifact import (
+    resolve_encoder_artifact,
+    resolve_training_cut,
+)
 from protea.core.operations.encode_residue_sparse import ORDERS
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -41,18 +45,39 @@ from protea.infrastructure.orm.models.embedding.sequence_embedding import Sequen
 
 class ApplyLearnedEncoderPayload(ProteaPayload, frozen=True):
     source_embedding_config_id: str
-    encoder_artifact_path: str
+    encoder_artifact_path: str | None = None
+    encoder_artifact_uri: str | None = None
     target_model_name: str = "learned-code"
     batch_size: int = 4000
     skip_existing: bool = True
     sequence_id_limit: int | None = None  # smoke-test cap; None = all source sequences
 
-    @field_validator("source_embedding_config_id", "encoder_artifact_path", mode="before")
+    @field_validator("source_embedding_config_id", mode="before")
     @classmethod
     def _non_empty(cls, v: str) -> str:
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
         return v.strip()
+
+    @model_validator(mode="after")
+    def _exactly_one_address(self) -> ApplyLearnedEncoderPayload:
+        """Refuse both addresses and refuse neither, as the residue operation does.
+
+        A local path resolves against whichever host runs the work. This operation runs
+        inline rather than fanning out, so it runs wherever the operations queue is
+        consumed, which is not where an artifact fitted on the compute node was written.
+        The store address is the one that means the same thing on both.
+        """
+        has_path = bool((self.encoder_artifact_path or "").strip())
+        has_uri = bool((self.encoder_artifact_uri or "").strip())
+        if has_path == has_uri:
+            raise ValueError(
+                "give exactly one of encoder_artifact_path and encoder_artifact_uri. "
+                "The path resolves on whichever host consumes the operations queue; the "
+                "uri resolves through the artifact store and is usable when the artifact "
+                "was written somewhere else"
+            )
+        return self
 
 
 def _topk_real(z, top_k: int):
@@ -236,6 +261,13 @@ def refuse_wrong_order(meta: dict, artifact_path: str) -> None:
             f"implement: it pools first and applies the map to the pooled vector. Run it "
             f"through encode_residue_sparse, which selects atoms per residue before pooling. "
             f"Running it here would produce a complete code computed the other way")
+    if not str(meta.get("training_release") or "").strip():
+        raise ValueError(
+            f"{artifact_path} declares no training_release. A fitted encoder must say "
+            "which annotation release it was fitted against, because the column that "
+            "records it means NOT FITTED when it is NULL, and the temporal gate reads "
+            "that column before scoring"
+        )
 
 
 def _load_encoder(artifact_path: str, scaler_path: str | None = None):
@@ -282,6 +314,7 @@ def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta:
                      f"top_k={meta['top_k']}, objective={meta.get('objective')}) over source config "
                      f"{p.source_embedding_config_id}"),
         display_name=name, family="learned-code",
+        trained_on_annotation_set_id=resolve_training_cut(session, meta),
     )
     session.add(cfg)
     session.flush()
@@ -341,7 +374,8 @@ class ApplyLearnedEncoderOperation:
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         p = payload or {}
         src = str(p.get("source_embedding_config_id", ""))[:8]
-        artifact = str(p.get("encoder_artifact_path", "")).rsplit("/", 1)[-1]
+        address = p.get("encoder_artifact_path") or p.get("encoder_artifact_uri") or ""
+        artifact = str(address).rsplit("/", 1)[-1]
         bits = []
         if src:
             bits.append(f"src={src}")
@@ -355,7 +389,8 @@ class ApplyLearnedEncoderOperation:
     def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
         p = ApplyLearnedEncoderPayload.model_validate(payload)
         src_id = uuid.UUID(p.source_embedding_config_id)
-        apply, meta = _load_encoder(p.encoder_artifact_path)
+        artifact = resolve_encoder_artifact(p.encoder_artifact_path, p.encoder_artifact_uri)
+        apply, meta = _load_encoder(artifact)
         if int(meta["in_dim"]) <= 0:
             raise ValueError("encoder meta missing in_dim")
         target_id = _ensure_target_config(session, p, meta)

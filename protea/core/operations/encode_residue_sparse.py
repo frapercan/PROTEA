@@ -40,7 +40,6 @@ store.
 
 from __future__ import annotations
 
-import tempfile
 import uuid
 from dataclasses import dataclass
 from typing import Annotated, Any
@@ -59,6 +58,11 @@ from protea.core.contracts.operation import (
 from protea.core.operations._compute_embeddings_helpers import (
     fetch_embedding_scale,
     scale_and_clip_embedding,
+)
+from protea.core.operations._encode_residue_sparse_batch import encode_until_done
+from protea.core.operations._encoder_artifact import (
+    resolve_encoder_artifact,
+    resolve_training_cut,
 )
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -79,6 +83,7 @@ REQUIRED_META = (
     "layer_indices",
     "aggregate",
     "order",
+    "training_release",
 )
 
 #: Which of two pipelines the map was fitted for.
@@ -186,118 +191,6 @@ class EncodeResidueSparseBatchPayload(ProteaPayload, frozen=True):
     encoder_artifact_uri: str | None = None
     device: str = "cuda"
     batch_size: PositiveInt = 32
-
-
-def resolve_encoder_artifact(path: str | None, uri: str | None) -> str:
-    """Return a local path for the artifact, fetching it from the store if addressed by one.
-
-    The store copy is written under the platform's cache rather than beside the
-    caller, so two workers on the same host share one download and a worker that
-    restarts does not fetch it again.
-    """
-    if path:
-        return path
-    if not uri:
-        raise ValueError("resolve_encoder_artifact needs a path or a uri and was given neither")
-    from pathlib import Path as _Path
-
-    from protea.infrastructure.settings import load_settings
-    from protea.infrastructure.storage import get_artifact_store
-
-    project_root = _Path(__file__).resolve().parents[3]
-    store = get_artifact_store(load_settings(project_root))
-    cache = _Path(tempfile.gettempdir()) / "protea-encoder-artifacts"
-    cache.mkdir(parents=True, exist_ok=True)
-    local = cache / uri.replace("/", "_")
-    if not local.exists():
-        local.write_bytes(store.get(uri))
-    return str(local)
-
-
-def _emit_scope(emit: EmitFn, pending: list, source: EmbeddingConfig, meta: dict) -> None:
-    """Say what is about to be dispatched, including the order the artifact declares.
-
-    The order is on the scope event rather than only in the result, because it is the
-    field that decides what the codes ARE and a reader watching a run should not have
-    to wait for the end to see which one they are getting.
-    """
-    emit(
-        "encode.scope",
-        f"{len(pending)} sequences to encode through {source.model_name}",
-        {
-            "pending": len(pending),
-            "source": source.model_name,
-            "order": meta["order"],
-            "k_residue": meta["k_residue"],
-            "k_sequence": meta["k_sequence"],
-            "dictionary": meta["dict_dim"],
-        },
-        "info",
-    )
-
-
-def _dispatch_result(
-    operations: list[tuple[str, dict]],
-    sequence_ids: list[int],
-    target_id: uuid.UUID,
-    meta: dict,
-) -> OperationResult:
-    """What the coordinator returns: the scope of the fan-out and where to read the codes."""
-    return OperationResult(
-        result={
-            "batches": len(operations),
-            "sequences": len(sequence_ids),
-            "embedding_config_id": str(target_id),
-            "recipe": {k: meta[k] for k in REQUIRED_META},
-            "caveat": (
-                "point predict_go_terms at this embedding_config_id to retrieve on "
-                "these codes. Retrieval, the re-ranker and the evaluation are "
-                "unchanged; only what they retrieve on differs"
-            ),
-        },
-        progress_total=len(operations),
-        publish_operations=operations,
-    )
-
-
-def build_encode_batch_messages(
-    p: EncodeResidueSparsePayload,
-    parent_job_id: uuid.UUID,
-    source_id: uuid.UUID,
-    target_id: uuid.UUID,
-    sequence_ids: list[int],
-) -> list[tuple[str, dict]]:
-    """Partition the pending sequences and address one message per batch to the card queue.
-
-    Every field a worker needs travels in the message, so nothing is looked up between
-    coordinator and worker beyond reading the sequences themselves. The target config
-    id is passed rather than derived, so two batches never race each other to create it.
-    """
-    batches = [
-        sequence_ids[i : i + p.sequences_per_job]
-        for i in range(0, len(sequence_ids), p.sequences_per_job)
-    ]
-    parent = str(parent_job_id)
-    return [
-        (
-            _BATCH_QUEUE,
-            {
-                "operation": "encode_residue_sparse_batch",
-                "job_id": parent,
-                "payload": {
-                    "source_embedding_config_id": str(source_id),
-                    "target_embedding_config_id": str(target_id),
-                    "sequence_ids": chunk,
-                    "parent_job_id": parent,
-                    "encoder_artifact_path": p.encoder_artifact_path,
-                    "encoder_artifact_uri": p.encoder_artifact_uri,
-                    "device": p.device,
-                    "batch_size": p.batch_size,
-                },
-            },
-        )
-        for chunk in batches
-    ]
 
 
 def refuse_backend_without_residues(backend: Any, model_backend: str) -> None:
@@ -426,6 +319,92 @@ def code_density(code: np.ndarray) -> float:
     return float(np.count_nonzero(code) / code.size) if code.size else 0.0
 
 
+def _emit_scope(emit: EmitFn, pending: list, source: EmbeddingConfig, meta: dict) -> None:
+    """Say what is about to be dispatched, including the order the artifact declares.
+
+    The order is on the scope event rather than only in the result, because it is the
+    field that decides what the codes ARE and a reader watching a run should not have
+    to wait for the end to see which one they are getting.
+    """
+    emit(
+        "encode.scope",
+        f"{len(pending)} sequences to encode through {source.model_name}",
+        {
+            "pending": len(pending),
+            "source": source.model_name,
+            "order": meta["order"],
+            "k_residue": meta["k_residue"],
+            "k_sequence": meta["k_sequence"],
+            "dictionary": meta["dict_dim"],
+        },
+        "info",
+    )
+
+
+def _dispatch_result(
+    operations: list[tuple[str, dict]],
+    sequence_ids: list[int],
+    target_id: uuid.UUID,
+    meta: dict,
+) -> OperationResult:
+    """What the coordinator returns: the scope of the fan-out and where to read the codes."""
+    return OperationResult(
+        result={
+            "batches": len(operations),
+            "sequences": len(sequence_ids),
+            "embedding_config_id": str(target_id),
+            "recipe": {k: meta[k] for k in REQUIRED_META},
+            "caveat": (
+                "point predict_go_terms at this embedding_config_id to retrieve on "
+                "these codes. Retrieval, the re-ranker and the evaluation are "
+                "unchanged; only what they retrieve on differs"
+            ),
+        },
+        progress_total=len(operations),
+        publish_operations=operations,
+    )
+
+
+def build_encode_batch_messages(
+    p: EncodeResidueSparsePayload,
+    parent_job_id: uuid.UUID,
+    source_id: uuid.UUID,
+    target_id: uuid.UUID,
+    sequence_ids: list[int],
+) -> list[tuple[str, dict]]:
+    """Partition the pending sequences and address one message per batch to the card queue.
+
+    Every field a worker needs travels in the message, so nothing is looked up between
+    coordinator and worker beyond reading the sequences themselves. The target config
+    id is passed rather than derived, so two batches never race each other to create it.
+    """
+    batches = [
+        sequence_ids[i : i + p.sequences_per_job]
+        for i in range(0, len(sequence_ids), p.sequences_per_job)
+    ]
+    parent = str(parent_job_id)
+    return [
+        (
+            _BATCH_QUEUE,
+            {
+                "operation": "encode_residue_sparse_batch",
+                "job_id": parent,
+                "payload": {
+                    "source_embedding_config_id": str(source_id),
+                    "target_embedding_config_id": str(target_id),
+                    "sequence_ids": chunk,
+                    "parent_job_id": parent,
+                    "encoder_artifact_path": p.encoder_artifact_path,
+                    "encoder_artifact_uri": p.encoder_artifact_uri,
+                    "device": p.device,
+                    "batch_size": p.batch_size,
+                },
+            },
+        )
+        for chunk in batches
+    ]
+
+
 def _ensure_target_config(
     session: Session, p: EncodeResidueSparsePayload, meta: dict, source: EmbeddingConfig
 ) -> uuid.UUID:
@@ -463,6 +442,7 @@ def _ensure_target_config(
         ),
         display_name=name,
         family=TARGET_BACKEND,
+        trained_on_annotation_set_id=resolve_training_cut(session, meta),
     )
     session.add(config)
     session.flush()
@@ -616,6 +596,47 @@ class EncodeResidueSparseOperation(Operation):
         )
 
 
+def _drop_already_encoded(
+    session: Session,
+    target_id: uuid.UUID,
+    pending: list[tuple[int, str]],
+    emit: EmitFn,
+) -> list[tuple[int, str]]:
+    """Remove the sequences this batch has already written, so a retry can finish it.
+
+    The batch commits every ``batch_size`` sequences, which keeps peak memory at one
+    forward pass rather than the batch. That makes a failure halfway through leave a
+    committed prefix, and a retry that started from the beginning collided with its own
+    prefix on the very first insert. So the backoff was written for a transient fault
+    and the state it left made the fault permanent: five retries, five identical unique
+    violations, and a log naming the collision rather than the cause.
+
+    Skipping the prefix is not only about the constraint, which the idempotent insert
+    now absorbs anyway. It is about the forward pass: recomputing sixteen proteins on
+    the card to discard the result is the expensive half of the mistake.
+    """
+    if not pending:
+        return pending
+    done = {
+        int(i)
+        for (i,) in session.execute(
+            select(SequenceEmbedding.sequence_id).where(
+                SequenceEmbedding.embedding_config_id == target_id,
+                SequenceEmbedding.sequence_id.in_([i for i, _s in pending]),
+            )
+        )
+    }
+    if not done:
+        return pending
+    emit(
+        "encode.resuming",
+        f"{len(done)} of {len(pending)} sequences already have a code, resuming after them",
+        {"already_encoded": len(done), "batch": len(pending)},
+        "info",
+    )
+    return [(i, s) for i, s in pending if i not in done]
+
+
 class EncodeResidueSparseBatchOperation(Operation):
     """One batch of sequences, encoded where the card is.
 
@@ -662,6 +683,12 @@ class EncodeResidueSparseBatchOperation(Operation):
 
         backend = _resolve_backend(source.model_backend)
         refuse_backend_without_residues(backend, source.model_backend)
+        pending = _drop_already_encoded(session, target_id, pending, emit)
+        if not pending:
+            return OperationResult(
+                result={"encoded": 0, "embedding_config_id": str(target_id),
+                        "note": "every sequence in this batch already had a code"}
+            )
         model, tokenizer = _get_or_load_model(source, p.device, emit)
         run = _Run(
             backend=backend,
@@ -690,25 +717,9 @@ class EncodeResidueSparseBatchOperation(Operation):
         residues rather than the corpus, and a long protein costs time and not
         headroom.
         """
-        encoded = clipped = residues_seen = 0
-        densities: list[float] = []
-
-        for start in range(0, len(pending), run.batch_size):
-            batch = pending[start : start + run.batch_size]
-            rows, stats = _encode_batch(run, batch, emit)
-            session.bulk_insert_mappings(SequenceEmbedding, rows)
-            session.commit()
-            encoded += len(rows)
-            clipped += stats["clipped"]
-            residues_seen += stats["residues"]
-            densities.extend(stats["densities"])
-            emit(
-                "encode.progress",
-                f"{encoded}/{len(pending)} sequences",
-                {"encoded": encoded, "total": len(pending), "residues": residues_seen},
-                "info",
-            )
-
+        encoded, clipped, residues_seen, densities = encode_until_done(
+            session, run, pending, emit
+        )
         mean_density = float(np.mean(densities)) if densities else 0.0
         emit(
             "encode.done",

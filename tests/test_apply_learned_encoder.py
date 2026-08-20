@@ -8,6 +8,7 @@ import pytest
 
 from protea.core.operations.apply_learned_encoder import (
     IMPLEMENTED_ORDER,
+    ApplyLearnedEncoderOperation,
     ApplyLearnedEncoderPayload,
     _load_encoder,
     refuse_wrong_order,
@@ -40,7 +41,7 @@ def test_load_encoder_apply_produces_topk_real_code(tmp_path):
     art = tmp_path / "enc.pt"
     torch.save({"state_dict": enc.state_dict(),
                 "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k,
-                         "objective": "hard-neg", "order": "pool-then-select"}}, art)
+                         "objective": "hard-neg", "order": "pool-then-select", "training_release": "220"}}, art)
 
     apply, meta = _load_encoder(str(art))
     assert meta["dict_dim"] == dict_dim
@@ -63,7 +64,7 @@ def test_load_encoder_mean_pools_multi_chunk_groups(tmp_path):
     art = tmp_path / "enc.pt"
     torch.save({"state_dict": enc.state_dict(),
                 "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k,
-                         "order": "pool-then-select"}}, art)
+                         "order": "pool-then-select", "training_release": "220"}}, art)
     apply, _ = _load_encoder(str(art))
     rng = np.random.RandomState(1)
     multi = rng.randn(3, in_dim).astype(np.float32)
@@ -81,7 +82,7 @@ def test_load_encoder_zero_row_is_safe(tmp_path):
     art = tmp_path / "enc.pt"
     torch.save({"state_dict": enc.state_dict(),
                 "meta": {"in_dim": 4, "dict_dim": 16, "top_k": 3, "objective": "cosine-lin",
-                         "order": "pool-then-select"}}, art)
+                         "order": "pool-then-select", "training_release": "220"}}, art)
     apply, _ = _load_encoder(str(art))
     codes = apply([np.zeros((1, 4), dtype=np.float32)])  # zero embedding must not div-by-zero
     assert codes.shape == (1, 16) and np.isfinite(codes).all()
@@ -101,7 +102,7 @@ def _save_attn_artifact(path, in_dim, dict_dim, att_dim, heads, top_k, cap_chunk
                 "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k,
                          "att_dim": att_dim, "heads": heads, "cap_chunks": cap_chunks,
                          "pooling": "attention", "objective": "hard-neg",
-                         "order": "pool-then-select"}}, path)
+                         "order": "pool-then-select", "training_release": "220"}}, path)
 
 
 def test_attention_apply_produces_topk_real_code(tmp_path):
@@ -158,8 +159,8 @@ def test_an_unknown_order_is_refused_rather_than_guessed():
         refuse_wrong_order({"order": "whichever"}, "e.pt")
 
 
-def test_the_implemented_order_passes():
-    refuse_wrong_order({"order": IMPLEMENTED_ORDER}, "e.pt")
+def test_the_implemented_order_with_a_declared_cut_passes():
+    refuse_wrong_order({"order": IMPLEMENTED_ORDER, "training_release": "220"}, "e.pt")
 
 
 def test_a_select_then_pool_artifact_cannot_be_loaded_here(tmp_path):
@@ -178,3 +179,61 @@ def test_a_select_then_pool_artifact_cannot_be_loaded_here(tmp_path):
 
     with pytest.raises(ValueError, match="encode_residue_sparse"):
         _load_encoder(str(art))
+
+
+# ------------------------------------------------------------ addressing the artifact
+
+# This operation runs inline rather than fanning out, so it runs wherever the operations
+# queue is consumed, which is not the machine an artifact fitted on the compute node was
+# written to. A local path cannot mean the same thing on both; the store address can.
+
+
+def test_a_uri_alone_is_accepted():
+    p = ApplyLearnedEncoderPayload(
+        source_embedding_config_id="cfg", encoder_artifact_uri="encoders/e.pt"
+    )
+
+    assert p.encoder_artifact_uri == "encoders/e.pt"
+    assert p.encoder_artifact_path is None
+
+
+def test_both_addresses_are_refused():
+    """Two addresses can disagree and nothing downstream could say which was meant."""
+    with pytest.raises(ValueError, match="exactly one"):
+        ApplyLearnedEncoderPayload(
+            source_embedding_config_id="cfg",
+            encoder_artifact_path="/tmp/e.pt",
+            encoder_artifact_uri="encoders/e.pt",
+        )
+
+
+def test_neither_address_is_refused():
+    with pytest.raises(ValueError, match="exactly one"):
+        ApplyLearnedEncoderPayload(source_embedding_config_id="cfg")
+
+
+def test_the_summary_names_the_artifact_whichever_address_carried_it():
+    """It used to read the path only, so a uri dispatch summarised as having none."""
+    op = ApplyLearnedEncoderOperation()
+
+    assert "e.pt" in op.summarize_payload(
+        {"source_embedding_config_id": "cfg", "encoder_artifact_uri": "encoders/e.pt"}
+    )
+    assert "e.pt" in op.summarize_payload(
+        {"source_embedding_config_id": "cfg", "encoder_artifact_path": "/tmp/e.pt"}
+    )
+
+
+# ------------------------------------------------------------------- the training cut
+
+
+def test_an_artifact_that_does_not_say_when_it_was_fitted_is_refused():
+    """NULL in that column means NOT FITTED, so silence would claim something false."""
+    with pytest.raises(ValueError, match="training_release"):
+        refuse_wrong_order({"order": IMPLEMENTED_ORDER}, "e.pt")
+
+
+def test_the_order_is_checked_before_the_cut():
+    """A wrong-order artifact hears about the order, not about a field it also lacks."""
+    with pytest.raises(ValueError, match="encode_residue_sparse"):
+        refuse_wrong_order({"order": "select-then-pool"}, "e.pt")
