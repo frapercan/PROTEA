@@ -40,13 +40,67 @@ export const VALIDATION_FRAME = "the cut before the board's mark";
  * says plainly what state the work is in.
  */
 export const HEADLINE = {
-  value: null,
+  /**
+   * The figure, or null while the campaign recomputes it.
+   *
+   * Written as a widened type rather than left to inference. `as const` on a
+   * bare null narrows the field to the literal type `null`, which makes the
+   * restored-figure branch of `headlineClaim` unreachable and unwritable. The
+   * field describes a number that is currently absent, not a field that is
+   * always absent, and the type has to say so for the withdrawal to be
+   * reversible in one edit.
+   */
+  value: null as number | null,
   metric: METRIC,
   frame: FRAME,
   validation: VALIDATION_FRAME,
   totalCells: 9,
   withdrawn: true,
 } as const;
+
+/**
+ * The opening claim, phrased for whichever state the headline figure is in.
+ *
+ * The figure was withdrawn by setting it to null, and the sentence below
+ * spliced it in with `+`, so the served front page read "PROTEA reaches null
+ * on the field's headline score" in every locale for as long as the
+ * withdrawal lasted. The comment above argues that a front door should say
+ * plainly what state the work is in, and the front door was saying `null`.
+ *
+ * The hero got it right two files over, rendering `HEADLINE.value ??
+ * "being recomputed"`, and that is the shape of the mistake rather than an
+ * inconsistency: a withdrawal was handled where the number is drawn as a
+ * number, and missed where it is spliced into a sentence. Only prose can
+ * stringify null silently, so only prose needs the state spelled out.
+ *
+ * The rank claim survives the withdrawal and the figure does not, because the
+ * two rest on different things. The rank is read from the sealed board, which
+ * has not moved. The figure is the number being recomputed.
+ */
+export function headlineClaim(): string {
+  const score =
+    "the field's headline score (a weighted, information-aware measure called " +
+    METRIC +
+    ")";
+  const cells =
+    "The nine cells are three knowledge regimes, from proteins we know nothing about to proteins we already know something about, crossed with the three branches of GO.";
+  if (HEADLINE.value === null) {
+    return (
+      "On a fair test, PROTEA ranks first in seven of the nine evaluation cells on " +
+      score +
+      ". The figure itself is withheld while the campaign recomputes it, and the ranking is read from the sealed board, which has not moved. " +
+      cells
+    );
+  }
+  return (
+    "On a fair test, PROTEA reaches " +
+    HEADLINE.value.toFixed(3) +
+    " on " +
+    score +
+    " and ranks first in seven of the nine evaluation cells. " +
+    cells
+  );
+}
 
 // The one sentence the whole product is an argument for.
 export const THESIS_SENTENCE =
@@ -82,7 +136,7 @@ export const CHAPTER_ZERO: ChapterZeroMovement[] = [
   {
     lead: "What it achieves.",
     body:
-      "On a fair test, PROTEA reaches " + HEADLINE.value + " on the field's headline score (a weighted, information-aware measure called " + METRIC + ") and ranks first in seven of the nine evaluation cells. The nine cells are three knowledge regimes, from proteins we know nothing about to proteins we already know something about, crossed with the three branches of GO.",
+      headlineClaim(),
     link: { to: "pillar/3", label: "The nine-cell board, read as a map" },
   },
   {
