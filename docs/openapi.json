@@ -9137,6 +9137,59 @@
         ]
       }
     },
+    "/v1/rungs": {
+      "get": {
+        "description": "Every rung the record knows about, newest last.",
+        "operationId": "list_rungs_v1_rungs_get",
+        "parameters": [
+          {
+            "description": "Metric to rank each rung's arms by, averaged over every populated cell of the arm. Defaults to the IA-weighted micro F, the one the CAFA and LAFA leaderboards are quoted in.",
+            "in": "query",
+            "name": "metric",
+            "required": false,
+            "schema": {
+              "default": "f_micro_w",
+              "description": "Metric to rank each rung's arms by, averaged over every populated cell of the arm. Defaults to the IA-weighted micro F, the one the CAFA and LAFA leaderboards are quoted in.",
+              "title": "Metric",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Rungs V1 Rungs Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Rungs",
+        "tags": [
+          "rungs"
+        ]
+      }
+    },
     "/v1/runners": {
       "get": {
         "description": "List all installed experiment runner plugins.\n\nToday: ``baseline``, ``knn``, ``lightgbm``. The latter two are\ncontract-surface stubs until F2A.7 (lab \u2192 ``protea-runners\n.lightgbm`` migration) and F2C.1 (``protea-method`` extraction)\nmove the real implementations here.",
