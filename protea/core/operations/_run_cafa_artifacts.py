@@ -525,13 +525,23 @@ def _write_scored_base(df: Any, scoring_config: ScoringConfig | None, path: str)
             pass
         return
     scores = _vectorized_scores(df, scoring_config)
-    round6 = scoring_config is not None
     proteins = df["protein_accession"].tolist()
     go_ids = df["go_id"].tolist()
     with open(path, "w") as f:
         for i, (protein, go_id) in enumerate(zip(proteins, go_ids, strict=True)):
-            score = round(float(scores[i]), 6) if round6 else float(scores[i])
-            f.write(f"{protein}\t{go_id}\t{score:.4f}\n")
+            # One rounding, both paths. The ScoringConfig path used to round
+            # to six decimals before formatting to four, and the None
+            # fallback went straight to four, so the same arithmetic could
+            # come out one unit apart in the last digit.
+            #
+            # It is not hypothetical. embedding_only weights
+            # embedding_similarity at 1.0 and everything else at 0, which
+            # computes exactly what the fallback computes, and the two were
+            # measured against each other across 396 cells: 387 identical,
+            # 9 differing, every difference exactly 0.0001. The baseline and
+            # the arm it is the baseline for must not disagree by their
+            # formatting.
+            f.write(f"{protein}\t{go_id}\t{float(scores[i]):.4f}\n")
 
 
 def write_predictions_reranked(
