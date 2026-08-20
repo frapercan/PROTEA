@@ -9,7 +9,7 @@ the whole spread across eight backbones is 0.022.
 
 from __future__ import annotations
 
-from protea.api.routers.strata import _Coordinates, _arm_rows, _matches
+from protea.api.routers.strata import _arm_rows, _Coordinates, _matches
 
 
 class TestCoordinates:
