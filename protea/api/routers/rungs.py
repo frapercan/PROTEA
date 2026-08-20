@@ -57,6 +57,18 @@ _ARMS = text(
     FROM job j
     LEFT JOIN prediction_set ps
            ON ps.meta ->> 'job_id' = j.id::text
+          -- A finished run, asserted rather than inspected. A cancelled
+          -- job leaves its written batches behind and the prediction set
+          -- carries no mark saying so: the completion state lives on the
+          -- job. One ankh-base K=30 job was cancelled after one batch and
+          -- left a 1,024-protein set that is indistinguishable from a
+          -- finished one when you hold only the set.
+          --
+          -- batches rather than status alone, because SUCCEEDED is the
+          -- job's verdict and the batch counts are its arithmetic, and a
+          -- gate wants both.
+          AND j.status::text = 'SUCCEEDED'
+          AND (j.meta ->> 'batches_completed') IS NOT DISTINCT FROM (j.meta ->> 'expected_batches')
     LEFT JOIN evaluation_result er
            ON er.prediction_set_id = ps.id
     WHERE j.operation = 'predict_go_terms'
