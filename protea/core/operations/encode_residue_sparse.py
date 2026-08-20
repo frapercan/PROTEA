@@ -40,12 +40,13 @@ store.
 
 from __future__ import annotations
 
+import tempfile
 import uuid
 from dataclasses import dataclass
 from typing import Annotated, Any
 
 import numpy as np
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -112,22 +113,205 @@ TARGET_BACKEND = "residue-sparse"
 PositiveInt = Annotated[int, Field(gt=0)]
 
 
+#: Queue the per-batch messages are addressed to. It is the same queue
+#: ``compute_embeddings`` fans out to, because the requirement is identical: a
+#: worker with a card. Reusing it means this operation reaches the card through
+#: machinery that already exists rather than through a second path to keep in step.
+_BATCH_QUEUE = "protea.embeddings.batch"
+
+
 class EncodeResidueSparsePayload(ProteaPayload, frozen=True):
-    """Which corpus, which frozen encoder, and under what name."""
+    """Coordinator: which corpus, which frozen encoder, under what name, in what batches.
+
+    The coordinator does no inference. It resolves the artifact, creates the target
+    config, decides which sequences still need a code, and publishes one message per
+    batch to the queue a worker with a card consumes. That split is not tidiness: the
+    process that consumes the operations queue runs on the host that owns the state,
+    and that host has no card, so an operation that does its work inline cannot run at
+    all in the deployed topology.
+    """
 
     source_embedding_config_id: str
-    encoder_artifact_path: str
+    encoder_artifact_path: str | None = None
+    encoder_artifact_uri: str | None = None
     target_model_name: str = "residue-sparse"
+    device: str = "cuda"
     batch_size: PositiveInt = 32
+    sequences_per_job: PositiveInt = 512
     sequence_id_limit: int | None = None
     skip_existing: bool = True
 
-    @field_validator("source_embedding_config_id", "encoder_artifact_path", mode="before")
+    @field_validator("source_embedding_config_id", mode="before")
     @classmethod
     def _non_empty(cls, v: str) -> str:
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
         return v.strip()
+
+    @model_validator(mode="after")
+    def _exactly_one_address(self) -> EncodeResidueSparsePayload:
+        """Refuse both addresses and refuse neither.
+
+        A local path resolves against whichever host runs the work, and with the
+        dispatcher and the card on different machines there is no path that means the
+        same thing on both. The URI is the address that does, so both are accepted and
+        the ambiguity of carrying both is not.
+        """
+        has_path = bool((self.encoder_artifact_path or "").strip())
+        has_uri = bool((self.encoder_artifact_uri or "").strip())
+        if has_path == has_uri:
+            raise ValueError(
+                "give exactly one of encoder_artifact_path and encoder_artifact_uri. "
+                "The path resolves on whichever host runs the work, so it is usable "
+                "only when the dispatcher and the card are the same machine; the URI "
+                "resolves through the artifact store and is usable when they are not"
+            )
+        return self
+
+
+class EncodeResidueSparseBatchPayload(ProteaPayload, frozen=True):
+    """One batch of sequences, addressed to a worker that has a card.
+
+    Carries every field the worker needs, so no lookup happens between coordinator and
+    worker beyond reading the sequences themselves. The target config already exists by
+    the time this runs: the coordinator created it, so a batch never races another batch
+    to create it.
+    """
+
+    source_embedding_config_id: str
+    target_embedding_config_id: str
+    sequence_ids: list[int]
+    parent_job_id: str
+    encoder_artifact_path: str | None = None
+    encoder_artifact_uri: str | None = None
+    device: str = "cuda"
+    batch_size: PositiveInt = 32
+
+
+def resolve_encoder_artifact(path: str | None, uri: str | None) -> str:
+    """Return a local path for the artifact, fetching it from the store if addressed by one.
+
+    The store copy is written under the platform's cache rather than beside the
+    caller, so two workers on the same host share one download and a worker that
+    restarts does not fetch it again.
+    """
+    if path:
+        return path
+    from pathlib import Path as _Path
+
+    from protea.infrastructure.settings import get_settings
+    from protea.infrastructure.storage import get_artifact_store
+
+    assert uri is not None
+    store = get_artifact_store(get_settings())
+    cache = _Path(tempfile.gettempdir()) / "protea-encoder-artifacts"
+    cache.mkdir(parents=True, exist_ok=True)
+    local = cache / uri.replace("/", "_")
+    if not local.exists():
+        local.write_bytes(store.get(uri))
+    return str(local)
+
+
+def _emit_scope(emit: EmitFn, pending: list, source: EmbeddingConfig, meta: dict) -> None:
+    """Say what is about to be dispatched, including the order the artifact declares.
+
+    The order is on the scope event rather than only in the result, because it is the
+    field that decides what the codes ARE and a reader watching a run should not have
+    to wait for the end to see which one they are getting.
+    """
+    emit(
+        "encode.scope",
+        f"{len(pending)} sequences to encode through {source.model_name}",
+        {
+            "pending": len(pending),
+            "source": source.model_name,
+            "order": meta["order"],
+            "k_residue": meta["k_residue"],
+            "k_sequence": meta["k_sequence"],
+            "dictionary": meta["dict_dim"],
+        },
+        "info",
+    )
+
+
+def _dispatch_result(
+    operations: list[tuple[str, dict]],
+    sequence_ids: list[int],
+    target_id: uuid.UUID,
+    meta: dict,
+) -> OperationResult:
+    """What the coordinator returns: the scope of the fan-out and where to read the codes."""
+    return OperationResult(
+        result={
+            "batches": len(operations),
+            "sequences": len(sequence_ids),
+            "embedding_config_id": str(target_id),
+            "recipe": {k: meta[k] for k in REQUIRED_META},
+            "caveat": (
+                "point predict_go_terms at this embedding_config_id to retrieve on "
+                "these codes. Retrieval, the re-ranker and the evaluation are "
+                "unchanged; only what they retrieve on differs"
+            ),
+        },
+        progress_total=len(operations),
+        publish_operations=operations,
+    )
+
+
+def build_encode_batch_messages(
+    p: EncodeResidueSparsePayload,
+    parent_job_id: uuid.UUID,
+    source_id: uuid.UUID,
+    target_id: uuid.UUID,
+    sequence_ids: list[int],
+) -> list[tuple[str, dict]]:
+    """Partition the pending sequences and address one message per batch to the card queue.
+
+    Every field a worker needs travels in the message, so nothing is looked up between
+    coordinator and worker beyond reading the sequences themselves. The target config
+    id is passed rather than derived, so two batches never race each other to create it.
+    """
+    batches = [
+        sequence_ids[i : i + p.sequences_per_job]
+        for i in range(0, len(sequence_ids), p.sequences_per_job)
+    ]
+    parent = str(parent_job_id)
+    return [
+        (
+            _BATCH_QUEUE,
+            {
+                "operation": "encode_residue_sparse_batch",
+                "job_id": parent,
+                "payload": {
+                    "source_embedding_config_id": str(source_id),
+                    "target_embedding_config_id": str(target_id),
+                    "sequence_ids": chunk,
+                    "parent_job_id": parent,
+                    "encoder_artifact_path": p.encoder_artifact_path,
+                    "encoder_artifact_uri": p.encoder_artifact_uri,
+                    "device": p.device,
+                    "batch_size": p.batch_size,
+                },
+            },
+        )
+        for chunk in batches
+    ]
+
+
+def refuse_backend_without_residues(backend: Any, model_backend: str) -> None:
+    """Refuse a backend that cannot emit per-residue output, before any work is done.
+
+    Called at dispatch time rather than inside a batch. Without it the failure is an
+    attribute error on a worker, after a model has been loaded, once per batch, and it
+    names a missing method rather than the reason the request could never have worked.
+    """
+    if not hasattr(backend, "embed_batch_per_residue"):
+        raise ValueError(
+            f"backend {model_backend!r} has no embed_batch_per_residue, so it cannot "
+            "produce the per-residue output this operation selects atoms from. Use a "
+            "backend that emits residues, or apply_learned_encoder if a pooled code is "
+            "what is wanted"
+        )
 
 
 def load_frozen_encoder(path: str) -> tuple[np.ndarray, np.ndarray, dict]:
@@ -381,26 +565,29 @@ class EncodeResidueSparseOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
+        """Resolve, scope, and hand the work to whoever has a card.
+
+        Nothing is inferred here. The coordinator runs on the host that owns the
+        state, which has no card, so every decision that needs the database is made
+        here and every decision that needs the model is made in a batch.
+        """
         p = EncodeResidueSparsePayload.model_validate(payload)
+        parent_job_id = uuid.UUID(payload["_job_id"])
         source = session.get(EmbeddingConfig, uuid.UUID(p.source_embedding_config_id))
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")
 
-        weight, bias, meta = load_frozen_encoder(p.encoder_artifact_path)
+        from protea.core.operations.compute_embeddings import _resolve_backend
+
+        refuse_backend_without_residues(
+            _resolve_backend(source.model_backend), source.model_backend
+        )
+
+        artifact = resolve_encoder_artifact(p.encoder_artifact_path, p.encoder_artifact_uri)
+        _weight, _bias, meta = load_frozen_encoder(artifact)
         target_id = _ensure_target_config(session, p, meta, source)
         pending = _pending_sequences(session, source.id, target_id, p)
-        emit(
-            "encode.scope",
-            f"{len(pending)} sequences to encode through {source.model_name}",
-            {
-                "pending": len(pending),
-                "source": source.model_name,
-                "k_residue": meta["k_residue"],
-                "k_sequence": meta["k_sequence"],
-                "dictionary": meta["dict_dim"],
-            },
-            "info",
-        )
+        _emit_scope(emit, pending, source, meta)
         if not pending:
             return OperationResult(
                 result={
@@ -409,14 +596,73 @@ class EncodeResidueSparseOperation(Operation):
                     "note": "every sequence already had a code",
                 }
             )
+
+        ids = [i for i, _s in pending]
+        operations = build_encode_batch_messages(p, parent_job_id, source.id, target_id, ids)
+        emit(
+            "encode.dispatching",
+            f"{len(operations)} batches to {_BATCH_QUEUE}",
+            {"batches": len(operations), "sequences": len(ids), "device": p.device},
+            "info",
+        )
+        return _dispatch_result(operations, ids, target_id, meta)
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        return (
+            f"encode the corpus of embedding config "
+            f"{payload.get('source_embedding_config_id')} with a residue-level sparse encoder"
+        )
+
+
+class EncodeResidueSparseBatchOperation(Operation):
+    """One batch of sequences, encoded where the card is.
+
+    Loads the model on the device the payload names rather than on a hardcoded one,
+    so a host without a card refuses at dispatch instead of raising inside a forward
+    pass, and a host with two cards can be told which.
+    """
+
+    name = "encode_residue_sparse_batch"
+    description = (
+        "GPU child job: run the language model over one batch of sequences, select "
+        "atoms per residue, reduce, and store one sparse code per sequence under the "
+        "target embedding config the coordinator created."
+    )
+
+    def execute(
+        self, session: Session, payload: dict[str, Any], *, emit: EmitFn
+    ) -> OperationResult:
+        p = EncodeResidueSparseBatchPayload.model_validate(payload)
+        source = session.get(EmbeddingConfig, uuid.UUID(p.source_embedding_config_id))
+        if source is None:
+            raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")
+        target_id = uuid.UUID(p.target_embedding_config_id)
+
+        artifact = resolve_encoder_artifact(p.encoder_artifact_path, p.encoder_artifact_uri)
+        weight, bias, meta = load_frozen_encoder(artifact)
+
+        rows = session.execute(
+            select(Sequence.id, Sequence.sequence).where(Sequence.id.in_(p.sequence_ids))
+        ).all()
+        pending = [(int(i), s) for i, s in rows]
+        if len(pending) != len(p.sequence_ids):
+            missing = set(p.sequence_ids) - {i for i, _ in pending}
+            raise ValueError(
+                f"{len(missing)} of {len(p.sequence_ids)} sequences in this batch no longer "
+                f"exist, for example {sorted(missing)[:3]}. The batch is not encoded rather "
+                "than silently short, because a short batch and a finished one look alike"
+            )
+
         from protea.core.operations.compute_embeddings import (
             _get_or_load_model,
             _resolve_backend,
         )
 
-        model, tokenizer = _get_or_load_model(source, "cuda", emit)
+        backend = _resolve_backend(source.model_backend)
+        refuse_backend_without_residues(backend, source.model_backend)
+        model, tokenizer = _get_or_load_model(source, p.device, emit)
         run = _Run(
-            backend=_resolve_backend(source.model_backend),
+            backend=backend,
             model=model,
             tokenizer=tokenizer,
             weight=weight,
@@ -480,17 +726,13 @@ class EncodeResidueSparseOperation(Operation):
                 "residues": residues_seen,
                 "mean_density": mean_density,
                 "clipped_components": clipped,
-                "recipe": {k: run.meta[k] for k in REQUIRED_META},
-                "caveat": (
-                    "point predict_go_terms at this embedding_config_id to retrieve on "
-                    "these codes. Retrieval, the re-ranker and the evaluation are "
-                    "unchanged; only what they retrieve on differs"
-                ),
             }
         )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
-        return (
-            f"encode the corpus of embedding config "
-            f"{payload.get('source_embedding_config_id')} with a residue-level sparse encoder"
-        )
+        pl = payload or {}
+        n = len(pl.get("sequence_ids") or [])
+        bits = [f"n={n}"] if n else []
+        if pl.get("device"):
+            bits.append(str(pl["device"]))
+        return " · ".join(bits)
