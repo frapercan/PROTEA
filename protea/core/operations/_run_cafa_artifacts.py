@@ -691,6 +691,17 @@ def parse_results(dfs_best: dict) -> dict[str, Any]:
             "recall": round(float(row.get("rc", 0)), 4),
             "tau": round(float(row.get("tau", 0)), 4),
             "coverage": round(float(row.get("cov_max", row.get("cov", 0))), 4),
+            # Coverage at the threshold Fmax actually landed on, which is
+            # the one that reconciles with n_proteins. ``coverage`` above is
+            # cafaeval's cov_max, the maximum over every threshold, so the
+            # two describe different points and reading them as a pair makes
+            # the population look as though it moved. It did not: n is the
+            # count of proteins with a prediction at this tau, and a single
+            # 0.98 -> 0.99 step moved it by 17 per cent in rung 1 while the
+            # scored cohort was provably identical across all 32 runs.
+            "coverage_at_tau": (
+                round(float(row["cov"]), 4) if row.get("cov") is not None else None
+            ),
             "n_proteins": int(row.get("n", 0)) if "n" in row else None,
         }
 
