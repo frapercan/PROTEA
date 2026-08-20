@@ -10536,7 +10536,7 @@
     },
     "/v1/stratum/{prediction_set_id}/members": {
       "get": {
-        "description": "The proteins a stratum is made of, with what put each one there.\n\nEvery row carries its nearest donor and the identity to it, because\nthat is what the band IS: a reader who cannot see the donor cannot\ncheck the band, and a band nobody can check is a label.",
+        "description": "The proteins a stratum is made of, with what put each one there.\n\nEvery row carries the identity to its nearest donor and whether that\ndonor is experimental, because that is what the band IS: a reader who\ncannot see what put a protein in a band cannot check the band, and a\nband nobody can check is a label.\n\nIt does NOT yet carry WHICH donor. ``Neighbourhood`` resolves five\nfacts about the retrieved donors and the accession is not among them,\nso naming it here would mean changing what retrieval returns. Until\nthen a reader can check the distance but not follow it, and this\ndocstring says so rather than implying otherwise.",
         "operationId": "stratum_members_v1_stratum__prediction_set_id__members_get",
         "parameters": [
           {
