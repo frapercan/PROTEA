@@ -141,3 +141,44 @@ class TestBest:
         best = _best(rows, "f_micro_w")
         assert best["cells"] == 1
         assert best["value"] == 0.5
+
+
+class TestAnArmIsAFinishedRun:
+    """A cancelled job leaves its written batches behind.
+
+    The prediction set carries no mark saying it is half written: the
+    completion state lives on the job. Four sets match (rung 1, ankh-base,
+    K=30) in the live database and three came from FAILED or CANCELLED
+    jobs, one of them holding 1,024 proteins from a single batch written
+    before the cancel. Selecting sets and inspecting them cannot tell those
+    apart, however carefully, because the distinguishing fact is not in the
+    object being held.
+    """
+
+    def test_the_query_requires_a_succeeded_job(self):
+        from protea.api.routers.rungs import _ARMS
+
+        sql = str(_ARMS)
+        assert "j.status::text = 'SUCCEEDED'" in sql
+
+    def test_the_query_requires_the_batches_to_agree(self):
+        # SUCCEEDED is the job's verdict; the batch counts are its
+        # arithmetic. A gate wants both, because they are recorded by
+        # different code at different times.
+        from protea.api.routers.rungs import _ARMS
+
+        sql = str(_ARMS)
+        assert "batches_completed" in sql and "expected_batches" in sql
+
+    def test_the_gate_sits_on_the_join_not_the_where(self):
+        # It has to be a join condition. Moved into WHERE it would drop the
+        # whole arm rather than only its prediction set, and an arm whose
+        # job is still running would vanish from the rung instead of
+        # showing as running.
+        from protea.api.routers.rungs import _ARMS
+
+        sql = str(_ARMS)
+        head = sql[: sql.index("UNION ALL")]
+        join_at = head.index("LEFT JOIN prediction_set")
+        where_at = head.index("WHERE j.operation")
+        assert join_at < head.index("SUCCEEDED") < where_at
