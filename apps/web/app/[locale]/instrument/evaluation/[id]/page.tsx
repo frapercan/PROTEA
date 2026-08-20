@@ -417,7 +417,11 @@ export default function EvaluationDetailPage() {
                                   <RunReceipt predictionSetId={r.prediction_set_id} />
                                 </div>
                               ) : null}
-                              <StrataPanel evaluationResultId={r.id} />
+                              <StrataPanel
+                                evaluationResultId={r.id}
+                                predictionSetId={r.prediction_set_id}
+                                locale={params.locale}
+                              />
                             </td>
                           </tr>
                         )}
