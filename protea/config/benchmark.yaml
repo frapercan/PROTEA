@@ -27,6 +27,9 @@ stages:
   # Human-readable labels. Any scoring config not listed here falls back to
   # a Title-Cased version of its own `name`.
   labels:
+    # A run with no scoring config and no re-ranker: the neighbour vote
+    # on its own. The baseline the other stages are measured against.
+    knn: "KNN baseline"
     embedding_only: "Embedding-only"
     vote_fraction: "Vote fraction (KNN)"
     alignment_only: "Alignment-only"
