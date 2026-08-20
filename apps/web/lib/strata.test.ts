@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   axisLabel,
+  axisRank,
   cellKey,
   formatScore,
   inReportOrder,
@@ -62,6 +63,74 @@ describe("inReportOrder", () => {
     const ordered = inReportOrder(cells, AXES);
     expect(ordered).toHaveLength(3);
     expect(ordered.map((c) => c.reportable)).toEqual([true, true, false]);
+  });
+
+  it("walks homology from twilight up to near-identical", () => {
+    // The defect this replaced: values were compared as text, so the panel
+    // rendered twilight, near-identical, distant, close. Reading down the
+    // column showed no gradient, which is the one thing it is for.
+    const cells = [
+      cell("F", ">90", 146, 0.3572),
+      cell("F", "<=30", 258, 0.1915),
+      cell("F", "60-90", 282, 0.3829),
+      cell("F", "30-60", 332, 0.3632),
+    ];
+    expect(inReportOrder(cells, AXES).map((c) => c.homology)).toEqual([
+      "<=30",
+      "30-60",
+      "60-90",
+      ">90",
+    ]);
+  });
+
+  it("puts no-donor at the floor of the homology axis", () => {
+    const cells = [cell("F", "<=30", 10, 0.1), cell("F", "none", 10, 0.0)];
+    expect(inReportOrder(cells, AXES).map((c) => c.homology)).toEqual([
+      "none",
+      "<=30",
+    ]);
+  });
+
+  it("sorts length by length, not by its first digit", () => {
+    // Text order puts 1024-2048 second, between <=512 and 512-1024.
+    const byLength = ["length"];
+    const cells = [
+      { ...cell("F", "<=30", 90, 0.24), length: "512-1024" },
+      { ...cell("F", "<=30", 32, 0.11), length: "1024-2048" },
+      { ...cell("F", "<=30", 258, 0.19), length: "<=512" },
+    ];
+    expect(inReportOrder(cells, byLength).map((c) => c.length)).toEqual([
+      "<=512",
+      "512-1024",
+      "1024-2048",
+    ]);
+  });
+
+  it("orders by the outer axis first, then within it", () => {
+    const cells = [
+      cell("P", "<=30", 362, 0.0535),
+      cell("F", ">90", 146, 0.3572),
+      cell("F", "<=30", 258, 0.1915),
+    ];
+    const out = inReportOrder(cells, AXES);
+    expect(out.map((c) => `${c.aspect}/${c.homology}`)).toEqual([
+      "F/<=30",
+      "F/>90",
+      "P/<=30",
+    ]);
+  });
+
+  it("still sorts withheld cells last, whatever their band", () => {
+    // Ordering must not promote a withheld cell just because its band
+    // ranks first.
+    const cells = [
+      cell("F", ">90", 200, 0.4),
+      cell("F", "<=30", 4, 0.9, false),
+    ];
+    expect(inReportOrder(cells, AXES).map((c) => c.reportable)).toEqual([
+      true,
+      false,
+    ]);
   });
 
   it("does not mutate its input", () => {
@@ -162,5 +231,30 @@ describe("formatScore", () => {
     // several distinct cells as the same number.
     expect(formatScore(0.4439999)).toBe("0.4440");
     expect(formatScore(0.2461)).toBe("0.2461");
+  });
+});
+
+describe("axisRank", () => {
+  it("ranks the axes whose values stand for a quantity", () => {
+    expect(axisRank("homology", "<=30")).toBeLessThan(
+      axisRank("homology", ">90"),
+    );
+    expect(axisRank("length", "512-1024")).toBeLessThan(
+      axisRank("length", "1024-2048"),
+    );
+  });
+
+  it("leaves axes with no natural order alone", () => {
+    // aspect is a set of three names, not a scale. Inventing an order for
+    // it would be a claim the data does not make.
+    expect(axisRank("aspect", "F")).toBe(-1);
+  });
+
+  it("sorts an unknown band last rather than first", () => {
+    // A band added upstream should show up as an outlier at the end, not
+    // silently lead the table as though it were the floor.
+    expect(axisRank("homology", "90-95")).toBeGreaterThan(
+      axisRank("homology", ">90"),
+    );
   });
 });
