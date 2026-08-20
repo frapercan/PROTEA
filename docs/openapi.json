@@ -8720,6 +8720,57 @@
         ]
       }
     },
+    "/v1/receipts/prediction-set/{prediction_set_id}": {
+      "get": {
+        "description": "The run behind a set of predictions, in readable terms.\n\n404 rather than an empty body when the set is unknown, because a set\nthat does not exist and one that recorded nothing must not look alike.",
+        "operationId": "get_receipt_v1_receipts_prediction_set__prediction_set_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prediction_set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Prediction Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Receipt V1 Receipts Prediction Set  Prediction Set Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "How a prediction set was produced",
+        "tags": [
+          "receipts"
+        ]
+      }
+    },
     "/v1/reranker-models/import": {
       "post": {
         "description": "Upload a trained booster and register a ``RerankerModel`` row.\n\nThe three files (``model.txt``, ``spec.yaml``, ``run.json``) mirror\nthe artefacts produced by ``protea-reranker-lab`` under\n``runs/<name>/``. Wire format unchanged: the FastAPI deps expose\nevery File/Form field as a discrete multipart part.",
