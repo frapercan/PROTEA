@@ -34,6 +34,7 @@ from protea.core.operations._compute_embeddings_helpers import (
     fetch_embedding_scale,
     scale_and_clip_embedding,
 )
+from protea.core.operations.encode_residue_sparse import ORDERS
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 
@@ -200,6 +201,43 @@ def _build_attention_apply(blob: dict, meta: dict, dev: str, scaler=None):
     return apply
 
 
+#: The order this operation implements. It pools the chunk vectors FIRST and applies the map
+#: to the result, so the selection at the end sees a whole sequence rather than a residue.
+#: ``encode_residue_sparse`` implements the other one and refuses this one by name; this
+#: refuses that one by name. Neither is the special case, and an artifact runs in exactly one.
+IMPLEMENTED_ORDER = "pool-then-select"
+
+
+def refuse_wrong_order(meta: dict, artifact_path: str) -> None:
+    """Refuse an artifact fitted for the other order, and refuse one that does not say.
+
+    The distinction cannot be recovered from the weights. Both orders produce the same tensor
+    shapes and declare the same ``in_dim`` and ``dict_dim``, so an artifact fitted for
+    per-residue selection runs happily through this path and yields a complete, plausible code
+    computed by the wrong mechanism. Measured on the arms of the encoder study, that code
+    shares 12 of 128 atoms with the intended one, at cosine 0.08. Nothing downstream can tell
+    them apart, which is why the artifact has to say which it is, and why saying nothing is not
+    allowed to mean this one.
+    """
+    order = meta.get("order")
+    if order is None:
+        raise ValueError(
+            f"{artifact_path} declares no order. A learned encoder must state whether it was "
+            f"fitted to pool before selecting or to select before pooling, because the two "
+            f"produce different codes from identical weights and shapes. Add "
+            f"order={IMPLEMENTED_ORDER!r} to the artifact meta if that is how it was fitted")
+    order = str(order)
+    if order not in ORDERS:
+        raise ValueError(
+            f"{artifact_path} declares order {order!r}, which is not one of {list(ORDERS)}")
+    if order != IMPLEMENTED_ORDER:
+        raise ValueError(
+            f"{artifact_path} declares order {order!r}, which this operation does not "
+            f"implement: it pools first and applies the map to the pooled vector. Run it "
+            f"through encode_residue_sparse, which selects atoms per residue before pooling. "
+            f"Running it here would produce a complete code computed the other way")
+
+
 def _load_encoder(artifact_path: str, scaler_path: str | None = None):
     """Load the torch artifact -> (apply_fn, meta). Lazy-imports torch/numpy.
 
@@ -216,6 +254,7 @@ def _load_encoder(artifact_path: str, scaler_path: str | None = None):
 
     blob = torch.load(artifact_path, map_location="cpu", weights_only=False)
     meta = blob["meta"]
+    refuse_wrong_order(meta, artifact_path)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     scaler = _load_scaler(scaler_path or _sibling_scaler_path(artifact_path), int(meta["in_dim"]))
     pooling = str(meta.get("pooling", "mean")).lower()
