@@ -52,6 +52,26 @@ def _release_card() -> None:
         pass
 
 
+#: The largest batch this PROCESS has completed, or None before the first one.
+#:
+#: A worker consumes many messages and the card does not change between them, so
+#: rediscovering the size costs an out-of-memory fault per step of the descent, per
+#: message, forever. Measured on a card that settles at one sequence: three faults per
+#: message and 1,224 of 1,304 batches ultimately run at one.
+#:
+#: This still encodes nobody's memory. The number is learned from what this machine
+#: actually did, it lives only in the process, and a machine that never faults never
+#: descends and so never sets it.
+_LAST_GOOD_SIZE: int | None = None
+
+
+def _starting_size(requested: int) -> int:
+    """Begin where this process left off, never above what the payload asked for."""
+    if _LAST_GOOD_SIZE is None:
+        return requested
+    return max(1, min(requested, _LAST_GOOD_SIZE))
+
+
 def encode_until_done(
     session: Session,
     run: Any,
@@ -70,9 +90,10 @@ def encode_until_done(
     """
     from protea.core.operations.encode_residue_sparse import _encode_batch
 
+    global _LAST_GOOD_SIZE
     encoded = clipped = residues_seen = 0
     densities: list[float] = []
-    size = run.batch_size
+    size = _starting_size(run.batch_size)
     start = 0
     while start < len(pending):
         batch = pending[start : start + size]
@@ -93,6 +114,7 @@ def encode_until_done(
             continue
         session.execute(pg_insert(SequenceEmbedding).on_conflict_do_nothing(), rows)
         session.commit()
+        _LAST_GOOD_SIZE = len(batch)
         start += len(batch)
         encoded += len(rows)
         clipped += stats["clipped"]

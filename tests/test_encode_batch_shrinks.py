@@ -9,10 +9,18 @@ from __future__ import annotations
 
 import pytest
 
+import protea.core.operations._encode_residue_sparse_batch as batch_mod
 from protea.core.operations._encode_residue_sparse_batch import (
     _is_out_of_memory,
+    _starting_size,
     encode_until_done,
 )
+
+
+@pytest.fixture(autouse=True)
+def _forget_the_learned_size(monkeypatch):
+    """Each test starts with a process that has learned nothing."""
+    monkeypatch.setattr(batch_mod, "_LAST_GOOD_SIZE", None)
 
 
 class _Run:
@@ -117,3 +125,52 @@ def test_an_unrelated_failure_is_not_retried_at_all(monkeypatch):
         encode_until_done(_Session(), _Run(), _sequences(8), _emit([]))
 
     assert calls == [8], "raised on the first attempt rather than halved"
+
+
+# ------------------------------------------------------ remembering what already worked
+
+# A worker consumes many messages and the card does not change between them. Without
+# this, the descent runs again on every message and pays an out-of-memory fault per step,
+# forever. It still encodes nobody's memory: the number is learned from what the machine
+# actually did, it lives only in the process, and a machine that never faults never sets it.
+
+
+def test_a_process_that_has_learned_nothing_starts_where_it_was_asked():
+    assert _starting_size(8) == 8
+
+
+def test_a_process_that_learned_a_size_starts_there(monkeypatch):
+    monkeypatch.setattr(batch_mod, "_LAST_GOOD_SIZE", 2)
+
+    assert _starting_size(8) == 2
+
+
+def test_the_payload_is_still_a_ceiling(monkeypatch):
+    """A remembered size never raises a batch above what the caller asked for."""
+    monkeypatch.setattr(batch_mod, "_LAST_GOOD_SIZE", 64)
+
+    assert _starting_size(8) == 8
+
+
+def test_the_second_message_does_not_descend_again(monkeypatch):
+    """The whole point: one descent per process, not one per message."""
+    tried = []
+
+    def fake_encode(_run, batch, _emit):
+        tried.append(len(batch))
+        if len(batch) > 2:
+            raise RuntimeError("CUDA out of memory")
+        rows = [{"sequence_id": i} for i, _s in batch]
+        return rows, {"clipped": 0, "residues": 10 * len(batch), "densities": [0.0] * len(batch)}
+
+    import protea.core.operations.encode_residue_sparse as op
+
+    monkeypatch.setattr(op, "_encode_batch", fake_encode)
+
+    encode_until_done(_Session(), _Run(), _sequences(4), _emit([]))
+    first = list(tried)
+    tried.clear()
+    encode_until_done(_Session(), _Run(), _sequences(4), _emit([]))
+
+    assert first == [4, 2, 2], "the first message finds the size the hard way"
+    assert tried == [2, 2], "the second starts at what worked and never faults"
