@@ -10,6 +10,8 @@ about REFUSAL (that an artifact which does not declare its recipe cannot run).
 
 from __future__ import annotations
 
+import pathlib
+
 import numpy as np
 import pytest
 
@@ -26,6 +28,7 @@ from protea.core.operations.encode_residue_sparse import (
     load_frozen_encoder,
     reduce_residues,
     refuse_backend_without_residues,
+    resolve_encoder_artifact,
     topk_real,
 )
 
@@ -415,3 +418,46 @@ def test_the_whole_dictionary_refusal_now_explains_the_hole(tmp_path):
     path = _artifact(tmp_path, k_residue=16)
     with pytest.raises(ValueError, match="pool-then-select"):
         load_frozen_encoder(str(path))
+
+
+# --------------------------------------------------------------- resolving the artifact
+
+# This path shipped broken and no test caught it, because every test asserted the payload
+# ACCEPTED a uri and none of them ever resolved one. The function called get_settings,
+# which does not exist; the real name is load_settings and it takes a project root. The
+# first real dispatch failed on it. So these execute the body rather than the declaration.
+
+
+def test_a_local_path_is_returned_unchanged():
+    assert resolve_encoder_artifact("/tmp/e.npz", None) == "/tmp/e.npz"
+
+
+def test_neither_address_is_refused_rather_than_returning_none():
+    with pytest.raises(ValueError, match="neither"):
+        resolve_encoder_artifact(None, None)
+
+
+def test_a_uri_is_fetched_through_the_store_and_cached(monkeypatch, tmp_path):
+    """Executes the real body: settings, store, download, cache, and the second call."""
+    payload = b"not-really-an-npz"
+    calls = []
+
+    class _Store:
+        def get(self, key):
+            calls.append(key)
+            return payload
+
+    import protea.infrastructure.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "get_artifact_store", lambda _s: _Store())
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+
+    first = resolve_encoder_artifact(None, "encoders/e.npz")
+
+    assert pathlib.Path(first).read_bytes() == payload
+    assert calls == ["encoders/e.npz"]
+
+    second = resolve_encoder_artifact(None, "encoders/e.npz")
+
+    assert second == first
+    assert calls == ["encoders/e.npz"], "a cached artifact must not be downloaded twice"
