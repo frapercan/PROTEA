@@ -61,7 +61,8 @@ def _save_linear_head(path, in_dim: int, dict_dim: int, top_k: int) -> None:
     enc = nn.Linear(in_dim, dict_dim)
     torch.save(
         {"state_dict": enc.state_dict(),
-         "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k, "objective": "hard-neg"}},
+         "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k,
+                  "objective": "hard-neg", "order": "pool-then-select"}},
         path,
     )
 

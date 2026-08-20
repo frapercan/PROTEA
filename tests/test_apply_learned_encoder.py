@@ -7,8 +7,10 @@ import numpy as np
 import pytest
 
 from protea.core.operations.apply_learned_encoder import (
+    IMPLEMENTED_ORDER,
     ApplyLearnedEncoderPayload,
     _load_encoder,
+    refuse_wrong_order,
 )
 
 
@@ -38,7 +40,7 @@ def test_load_encoder_apply_produces_topk_real_code(tmp_path):
     art = tmp_path / "enc.pt"
     torch.save({"state_dict": enc.state_dict(),
                 "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k,
-                         "objective": "hard-neg"}}, art)
+                         "objective": "hard-neg", "order": "pool-then-select"}}, art)
 
     apply, meta = _load_encoder(str(art))
     assert meta["dict_dim"] == dict_dim
@@ -60,7 +62,8 @@ def test_load_encoder_mean_pools_multi_chunk_groups(tmp_path):
     enc = nn.Linear(in_dim, dict_dim)
     art = tmp_path / "enc.pt"
     torch.save({"state_dict": enc.state_dict(),
-                "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k}}, art)
+                "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k,
+                         "order": "pool-then-select"}}, art)
     apply, _ = _load_encoder(str(art))
     rng = np.random.RandomState(1)
     multi = rng.randn(3, in_dim).astype(np.float32)
@@ -77,7 +80,8 @@ def test_load_encoder_zero_row_is_safe(tmp_path):
     enc = nn.Linear(4, 16)
     art = tmp_path / "enc.pt"
     torch.save({"state_dict": enc.state_dict(),
-                "meta": {"in_dim": 4, "dict_dim": 16, "top_k": 3, "objective": "cosine-lin"}}, art)
+                "meta": {"in_dim": 4, "dict_dim": 16, "top_k": 3, "objective": "cosine-lin",
+                         "order": "pool-then-select"}}, art)
     apply, _ = _load_encoder(str(art))
     codes = apply([np.zeros((1, 4), dtype=np.float32)])  # zero embedding must not div-by-zero
     assert codes.shape == (1, 16) and np.isfinite(codes).all()
@@ -96,7 +100,8 @@ def _save_attn_artifact(path, in_dim, dict_dim, att_dim, heads, top_k, cap_chunk
     torch.save({"state_dict": sd,
                 "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k,
                          "att_dim": att_dim, "heads": heads, "cap_chunks": cap_chunks,
-                         "pooling": "attention", "objective": "hard-neg"}}, path)
+                         "pooling": "attention", "objective": "hard-neg",
+                         "order": "pool-then-select"}}, path)
 
 
 def test_attention_apply_produces_topk_real_code(tmp_path):
@@ -122,3 +127,54 @@ def test_attention_apply_truncates_to_cap(tmp_path):
     long_group = rng.randn(10, in_dim).astype(np.float32)  # > cap chunks
     codes = apply([long_group])
     assert codes.shape == (1, dict_dim) and np.isfinite(codes).all()
+
+
+# --------------------------------------------------------------------------- the order
+
+# The distinction cannot be recovered from the weights: both orders produce the same tensor
+# shapes and declare the same in_dim and dict_dim. An artifact fitted for per-residue
+# selection runs happily through this path and yields a complete code computed the wrong
+# way, sharing 12 of 128 atoms with the intended one at cosine 0.08. encode_residue_sparse
+# refuses this order by name; this refuses that one, so neither is the special case.
+
+
+def test_this_operation_pools_before_selecting():
+    assert IMPLEMENTED_ORDER == "pool-then-select"
+
+
+def test_an_artifact_that_does_not_declare_its_order_is_refused():
+    """Silence is not allowed to mean this one, which is the whole point of the field."""
+    with pytest.raises(ValueError, match="declares no order"):
+        refuse_wrong_order({"in_dim": 8, "dict_dim": 32}, "e.pt")
+
+
+def test_the_other_order_is_refused_and_the_message_says_where_it_belongs():
+    with pytest.raises(ValueError, match="encode_residue_sparse"):
+        refuse_wrong_order({"order": "select-then-pool"}, "e.pt")
+
+
+def test_an_unknown_order_is_refused_rather_than_guessed():
+    with pytest.raises(ValueError, match="not one of"):
+        refuse_wrong_order({"order": "whichever"}, "e.pt")
+
+
+def test_the_implemented_order_passes():
+    refuse_wrong_order({"order": IMPLEMENTED_ORDER}, "e.pt")
+
+
+def test_a_select_then_pool_artifact_cannot_be_loaded_here(tmp_path):
+    """Through the loader, not only through the helper.
+
+    A test on the helper alone passes while the loader never calls it, which is the failure
+    mode of a suite that inspects rather than executes.
+    """
+    import torch
+    import torch.nn as nn
+
+    art = tmp_path / "wrong-order.pt"
+    torch.save({"state_dict": nn.Linear(8, 32).state_dict(),
+                "meta": {"in_dim": 8, "dict_dim": 32, "top_k": 5,
+                         "order": "select-then-pool"}}, art)
+
+    with pytest.raises(ValueError, match="encode_residue_sparse"):
+        _load_encoder(str(art))
