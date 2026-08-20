@@ -142,6 +142,7 @@ class EncodeResidueSparsePayload(ProteaPayload, frozen=True):
     target_model_name: str = "residue-sparse"
     device: str = "cuda"
     batch_size: PositiveInt = 32
+    residue_budget: PositiveInt = 4096
     sequences_per_job: PositiveInt = 512
     sequence_id_limit: int | None = None
     skip_existing: bool = True
@@ -191,6 +192,7 @@ class EncodeResidueSparseBatchPayload(ProteaPayload, frozen=True):
     encoder_artifact_uri: str | None = None
     device: str = "cuda"
     batch_size: PositiveInt = 32
+    residue_budget: PositiveInt = 4096
 
 
 def refuse_backend_without_residues(backend: Any, model_backend: str) -> None:
@@ -492,6 +494,7 @@ class _Run:
     target_id: uuid.UUID
     scale: float
     batch_size: int
+    residue_budget: int
 
 
 def _encode_batch(run: _Run, batch: list[tuple[int, str]], emit: EmitFn) -> tuple[list[dict], dict]:
@@ -700,6 +703,7 @@ class EncodeResidueSparseBatchOperation(Operation):
             target_id=target_id,
             scale=fetch_embedding_scale(session, target_id),
             batch_size=p.batch_size,
+            residue_budget=p.residue_budget,
         )
         return self._encode(session, run, pending, emit)
 

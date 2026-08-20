@@ -14,6 +14,7 @@ from protea.core.operations._encode_residue_sparse_batch import (
     _is_out_of_memory,
     _starting_size,
     encode_until_done,
+    take_batch,
 )
 
 
@@ -174,3 +175,68 @@ def test_the_second_message_does_not_descend_again(monkeypatch):
 
     assert first == [4, 2, 2], "the first message finds the size the hard way"
     assert tried == [2, 2], "the second starts at what worked and never faults"
+
+
+# ------------------------------------------------------- residues, not sequence counts
+
+# Nothing truncates: a 35,991-residue protein enters the model whole. So eight long
+# proteins are thousands of times the work of eight short ones, and a count of sequences
+# is the wrong unit for what the card can hold. Measured on this corpus, the remaining
+# 477,407 proteins need 477,407 database round trips at one per batch and 48,705 at a
+# 4,000-residue budget.
+
+
+def _seqs(*lengths):
+    return [(i, "A" * n) for i, n in enumerate(lengths, start=1)]
+
+
+def test_short_sequences_are_grouped_up_to_the_budget():
+    batch = take_batch(_seqs(300, 300, 300, 300), 0, budget=1000, cap=32)
+
+    assert [i for i, _s in batch] == [1, 2, 3], "the fourth would exceed 1000 residues"
+
+
+def test_a_sequence_longer_than_the_whole_budget_goes_alone():
+    """Alone rather than skipped or split: splitting changes what is encoded and
+    skipping drops a protein silently."""
+    batch = take_batch(_seqs(9000, 100), 0, budget=1000, cap=32)
+
+    assert [i for i, _s in batch] == [1]
+
+
+def test_the_sequence_cap_still_applies_under_a_generous_budget():
+    batch = take_batch(_seqs(10, 10, 10, 10), 0, budget=1_000_000, cap=2)
+
+    assert len(batch) == 2
+
+
+def test_an_empty_tail_yields_an_empty_batch():
+    assert take_batch(_seqs(10, 10), 2, budget=1000, cap=8) == []
+
+
+def test_the_budget_halves_on_the_residues_carried_not_on_the_count(monkeypatch):
+    """The fault is about residues, so the retry has to be about residues too."""
+    seen = []
+
+    def fake_encode(_run, batch, _emit):
+        residues = sum(len(s) for _i, s in batch)
+        seen.append(residues)
+        if residues > 600:
+            raise RuntimeError("CUDA out of memory")
+        rows = [{"sequence_id": i} for i, _s in batch]
+        return rows, {"clipped": 0, "residues": residues, "densities": [0.0] * len(batch)}
+
+    import protea.core.operations.encode_residue_sparse as op
+
+    monkeypatch.setattr(op, "_encode_batch", fake_encode)
+
+    class _R:
+        batch_size = 32
+        residue_budget = 2400
+
+    encode_until_done(_Session(), _R(), _seqs(*([300] * 8)), _emit([]))
+
+    assert seen[0] == 2400, "starts at the declared budget"
+    assert seen[1] == 1200, "halves the residues, not the sequence count"
+    assert seen[2] == 600, "and again, until it fits"
+    assert sum(1 for r in seen if r <= 600) * 600 >= 2400 - 600
