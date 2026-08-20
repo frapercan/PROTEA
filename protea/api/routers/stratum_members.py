@@ -30,10 +30,53 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
+from protea.core.domain.aspect import Aspect
 from protea.core.operations._run_cafa_strata import neighbourhoods_for
 from protea.core.strata import stratum_for
 
 router = APIRouter(prefix="/stratum", tags=["strata"])
+
+#: Both spellings of an aspect, mapped to the wire code the band vocabulary
+#: takes. The CAFA form is first because it is the one every other surface
+#: in this product emits.
+_ASPECT_CODES: dict[str, str] = {
+    **{a.cafa: a.code for a in Aspect},
+    **{a.code: a.code for a in Aspect},
+}
+
+
+def _aspect_code(raw: str) -> str:
+    """Accept the code the caller was shown, not only the one the DB stores.
+
+    An aspect has two spellings in this system and they are not
+    interchangeable in code. ``Aspect.code`` is the single character in
+    ``go_term.aspect`` and in the OBO file. ``Aspect.cafa`` is the three
+    letters cafaeval writes, which the evaluation results JSON carries and
+    which every user-facing surface renders: the benchmark matrix, the
+    strata panel, the axis labels.
+
+    ``stratum_for`` takes the wire code. So opening a cell with the value
+    printed in that cell raised ``KeyError('BPO')``, and the caller got a
+    500 that named nothing. Anyone wiring a screen to this endpoint would
+    have hit it on the first click, because the value they hold is the one
+    the table displayed.
+
+    Both are accepted rather than one chosen. The CAFA form is what a
+    screen holds; the wire form is what the database column holds, and a
+    caller reading from there is not wrong either. What is refused is
+    refused as a 422 that names the vocabulary, because an unrecognised
+    aspect is a bad request and not a server fault.
+    """
+    code = _ASPECT_CODES.get(raw.strip().upper())
+    if code is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"aspect {raw!r} is not a GO aspect. Accepted: "
+                + ", ".join(sorted(_ASPECT_CODES))
+            ),
+        )
+    return code
 
 #: Sequence length per query, which the band needs and the neighbourhood
 #: does not carry.
@@ -64,7 +107,7 @@ class _Where:
 
 
 def _walk(
-    hoods: dict[str, Any], lengths: dict[str, int], at: _Where, limit: int
+    hoods: dict[str, Any], lengths: dict[str, int], at: _Where, aspect: str, limit: int
 ) -> tuple[list[dict[str, Any]], int]:
     """Place every query on the axes and keep the ones in this band.
 
@@ -78,7 +121,7 @@ def _walk(
         if residues is None:
             continue
         stratum = stratum_for(
-            category=at.category, aspect=at.aspect, residues=residues, neighbourhood=hood
+            category=at.category, aspect=aspect, residues=residues, neighbourhood=hood
         )
         if at.length is not None and str(stratum.length) != at.length:
             continue
@@ -111,9 +154,16 @@ def stratum_members(
 ) -> dict[str, Any]:
     """The proteins a stratum is made of, with what put each one there.
 
-    Every row carries its nearest donor and the identity to it, because
-    that is what the band IS: a reader who cannot see the donor cannot
-    check the band, and a band nobody can check is a label.
+    Every row carries the identity to its nearest donor and whether that
+    donor is experimental, because that is what the band IS: a reader who
+    cannot see what put a protein in a band cannot check the band, and a
+    band nobody can check is a label.
+
+    It does NOT yet carry WHICH donor. ``Neighbourhood`` resolves five
+    facts about the retrieved donors and the accession is not among them,
+    so naming it here would mean changing what retrieval returns. Until
+    then a reader can check the distance but not follow it, and this
+    docstring says so rather than implying otherwise.
     """
     with factory() as session:
         hoods = neighbourhoods_for(session, str(prediction_set_id))
@@ -132,7 +182,7 @@ def stratum_members(
             ).mappings()
         }
 
-    members, population = _walk(hoods, lengths, at, limit)
+    members, population = _walk(hoods, lengths, at, _aspect_code(at.aspect), limit)
 
     return {
         "prediction_set_id": str(prediction_set_id),
