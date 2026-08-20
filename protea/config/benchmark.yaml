@@ -8,12 +8,38 @@
 stages:
   # Preferred stage to select on initial page load. The first entry that
   # actually has data wins; otherwise falls back to the first stage seen.
-  # Baseline first so the landing view shows the widest coverage across PLMs.
+  # The board opens on the FIRST of these that has data, so this list is a
+  # claim about what a reader arriving with no opinion should be shown.
+  #
+  # It used to open on embedding_only, chosen when it was the widest-covered
+  # stage and the only alternative was a handful of others. Rung 1 has since
+  # measured all nine on one frame, and embedding_only is the second worst:
+  #
+  #     composite_no_embedding 0.2982   alignment_only        0.2854
+  #     composite              0.2978   embedding_plus_vote   0.2833
+  #     embedding_plus_align   0.2852   vote_fraction         0.2780
+  #     embedding_only         0.2497   evidence_veto         0.2189
+  #     knn (the None fallback) 0.2497
+  #
+  # composite leads because it is the method as configured, not because it
+  # won: composite_no_embedding is four ten-thousandths above it and opening
+  # on an ablation arm would make the board assert a result the campaign has
+  # not finished checking. The baseline stays reachable and stays named as
+  # the baseline; it just stops being the first thing anyone sees.
+  #
+  # knn is the None-scoring fallback and is arithmetically embedding_only,
+  # measured identical to four decimals across all 48 arms, so it sits
+  # beside it rather than anywhere its ordering would imply a difference.
   preferred_default:
-    - embedding_only
-    - vote_fraction
-    - embedding_plus_alignment
     - composite
+    - composite_no_embedding
+    - embedding_plus_alignment
+    - embedding_plus_vote
+    - alignment_only
+    - vote_fraction
+    - embedding_only
+    - knn
+    - evidence_veto
 
   # Scoring configs the frontend should highlight as the "reference / raw
   # embedding" baseline in the leaderboard. The name must match an entry in
