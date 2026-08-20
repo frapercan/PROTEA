@@ -64,11 +64,20 @@ _ARMS = text(
           -- left a 1,024-protein set that is indistinguishable from a
           -- finished one when you hold only the set.
           --
-          -- batches rather than status alone, because SUCCEEDED is the
-          -- job's verdict and the batch counts are its arithmetic, and a
-          -- gate wants both.
+          -- Progress rather than status alone, because SUCCEEDED is the
+          -- job's verdict and the counts are its arithmetic, written by
+          -- different code at different times.
+          --
+          -- The columns rather than the meta keys, and NOT NULL stated
+          -- explicitly. The first version of this compared
+          -- meta->>'batches_completed' against meta->>'expected_batches'
+          -- with IS NOT DISTINCT FROM, and one of the 258 predict jobs
+          -- carries neither key: two nulls are NOT DISTINCT, so that job
+          -- passed a gate that was meant to stop it. A gate whose failure
+          -- mode is silent success is not a gate.
           AND j.status::text = 'SUCCEEDED'
-          AND (j.meta ->> 'batches_completed') IS NOT DISTINCT FROM (j.meta ->> 'expected_batches')
+          AND j.progress_total IS NOT NULL
+          AND j.progress_current = j.progress_total
     LEFT JOIN evaluation_result er
            ON er.prediction_set_id = ps.id
     WHERE j.operation = 'predict_go_terms'

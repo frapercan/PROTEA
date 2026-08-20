@@ -161,14 +161,31 @@ class TestAnArmIsAFinishedRun:
         sql = str(_ARMS)
         assert "j.status::text = 'SUCCEEDED'" in sql
 
-    def test_the_query_requires_the_batches_to_agree(self):
-        # SUCCEEDED is the job's verdict; the batch counts are its
+    def test_the_query_requires_the_progress_to_agree(self):
+        # SUCCEEDED is the job's verdict; the progress counts are its
         # arithmetic. A gate wants both, because they are recorded by
         # different code at different times.
         from protea.api.routers.rungs import _ARMS
 
         sql = str(_ARMS)
-        assert "batches_completed" in sql and "expected_batches" in sql
+        assert "progress_current = j.progress_total" in sql
+
+    def test_the_gate_cannot_pass_on_missing_data(self):
+        # The first version compared two meta keys with IS NOT DISTINCT
+        # FROM, and one of the 258 predict jobs carries neither. Two nulls
+        # are NOT DISTINCT, so that job passed a gate meant to stop it.
+        # A gate whose failure mode is silent success is not a gate.
+        from protea.api.routers.rungs import _ARMS
+
+        sql = str(_ARMS)
+        assert "progress_total IS NOT NULL" in sql
+        # The defect, not the phrase: the phrase survives in the comment
+        # that explains why it was removed, which is where it belongs.
+        executable = "\n".join(
+            line for line in sql.splitlines() if not line.strip().startswith("--")
+        )
+        assert "IS NOT DISTINCT FROM" not in executable
+        assert "batches_completed" not in executable
 
     def test_the_gate_sits_on_the_join_not_the_where(self):
         # It has to be a join condition. Moved into WHERE it would drop the
