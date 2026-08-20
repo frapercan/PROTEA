@@ -10220,6 +10220,141 @@
         ]
       }
     },
+    "/v1/strata/compare/{evaluation_set_id}": {
+      "get": {
+        "description": "Compare every arm of a rung inside one stratum.\n\nThe existing endpoint answers \"how did this arm do across strata\". This\nanswers the transpose, \"who wins inside this stratum\", which is the\nquestion a reader has once they know the strata differ more than the\narms do. In rung 1 the twilight band scores 0.0535 against 0.1978 for\nthe close band, a factor of nearly four, while the whole spread across\neight backbones is 0.022.\n\nCoordinates left unset are not filtered, so omitting all of them\nreturns every cell of every arm; a caller wanting a table pins the\naxes it is not comparing along.",
+        "operationId": "compare_strata_v1_strata_compare__evaluation_set_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Evaluation Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Knowledge category to read: NK, LK or PK. One at a time, because the three are different populations and a table mixing them is not comparable down a column.",
+            "in": "query",
+            "name": "setting",
+            "required": false,
+            "schema": {
+              "default": "NK",
+              "description": "Knowledge category to read: NK, LK or PK. One at a time, because the three are different populations and a table mixing them is not comparable down a column.",
+              "title": "Setting",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stratum coordinate on the category axis.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Stratum coordinate on the category axis.",
+              "title": "Category"
+            }
+          },
+          {
+            "description": "Stratum coordinate on the aspect axis.",
+            "in": "query",
+            "name": "aspect",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Stratum coordinate on the aspect axis.",
+              "title": "Aspect"
+            }
+          },
+          {
+            "description": "Stratum coordinate on the length axis.",
+            "in": "query",
+            "name": "length",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Stratum coordinate on the length axis.",
+              "title": "Length"
+            }
+          },
+          {
+            "description": "Stratum coordinate on the homology axis.",
+            "in": "query",
+            "name": "homology",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Stratum coordinate on the homology axis.",
+              "title": "Homology"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Compare Strata V1 Strata Compare  Evaluation Set Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "One stratum across every arm of an evaluation set",
+        "tags": [
+          "strata"
+        ]
+      }
+    },
     "/v1/strata/{evaluation_result_id}": {
       "get": {
         "description": "Return the cells per knowledge setting, plus which axes were crossed.\n\n404 when no setting has been stratified, because an empty body and a run\nnobody stratified would otherwise look the same.",
