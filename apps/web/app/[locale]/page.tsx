@@ -3,6 +3,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { NineCellGrid } from "@/components/book/NineCellGrid";
 import { ReceiptFootnote } from "@/components/book/ReceiptFootnote";
 import { CHAPTER_ZERO, HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
+import { currentRung, frameLabel, getRungs } from "@/lib/rungs";
 
 /**
  * The front door is the argument, not a dashboard.
@@ -19,7 +20,19 @@ export default async function ArgumentPage() {
   const t = await getTranslations("book");
   const locale = await getLocale();
 
-  const frameCaption = `${HEADLINE.metric} · ${HEADLINE.frame} · validation ${HEADLINE.validation}`;
+  // The frame comes from the campaign, not from a constant. book.ts carried
+  // this as a literal and it had drifted to a six-month window for a
+  // two-year one, because nothing compared it to the database. Falling back
+  // to the constant on a fetch failure would restore the drift silently, so
+  // the caption drops the frame instead and the reader sees one fewer claim
+  // rather than a wrong one.
+  const rungs = await getRungs()
+    .then((r) => r.rungs)
+    .catch(() => []);
+  const frame = frameLabel(currentRung(rungs));
+  const frameCaption = [HEADLINE.metric, frame, `validation ${HEADLINE.validation}`]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="mx-auto max-w-3xl px-1 pb-16">

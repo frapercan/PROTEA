@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   currentRung,
   defaultEvalSet,
+  frameLabel,
   progressLabel,
   rungProgress,
   type Rung,
@@ -23,6 +24,7 @@ function rung(over: Partial<Rung> = {}): Rung {
     failed: 0,
     evaluated: 32,
     evaluation_set_ids: ["es-1"],
+    window_dates: { from: "2024-04-16", to: "2026-03-04" },
     best: null,
     started_at: "2026-08-19T00:00:00Z",
     ...over,
@@ -91,5 +93,25 @@ describe("progressLabel", () => {
       .toBe("48 arms computed, 32 scored");
     expect(progressLabel({ computed: 40, scored: 32, total: 48, live: true }))
       .toBe("40 of 48 arms computed, 32 scored");
+  });
+});
+
+describe("frameLabel", () => {
+  it("prints the window as dates, never as releases", () => {
+    // The campaign's naming discipline: a reader must be able to follow the
+    // argument without meeting a single identifier.
+    const label = frameLabel(rung());
+    expect(label).toBe("Apr 2024 to Mar 2026");
+    expect(label).not.toMatch(/220|230/);
+  });
+
+  it("is null rather than partial when a date is unrecorded", () => {
+    // "Apr 2024 to (unknown)" reads as an open-ended frame, which is a
+    // different claim from one endpoint being unrecorded.
+    expect(frameLabel(rung({ window_dates: null }))).toBeNull();
+  });
+
+  it("is null when there is no rung to describe", () => {
+    expect(frameLabel(null)).toBeNull();
   });
 });

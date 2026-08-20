@@ -8,11 +8,11 @@ actually varies.
 
 from __future__ import annotations
 
-from protea.api.routers.rungs import _arm_counts, _best, _question
+from protea.api.routers.rungs import _arm_counts, _arm_key, _best, _question
 
 
-def _arm(model: str, k: int, status: str) -> dict:
-    return {"model": model, "k": k, "status": status}
+def _arm(model: str, k: int, status: str, scorer: str | None = None) -> dict:
+    return {"model": model, "k": k, "status": status, "scorer": scorer}
 
 
 class TestArmCounts:
@@ -47,19 +47,50 @@ class TestArmCounts:
         assert counts["succeeded"] + counts["running"] + counts["failed"] == counts["arms"]
 
 
+class TestArmKey:
+    def test_two_scorers_over_one_run_are_two_arms(self):
+        # Rung 1's third axis re-scores prediction sets that already exist.
+        # Keyed on (model, K) alone, eight scorers collapse into one cell and
+        # the rung reports a grid an eighth of its real size.
+        a = _arm("ankh", 3, "SUCCEEDED", scorer="composite")
+        b = _arm("ankh", 3, "SUCCEEDED", scorer="vote_fraction")
+        assert _arm_key(a) != _arm_key(b)
+
+    def test_the_same_run_under_the_same_scorer_is_one_arm(self):
+        a = _arm("ankh", 3, "FAILED", scorer="composite")
+        b = _arm("ankh", 3, "SUCCEEDED", scorer="composite")
+        assert _arm_key(a) == _arm_key(b)
+        assert _arm_counts([a, b]) == {"arms": 1, "succeeded": 1, "running": 0, "failed": 0}
+
+    def test_no_scorer_is_its_own_arm_not_a_missing_one(self):
+        # The None fallback is a scorer: arithmetically embedding_only. An
+        # arm that ran under it is a real arm and must not merge with one
+        # that named a config.
+        assert _arm_key(_arm("ankh", 3, "SUCCEEDED")) != _arm_key(
+            _arm("ankh", 3, "SUCCEEDED", scorer="embedding_only")
+        )
+
+
 class TestQuestion:
-    def test_names_both_axes_when_both_vary(self):
-        q = _question({"a", "b"}, {1, 3, 30})
+    def test_names_every_axis_that_varies(self):
+        q = _question({"a", "b"}, {1, 3, 30}, {"x", "y"})
         assert "2 representations" in q
         assert "1 to 30" in q
+        assert "2 score weightings" in q
 
     def test_names_only_the_axis_that_varies(self):
-        assert "representations" not in _question({"a"}, {1, 3})
-        assert "neighbours" not in _question({"a", "b"}, {3})
+        assert "representations" not in _question({"a"}, {1, 3}, set())
+        assert "neighbours" not in _question({"a", "b"}, {3}, set())
+        assert "weightings" not in _question({"a", "b"}, {1, 3}, {"x"})
+
+    def test_the_scoring_axis_is_named_even_when_it_is_the_only_one(self):
+        # Rung 1's third axis re-scores one model at one K. The rung is
+        # still asking something and must say what.
+        assert "8 score weightings" in _question({"a"}, {3}, set("abcdefgh"))
 
     def test_says_so_when_nothing_varies(self):
         # "which of 1 representation" is not a question.
-        assert _question({"a"}, {3}) == "a single configuration, measured"
+        assert _question({"a"}, {3}, set()) == "a single configuration, measured"
 
 
 class TestBest:
