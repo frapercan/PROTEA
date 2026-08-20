@@ -10534,6 +10534,129 @@
         ]
       }
     },
+    "/v1/stratum/{prediction_set_id}/members": {
+      "get": {
+        "description": "The proteins a stratum is made of, with what put each one there.\n\nEvery row carries its nearest donor and the identity to it, because\nthat is what the band IS: a reader who cannot see the donor cannot\ncheck the band, and a band nobody can check is a label.",
+        "operationId": "stratum_members_v1_stratum__prediction_set_id__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prediction_set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Prediction Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Cap on rows returned.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "description": "Cap on rows returned.",
+              "maximum": 2000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Knowledge category, ASSERTED rather than verified. It is passed to the band computation because the stratum vocabulary takes it, and membership is not filtered on it: whether a query is NK in this aspect is an evaluation fact and not a retrieval one.",
+            "in": "query",
+            "name": "category",
+            "required": true,
+            "schema": {
+              "description": "Knowledge category, ASSERTED rather than verified. It is passed to the band computation because the stratum vocabulary takes it, and membership is not filtered on it: whether a query is NK in this aspect is an evaluation fact and not a retrieval one.",
+              "title": "Category",
+              "type": "string"
+            }
+          },
+          {
+            "description": "GO aspect, asserted on the same terms as category.",
+            "in": "query",
+            "name": "aspect",
+            "required": true,
+            "schema": {
+              "description": "GO aspect, asserted on the same terms as category.",
+              "title": "Aspect",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Length band, or unset for any.",
+            "in": "query",
+            "name": "length",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Length band, or unset for any.",
+              "title": "Length"
+            }
+          },
+          {
+            "description": "Identity band, or unset for any.",
+            "in": "query",
+            "name": "homology",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Identity band, or unset for any.",
+              "title": "Homology"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Stratum Members V1 Stratum  Prediction Set Id  Members Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Proteins in one stratum",
+        "tags": [
+          "strata"
+        ]
+      }
+    },
     "/v1/support": {
       "get": {
         "description": "Return total thumbs-up count and comments.\n\nPass ``all_comments=true`` to get all comments (up to the configured\npage limit) instead of the recent_limit most recent.",
