@@ -21,6 +21,8 @@ import {
 } from "@/lib/benchmarkHelpers";
 import { downloadCsv, rowsToCsv } from "@/lib/benchmarkCsv";
 import { MetricSelector, availableMetrics } from "@/components/MetricSelector";
+import { RungSpine } from "@/components/RungSpine";
+import { defaultEvalSet, getRungs, type Rung } from "@/lib/rungs";
 import { PRIMARY_METRIC, isUnweighted, metricValue } from "@/lib/metrics";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
 import {
@@ -127,13 +129,25 @@ export default function BenchmarkPage() {
     null,
   );
   const [matrix, setMatrix] = useState<BenchmarkMatrixResponse | null>(null);
+  // The campaign line. Also the source of the board's default view: it
+  // used to open on every evaluation set at once, which puts two
+  // temporal windows in one table and invites comparing down a column
+  // across windows without being told.
+  const [rungs, setRungs] = useState<Rung[]>([]);
   const [error, setError] = useState<string | null>(null);
   // URL-synced filters: copy the page link and the chips persist.
   const [stage, setStage] = useUrlParam("stage", null);
-  const [evalSetIdRaw, setEvalSetIdRaw] = useUrlParam("eval_set", "all");
-  const evalSetId = (evalSetIdRaw ?? "all") as string | "all";
-  const setEvalSetId = (v: string | "all") =>
-    setEvalSetIdRaw(v === "all" ? null : v);
+  // An absent param now means "whatever the current rung is", not "all".
+  // The two used to be the same value, so a reader arriving with no
+  // opinion got every evaluation set in one table: rows from a 226-to-227
+  // window sitting under rows from 220-to-230, comparable down a column
+  // only by accident. "all" is still reachable and now says so in the URL,
+  // which is the one place a deliberate choice should be recorded.
+  const [evalSetIdRaw, setEvalSetIdRaw] = useUrlParam("eval_set", null);
+  const evalSetId = (evalSetIdRaw ??
+    defaultEvalSet(rungs) ??
+    "all") as string | "all";
+  const setEvalSetId = (v: string | "all") => setEvalSetIdRaw(v);
   const [selectedK, setSelectedK] = useUrlNumber("k", null);
   // Lineage chip filter (URL-synced). Default "all" is encoded as the
   // missing param so a copied benchmark URL stays clean for the default
@@ -201,6 +215,14 @@ export default function BenchmarkPage() {
   // changes a chip; the global-champion banner stays correct either
   // way, and the user's URL ``/en/instrument/benchmark/?k=3`` (the slow path that
   // motivated this refactor) now resolves in one round-trip.
+  useEffect(() => {
+    // Failure here must not blank the board: the line is context, and a
+    // board with no context still answers the question it was asked.
+    getRungs()
+      .then((r) => setRungs(r.rungs))
+      .catch(() => setRungs([]));
+  }, []);
+
   useEffect(() => {
     setError(null);
     const urlPinned = {
@@ -455,6 +477,13 @@ export default function BenchmarkPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+      {/* The question before the answer. Above the header on purpose: a
+          reader landing on a matrix of numbers has no way to see which
+          campaign produced them or how far along it is. */}
+      <RungSpine
+        rungs={rungs}
+        activeEvalSetId={evalSetId === "all" ? null : evalSetId}
+      />
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>

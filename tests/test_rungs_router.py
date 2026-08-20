@@ -1,0 +1,112 @@
+"""The campaign as a line, tested where the decisions are.
+
+Three of them are easy to get wrong in ways that look right: counting
+jobs where a reader counts arms, reading a headline off the cell that
+flatters it, and letting the question a rung asks drift from what it
+actually varies.
+"""
+
+from __future__ import annotations
+
+from protea.api.routers.rungs import _arm_counts, _best, _question
+
+
+def _arm(model: str, k: int, status: str) -> dict:
+    return {"model": model, "k": k, "status": status}
+
+
+class TestArmCounts:
+    def test_counts_the_grid_not_the_jobs(self):
+        # A retried arm is one arm. Counting jobs made a 2-arm rung report
+        # 3 successes, which reads as a grid that grew rather than as a
+        # retry that worked.
+        arms = [
+            _arm("ankh", 3, "FAILED"),
+            _arm("ankh", 3, "SUCCEEDED"),
+            _arm("esm", 3, "SUCCEEDED"),
+        ]
+        assert _arm_counts(arms) == {
+            "arms": 2,
+            "succeeded": 2,
+            "running": 0,
+            "failed": 0,
+        }
+
+    def test_an_arm_is_running_until_something_succeeds(self):
+        arms = [_arm("ankh", 1, "FAILED"), _arm("ankh", 1, "RUNNING")]
+        counts = _arm_counts(arms)
+        assert counts == {"arms": 1, "succeeded": 0, "running": 1, "failed": 0}
+
+    def test_an_arm_all_of_whose_attempts_failed_is_failed(self):
+        arms = [_arm("ankh", 1, "FAILED"), _arm("ankh", 1, "FAILED")]
+        assert _arm_counts(arms)["failed"] == 1
+
+    def test_no_arm_is_counted_twice(self):
+        arms = [_arm("a", 1, "SUCCEEDED"), _arm("a", 1, "RUNNING")]
+        counts = _arm_counts(arms)
+        assert counts["succeeded"] + counts["running"] + counts["failed"] == counts["arms"]
+
+
+class TestQuestion:
+    def test_names_both_axes_when_both_vary(self):
+        q = _question({"a", "b"}, {1, 3, 30})
+        assert "2 representations" in q
+        assert "1 to 30" in q
+
+    def test_names_only_the_axis_that_varies(self):
+        assert "representations" not in _question({"a"}, {1, 3})
+        assert "neighbours" not in _question({"a", "b"}, {3})
+
+    def test_says_so_when_nothing_varies(self):
+        # "which of 1 representation" is not a question.
+        assert _question({"a"}, {3}) == "a single configuration, measured"
+
+
+class TestBest:
+    @staticmethod
+    def _row(model, k, values):
+        return {
+            "model": model,
+            "k": k,
+            "evaluation_result_id": f"{model}-{k}",
+            "results": {"NK": {a: {"f_micro_w": v} for a, v in values.items()}},
+        }
+
+    def test_averages_the_grid_rather_than_reading_one_cell(self):
+        # A rung's headline must not be the cell that happened to flatter
+        # it: one strong aspect can hide two weak ones.
+        rows = [
+            self._row("spiky", 3, {"MFO": 0.9, "BPO": 0.1, "CCO": 0.1}),
+            self._row("even", 3, {"MFO": 0.4, "BPO": 0.4, "CCO": 0.4}),
+        ]
+        assert _best(rows, "f_micro_w")["model"] == "even"
+
+    def test_reports_how_many_cells_it_averaged(self):
+        rows = [self._row("a", 3, {"MFO": 0.4, "BPO": 0.2})]
+        assert _best(rows, "f_micro_w")["cells"] == 2
+
+    def test_returns_none_when_nothing_carries_the_metric(self):
+        # Not zero, and not an arbitrary arm: a rung with no scored cell
+        # has no best, and saying otherwise would invent one.
+        rows = [{"model": "a", "k": 3, "evaluation_result_id": "x", "results": {}}]
+        assert _best(rows, "f_micro_w") is None
+
+    def test_skips_arms_missing_the_metric_rather_than_scoring_them_zero(self):
+        rows = [
+            self._row("scored", 3, {"MFO": 0.3}),
+            {"model": "unscored", "k": 3, "evaluation_result_id": "y", "results": {}},
+        ]
+        assert _best(rows, "f_micro_w")["model"] == "scored"
+
+    def test_ignores_a_non_numeric_cell(self):
+        rows = [
+            {
+                "model": "a",
+                "k": 3,
+                "evaluation_result_id": "z",
+                "results": {"NK": {"MFO": {"f_micro_w": None}, "BPO": {"f_micro_w": 0.5}}},
+            }
+        ]
+        best = _best(rows, "f_micro_w")
+        assert best["cells"] == 1
+        assert best["value"] == 0.5
