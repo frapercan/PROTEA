@@ -35,6 +35,7 @@ def _artifact(tmp_path, **overrides):
         "in_dim": 3,
         "layer_indices": [-1],
         "aggregate": "mean",
+        "order": "select-then-pool",
     }
     meta.update(overrides)
     path = tmp_path / "encoder.npz"
@@ -121,6 +122,7 @@ def test_an_artifact_that_does_not_declare_its_recipe_is_refused(tmp_path, missi
         "in_dim": 3,
         "layer_indices": [-1],
         "aggregate": "mean",
+        "order": "select-then-pool",
     }
     del meta[missing]
     path = tmp_path / "bad.npz"
@@ -255,3 +257,58 @@ def test_it_is_registered_so_it_can_be_dispatched():
     registry = build_operation_registry()
 
     assert registry.get("encode_residue_sparse").name == "encode_residue_sparse"
+
+
+# ---------------------------------------------------------------------------
+# The order the map was fitted for
+# ---------------------------------------------------------------------------
+#
+# Two pipelines produce a code from the same weights. select-then-pool maps
+# each residue, keeps k_residue atoms of each, aggregates, keeps k_sequence.
+# pool-then-select aggregates first and maps the result.
+#
+# Nothing about the weights distinguishes them. The map is affine, so
+# mean(X @ W + b) equals mean(X) @ W + b to within 7e-07, and an artifact
+# fitted either way has identical shapes and passes every check on them.
+# Served under the wrong order, a control arm produced a code sharing 130 of
+# 2048 atoms with the intended one at cosine 0.10. Not a degradation: a
+# different encoder.
+
+
+def test_an_artifact_that_does_not_declare_its_order_is_refused(tmp_path):
+    path = _artifact(tmp_path)
+    data = dict(np.load(path, allow_pickle=True))
+    del data["order"]
+    np.savez(path, **data)
+    with pytest.raises(ValueError, match="order"):
+        load_frozen_encoder(str(path))
+
+
+def test_an_unknown_order_is_refused_rather_than_guessed(tmp_path):
+    path = _artifact(tmp_path, order="whatever")
+    with pytest.raises(ValueError, match="cannot be recovered from the"):
+        load_frozen_encoder(str(path))
+
+
+def test_the_unimplemented_order_is_refused_rather_than_run_as_the_other(tmp_path):
+    # The dangerous case. Running it as select-then-pool would succeed,
+    # produce a complete code, and be wrong in a way nothing downstream
+    # could see.
+    path = _artifact(tmp_path, order="pool-then-select")
+    with pytest.raises(ValueError, match="does not implement"):
+        load_frozen_encoder(str(path))
+
+
+def test_the_declared_order_survives_into_the_recipe(tmp_path):
+    _, _, meta = load_frozen_encoder(str(_artifact(tmp_path)))
+    assert meta["order"] == "select-then-pool"
+
+
+def test_the_whole_dictionary_refusal_now_explains_the_hole(tmp_path):
+    # k_residue = dict_dim expresses pooling EXACTLY, since the map is
+    # affine. So the one value that would have made a pooled control work
+    # is the one value this check has always refused, and the order field
+    # is what closes that.
+    path = _artifact(tmp_path, k_residue=16)
+    with pytest.raises(ValueError, match="pool-then-select"):
+        load_frozen_encoder(str(path))

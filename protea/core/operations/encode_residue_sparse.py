@@ -77,7 +77,27 @@ REQUIRED_META = (
     "in_dim",
     "layer_indices",
     "aggregate",
+    "order",
 )
+
+#: Which of two pipelines the map was fitted for.
+#:
+#: ``select-then-pool`` applies the map per residue, keeps ``k_residue``
+#: atoms of each, aggregates, then keeps ``k_sequence``. It is what this
+#: operation implements and what every shipped recipe uses.
+#:
+#: ``pool-then-select`` aggregates the residues first and applies the map
+#: to the result. It is the natural control arm, and it is NOT implemented
+#: here: declaring it is refused with a message saying so, rather than
+#: executed as the other order.
+#:
+#: The distinction cannot be recovered from the weights. The map is affine,
+#: so mean(X @ W + b) equals mean(X) @ W + b to within 7e-07, and an
+#: artifact fitted either way has identical shapes and passes every check
+#: on them. Served under the wrong order it produced a code sharing 130 of
+#: 2048 atoms with the intended one, at cosine 0.10. Not a degradation, a
+#: different encoder.
+ORDERS = ("select-then-pool", "pool-then-select")
 
 #: How the per-residue codes become one code. ``mean`` is the first moment alone;
 #: ``moments`` concatenates the mean with the per-atom dispersion and therefore emits
@@ -139,10 +159,27 @@ def load_frozen_encoder(path: str) -> tuple[np.ndarray, np.ndarray, dict]:
             f"{list(AGGREGATES)}. The aggregate decides the code's width, so an "
             "unknown one cannot be guessed"
         )
+    order = str(meta["order"])
+    if order not in ORDERS:
+        raise ValueError(
+            f"{path} declares order {order!r}, which is not one of {list(ORDERS)}. "
+            "The order decides what the code IS, and it cannot be recovered from the "
+            "weights: an artifact fitted either way has identical shapes"
+        )
+    if order == "pool-then-select":
+        raise ValueError(
+            f"{path} declares order 'pool-then-select', which this operation does not "
+            "implement. Refused rather than run as 'select-then-pool', because the two "
+            "produce different codes from the same weights and the difference is "
+            "invisible in the output"
+        )
     if int(meta["k_residue"]) >= int(meta["dict_dim"]):
         raise ValueError(
             f"k_residue {meta['k_residue']} selects the whole {meta['dict_dim']}-atom "
-            "dictionary, which is not a sparse code"
+            "dictionary, which is not a sparse code. Note that under "
+            "'pool-then-select' this is exactly the right value, since the map is "
+            "affine and k_residue = dict_dim expresses pooling exactly; that is the "
+            "hole this check used to have, and the order field is what closes it"
         )
     return weight, bias, meta
 
