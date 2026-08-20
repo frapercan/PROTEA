@@ -27,6 +27,44 @@ from protea.core.operations.run_cafa_evaluation import (
     RunCafaEvaluationPayload,
 )
 
+
+def _gets(eval_set=None, pred_set=None, snapshot=None, config=None, scoring_cfg=None):
+    """A ``session.get`` keyed by model rather than by call order.
+
+    The positional form, ``side_effect=[eval_set, pred_set, snapshot]``,
+    breaks the moment the code under test reads one more row, whatever the
+    row is and wherever it is read. It broke here when the evaluation
+    started refusing an encoding whose training cut it could not certify,
+    which needs the config and the frame's two annotation sets.
+
+    Keyed on the model, the double answers what it is asked for and is
+    silent about order, so a new read is only a failure if the test cares
+    about it.
+    """
+
+    answers = {
+        "EvaluationSet": eval_set,
+        "PredictionSet": pred_set,
+        "OntologySnapshot": snapshot,
+        "EmbeddingConfig": config,
+        "ScoringConfig": scoring_cfg,
+        "AnnotationSet": None,
+    }
+
+    def get(model, pk):  # noqa: ANN001
+        # Matched by containment rather than by an exact __name__, because a
+        # test that patches a model class hands this a MagicMock whose
+        # __name__ is itself a MagicMock. Its repr still carries the patched
+        # target, so the name is recoverable from the text either way.
+        name = getattr(model, "__name__", None)
+        text = name if isinstance(name, str) else repr(model)
+        for key, value in answers.items():
+            if key in text:
+                return value
+        return None
+
+    return get
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -1351,7 +1389,7 @@ class TestExecuteErrors:
         session = MagicMock()
         eval_set = _make_eval_set()
         # First call returns eval_set, second returns None (pred_set missing)
-        session.get.side_effect = [eval_set, None]
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=None)
 
         with pytest.raises(ValueError, match="PredictionSet.*not found"):
             self.op.execute(
@@ -1370,7 +1408,9 @@ class TestExecuteErrors:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, snapshot]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         with pytest.raises(ValueError, match="No delta proteins"):
             self.op.execute(
@@ -1387,7 +1427,9 @@ class TestExecuteErrors:
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
         # get calls: eval_set, pred_set, ann_old, snapshot, scoring_config (None)
-        session.get.side_effect = [eval_set, pred_set, snapshot, None]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         with pytest.raises(ValueError, match="ScoringConfig.*not found"):
             self.op.execute(
@@ -1442,7 +1484,9 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, snapshot]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         # Mock the DB query for _write_predictions
         query = MagicMock()
@@ -1486,7 +1530,9 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, snapshot]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         query = MagicMock()
         session.query.return_value = query
@@ -1527,7 +1573,9 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, snapshot]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         query = MagicMock()
         session.query.return_value = query
@@ -1570,7 +1618,9 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, snapshot]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         query = MagicMock()
         session.query.return_value = query
@@ -1609,7 +1659,9 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot(ia_url=None)  # no ia_url
-        session.get.side_effect = [eval_set, pred_set, snapshot]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         query = MagicMock()
         session.query.return_value = query
@@ -1641,7 +1693,9 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot(ia_url="https://example.com/ia.tsv")
-        session.get.side_effect = [eval_set, pred_set, snapshot]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         query = MagicMock()
         session.query.return_value = query
@@ -1680,7 +1734,9 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot(ia_url="https://example.com/ia.tsv")
-        session.get.side_effect = [eval_set, pred_set, snapshot]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         query = MagicMock()
         session.query.return_value = query
@@ -1722,7 +1778,9 @@ class TestExecuteHappyPath:
         """
         mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
         session = MagicMock()
-        session.get.side_effect = [_make_eval_set(), _make_pred_set(), snapshot]
+        session.get.side_effect = _gets(
+            eval_set=_make_eval_set(), pred_set=_make_pred_set(), snapshot=snapshot
+        )
         query = MagicMock()
         session.query.return_value = query
         query.join.return_value = query
@@ -1810,7 +1868,9 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, snapshot]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         query = MagicMock()
         session.query.return_value = query
@@ -1851,7 +1911,9 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, snapshot]
+        session.get.side_effect = _gets(
+            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
+        )
 
         query = MagicMock()
         session.query.return_value = query
@@ -1900,7 +1962,12 @@ class TestExecuteHappyPath:
         scoring_cfg.formula = "linear"
         scoring_cfg.weights = {"embedding_similarity": 1.0}
         scoring_cfg.params = None
-        session.get.side_effect = [eval_set, pred_set, snapshot, scoring_cfg]
+        session.get.side_effect = _gets(
+            eval_set=eval_set,
+            pred_set=pred_set,
+            snapshot=snapshot,
+            scoring_cfg=scoring_cfg,
+        )
 
         query = MagicMock()
         session.query.return_value = query

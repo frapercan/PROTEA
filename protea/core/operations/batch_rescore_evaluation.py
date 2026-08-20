@@ -45,6 +45,10 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
+from protea.core.operations._evaluation_artifacts import (
+    resolve_ia_file,
+    resolve_obo,
+)
 from protea.core.operations._run_cafa_eval_driver import _run_cafaeval_for_setting
 from protea.core.operations.run_cafa_evaluation import (
     RunCafaEvaluationOperation,
@@ -336,8 +340,8 @@ class BatchRescoreEvaluationOperation:
         # verifies its sha256 (ADR-D47). Duplicating the download here is what
         # made a batch silently score against upstream bytes while the
         # equivalent single run scored against the archive.
-        obo_path = self._single._resolve_obo(str(tmpdir), inputs.snapshot, emit)
-        ia_path = self._single._resolve_ia_file(
+        obo_path = resolve_obo(str(tmpdir), inputs.snapshot, emit)
+        ia_path = resolve_ia_file(
             str(tmpdir), inputs.snapshot, base_payload.ia_file, emit,
             session, base_payload.information_accretion_set_id,
         )
