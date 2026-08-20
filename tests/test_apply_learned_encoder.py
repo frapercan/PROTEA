@@ -8,6 +8,7 @@ import pytest
 
 from protea.core.operations.apply_learned_encoder import (
     IMPLEMENTED_ORDER,
+    ApplyLearnedEncoderOperation,
     ApplyLearnedEncoderPayload,
     _load_encoder,
     refuse_wrong_order,
@@ -178,3 +179,46 @@ def test_a_select_then_pool_artifact_cannot_be_loaded_here(tmp_path):
 
     with pytest.raises(ValueError, match="encode_residue_sparse"):
         _load_encoder(str(art))
+
+
+# ------------------------------------------------------------ addressing the artifact
+
+# This operation runs inline rather than fanning out, so it runs wherever the operations
+# queue is consumed, which is not the machine an artifact fitted on the compute node was
+# written to. A local path cannot mean the same thing on both; the store address can.
+
+
+def test_a_uri_alone_is_accepted():
+    p = ApplyLearnedEncoderPayload(
+        source_embedding_config_id="cfg", encoder_artifact_uri="encoders/e.pt"
+    )
+
+    assert p.encoder_artifact_uri == "encoders/e.pt"
+    assert p.encoder_artifact_path is None
+
+
+def test_both_addresses_are_refused():
+    """Two addresses can disagree and nothing downstream could say which was meant."""
+    with pytest.raises(ValueError, match="exactly one"):
+        ApplyLearnedEncoderPayload(
+            source_embedding_config_id="cfg",
+            encoder_artifact_path="/tmp/e.pt",
+            encoder_artifact_uri="encoders/e.pt",
+        )
+
+
+def test_neither_address_is_refused():
+    with pytest.raises(ValueError, match="exactly one"):
+        ApplyLearnedEncoderPayload(source_embedding_config_id="cfg")
+
+
+def test_the_summary_names_the_artifact_whichever_address_carried_it():
+    """It used to read the path only, so a uri dispatch summarised as having none."""
+    op = ApplyLearnedEncoderOperation()
+
+    assert "e.pt" in op.summarize_payload(
+        {"source_embedding_config_id": "cfg", "encoder_artifact_uri": "encoders/e.pt"}
+    )
+    assert "e.pt" in op.summarize_payload(
+        {"source_embedding_config_id": "cfg", "encoder_artifact_path": "/tmp/e.pt"}
+    )
