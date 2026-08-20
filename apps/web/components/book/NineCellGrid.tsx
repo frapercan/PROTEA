@@ -18,7 +18,18 @@ import {
  *
  * A pure server component: no client JS, the reveal is CSS.
  */
-export function NineCellGrid({ frameCaption, italicLine }: { frameCaption: string; italicLine: string }) {
+export function NineCellGrid({
+  frameCaption,
+  italicLine,
+  campaignFrame,
+}: {
+  frameCaption: string;
+  italicLine: string;
+  /** The platform's own current window, read live, shown as a separate claim
+   *  from the board's. Null when the rungs surface could not be reached, in
+   *  which case the line is dropped rather than guessed. */
+  campaignFrame?: string | null;
+}) {
   return (
     <figure className="m-0">
       <div className="overflow-x-auto">
@@ -94,6 +105,28 @@ export function NineCellGrid({ frameCaption, italicLine }: { frameCaption: strin
       <figcaption className="mt-5 space-y-1.5 text-left">
         <p className="font-serif text-[15px] italic leading-snug text-[var(--muted)]">{italicLine}</p>
         <p className="protea-eyebrow text-[11px] uppercase text-[var(--subtle)]">{frameCaption}</p>
+        {/*
+          Where the words come from, said to the reader and not only to
+          whoever opens book.ts. Seven cells read "carried" and two read
+          "frontier", and without this line those are verdicts a reader has
+          no way to place: they cannot tell that the figures were withdrawn
+          rather than never taken, that the position is an external board's
+          and not this system's own measurement, or where to go to see
+          anything live.
+        */}
+        <p className="max-w-2xl text-[11px] leading-relaxed text-[var(--subtle)]">
+          Positions are from the sealed board, which is an external evaluation
+          of a submitted container and does not move. The figures behind them
+          are withdrawn while the campaign recomputes, so each cell names which
+          side of the frontier it is on and not by how much.
+          {campaignFrame ? (
+            <>
+              {" "}
+              The campaign itself runs a different window, {campaignFrame}, and
+              its arms are live on the benchmark surface.
+            </>
+          ) : null}
+        </p>
       </figcaption>
     </figure>
   );

@@ -23,6 +23,28 @@
 
 // The one metric, the one frame. Stamped on every evidence table.
 export const METRIC = "f_micro_w";
+/**
+ * The sealed board's own window, and a literal on purpose.
+ *
+ * This is LAFA's continuous benchmark window, the period the public board
+ * scored the submitted container over. It is six months, and the internal
+ * campaign's window is two years, and those are not the same claim about the
+ * same thing: one is an external board's evaluation period, the other is the
+ * temporal split this platform runs its own arms on.
+ *
+ * That distinction has been lost once already. The caption under the sealed
+ * board was switched from this constant to the live campaign frame, on the
+ * reasoning that a literal had drifted to six months for a two-year window
+ * and that a value read from the database cannot drift. The instinct is right
+ * in general and wrong for this pair: a number cannot have drifted from a
+ * number it was never a copy of, and the substitution captioned an external
+ * board with an internal window.
+ *
+ * It cannot be derived, either. The platform holds no evaluation result on
+ * the sealed window, so there is nothing in the database to read it from, and
+ * a frame that cannot be derived has to be written down and labelled as
+ * external rather than quietly replaced by one that can.
+ */
 export const FRAME = "Sep 2025 to Mar 2026";
 export const VALIDATION_FRAME = "the cut before the board's mark";
 

@@ -20,17 +20,25 @@ export default async function ArgumentPage() {
   const t = await getTranslations("book");
   const locale = await getLocale();
 
-  // The frame comes from the campaign, not from a constant. book.ts carried
-  // this as a literal and it had drifted to a six-month window for a
-  // two-year one, because nothing compared it to the database. Falling back
-  // to the constant on a fetch failure would restore the drift silently, so
-  // the caption drops the frame instead and the reader sees one fewer claim
-  // rather than a wrong one.
+  // Two windows, and the board gets its own.
+  //
+  // The sealed board is LAFA's evaluation of a submitted container over Sep
+  // 2025 to Mar 2026. The campaign is this platform's own temporal split,
+  // currently Apr 2024 to Mar 2026. This caption used to take the campaign's
+  // window, on the reasoning that the literal had drifted to six months for a
+  // two-year window and that a value read from the database cannot drift.
+  // A number cannot drift from a number it was never a copy of: the six
+  // months are the board's period and the two years are ours, so the
+  // substitution captioned an external board with an internal window.
+  //
+  // The campaign frame is still read live and still shown, one line down and
+  // labelled as the campaign, which is where a live number belongs and where
+  // it can be checked against the rung it comes from.
   const rungs = await getRungs()
     .then((r) => r.rungs)
     .catch(() => []);
-  const frame = frameLabel(currentRung(rungs));
-  const frameCaption = [HEADLINE.metric, frame, `validation ${HEADLINE.validation}`]
+  const campaignFrame = frameLabel(currentRung(rungs));
+  const frameCaption = [HEADLINE.metric, HEADLINE.frame, `validation ${HEADLINE.validation}`]
     .filter(Boolean)
     .join(" · ");
 
@@ -78,7 +86,11 @@ export default async function ArgumentPage() {
         <h2 id="board-heading" className="sr-only">
           {t("boardHeading")}
         </h2>
-        <NineCellGrid frameCaption={frameCaption} italicLine={t("nineCellItalic")} />
+        <NineCellGrid
+          frameCaption={frameCaption}
+          italicLine={t("nineCellItalic")}
+          campaignFrame={campaignFrame}
+        />
 
         <p className="mt-8 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
           {t.rich("headlineSentence", {
