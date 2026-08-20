@@ -18,10 +18,11 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { baseUrl } from "@/lib/api";
 import StrataChart from "@/components/StrataChart";
+import { StratumMembers } from "@/components/StratumMembers";
 import { CATEGORY_NAME, coverage } from "@/lib/strataView";
 import {
   axisLabel,
@@ -35,7 +36,14 @@ import {
   type StratumCell,
 } from "@/lib/strata";
 
-type Props = { evaluationResultId: string };
+type Props = {
+  evaluationResultId: string;
+  /** The set whose neighbourhood a cell is opened against. Optional because
+   *  not every caller has it; without it the panel reads as before and the
+   *  open control is not offered. */
+  predictionSetId?: string;
+  locale: string;
+};
 
 const TH = "px-2 py-1 text-left text-[11px] font-semibold text-slate-600";
 const TD = "px-2 py-1 text-[12px] tabular-nums";
@@ -44,12 +52,22 @@ function SettingTable({
   setting,
   cells,
   axes,
+  predictionSetId,
+  locale,
 }: {
   setting: string;
   cells: StratumCell[];
   axes: string[];
+  /** Absent on an evaluation whose row does not carry it; the open control
+   *  is then not offered rather than offered and broken. */
+  predictionSetId?: string;
+  locale: string;
 }) {
   const ordered = inReportOrder(cells, axes);
+  // One cell at a time. Opening recomputes the neighbourhood for every query
+  // in the prediction set, so a panel that let a reader open ten rows would
+  // fire ten of those.
+  const [open, setOpen] = useState<string | null>(null);
   const shaded = ordered.filter((c) => c.reportable);
   const cov = coverage(cells);
   return (
@@ -84,11 +102,12 @@ function SettingTable({
             </tr>
           </thead>
           <tbody>
-            {ordered.map((cell) => (
-              <tr
-                key={cellKey(cell, axes)}
-                className={cell.reportable ? "" : "opacity-60"}
-              >
+            {ordered.map((cell) => {
+              const key = cellKey(cell, axes);
+              const isOpen = open === key;
+              return (
+              <Fragment key={key}>
+              <tr className={cell.reportable ? "" : "opacity-60"}>
                 {axes.map((axis) => (
                   <td key={axis} className={`${TD} text-slate-700`}>
                     {axisLabel(axis, String(cell[axis] ?? ""))}
@@ -110,9 +129,39 @@ function SettingTable({
                       withheld
                     </span>
                   )}
+                  {predictionSetId ? (
+                    <button
+                      type="button"
+                      onClick={() => setOpen(isOpen ? null : key)}
+                      aria-expanded={isOpen}
+                      className="ml-1 rounded px-1.5 py-0.5 text-[10px] text-sky-700 hover:bg-sky-50 hover:underline"
+                    >
+                      {isOpen ? "close" : "open"}
+                    </button>
+                  ) : null}
                 </td>
               </tr>
-            ))}
+              {isOpen && predictionSetId ? (
+                <tr>
+                  <td colSpan={axes.length + 3} className="px-1 pb-2">
+                    <StratumMembers
+                      // Keyed on the cell: opening another one remounts
+                      // rather than reusing a panel still holding the
+                      // previous cell's proteins.
+                      key={key}
+                      predictionSetId={predictionSetId}
+                      category={setting}
+                      aspect={String(cell.aspect ?? "")}
+                      length={cell.length ? String(cell.length) : null}
+                      homology={cell.homology ? String(cell.homology) : null}
+                      locale={locale}
+                    />
+                  </td>
+                </tr>
+              ) : null}
+              </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </details>
@@ -120,7 +169,11 @@ function SettingTable({
   );
 }
 
-export default function StrataPanel({ evaluationResultId }: Props) {
+export default function StrataPanel({
+  evaluationResultId,
+  predictionSetId,
+  locale,
+}: Props) {
   const [data, setData] = useState<StrataResponse | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "absent" | "error">(
     "loading",
@@ -188,6 +241,8 @@ export default function StrataPanel({ evaluationResultId }: Props) {
           setting={setting}
           cells={cells}
           axes={data.axes}
+          predictionSetId={predictionSetId}
+          locale={locale}
         />
       ))}
     </section>
