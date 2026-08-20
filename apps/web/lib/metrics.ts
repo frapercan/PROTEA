@@ -18,6 +18,15 @@
 // Both axes are real and both are useful, which is why all four combinations
 // are kept and named rather than one being picked for the reader.
 
+/**
+ * The metric the surface leads with, matching the API's own choice.
+ *
+ * f_micro_w because it is the CAFA / LAFA headline and the only variant
+ * comparable to those leaderboards. Kept here so the front end and
+ * protea/api/metrics.py cannot drift into disagreeing about the default.
+ */
+export const PRIMARY_METRIC = "f_micro_w";
+
 export type Averaging = "macro" | "micro";
 export type Weighting = "plain" | "ia";
 
@@ -170,4 +179,33 @@ export function metricGroups(): { title: string; keys: string[] }[] {
     },
     { title: "coverage", keys: ["coverage_w", "coverage"] },
   ];
+}
+
+/**
+ * The value of one metric on a row, with the reason it may be absent.
+ *
+ * Absent is a real answer here: an evaluation run without an
+ * information-accretion set does not compute the weighted variants at all, so
+ * `f_micro_w` is missing rather than zero. Returning null keeps the surface
+ * able to say "not computed for this run" instead of drawing a zero that reads
+ * as a terrible score.
+ */
+export function metricValue(
+  row: Record<string, unknown>,
+  key: string,
+): number | null {
+  const raw = row[key];
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+/** Rank rows by a metric, putting rows that lack it last rather than at zero. */
+export function byMetricDesc(key: string) {
+  return (a: Record<string, unknown>, b: Record<string, unknown>): number => {
+    const av = metricValue(a, key);
+    const bv = metricValue(b, key);
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    return bv - av;
+  };
 }

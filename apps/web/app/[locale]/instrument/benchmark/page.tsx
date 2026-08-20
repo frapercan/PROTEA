@@ -20,6 +20,8 @@ import {
   stageLabel,
 } from "@/lib/benchmarkHelpers";
 import { downloadCsv, rowsToCsv } from "@/lib/benchmarkCsv";
+import { MetricSelector, availableMetrics } from "@/components/MetricSelector";
+import { PRIMARY_METRIC, isUnweighted, metricValue } from "@/lib/metrics";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
 import {
   bestPerCellFromRows,
@@ -36,7 +38,6 @@ import {
   type BenchmarkEmbedding,
   type BenchmarkEvalSet,
   type BenchmarkMatrixResponse,
-  type BenchmarkRow,
   type BenchmarkStage,
   type PerTaskAggregate,
 } from "@/lib/api";
@@ -65,36 +66,46 @@ const CATEGORY_TOOLTIPS: Record<string, string> = {
  *  on top of the data already in hand — no extra request. */
 type LineageChipKey = "all" | "nk_lk" | "pk_only" | "nk" | "lk";
 
-const LINEAGE_CHIPS: { key: LineageChipKey; label: string; cats: string[]; tooltip: string }[] = [
+const LINEAGE_CHIPS: {
+  key: LineageChipKey;
+  label: string;
+  cats: string[];
+  tooltip: string;
+}[] = [
   {
     key: "all",
     label: "All",
     cats: ["NK", "LK", "PK"],
-    tooltip: "Show every CAFA split (No / Limited / Partial Knowledge). Restores the full benchmark matrix.",
+    tooltip:
+      "Show every CAFA split (No / Limited / Partial Knowledge). Restores the full benchmark matrix.",
   },
   {
     key: "nk_lk",
     label: "NK + LK only",
     cats: ["NK", "LK"],
-    tooltip: "Selective-deploy window: the v27-binary reranker is published only on NK + LK splits (0.7291 ± 0.0028 multiseed pooled). Removes PK from the matrix.",
+    tooltip:
+      "Selective-deploy window: the v27-binary reranker is published only on NK + LK splits (0.7291 ± 0.0028 multiseed pooled). Removes PK from the matrix.",
   },
   {
     key: "pk_only",
     label: "PK only",
     cats: ["PK"],
-    tooltip: "Partial Knowledge in isolation. The reranker stays policy-zero here, so the matrix surfaces the KNN baseline that drives the selective-deploy decision.",
+    tooltip:
+      "Partial Knowledge in isolation. The reranker stays policy-zero here, so the matrix surfaces the KNN baseline that drives the selective-deploy decision.",
   },
   {
     key: "nk",
     label: "NK",
     cats: ["NK"],
-    tooltip: "No Knowledge in isolation — the strictest CAFA split where the test protein has zero experimental annotations at train cutoff.",
+    tooltip:
+      "No Knowledge in isolation — the strictest CAFA split where the test protein has zero experimental annotations at train cutoff.",
   },
   {
     key: "lk",
     label: "LK",
     cats: ["LK"],
-    tooltip: "Limited Knowledge in isolation — proteins annotated in other aspects but not the one under evaluation.",
+    tooltip:
+      "Limited Knowledge in isolation — proteins annotated in other aspects but not the one under evaluation.",
   },
 ];
 
@@ -112,14 +123,17 @@ export default function BenchmarkPage() {
   const params = useParams<{ locale: string }>();
   const locale = params?.locale ?? "en";
   const t = useTranslations("benchmark");
-  const [embeddings, setEmbeddings] = useState<BenchmarkEmbedding[] | null>(null);
+  const [embeddings, setEmbeddings] = useState<BenchmarkEmbedding[] | null>(
+    null,
+  );
   const [matrix, setMatrix] = useState<BenchmarkMatrixResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   // URL-synced filters: copy the page link and the chips persist.
   const [stage, setStage] = useUrlParam("stage", null);
   const [evalSetIdRaw, setEvalSetIdRaw] = useUrlParam("eval_set", "all");
   const evalSetId = (evalSetIdRaw ?? "all") as string | "all";
-  const setEvalSetId = (v: string | "all") => setEvalSetIdRaw(v === "all" ? null : v);
+  const setEvalSetId = (v: string | "all") =>
+    setEvalSetIdRaw(v === "all" ? null : v);
   const [selectedK, setSelectedK] = useUrlNumber("k", null);
   // Lineage chip filter (URL-synced). Default "all" is encoded as the
   // missing param so a copied benchmark URL stays clean for the default
@@ -128,13 +142,19 @@ export default function BenchmarkPage() {
   // the published reranker window; PK is policy-zero.
   const [lineageRaw, setLineageRaw] = useUrlParam("lineage", null);
   const lineage = (lineageRaw ?? "all") as LineageChipKey;
-  const setLineage = (v: LineageChipKey) => setLineageRaw(v === "all" ? null : v);
+  const setLineage = (v: LineageChipKey) =>
+    setLineageRaw(v === "all" ? null : v);
   // Reversible curation (slice F-METHOD-EVAL-SURFACE). The default view hides
   // diagnostic probe rows and legacy internal-frame rows superseded by a
   // current LAFA-frame result; "Show all" reveals everything. Encoded as the
   // missing param when off so a copied default URL stays clean. No data is
   // dropped: this is a pure presentation filter on rows already in hand.
   const [showAllRaw, setShowAllRaw] = useUrlParam("all", null);
+  // In the URL like every other filter: a link that renders under the
+  // recipient's own last selection is how two people end up arguing about
+  // different numbers while looking at "the same" page.
+  const [metricRaw, setMetric] = useUrlParam("metric", PRIMARY_METRIC);
+  const metric = metricRaw ?? PRIMARY_METRIC;
   const showAll = showAllRaw === "1";
   const setShowAll = (v: boolean) => setShowAllRaw(v ? "1" : null);
   // Default view: heatmap small-multiples (#81). The full numeric matrix is
@@ -188,8 +208,7 @@ export default function BenchmarkPage() {
       evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
       k: selectedK ?? undefined,
     };
-    const hasAnyPin =
-      stage != null || evalSetId !== "all" || selectedK != null;
+    const hasAnyPin = stage != null || evalSetId !== "all" || selectedK != null;
     Promise.all([
       getBenchmarkMatrix(hasAnyPin ? urlPinned : undefined),
       getBenchmarkEmbeddings(),
@@ -288,7 +307,11 @@ export default function BenchmarkPage() {
   const perTaskIndex = useMemo(() => {
     const out = new Map<string, PerTaskAggregate>();
     if (!matrix) return out;
-    for (const t of perTaskFromRows(curatedRows, matrix.categories, matrix.aspects)) {
+    for (const t of perTaskFromRows(
+      curatedRows,
+      matrix.categories,
+      matrix.aspects,
+    )) {
       out.set(`${t.category}|${t.aspect}`, t);
     }
     return out;
@@ -322,7 +345,9 @@ export default function BenchmarkPage() {
         aria-busy="true"
       >
         <div className="space-y-2">
-          <p className="text-sm font-semibold text-slate-700">{t("loadingTitle")}</p>
+          <p className="text-sm font-semibold text-slate-700">
+            {t("loadingTitle")}
+          </p>
           <p className="text-xs text-slate-500 max-w-2xl">{t("loadingHint")}</p>
         </div>
         <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -344,7 +369,9 @@ export default function BenchmarkPage() {
                 embeddingsReady ? "bg-emerald-500" : "bg-blue-400 animate-pulse"
               }`}
             />
-            <span className={embeddingsReady ? "text-slate-700" : "text-slate-500"}>
+            <span
+              className={embeddingsReady ? "text-slate-700" : "text-slate-500"}
+            >
               {t("loadingStepEmbeddings")}
             </span>
           </li>
@@ -380,16 +407,20 @@ export default function BenchmarkPage() {
   // implying the benchmark is empty.
   const curatedToEmpty = !hasData && matrix.rows.length > 0;
   const stageList = catalog.stages.length > 0 ? catalog.stages : matrix.stages;
-  const allEvalSetList = catalog.evalSets.length > 0 ? catalog.evalSets : matrix.evaluation_sets;
+  const allEvalSetList =
+    catalog.evalSets.length > 0 ? catalog.evalSets : matrix.evaluation_sets;
   // Hide eval sets that have no curated rows (probe / test-only sets) from the
   // selector in the default view; the currently selected set is always kept so
   // the dropdown never loses its own value. Reversible via "Show all".
   const curatedEsIds = evalSetIdsWithRows(curatedRows);
   const evalSetList = showAll
     ? allEvalSetList
-    : allEvalSetList.filter((es) => curatedEsIds.has(es.id) || es.id === evalSetId);
+    : allEvalSetList.filter(
+        (es) => curatedEsIds.has(es.id) || es.id === evalSetId,
+      );
   const hiddenEvalSetCount = allEvalSetList.length - evalSetList.length;
-  const allCategories = catalog.categories.length > 0 ? catalog.categories : matrix.categories;
+  const allCategories =
+    catalog.categories.length > 0 ? catalog.categories : matrix.categories;
   const aspects = catalog.aspects.length > 0 ? catalog.aspects : matrix.aspects;
   const currentStageLabel = stageLabel(stageList, stage);
 
@@ -399,7 +430,8 @@ export default function BenchmarkPage() {
   // category list so the page never goes blank: this happens, for
   // example, on a benchmark that has only NK rows when the user clicks
   // "PK only". A subtle banner explains the fallback.
-  const activeChip = LINEAGE_CHIPS.find((c) => c.key === lineage) ?? LINEAGE_CHIPS[0];
+  const activeChip =
+    LINEAGE_CHIPS.find((c) => c.key === lineage) ?? LINEAGE_CHIPS[0];
   const chipCats = new Set(activeChip.cats);
   const categories = allCategories.filter((c) => chipCats.has(c));
   const lineageHasNoMatch = categories.length === 0 && allCategories.length > 0;
@@ -408,13 +440,15 @@ export default function BenchmarkPage() {
   // category was filtered out. Identical to chipCats on the happy path,
   // but defaults to "all known" when the fallback fires above.
   const effectiveCatSet = new Set(effectiveCategories);
-  const filteredRows = curatedRows.filter((r) => effectiveCatSet.has(r.category));
+  const filteredRows = curatedRows.filter((r) =>
+    effectiveCatSet.has(r.category),
+  );
 
   // Active eval set banner: when "all" is selected and there's only one set,
   // show that one; when a specific one is selected, show its full metadata.
   const activeEvalSet =
     evalSetId !== "all"
-      ? evalSetList.find((e) => e.id === evalSetId) ?? null
+      ? (evalSetList.find((e) => e.id === evalSetId) ?? null)
       : evalSetList.length === 1
         ? evalSetList[0]
         : null;
@@ -424,12 +458,18 @@ export default function BenchmarkPage() {
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Benchmark matrix</h1>
+          <h1 className="text-2xl font-bold text-slate-900">
+            Benchmark matrix
+          </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Per-embedding IA-weighted <span className="font-mono">f_micro_w</span> (LAFA / CAFA
-            comparable) across categories and aspects for every evaluation run in the
-            database.{" "}
-            <Link href={`/${locale}/`} className="text-blue-600 hover:underline">
+            Per-embedding IA-weighted{" "}
+            <span className="font-mono">f_micro_w</span> (LAFA / CAFA
+            comparable) across categories and aspects for every evaluation run
+            in the database.{" "}
+            <Link
+              href={`/${locale}/`}
+              className="text-blue-600 hover:underline"
+            >
               {t("backToHome")}
             </Link>
           </p>
@@ -497,7 +537,7 @@ export default function BenchmarkPage() {
                 <strong>{curation.hiddenLegacy}</strong> legacy internal-frame
               </span>
             )}
-            {(curation.hiddenTotal > 0) && hiddenEvalSetCount > 0 && " · "}
+            {curation.hiddenTotal > 0 && hiddenEvalSetCount > 0 && " · "}
             {hiddenEvalSetCount > 0 && (
               <span>
                 <strong>{hiddenEvalSetCount}</strong> eval set
@@ -562,7 +602,11 @@ export default function BenchmarkPage() {
               {activeEvalSet.stats.nk_proteins != null && (
                 <span
                   className={effectiveCatSet.has("NK") ? "" : "opacity-40"}
-                  title={effectiveCatSet.has("NK") ? undefined : "Hidden by lineage chip"}
+                  title={
+                    effectiveCatSet.has("NK")
+                      ? undefined
+                      : "Hidden by lineage chip"
+                  }
                 >
                   <span className="text-blue-500">NK</span>{" "}
                   <span className="font-mono font-semibold">
@@ -573,7 +617,11 @@ export default function BenchmarkPage() {
               {activeEvalSet.stats.lk_proteins != null && (
                 <span
                   className={effectiveCatSet.has("LK") ? "" : "opacity-40"}
-                  title={effectiveCatSet.has("LK") ? undefined : "Hidden by lineage chip"}
+                  title={
+                    effectiveCatSet.has("LK")
+                      ? undefined
+                      : "Hidden by lineage chip"
+                  }
                 >
                   <span className="text-blue-500">LK</span>{" "}
                   <span className="font-mono font-semibold">
@@ -584,7 +632,11 @@ export default function BenchmarkPage() {
               {activeEvalSet.stats.pk_proteins != null && (
                 <span
                   className={effectiveCatSet.has("PK") ? "" : "opacity-40"}
-                  title={effectiveCatSet.has("PK") ? undefined : "Hidden by lineage chip"}
+                  title={
+                    effectiveCatSet.has("PK")
+                      ? undefined
+                      : "Hidden by lineage chip"
+                  }
                 >
                   <span className="text-blue-500">PK</span>{" "}
                   <span className="font-mono font-semibold">
@@ -595,7 +647,9 @@ export default function BenchmarkPage() {
               {activeEvalSet.new_obo_version && (
                 <span>
                   <span className="text-blue-500">OBO</span>{" "}
-                  <span className="font-mono">{activeEvalSet.new_obo_version}</span>
+                  <span className="font-mono">
+                    {activeEvalSet.new_obo_version}
+                  </span>
                 </span>
               )}
             </div>
@@ -609,7 +663,11 @@ export default function BenchmarkPage() {
           <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
             Pipeline stage
           </label>
-          <div role="group" aria-label="Pipeline stage" className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-0.5">
+          <div
+            role="group"
+            aria-label="Pipeline stage"
+            className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-0.5"
+          >
             {stageList.map((s) => (
               <button
                 key={s.name}
@@ -624,7 +682,9 @@ export default function BenchmarkPage() {
               >
                 {s.label}
                 {s.is_baseline && (
-                  <span className="ml-1 text-[9px] text-slate-600 uppercase">base</span>
+                  <span className="ml-1 text-[9px] text-slate-600 uppercase">
+                    base
+                  </span>
                 )}
               </button>
             ))}
@@ -636,7 +696,11 @@ export default function BenchmarkPage() {
             <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
               Neighbours (K)
             </label>
-            <div role="group" aria-label="Neighbours (K)" className="flex gap-1 rounded-lg bg-slate-100 p-0.5">
+            <div
+              role="group"
+              aria-label="Neighbours (K)"
+              className="flex gap-1 rounded-lg bg-slate-100 p-0.5"
+            >
               {catalog.ks.map((n) => (
                 <button
                   key={n}
@@ -729,10 +793,10 @@ export default function BenchmarkPage() {
           className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
           role="status"
         >
-          The <strong>{activeChip.label}</strong> chip would hide every row
-          in the current evaluation set (no matching {activeChip.cats.join(" / ")} cells exist).
-          Showing all categories instead — pick a chip with data, or
-          choose a different evaluation set above.
+          The <strong>{activeChip.label}</strong> chip would hide every row in
+          the current evaluation set (no matching {activeChip.cats.join(" / ")}{" "}
+          cells exist). Showing all categories instead — pick a chip with data,
+          or choose a different evaluation set above.
         </div>
       )}
 
@@ -744,7 +808,9 @@ export default function BenchmarkPage() {
         <section className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50/60 via-white to-cyan-50/40 shadow-sm p-4 sm:p-5">
           <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
             <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-              <span aria-hidden className="text-base">📈</span>
+              <span aria-hidden className="text-base">
+                📈
+              </span>
               Per-task headline
               <Tooltip text={FMICRO_TOOLTIP}>
                 <span className="ml-1 font-mono text-[11px] font-normal text-slate-600 underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
@@ -760,7 +826,10 @@ export default function BenchmarkPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr>
-                  <th scope="col" className="px-2 py-1 text-left font-medium text-slate-500"></th>
+                  <th
+                    scope="col"
+                    className="px-2 py-1 text-left font-medium text-slate-500"
+                  ></th>
                   {aspects.map((asp) => (
                     <th
                       key={asp}
@@ -775,7 +844,10 @@ export default function BenchmarkPage() {
               <tbody>
                 {effectiveCategories.map((cat) => (
                   <tr key={cat} className="border-t border-slate-200/60">
-                    <th scope="row" className="px-2 py-2.5 font-semibold text-slate-700 text-left">
+                    <th
+                      scope="row"
+                      className="px-2 py-2.5 font-semibold text-slate-700 text-left"
+                    >
                       {CATEGORY_TOOLTIPS[cat] ? (
                         <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
                           <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
@@ -790,7 +862,10 @@ export default function BenchmarkPage() {
                       const agg = perTaskIndex.get(`${cat}|${asp}`);
                       if (!agg) {
                         return (
-                          <td key={asp} className="px-2 py-2.5 text-center text-slate-300 border-l border-slate-200/60">
+                          <td
+                            key={asp}
+                            className="px-2 py-2.5 text-center text-slate-300 border-l border-slate-200/60"
+                          >
                             —
                           </td>
                         );
@@ -819,12 +894,25 @@ export default function BenchmarkPage() {
             </table>
           </div>
           <p className="mt-3 text-[11px] text-slate-500">
-            Headline = the calibrated mean across every model per task. The best-cell
-            tables below report the single top model per cell (a maximum), which runs
-            ~+0.02 to +0.03 above this mean and must not be read as the headline.
+            Headline = the calibrated mean across every model per task. The
+            best-cell tables below report the single top model per cell (a
+            maximum), which runs ~+0.02 to +0.03 above this mean and must not be
+            read as the headline.
           </p>
         </section>
       )}
+
+      <div className="mb-3">
+        {/* Every number below is this metric. Named once here rather than
+            repeated on each cell, but never left unstated. */}
+        <MetricSelector
+          value={metric}
+          onChange={(k) => setMetric(k === PRIMARY_METRIC ? null : k)}
+          available={availableMetrics(
+            curatedRows as unknown as Record<string, unknown>[],
+          )}
+        />
+      </div>
 
       {/* Global champions: best primary metric per (cat, asp) ignoring stage/K
           filters. Stable across filter changes — anchors the best-cell read. */}
@@ -832,10 +920,13 @@ export default function BenchmarkPage() {
         <section className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/60 via-white to-violet-50/40 shadow-sm p-4 sm:p-5">
           <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
             <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-              <span aria-hidden className="text-base">🏆</span>
+              <span aria-hidden className="text-base">
+                🏆
+              </span>
               Best cell per task
               <span className="ml-1 text-[11px] font-normal text-slate-500">
-                single top model per cell across every stage and K · best-cell maximum, not the headline
+                single top model per cell across every stage and K · best-cell
+                maximum, not the headline
               </span>
             </h2>
           </div>
@@ -843,7 +934,10 @@ export default function BenchmarkPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr>
-                  <th scope="col" className="px-2 py-1 text-left font-medium text-slate-500"></th>
+                  <th
+                    scope="col"
+                    className="px-2 py-1 text-left font-medium text-slate-500"
+                  ></th>
                   {aspects.map((asp) => (
                     <th
                       key={asp}
@@ -858,7 +952,10 @@ export default function BenchmarkPage() {
               <tbody>
                 {effectiveCategories.map((cat) => (
                   <tr key={cat} className="border-t border-slate-200/60">
-                    <th scope="row" className="px-2 py-2.5 font-semibold text-slate-700 text-left">
+                    <th
+                      scope="row"
+                      className="px-2 py-2.5 font-semibold text-slate-700 text-left"
+                    >
                       {CATEGORY_TOOLTIPS[cat] ? (
                         <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
                           <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
@@ -873,12 +970,17 @@ export default function BenchmarkPage() {
                       const best = bestPerCellGlobal.get(`${cat}|${asp}`);
                       if (!best) {
                         return (
-                          <td key={asp} className="px-2 py-2.5 text-center text-slate-300">
+                          <td
+                            key={asp}
+                            className="px-2 py-2.5 text-center text-slate-300"
+                          >
                             —
                           </td>
                         );
                       }
-                      const emb = embeddings.find((e) => e.id === best.embedding_config_id);
+                      const emb = embeddings.find(
+                        (e) => e.id === best.embedding_config_id,
+                      );
                       return (
                         <td
                           key={asp}
@@ -890,8 +992,11 @@ export default function BenchmarkPage() {
                             className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                           >
                             <div className="font-bold text-lg text-slate-900 group-hover:text-blue-700 tabular-nums leading-none flex items-center justify-center gap-1">
-                              {best.primary.toFixed(3)}
-                              {best.primary_metric === "fmax" && (
+                              {metricValue(
+                                best as unknown as Record<string, unknown>,
+                                metric,
+                              )?.toFixed(3) ?? "n/a"}
+                              {isUnweighted(metric) && (
                                 <Tooltip text={NOT_IA_TOOLTIP}>
                                   <span className="text-[8px] font-bold uppercase text-rose-600 cursor-help">
                                     fmax
@@ -945,7 +1050,10 @@ export default function BenchmarkPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr>
-                  <th scope="col" className="px-2 py-1 text-left font-medium text-slate-500"></th>
+                  <th
+                    scope="col"
+                    className="px-2 py-1 text-left font-medium text-slate-500"
+                  ></th>
                   {aspects.map((asp) => (
                     <th
                       key={asp}
@@ -960,7 +1068,10 @@ export default function BenchmarkPage() {
               <tbody>
                 {effectiveCategories.map((cat) => (
                   <tr key={cat} className="border-t">
-                    <th scope="row" className="px-2 py-2 font-semibold text-slate-700 text-left">
+                    <th
+                      scope="row"
+                      className="px-2 py-2 font-semibold text-slate-700 text-left"
+                    >
                       {CATEGORY_TOOLTIPS[cat] ? (
                         <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
                           <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
@@ -983,7 +1094,9 @@ export default function BenchmarkPage() {
                           </td>
                         );
                       }
-                      const emb = embeddings.find((e) => e.id === best.embedding_config_id);
+                      const emb = embeddings.find(
+                        (e) => e.id === best.embedding_config_id,
+                      );
                       return (
                         <td
                           key={asp}
@@ -995,8 +1108,11 @@ export default function BenchmarkPage() {
                             className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                           >
                             <div className="font-semibold text-slate-900 group-hover:text-blue-700 tabular-nums flex items-center justify-center gap-1">
-                              {best.primary.toFixed(3)}
-                              {best.primary_metric === "fmax" && (
+                              {metricValue(
+                                best as unknown as Record<string, unknown>,
+                                metric,
+                              )?.toFixed(3) ?? "n/a"}
+                              {isUnweighted(metric) && (
                                 <Tooltip text={NOT_IA_TOOLTIP}>
                                   <span className="text-[8px] font-bold uppercase text-rose-600 cursor-help">
                                     fmax
@@ -1025,7 +1141,11 @@ export default function BenchmarkPage() {
       {/* View toggle: Heatmap (default) | Table */}
       {hasData && (
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div role="tablist" aria-label="View mode" className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm">
+          <div
+            role="tablist"
+            aria-label="View mode"
+            className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm"
+          >
             {(["heatmap", "table"] as const).map((mode) => {
               const active = viewMode === mode;
               return (
@@ -1069,7 +1189,8 @@ export default function BenchmarkPage() {
               <p className="text-slate-500 text-sm">
                 Every result for{" "}
                 <span className="font-semibold">{currentStageLabel}</span> is a
-                probe or a legacy internal-frame run, hidden by the curated view.
+                probe or a legacy internal-frame run, hidden by the curated
+                view.
               </p>
               <button
                 type="button"
@@ -1086,8 +1207,8 @@ export default function BenchmarkPage() {
                 <span className="font-semibold">{currentStageLabel}</span> yet.
               </p>
               <p className="text-slate-600 text-xs mt-2">
-                Run <code>run_cafa_evaluation</code> for an embedding to populate
-                this cell of the matrix.
+                Run <code>run_cafa_evaluation</code> for an embedding to
+                populate this cell of the matrix.
               </p>
             </>
           )}
@@ -1168,7 +1289,10 @@ export default function BenchmarkPage() {
                         const row = rowIndex.get(cellKey(emb.id, cat, asp));
                         const best = bestPerCell.get(`${cat}|${asp}`);
                         const isWinner =
-                          row && best && row.evaluation_result_id === best.evaluation_result_id;
+                          row &&
+                          best &&
+                          row.evaluation_result_id ===
+                            best.evaluation_result_id;
                         const std = formatStd(row?.fmax_std ?? null);
                         const ciBand =
                           row && hasCiBand(row)
@@ -1193,12 +1317,17 @@ export default function BenchmarkPage() {
                               >
                                 <span
                                   className={`font-semibold group-hover:text-blue-700 ${
-                                    isWinner ? "text-green-700" : "text-slate-900"
+                                    isWinner
+                                      ? "text-green-700"
+                                      : "text-slate-900"
                                   }`}
                                 >
-                                  {row.primary.toFixed(3)}
+                                  {metricValue(
+                                    row as unknown as Record<string, unknown>,
+                                    metric,
+                                  )?.toFixed(3) ?? "n/a"}
                                 </span>
-                                {row.primary_metric === "fmax" && (
+                                {isUnweighted(metric) && (
                                   <span
                                     className="text-[8px] font-bold uppercase text-rose-600"
                                     title="Not IA-weighted (legacy Fmax)"
@@ -1217,7 +1346,8 @@ export default function BenchmarkPage() {
                             )}
                             {row && hasCiBand(row) && (
                               <span className="mt-0.5 block text-[9px] leading-none text-slate-400 tabular-nums">
-                                CI [{row.fmax_ci_low!.toFixed(3)}, {row.fmax_ci_high!.toFixed(3)}]
+                                CI [{row.fmax_ci_low!.toFixed(3)},{" "}
+                                {row.fmax_ci_high!.toFixed(3)}]
                               </span>
                             )}
                           </td>
@@ -1233,10 +1363,9 @@ export default function BenchmarkPage() {
       )}
 
       <p className="text-xs text-slate-600">
-        Display names and stage labels come from{" "}
-        <code>embedding_config</code> (DB) and{" "}
-        <code>protea/config/benchmark.yaml</code>. Edit the YAML to change
-        ordering, labels, or the baseline tag.
+        Display names and stage labels come from <code>embedding_config</code>{" "}
+        (DB) and <code>protea/config/benchmark.yaml</code>. Edit the YAML to
+        change ordering, labels, or the baseline tag.
       </p>
     </div>
   );

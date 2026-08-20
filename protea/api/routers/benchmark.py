@@ -165,11 +165,14 @@ def _make_leaderboard(
             "primary": entry["primary"],
             "primary_metric": entry["primary_metric"],
             "f_micro_w": entry.get("f_micro_w"),
+            "f_micro": entry.get("f_micro"),
+            "fmax_w": entry.get("fmax_w"),
+            "fmax": entry["fmax"],
             "precision_w": entry.get("precision_w"),
             "recall_w": entry.get("recall_w"),
-            "fmax": entry["fmax"],
             "precision": entry["precision"],
             "recall": entry["recall"],
+            "coverage_w": entry.get("coverage_w"),
             "coverage": entry["coverage"],
             "embedding_config_id": entry["embedding_config_id"],
             "k": entry["k"],
@@ -601,12 +604,20 @@ def _fold_evaluation_cells(
                 "aspect": asp,
                 "primary": round(primary, 4),
                 "primary_metric": primary_metric,
+                # Every stored metric travels, not just the headline. Two
+                # independent axes decide what a figure means: macro (fmax*)
+                # averages the per-protein score, micro (f_micro*) sums the
+                # confusion matrix first; the _w suffix is IA weighting. A
+                # reader given only one of them cannot tell which they hold.
                 "f_micro_w": _round(cell.get("f_micro_w")),
+                "f_micro": _round(cell.get("f_micro")),
+                "fmax_w": _round(cell.get("fmax_w")),
+                "fmax": round(float(cell["fmax"]), 4),
                 "precision_w": _round(cell.get("precision_w")),
                 "recall_w": _round(cell.get("recall_w")),
-                "fmax": round(float(cell["fmax"]), 4),
                 "precision": _round(cell.get("precision")),
                 "recall": _round(cell.get("recall")),
+                "coverage_w": _round(cell.get("coverage_w")),
                 "coverage": _round(cell.get("coverage")),
                 "n_proteins": cell.get("n_proteins"),
                 "evaluation_result_id": str(er.id),
