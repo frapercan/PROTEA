@@ -10,6 +10,8 @@
 // a reader comparing rows down a column was comparing 226-to-227 numbers
 // against 220-to-230 ones without being told.
 
+import { baseUrl } from "@/lib/api";
+
 export type Rung = {
   rung: string;
   window: string;
@@ -102,7 +104,19 @@ export function getRungs(): Promise<RungsResponse> {
   // Not cacheable: this is the surface a reader watches while a rung fills
   // in, and a stale line saying "0 scored" beside a board already showing
   // the scores is worse than a slower one.
-  return fetch("/api-proxy/rungs", { cache: "no-store" }).then((r) => {
+  // Through baseUrl() rather than a hardcoded public path. A server
+  // component's fetch runs in Node, where a relative URL cannot be resolved
+  // at all: it throws "Failed to parse URL from /api-proxy/rungs" before any
+  // request is made. baseUrl() already handles exactly this, substituting an
+  // internal absolute URL when there is no window, and its own comment
+  // describes this failure. This call was bypassing it.
+  //
+  // The consequence was invisible because the one server-side caller wraps
+  // this in a catch that drops the frame on failure. That catch was written
+  // for an occasional network error. The failure is total and structural, so
+  // a permanent absence read as an intermittent one, and the front page never
+  // once showed the campaign's window.
+  return fetch(`${baseUrl()}/rungs`, { cache: "no-store" }).then((r) => {
     if (!r.ok) throw new Error(`rungs: ${r.status}`);
     return r.json() as Promise<RungsResponse>;
   });
