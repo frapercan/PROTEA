@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -132,7 +132,14 @@ def _best(rows: list[dict[str, Any]], metric: str) -> dict[str, Any] | None:
 @router.get("")
 def list_rungs(
     factory: sessionmaker[Session] = Depends(get_session_factory),
-    metric: str = "f_micro_w",
+    metric: str = Query(
+        default="f_micro_w",
+        description=(
+            "Metric to rank each rung's arms by, averaged over every populated "
+            "cell of the arm. Defaults to the IA-weighted micro F, the one the "
+            "CAFA and LAFA leaderboards are quoted in."
+        ),
+    ),
 ) -> dict[str, Any]:
     """Every rung the record knows about, newest last."""
     with factory() as session:

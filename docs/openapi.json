@@ -9143,11 +9143,13 @@
         "operationId": "list_rungs_v1_rungs_get",
         "parameters": [
           {
+            "description": "Metric to rank each rung's arms by, averaged over every populated cell of the arm. Defaults to the IA-weighted micro F, the one the CAFA and LAFA leaderboards are quoted in.",
             "in": "query",
             "name": "metric",
             "required": false,
             "schema": {
               "default": "f_micro_w",
+              "description": "Metric to rank each rung's arms by, averaged over every populated cell of the arm. Defaults to the IA-weighted micro F, the one the CAFA and LAFA leaderboards are quoted in.",
               "title": "Metric",
               "type": "string"
             }
