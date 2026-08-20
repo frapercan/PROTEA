@@ -558,9 +558,17 @@ def _prefers(candidate: dict[str, Any], incumbent: dict[str, Any] | None) -> boo
     more often a cell is recomputed. After the 2026-08-18 recompute 140 cells
     held more than one generation, so this was not hypothetical.
 
-    The order is trust first, then recency. Two rows of the same generation and
-    the same instant keep the incumbent, so the result does not depend on the
-    order the database happened to return.
+    The order is trust first, then the prediction set's recency, then the
+    evaluation's own. That last step is not redundant: a cell can hold
+    several EVALUATIONS of one prediction set, and those share a prediction
+    set timestamp, so without it they tie and the winner is whichever order
+    the database happened to return. Rung 1 had three evaluations of one
+    ankh-base run, and the arbitrary winner was the oldest, written before
+    the IA-weighted metrics existed. Nine cells of the board carried no
+    primary metric as a result, with nothing on the surface saying so.
+
+    Rows tied on all three keep the incumbent, so the result still does not
+    depend on database order.
     """
     if incumbent is None:
         return True
@@ -571,6 +579,9 @@ def _prefers(candidate: dict[str, Any], incumbent: dict[str, Any] | None) -> boo
     cand_at, inc_at = candidate.get("_created_at"), incumbent.get("_created_at")
     if cand_at is not None and inc_at is not None and cand_at != inc_at:
         return cand_at > inc_at
+    cand_ev, inc_ev = candidate.get("_evaluated_at"), incumbent.get("_evaluated_at")
+    if cand_ev is not None and inc_ev is not None and cand_ev != inc_ev:
+        return cand_ev > inc_ev
     return False
 
 
@@ -628,6 +639,9 @@ def _cell_payload(
             "prediction_set_status": row.pred_status or None,
             "self_hit_rate": row.self_hit_rate,
             "_created_at": row.pred_created,
+            # The evaluation's own instant, distinct from the prediction
+            # set's: several evaluations can share one prediction set.
+            "_evaluated_at": er.created_at,
     }
 
 
