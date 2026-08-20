@@ -48,7 +48,6 @@ from typing import Annotated, Any
 import numpy as np
 from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import (
@@ -61,6 +60,7 @@ from protea.core.operations._compute_embeddings_helpers import (
     fetch_embedding_scale,
     scale_and_clip_embedding,
 )
+from protea.core.operations._encode_residue_sparse_batch import encode_until_done
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -738,25 +738,9 @@ class EncodeResidueSparseBatchOperation(Operation):
         residues rather than the corpus, and a long protein costs time and not
         headroom.
         """
-        encoded = clipped = residues_seen = 0
-        densities: list[float] = []
-
-        for start in range(0, len(pending), run.batch_size):
-            batch = pending[start : start + run.batch_size]
-            rows, stats = _encode_batch(run, batch, emit)
-            session.execute(pg_insert(SequenceEmbedding).on_conflict_do_nothing(), rows)
-            session.commit()
-            encoded += len(rows)
-            clipped += stats["clipped"]
-            residues_seen += stats["residues"]
-            densities.extend(stats["densities"])
-            emit(
-                "encode.progress",
-                f"{encoded}/{len(pending)} sequences",
-                {"encoded": encoded, "total": len(pending), "residues": residues_seen},
-                "info",
-            )
-
+        encoded, clipped, residues_seen, densities = encode_until_done(
+            session, run, pending, emit
+        )
         mean_density = float(np.mean(densities)) if densities else 0.0
         emit(
             "encode.done",
