@@ -48,6 +48,7 @@ from typing import Annotated, Any
 import numpy as np
 from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import (
@@ -616,6 +617,47 @@ class EncodeResidueSparseOperation(Operation):
         )
 
 
+def _drop_already_encoded(
+    session: Session,
+    target_id: uuid.UUID,
+    pending: list[tuple[int, str]],
+    emit: EmitFn,
+) -> list[tuple[int, str]]:
+    """Remove the sequences this batch has already written, so a retry can finish it.
+
+    The batch commits every ``batch_size`` sequences, which keeps peak memory at one
+    forward pass rather than the batch. That makes a failure halfway through leave a
+    committed prefix, and a retry that started from the beginning collided with its own
+    prefix on the very first insert. So the backoff was written for a transient fault
+    and the state it left made the fault permanent: five retries, five identical unique
+    violations, and a log naming the collision rather than the cause.
+
+    Skipping the prefix is not only about the constraint, which the idempotent insert
+    now absorbs anyway. It is about the forward pass: recomputing sixteen proteins on
+    the card to discard the result is the expensive half of the mistake.
+    """
+    if not pending:
+        return pending
+    done = {
+        int(i)
+        for (i,) in session.execute(
+            select(SequenceEmbedding.sequence_id).where(
+                SequenceEmbedding.embedding_config_id == target_id,
+                SequenceEmbedding.sequence_id.in_([i for i, _s in pending]),
+            )
+        )
+    }
+    if not done:
+        return pending
+    emit(
+        "encode.resuming",
+        f"{len(done)} of {len(pending)} sequences already have a code, resuming after them",
+        {"already_encoded": len(done), "batch": len(pending)},
+        "info",
+    )
+    return [(i, s) for i, s in pending if i not in done]
+
+
 class EncodeResidueSparseBatchOperation(Operation):
     """One batch of sequences, encoded where the card is.
 
@@ -662,6 +704,12 @@ class EncodeResidueSparseBatchOperation(Operation):
 
         backend = _resolve_backend(source.model_backend)
         refuse_backend_without_residues(backend, source.model_backend)
+        pending = _drop_already_encoded(session, target_id, pending, emit)
+        if not pending:
+            return OperationResult(
+                result={"encoded": 0, "embedding_config_id": str(target_id),
+                        "note": "every sequence in this batch already had a code"}
+            )
         model, tokenizer = _get_or_load_model(source, p.device, emit)
         run = _Run(
             backend=backend,
@@ -696,7 +744,7 @@ class EncodeResidueSparseBatchOperation(Operation):
         for start in range(0, len(pending), run.batch_size):
             batch = pending[start : start + run.batch_size]
             rows, stats = _encode_batch(run, batch, emit)
-            session.bulk_insert_mappings(SequenceEmbedding, rows)
+            session.execute(pg_insert(SequenceEmbedding).on_conflict_do_nothing(), rows)
             session.commit()
             encoded += len(rows)
             clipped += stats["clipped"]

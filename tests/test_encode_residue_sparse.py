@@ -11,6 +11,7 @@ about REFUSAL (that an artifact which does not declare its recipe cannot run).
 from __future__ import annotations
 
 import pathlib
+import uuid
 
 import numpy as np
 import pytest
@@ -23,6 +24,7 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparseOperation,
     EncodeResidueSparsePayload,
+    _drop_already_encoded,
     code_density,
     encode_one,
     load_frozen_encoder,
@@ -461,3 +463,66 @@ def test_a_uri_is_fetched_through_the_store_and_cached(monkeypatch, tmp_path):
 
     assert second == first
     assert calls == ["encoders/e.npz"], "a cached artifact must not be downloaded twice"
+
+
+# ------------------------------------------------------------------ resuming a batch
+
+# The batch commits every batch_size sequences, so a failure halfway leaves a committed
+# prefix. The retry used to start from the beginning and collide with that prefix on its
+# first insert: a backoff written for a transient fault, and the state it left made the
+# fault permanent. Five retries, five identical unique violations, and a log naming the
+# collision rather than the OOM that caused it.
+
+
+class _StubSession:
+    """Returns the ids it was told are already written, and records the query ran."""
+
+    def __init__(self, done):
+        self._done = done
+        self.queries = 0
+
+    def execute(self, _stmt):
+        self.queries += 1
+        return [(i,) for i in self._done]
+
+
+def _emitted(bucket):
+    def emit(event, message, fields, level):
+        bucket.append((event, fields))
+
+    return emit
+
+
+def test_a_batch_with_nothing_written_is_untouched():
+    events = []
+    pending = [(1, "AAA"), (2, "CCC")]
+
+    out = _drop_already_encoded(_StubSession([]), uuid.uuid4(), pending, _emitted(events))
+
+    assert out == pending
+    assert events == [], "nothing to resume, so nothing to say"
+
+
+def test_the_committed_prefix_is_dropped_and_announced():
+    events = []
+    pending = [(1, "AAA"), (2, "CCC"), (3, "GGG")]
+
+    out = _drop_already_encoded(_StubSession([1, 2]), uuid.uuid4(), pending, _emitted(events))
+
+    assert out == [(3, "GGG")]
+    assert events[0][0] == "encode.resuming"
+    assert events[0][1] == {"already_encoded": 2, "batch": 3}
+
+
+def test_a_fully_written_batch_leaves_nothing_to_do():
+    """The case that used to raise on the first insert instead of returning."""
+    out = _drop_already_encoded(_StubSession([1, 2]), uuid.uuid4(), [(1, "A"), (2, "C")], _emitted([]))
+
+    assert out == []
+
+
+def test_an_empty_batch_does_not_query():
+    s = _StubSession([9])
+
+    assert _drop_already_encoded(s, uuid.uuid4(), [], _emitted([])) == []
+    assert s.queries == 0
