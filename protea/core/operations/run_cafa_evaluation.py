@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
+from protea.core._evaluation_leakage import refuse_uncertifiable_encoding
 from protea.core.band_registry import (
     assert_band_consistency,
     assert_release_not_after_cutoff,
@@ -391,6 +392,7 @@ class RunCafaEvaluationOperation:
         pred_set = session.get(PredictionSet, pred_set_id)
         if pred_set is None:
             raise ValueError(f"PredictionSet {pred_set_id} not found")
+        refuse_uncertifiable_encoding(session, pred_set, eval_set)
 
         emit("run_cafa_evaluation.computing_delta", None, {}, "info")
         data, pivot_snapshot_id = load_evaluation_data_for_set(session, eval_set)
