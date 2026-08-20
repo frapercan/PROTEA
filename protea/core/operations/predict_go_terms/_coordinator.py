@@ -19,6 +19,7 @@ from protea.core.operations.predict_go_terms._common import (
     _RerankerBinding,
     _RerankerDispatch,
 )
+from protea.core.operations.predict_go_terms._receipt import run_receipt
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
@@ -174,7 +175,7 @@ class PredictGOTermsOperation:
             query_set_id=uuid.UUID(p.query_set_id) if p.query_set_id else None,
             limit_per_entry=p.limit_per_entry,
             distance_threshold=p.distance_threshold,
-            meta={},
+            meta=run_receipt(p, parent_job_id),
         )
         session.add(prediction_set)
         session.flush()
