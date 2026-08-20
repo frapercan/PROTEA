@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
+import { CampaignNow } from "@/components/book/CampaignNow";
 import { NineCellGrid } from "@/components/book/NineCellGrid";
 import { ReceiptFootnote } from "@/components/book/ReceiptFootnote";
 import { CHAPTER_ZERO, HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
@@ -125,6 +126,8 @@ export default async function ArgumentPage() {
           })}
         </p>
       </section>
+
+      <CampaignNow rungs={rungs} />
 
       {/* The four pillars, as chapters. */}
       <section aria-labelledby="chapters-heading" className="mt-16 border-t border-[var(--border)] pt-10">
