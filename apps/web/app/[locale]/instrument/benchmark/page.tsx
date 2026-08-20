@@ -22,6 +22,7 @@ import {
 import { downloadCsv, rowsToCsv } from "@/lib/benchmarkCsv";
 import { MetricSelector, availableMetrics } from "@/components/MetricSelector";
 import { RungSpine } from "@/components/RungSpine";
+import { StratumCompare } from "@/components/StratumCompare";
 import { defaultEvalSet, getRungs, type Rung } from "@/lib/rungs";
 import { PRIMARY_METRIC, isUnweighted, metricValue } from "@/lib/metrics";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
@@ -484,6 +485,15 @@ export default function BenchmarkPage() {
         rungs={rungs}
         activeEvalSetId={evalSetId === "all" ? null : evalSetId}
       />
+      {/* Directly under the campaign line and above the matrix, because the
+          matrix ranks arms over the whole population and that number is the
+          one for the band that needs least help. Measured on rung 1, the
+          spread across eight representations is 0.0848 with no close donor
+          and 0.0081 with one. Only shown for a single evaluation set: "all"
+          would compare arms across temporal windows. */}
+      {evalSetId !== "all" ? (
+        <StratumCompare evaluationSetId={evalSetId} k={selectedK} />
+      ) : null}
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
