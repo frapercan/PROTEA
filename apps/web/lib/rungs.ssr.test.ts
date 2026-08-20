@@ -99,3 +99,43 @@ describe("getRungs failure mode", () => {
     expect(out).toEqual([]);
   });
 });
+
+describe("a 200 with the wrong shape", () => {
+  function replyWith(body: unknown) {
+    const stub: typeof globalThis.fetch = async () =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    globalThis.fetch = vi.fn(stub);
+  }
+
+  it("rejects rather than resolving to something with no rungs", async () => {
+    // What the e2e mock actually returns for an unknown route. Resolving
+    // this gave the caller `undefined`, which threw one line later, outside
+    // the promise chain, where its catch could not see it.
+    replyWith([]);
+    await expect(getRungs()).rejects.toThrow(/no rungs array/);
+  });
+
+  it("rejects an object whose rungs is not an array", async () => {
+    replyWith({ rungs: "soon" });
+    await expect(getRungs()).rejects.toThrow(/no rungs array/);
+  });
+
+  it("accepts the real shape", async () => {
+    replyWith({ rungs: [], metric: "f_micro_w" });
+    await expect(getRungs()).resolves.toEqual({ rungs: [], metric: "f_micro_w" });
+  });
+
+  it("leaves the caller's catch able to do its job", async () => {
+    // The property the front page depends on: any failure, of any kind,
+    // ends as an empty list rather than as a blank page.
+    replyWith([]);
+    await expect(
+      getRungs()
+        .then((r) => r.rungs)
+        .catch(() => []),
+    ).resolves.toEqual([]);
+  });
+});

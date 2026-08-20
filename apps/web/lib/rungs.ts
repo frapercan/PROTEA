@@ -129,7 +129,24 @@ export async function getRungs(): Promise<RungsResponse> {
   // once showed the campaign's window.
   const res = await fetch(`${baseUrl()}/rungs`, { cache: "no-store" });
   if (!res.ok) throw new Error(`rungs: ${res.status}`);
-  return (await res.json()) as RungsResponse;
+  const body: unknown = await res.json();
+  // A 200 is not an answer. The e2e mock replies 200 with `[]` to every
+  // route it does not know, so `body.rungs` came back undefined, the cast
+  // asserted a shape that was not there, and the caller's next line,
+  // `currentRung(rungs)`, threw on `.length` OUTSIDE the promise chain.
+  // Its `.catch()` could not see it and the whole server render went with
+  // it: the front page lost every element and all four of its e2e tests.
+  //
+  // Rejecting here puts a wrong shape in the same channel as a wrong
+  // status, which is the channel the caller already handles.
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !Array.isArray((body as { rungs?: unknown }).rungs)
+  ) {
+    throw new Error("rungs: response has no rungs array");
+  }
+  return body as RungsResponse;
 }
 
 
