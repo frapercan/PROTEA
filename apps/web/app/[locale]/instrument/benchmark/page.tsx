@@ -230,10 +230,16 @@ export default function BenchmarkPage() {
       stage: stage ?? undefined,
       evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
       k: selectedK ?? undefined,
+      // With no stage pinned the server picks the preferred one and sends
+      // that alone. One evaluation set carries nine stages of 432 cells,
+      // so the unfiltered payload is 3 MB against 383 kB, and the client
+      // was discarding eight ninths of it to show one stage. The catalogue
+      // is unaffected, so every stage stays in the selector.
+      resolve_stage: stage == null,
     };
     const hasAnyPin = stage != null || evalSetId !== "all" || selectedK != null;
     Promise.all([
-      getBenchmarkMatrix(hasAnyPin ? urlPinned : undefined),
+      getBenchmarkMatrix(hasAnyPin ? urlPinned : { resolve_stage: true }),
       getBenchmarkEmbeddings(),
     ])
       .then(([m, e]) => {

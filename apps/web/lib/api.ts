@@ -1290,11 +1290,14 @@ export function getBenchmarkMatrix(params?: {
   evaluation_set_id?: string;
   stage?: string;
   k?: number;
+  /** Ask the server to pick the default stage instead of sending them all. */
+  resolve_stage?: boolean;
 }) {
   const qs = new URLSearchParams();
   if (params?.evaluation_set_id) qs.set("evaluation_set_id", params.evaluation_set_id);
   if (params?.stage) qs.set("stage", params.stage);
   if (params?.k !== undefined) qs.set("k", String(params.k));
+  if (params?.resolve_stage) qs.set("resolve_stage", "true");
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   // Cacheable: the benchmark matrix only changes when a new evaluation result
   // lands (rare, minutes-to-hours apart). A 60s revalidation window lets the

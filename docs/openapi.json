@@ -5214,6 +5214,18 @@
               "description": "If set, restrict rows to PredictionSets computed with this ``limit_per_entry`` (K). Typical values: 3, 5, 10.",
               "title": "K"
             }
+          },
+          {
+            "description": "When no stage is pinned, filter to the preferred default stage instead of returning every stage. The catalogue is unaffected, so the caller still learns which stages exist. Which one was chosen is echoed in filters.stage.",
+            "in": "query",
+            "name": "resolve_stage",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When no stage is pinned, filter to the preferred default stage instead of returning every stage. The catalogue is unaffected, so the caller still learns which stages exist. Which one was chosen is echoed in filters.stage.",
+              "title": "Resolve Stage",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
