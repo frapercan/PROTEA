@@ -165,11 +165,14 @@ def _make_leaderboard(
             "primary": entry["primary"],
             "primary_metric": entry["primary_metric"],
             "f_micro_w": entry.get("f_micro_w"),
+            "f_micro": entry.get("f_micro"),
+            "fmax_w": entry.get("fmax_w"),
+            "fmax": entry["fmax"],
             "precision_w": entry.get("precision_w"),
             "recall_w": entry.get("recall_w"),
-            "fmax": entry["fmax"],
             "precision": entry["precision"],
             "recall": entry["recall"],
+            "coverage_w": entry.get("coverage_w"),
             "coverage": entry["coverage"],
             "embedding_config_id": entry["embedding_config_id"],
             "k": entry["k"],
@@ -571,6 +574,63 @@ def _prefers(candidate: dict[str, Any], incumbent: dict[str, Any] | None) -> boo
     return False
 
 
+def _cell_payload(
+    er: EvaluationResult, row: _RowKey, cat: str, asp: str, cell: dict[str, Any]
+) -> dict[str, Any]:
+    """The matrix entry for one ``(category, aspect)`` cell.
+
+    Split out of :func:`_fold_evaluation_cells` because the literal is the
+    bulk of it. The fold is a walk over cells; this is the answer to "what
+    does one cell publish", which is a separate question and the one that
+    keeps growing.
+    """
+    primary, primary_metric = _primary_score(cell)
+    return {
+
+            "embedding_config_id": row.eid,
+            "evaluation_set_id": row.esid,
+            "stage": row.st,
+            "k": row.row_k,
+            "category": cat,
+            "aspect": asp,
+            "primary": round(primary, 4),
+            "primary_metric": primary_metric,
+            # Every stored metric travels, not just the headline. Two
+            # independent axes decide what a figure means: macro (fmax*)
+            # averages the per-protein score, micro (f_micro*) sums the
+            # confusion matrix first; the _w suffix is IA weighting. A
+            # reader given only one of them cannot tell which they hold.
+            "f_micro_w": _round(cell.get("f_micro_w")),
+            "f_micro": _round(cell.get("f_micro")),
+            "fmax_w": _round(cell.get("fmax_w")),
+            "fmax": round(float(cell["fmax"]), 4),
+            "precision_w": _round(cell.get("precision_w")),
+            "recall_w": _round(cell.get("recall_w")),
+            "precision": _round(cell.get("precision")),
+            "recall": _round(cell.get("recall")),
+            "coverage_w": _round(cell.get("coverage_w")),
+            "coverage": _round(cell.get("coverage")),
+            "n_proteins": cell.get("n_proteins"),
+            "evaluation_result_id": str(er.id),
+            # F-METHOD-EVAL-SURFACE: per-result provenance, read through
+            # so the matrix can badge frame / window / arms / leakage
+            # without a second request. ``None`` on legacy rows.
+            "frame": er.frame,
+            "temporal_window": er.temporal_window,
+            "arms_enabled": er.arms_enabled,
+            "leakage_role": er.leakage_role,
+            # R0.1 reproducible-frame provenance: the Job that produced
+            # this result. ``None`` flags an orphan artifact (the
+            # job_id=None archaeology trap) vs a job-backed, traceable run.
+            "job_id": str(er.job_id) if er.job_id else None,
+            # Which generation produced the cell. See _prefers.
+            "prediction_set_id": row.pred_set_id or None,
+            "prediction_set_status": row.pred_status or None,
+            "self_hit_rate": row.self_hit_rate,
+            "_created_at": row.pred_created,
+    }
+
+
 def _fold_evaluation_cells(
     er: EvaluationResult,
     row: _RowKey,
@@ -590,43 +650,8 @@ def _fold_evaluation_cells(
             cell = cat_data.get(asp) or {}
             if cell.get("fmax") is None:
                 continue
-            primary, primary_metric = _primary_score(cell)
             key: _BestKey = (row.eid, row.esid, row.st, row.row_k, cat, asp)
-            payload = {
-                "embedding_config_id": row.eid,
-                "evaluation_set_id": row.esid,
-                "stage": row.st,
-                "k": row.row_k,
-                "category": cat,
-                "aspect": asp,
-                "primary": round(primary, 4),
-                "primary_metric": primary_metric,
-                "f_micro_w": _round(cell.get("f_micro_w")),
-                "precision_w": _round(cell.get("precision_w")),
-                "recall_w": _round(cell.get("recall_w")),
-                "fmax": round(float(cell["fmax"]), 4),
-                "precision": _round(cell.get("precision")),
-                "recall": _round(cell.get("recall")),
-                "coverage": _round(cell.get("coverage")),
-                "n_proteins": cell.get("n_proteins"),
-                "evaluation_result_id": str(er.id),
-                # F-METHOD-EVAL-SURFACE: per-result provenance, read through
-                # so the matrix can badge frame / window / arms / leakage
-                # without a second request. ``None`` on legacy rows.
-                "frame": er.frame,
-                "temporal_window": er.temporal_window,
-                "arms_enabled": er.arms_enabled,
-                "leakage_role": er.leakage_role,
-                # R0.1 reproducible-frame provenance: the Job that produced
-                # this result. ``None`` flags an orphan artifact (the
-                # job_id=None archaeology trap) vs a job-backed, traceable run.
-                "job_id": str(er.job_id) if er.job_id else None,
-                # Which generation produced the cell. See _prefers.
-                "prediction_set_id": row.pred_set_id or None,
-                "prediction_set_status": row.pred_status or None,
-                "self_hit_rate": row.self_hit_rate,
-                "_created_at": row.pred_created,
-            }
+            payload = _cell_payload(er, row, cat, asp, cell)
             if _prefers(payload, best_global.get(key)):
                 best_global[key] = payload
             if passes_filter and _prefers(payload, best.get(key)):
