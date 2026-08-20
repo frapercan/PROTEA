@@ -73,10 +73,50 @@ export function cellKey(cell: StratumCell, axes: string[]): string {
 }
 
 /**
+ * The order a band's values mean, for the axes whose values are ordered.
+ *
+ * These read as text but stand for a quantity, and comparing them as text
+ * puts them in an order that has nothing to do with it. A table sorted
+ * that way rendered homology as twilight, near-identical, distant, close,
+ * and length as <=512, 1024-2048, 512-1024. Both are the axes the panel
+ * exists to show a gradient along, and the gradient was the thing the
+ * sort destroyed.
+ *
+ * Axes absent here have no natural order and keep the stable text sort.
+ */
+const AXIS_ORDER: Record<string, readonly string[]> = {
+  // Ascending sequence identity to the nearest annotated donor. "none"
+  // leads because it is the floor: no donor at all.
+  homology: ["none", "<=30", "30-60", "60-90", ">90"],
+  length: ["<=512", "512-1024", "1024-2048", ">2048"],
+  // Descending taxonomic proximity, same shape as homology.
+  taxonomy: ["none", "root-only", "distant", "intermediate", "close", "same"],
+  // Strongest evidence first: this is a quality order, not a scale.
+  donor_evidence: ["exp", "other", "none"],
+  // How much the protein already had, which is what the categories mean.
+  category: ["NK", "LK", "PK"],
+};
+
+/** Rank of a value on its axis; -1 for axes with no natural order. */
+export function axisRank(axis: string, value: string): number {
+  const order = AXIS_ORDER[axis];
+  if (!order) return -1;
+  const i = order.indexOf(value);
+  // An unrecognised value sorts after every known one rather than at the
+  // front, so a band added upstream is visible as an outlier instead of
+  // silently leading the table.
+  return i === -1 ? order.length : i;
+}
+
+/**
  * Cells in report order, withheld ones last.
  *
  * Sorted rather than filtered: the withheld ones stay visible and marked,
  * because their absence is itself a result about coverage.
+ *
+ * Within that, axes are compared in the order they were crossed, each by
+ * what its values mean where they mean something. Reading down a column
+ * then follows the gradient rather than an accident of spelling.
  */
 export function inReportOrder(
   cells: StratumCell[],
@@ -84,7 +124,16 @@ export function inReportOrder(
 ): StratumCell[] {
   return [...cells].sort((a, b) => {
     if (a.reportable !== b.reportable) return a.reportable ? -1 : 1;
-    return cellKey(a, axes).localeCompare(cellKey(b, axes));
+    for (const axis of axes) {
+      const av = String(a[axis] ?? "");
+      const bv = String(b[axis] ?? "");
+      if (av === bv) continue;
+      const ar = axisRank(axis, av);
+      const br = axisRank(axis, bv);
+      if (ar !== br) return ar - br;
+      return av.localeCompare(bv);
+    }
+    return 0;
   });
 }
 
