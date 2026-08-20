@@ -4,7 +4,17 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, Index, Integer, String, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -101,6 +111,26 @@ class EmbeddingConfig(Base):
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     family: Mapped[str | None] = mapped_column(String, nullable=True)
     param_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    #: The annotation release this encoding was FITTED against, for
+    #: encodings that were fitted at all.
+    #:
+    #: NULL means "not fitted", which is the honest state for a pretrained
+    #: backbone used as it ships: it saw no annotations of ours and has no
+    #: cut. It does NOT mean "unknown", and the distinction is the point.
+    #: An encoder that cannot say which release it saw can be certified
+    #: neither clean nor contaminated for any frame, which is worse than
+    #: being known dirty, because a known contamination can be excluded and
+    #: an unfalsifiable one cannot.
+    #:
+    #: The deployed sparse encoder is exactly that today: its artifact
+    #: declares pooling, dictionary size, top-k, input width and backbone,
+    #: and nothing about when it was fitted.
+    trained_on_annotation_set_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("annotation_set.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
