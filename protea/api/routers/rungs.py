@@ -84,6 +84,38 @@ _ARMS = text(
 )
 
 
+#: Publication dates of the releases a window names.
+#:
+#: The campaign's naming discipline forbids release numbers in published
+#: prose: "a reader must be able to follow the entire argument without
+#: meeting a single identifier". A window is stored as "220-230" and has to
+#: be rendered as dates, so the dates travel with it rather than being
+#: looked up by whoever is writing.
+_WINDOW_DATES = text(
+    """
+    SELECT source_version, source_published_at
+    FROM annotation_set
+    WHERE source_published_at IS NOT NULL
+    """
+)
+
+
+def _window_dates(window: str | None, published: dict[str, Any]) -> dict[str, Any] | None:
+    """The window's endpoints as dates, or None when either is unknown.
+
+    None rather than a partial range: "Apr 2024 to (unknown)" reads as a
+    frame with an open end, which is a different claim from one endpoint
+    being unrecorded.
+    """
+    if not window or "-" not in window:
+        return None
+    lo, hi = window.split("-", 1)
+    a, b = published.get(lo), published.get(hi)
+    if a is None or b is None:
+        return None
+    return {"from": a.date().isoformat(), "to": b.date().isoformat()}
+
+
 def _arm_key(row: dict[str, Any]) -> tuple[Any, ...]:
     """What makes two jobs the same arm.
 
@@ -184,6 +216,10 @@ def list_rungs(
     """Every rung the record knows about, newest last."""
     with factory() as session:
         rows = [dict(r) for r in session.execute(_ARMS).mappings().all()]
+        published = {
+            r["source_version"]: r["source_published_at"]
+            for r in session.execute(_WINDOW_DATES).mappings().all()
+        }
 
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
@@ -200,6 +236,7 @@ def list_rungs(
             {
                 "rung": rung,
                 "window": window,
+                "window_dates": _window_dates(window, published),
                 "question": _question(models, ks, scorers),
                 "models": sorted(models),
                 "ks": sorted(ks),

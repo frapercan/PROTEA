@@ -23,6 +23,9 @@ export type Rung = {
   failed: number;
   evaluated: number;
   evaluation_set_ids: string[];
+  /** Null when either endpoint's publication date is unrecorded. */
+  window_dates: { from: string; to: string } | null;
+  scorers?: string[];
   best: {
     model: string;
     k: number;
@@ -103,4 +106,28 @@ export function getRungs(): Promise<RungsResponse> {
     if (!r.ok) throw new Error(`rungs: ${r.status}`);
     return r.json() as Promise<RungsResponse>;
   });
+}
+
+
+/**
+ * The frame a reader is being shown, as dates rather than releases.
+ *
+ * The campaign's naming discipline is explicit: "a reader must be able to
+ * follow the entire argument without meeting a single identifier". A window
+ * is stored as release numbers and must never be printed as them.
+ *
+ * The front matter used to hardcode this and had drifted: it declared a
+ * six-month frame ("Sep 2025 to Mar 2026") for a window that actually runs
+ * from April 2024 to March 2026. Nothing compared the constant to the
+ * database, so nothing noticed.
+ */
+export function frameLabel(rung: Rung | null): string | null {
+  if (!rung?.window_dates) return null;
+  const month = (iso: string) =>
+    new Date(`${iso}T00:00:00Z`).toLocaleDateString("en", {
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+  return `${month(rung.window_dates.from)} to ${month(rung.window_dates.to)}`;
 }
