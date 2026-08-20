@@ -9,6 +9,10 @@
 // A withdrawal is a state the product is meant to be able to occupy. These
 // tests are about it staying sayable.
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -83,5 +87,30 @@ describe("the withdrawal flag and the figure agree", () => {
     // Two fields say the same thing, so restoring the number and forgetting
     // the flag would leave the front page describing a state it is not in.
     expect(HEADLINE.withdrawn).toBe(HEADLINE.value === null);
+  });
+});
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+describe("the sealed board's frame is the board's, not the campaign's", () => {
+  it("is the external evaluation window and not the platform's split", () => {
+    // These two were conflated once: the caption under the sealed board was
+    // switched to the live campaign window because the literal "looked
+    // drifted" at six months against a two-year one. They were never the
+    // same claim, so one could not have drifted from the other.
+    expect(HEADLINE.frame).toBe("Sep 2025 to Mar 2026");
+  });
+
+  it("carries its reason in the source, where the next reader will look", () => {
+    // Read from the file rather than restated here. A test that asserts a
+    // string it also defines proves nothing, and this one exists precisely
+    // because someone reasonable changed this constant once already.
+    // resolve() against cwd rather than import.meta.url: vitest rewrites the
+    // module URL to a non-file scheme, so the URL form throws.
+    const src = readFileSync(resolve(__dirname, "book.ts"), "utf8");
+    const doc = src.slice(0, src.indexOf("export const FRAME ="));
+    expect(doc).toMatch(/cannot be derived/);
+    expect(doc).toMatch(/external board/);
+    expect(doc).toMatch(/never a copy of/);
   });
 });
