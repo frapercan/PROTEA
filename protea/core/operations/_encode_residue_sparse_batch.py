@@ -52,7 +52,18 @@ def _release_card() -> None:
         pass
 
 
-#: The largest batch this PROCESS has completed, or None before the first one.
+#: How many residues a batch may carry. The unit is residues rather than sequences
+#: because nothing here truncates: a 35,991-residue protein enters the model whole, and
+#: eight of them are four thousand times the work of eight short ones. A count of
+#: sequences is therefore the wrong unit, and the card refuses batches for a reason that
+#: has nothing to do with how many proteins are in them.
+#:
+#: Measured on this corpus: at one sequence per batch the remaining 477,407 proteins need
+#: 477,407 round trips to the database; at a 4,000-residue budget they need 48,705.
+_DEFAULT_RESIDUE_BUDGET = 4096
+
+
+#: The largest residue budget this PROCESS has completed, or None before the first one.
 #:
 #: A worker consumes many messages and the card does not change between them, so
 #: rediscovering the size costs an out-of-memory fault per step of the descent, per
@@ -70,6 +81,26 @@ def _starting_size(requested: int) -> int:
     if _LAST_GOOD_SIZE is None:
         return requested
     return max(1, min(requested, _LAST_GOOD_SIZE))
+
+
+def take_batch(
+    pending: list[tuple[int, str]], start: int, budget: int, cap: int
+) -> list[tuple[int, str]]:
+    """Sequences from ``start`` that together fit the residue budget, at most ``cap``.
+
+    A sequence longer than the whole budget goes alone rather than being skipped or split,
+    because splitting it would change what is encoded and skipping it would silently drop
+    a protein. The budget is a target for the common case, not a hard limit on one.
+    """
+    batch: list[tuple[int, str]] = []
+    residues = 0
+    for i in range(start, len(pending)):
+        seq = pending[i][1]
+        if batch and (residues + len(seq) > budget or len(batch) >= cap):
+            break
+        batch.append(pending[i])
+        residues += len(seq)
+    return batch
 
 
 def encode_until_done(
@@ -93,28 +124,30 @@ def encode_until_done(
     global _LAST_GOOD_SIZE
     encoded = clipped = residues_seen = 0
     densities: list[float] = []
-    size = _starting_size(run.batch_size)
+    budget = _starting_size(getattr(run, "residue_budget", _DEFAULT_RESIDUE_BUDGET))
+    cap = run.batch_size
     start = 0
     while start < len(pending):
-        batch = pending[start : start + size]
+        batch = take_batch(pending, start, budget, cap)
         try:
             rows, stats = _encode_batch(run, batch, emit)
         except Exception as exc:  # noqa: BLE001 - re-raised unless it is a memory fault
+            carried = sum(len(s) for _i, s in batch)
             if not _is_out_of_memory(exc) or len(batch) == 1:
                 raise
-            size = max(1, len(batch) // 2)
+            budget = max(1, carried // 2)
             _release_card()
             emit(
                 "encode.shrinking",
-                f"out of memory on {len(batch)} sequences, retrying {size} at a time",
-                {"was": len(batch), "now": size,
-                 "residues": sum(len(s) for _i, s in batch)},
+                f"out of memory on {len(batch)} sequences carrying {carried} residues, "
+                f"retrying with a budget of {budget}",
+                {"sequences": len(batch), "residues": carried, "budget": budget},
                 "warning",
             )
             continue
         session.execute(pg_insert(SequenceEmbedding).on_conflict_do_nothing(), rows)
         session.commit()
-        _LAST_GOOD_SIZE = len(batch)
+        _LAST_GOOD_SIZE = max(_LAST_GOOD_SIZE or 0, sum(len(s) for _i, s in batch))
         start += len(batch)
         encoded += len(rows)
         clipped += stats["clipped"]
