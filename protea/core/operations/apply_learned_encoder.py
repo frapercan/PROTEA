@@ -34,10 +34,11 @@ from protea.core.operations._compute_embeddings_helpers import (
     fetch_embedding_scale,
     scale_and_clip_embedding,
 )
-from protea.core.operations.encode_residue_sparse import (
-    ORDERS,
+from protea.core.operations._encoder_artifact import (
     resolve_encoder_artifact,
+    resolve_training_cut,
 )
+from protea.core.operations.encode_residue_sparse import ORDERS
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 
@@ -260,6 +261,13 @@ def refuse_wrong_order(meta: dict, artifact_path: str) -> None:
             f"implement: it pools first and applies the map to the pooled vector. Run it "
             f"through encode_residue_sparse, which selects atoms per residue before pooling. "
             f"Running it here would produce a complete code computed the other way")
+    if not str(meta.get("training_release") or "").strip():
+        raise ValueError(
+            f"{artifact_path} declares no training_release. A fitted encoder must say "
+            "which annotation release it was fitted against, because the column that "
+            "records it means NOT FITTED when it is NULL, and the temporal gate reads "
+            "that column before scoring"
+        )
 
 
 def _load_encoder(artifact_path: str, scaler_path: str | None = None):
@@ -306,6 +314,7 @@ def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta:
                      f"top_k={meta['top_k']}, objective={meta.get('objective')}) over source config "
                      f"{p.source_embedding_config_id}"),
         display_name=name, family="learned-code",
+        trained_on_annotation_set_id=resolve_training_cut(session, meta),
     )
     session.add(cfg)
     session.flush()

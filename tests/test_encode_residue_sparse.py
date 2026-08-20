@@ -44,6 +44,7 @@ def _artifact(tmp_path, **overrides):
         "layer_indices": [-1],
         "aggregate": "mean",
         "order": "select-then-pool",
+        "training_release": "220",
     }
     meta.update(overrides)
     path = tmp_path / "encoder.npz"
@@ -131,6 +132,7 @@ def test_an_artifact_that_does_not_declare_its_recipe_is_refused(tmp_path, missi
         "layer_indices": [-1],
         "aggregate": "mean",
         "order": "select-then-pool",
+        "training_release": "220",
     }
     del meta[missing]
     path = tmp_path / "bad.npz"
