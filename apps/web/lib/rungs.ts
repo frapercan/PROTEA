@@ -100,7 +100,18 @@ export function progressLabel(p: RungProgress): string {
   return `${p.computed} of ${p.total} arms computed, ${p.scored} scored`;
 }
 
-export function getRungs(): Promise<RungsResponse> {
+// `async`, and that is load-bearing rather than style.
+//
+// `baseUrl()` throws synchronously when NEXT_PUBLIC_API_URL is unset. In a
+// non-async function that throw escapes before a promise exists, so the
+// caller's `.catch()` never attaches and the exception takes down the whole
+// server render: the front page lost its H1 and the e2e suite caught it.
+//
+// The previous hardcoded path could not do that. A relative URL produced a
+// REJECTED PROMISE, which the caller's catch handled, so the bug it hid was
+// survivable in a way the fix was not. Making this async puts every failure
+// in the same channel, which is what the caller was always written for.
+export async function getRungs(): Promise<RungsResponse> {
   // Not cacheable: this is the surface a reader watches while a rung fills
   // in, and a stale line saying "0 scored" beside a board already showing
   // the scores is worse than a slower one.
@@ -116,10 +127,9 @@ export function getRungs(): Promise<RungsResponse> {
   // for an occasional network error. The failure is total and structural, so
   // a permanent absence read as an intermittent one, and the front page never
   // once showed the campaign's window.
-  return fetch(`${baseUrl()}/rungs`, { cache: "no-store" }).then((r) => {
-    if (!r.ok) throw new Error(`rungs: ${r.status}`);
-    return r.json() as Promise<RungsResponse>;
-  });
+  const res = await fetch(`${baseUrl()}/rungs`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`rungs: ${res.status}`);
+  return (await res.json()) as RungsResponse;
 }
 
 

@@ -71,3 +71,31 @@ describe("getRungs on the server", () => {
     });
   });
 });
+
+describe("getRungs failure mode", () => {
+  it("rejects rather than throwing synchronously when the base is unset", async () => {
+    // The caller wraps this in `.catch()`. A synchronous throw escapes before
+    // the promise exists, so the catch never attaches and the exception takes
+    // down the server render instead of dropping one caption. That is how the
+    // fix for the relative-URL bug broke the front page's H1: the bug it
+    // replaced failed asynchronously and was therefore survivable.
+    delete process.env.NEXT_PUBLIC_API_URL;
+    let threw = false;
+    try {
+      const p = getRungs();
+      expect(p).toBeInstanceOf(Promise);
+      await p;
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+  });
+
+  it("survives the caller's catch, which is what the caller relies on", async () => {
+    delete process.env.NEXT_PUBLIC_API_URL;
+    const out = await getRungs()
+      .then((r) => r.rungs)
+      .catch(() => []);
+    expect(out).toEqual([]);
+  });
+});
