@@ -49,14 +49,44 @@ _RECEIPT = text(
     """
 )
 
-#: The campaign a job declared, if the receipt links to one.
+#: The campaign a job declared, and whether the job finished.
+#:
+#: The completion state lives on the JOB, never on the prediction set. A
+#: cancelled run leaves its written batches behind and the set it wrote
+#: carries no mark saying it is partial, so a receipt read without this
+#: describes a half-written run in exactly the words it would use for a
+#: finished one. 131 of 258 predict jobs in this database left such a set.
 _CAMPAIGN = text(
     """
-    SELECT meta ->> 'rung' AS rung, meta ->> 'window' AS window,
-           meta ->> 'axis' AS axis, meta ->> 'scorer' AS scorer
+    SELECT meta ->> 'rung'   AS rung,
+           meta ->> 'window' AS window,
+           meta ->> 'axis'   AS axis,
+           meta ->> 'scorer' AS scorer,
+           status::text      AS status,
+           progress_current  AS batches_done,
+           progress_total    AS batches_total
     FROM job WHERE id = :jid
     """
 )
+
+
+def _finished(job: dict[str, Any] | None) -> bool | None:
+    """Did the run that wrote this set complete?
+
+    None when there is no job to ask, which is a third state: a set from
+    before the receipt existed is not unfinished, it is unattributed, and
+    reporting False would accuse it of something the record cannot say.
+
+    Both conditions, and the total explicitly not null. Comparing two
+    missing counts and finding them equal is how a gate passes the thing
+    it was written to stop.
+    """
+    if job is None:
+        return None
+    done, total = job.get("batches_done"), job.get("batches_total")
+    if job.get("status") != "SUCCEEDED" or total is None:
+        return False
+    return done == total
 
 
 def _donors(policy: dict[str, Any] | None) -> dict[str, Any]:
@@ -83,26 +113,15 @@ def _donors(policy: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-@router.get("/prediction-set/{prediction_set_id}", summary="How a prediction set was produced")
-def get_receipt(
-    prediction_set_id: uuid.UUID,
-    factory: sessionmaker[Session] = Depends(get_session_factory),
+def _payload(
+    row: Any, receipt: dict[str, Any], campaign: dict[str, Any] | None, job: dict[str, Any] | None
 ) -> dict[str, Any]:
-    """The run behind a set of predictions, in readable terms.
+    """The run, in the terms someone would describe it in.
 
-    404 rather than an empty body when the set is unknown, because a set
-    that does not exist and one that recorded nothing must not look alike.
+    Split from the endpoint because the endpoint's job is to fetch and
+    refuse, and this one's is to decide what a reader is told. The second
+    keeps growing and the first does not.
     """
-    with factory() as session:
-        row = session.execute(_RECEIPT, {"psid": prediction_set_id}).mappings().first()
-        if row is None:
-            raise HTTPException(status_code=404, detail=f"no prediction set {prediction_set_id}")
-        receipt = dict(row["receipt"] or {})
-        campaign = None
-        if receipt.get("job_id"):
-            c = session.execute(_CAMPAIGN, {"jid": receipt["job_id"]}).mappings().first()
-            campaign = dict(c) if c else None
-
     return {
         "prediction_set_id": str(row["prediction_set_id"]),
         # Absent rather than guessed. A set written before the receipt
@@ -132,6 +151,40 @@ def get_receipt(
         "ontology": {"obo_url": row["ontology_url"]},
         "features": receipt.get("features") or [],
         "campaign": campaign,
+        # The first thing a reader needs and the last thing the set can
+        # say about itself.
+        "run": {
+            "finished": _finished(job),
+            "status": (job or {}).get("status"),
+            "batches_done": (job or {}).get("batches_done"),
+            "batches_total": (job or {}).get("batches_total"),
+        },
         "job_id": receipt.get("job_id"),
         "created_at": row["created_at"].isoformat(),
     }
+
+
+@router.get("/prediction-set/{prediction_set_id}", summary="How a prediction set was produced")
+def get_receipt(
+    prediction_set_id: uuid.UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> dict[str, Any]:
+    """The run behind a set of predictions, in readable terms.
+
+    404 rather than an empty body when the set is unknown, because a set
+    that does not exist and one that recorded nothing must not look alike.
+    """
+    with factory() as session:
+        row = session.execute(_RECEIPT, {"psid": prediction_set_id}).mappings().first()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"no prediction set {prediction_set_id}")
+        receipt = dict(row["receipt"] or {})
+        job = None
+        if receipt.get("job_id"):
+            c = session.execute(_CAMPAIGN, {"jid": receipt["job_id"]}).mappings().first()
+            job = dict(c) if c else None
+        campaign = (
+            {k: job[k] for k in ("rung", "window", "axis", "scorer")} if job else None
+        )
+
+    return _payload(row, receipt, campaign, job)

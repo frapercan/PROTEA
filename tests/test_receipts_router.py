@@ -8,7 +8,7 @@ a donor needed. The data existed and was unreachable.
 
 from __future__ import annotations
 
-from protea.api.routers.receipts import _donors
+from protea.api.routers.receipts import _donors, _finished
 
 EXPERIMENTAL = ["EXP", "HDA", "HEP", "HGI", "HMP", "HTP", "IC", "IDA", "IEP", "IGI", "IMP", "IPI", "TAS"]
 
@@ -38,3 +38,38 @@ class TestDonorRegime:
     def test_reviewed_only_is_reported_and_defaults_to_false(self):
         assert _donors({"evidence_codes": []})["reviewed_only"] is False
         assert _donors({"evidence_codes": [], "reviewed_only": True})["reviewed_only"] is True
+
+
+class TestTheRunSaysWhetherItFinished:
+    """A cancelled run leaves its written batches behind.
+
+    The prediction set carries no mark saying it is partial, so a receipt
+    read without this describes a half-written run in exactly the words it
+    would use for a finished one. 131 of 258 predict jobs in this database
+    left such a set, and one of them cost the project a night: a
+    measurement built from a 1,024-protein remnant produced a candidate
+    pool of 13.4 terms against the real 130, and a ceiling with its sign
+    reversed.
+    """
+
+    def test_a_completed_job_is_finished(self):
+        assert _finished({"status": "SUCCEEDED", "batches_done": 22, "batches_total": 22})
+
+    def test_a_cancelled_job_is_not(self):
+        assert not _finished({"status": "CANCELLED", "batches_done": 1, "batches_total": 22})
+
+    def test_succeeded_with_missing_batches_is_not(self):
+        # The verdict and the arithmetic are written by different code at
+        # different times, so both are checked.
+        assert not _finished({"status": "SUCCEEDED", "batches_done": 3, "batches_total": 22})
+
+    def test_two_missing_counts_do_not_count_as_agreeing(self):
+        # The defect this replaced elsewhere: comparing two nulls and
+        # finding them equal is how a gate passes what it exists to stop.
+        assert not _finished({"status": "SUCCEEDED", "batches_done": None, "batches_total": None})
+
+    def test_no_job_is_unattributed_rather_than_unfinished(self):
+        # A set from before the receipt existed is not a failed run.
+        # Reporting False would accuse it of something the record cannot
+        # say, and the panel draws False as a red warning.
+        assert _finished(None) is None
