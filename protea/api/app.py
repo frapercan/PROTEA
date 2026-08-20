@@ -39,6 +39,7 @@ from protea.api.routers import metrics as metrics_router
 from protea.api.routers import proteins as proteins_router
 from protea.api.routers import proteins_stats as proteins_stats_router
 from protea.api.routers import query_sets as query_sets_router
+from protea.api.routers import receipts as receipts_router
 from protea.api.routers import registry as registry_router
 from protea.api.routers import reranker_models as reranker_models_router
 from protea.api.routers import rungs as rungs_router
@@ -193,6 +194,7 @@ _ROUTER_MODULES = (
     scoring_router,
     showcase_router,
     benchmark_router,
+    receipts_router,
     rungs_router,
     strata_router,
     support_router,
