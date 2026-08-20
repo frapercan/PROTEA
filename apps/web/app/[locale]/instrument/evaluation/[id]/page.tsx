@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { baseUrl } from "@/lib/api";
 import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import StrataPanel from "@/components/StrataPanel";
+import { RunReceipt } from "@/components/RunReceipt";
 
 type NsMetrics = {
   fmax: number;
@@ -406,6 +407,16 @@ export default function EvaluationDetailPage() {
                               }
                               className="px-3 pb-3 pt-0"
                             >
+                              {/* What it was measured with, before where it holds. A
+                                  reader who opens a row is asking both, and the strata
+                                  answer only the second: a per-stratum table of a run
+                                  whose K and donor policy are unknown is a
+                                  decomposition of an unknown. */}
+                              {r.prediction_set_id ? (
+                                <div className="mb-3">
+                                  <RunReceipt predictionSetId={r.prediction_set_id} />
+                                </div>
+                              ) : null}
                               <StrataPanel evaluationResultId={r.id} />
                             </td>
                           </tr>
