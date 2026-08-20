@@ -17,7 +17,27 @@ from __future__ import annotations
 
 from typing import Any
 
-VALID_BACKENDS: frozenset[str] = frozenset({"esm", "esm3c", "t5", "ankh", "protst", "auto"})
+#: Every ``model_backend`` a config may carry.
+#:
+#: The five language-model backends and ``auto``, plus the two an encoder
+#: operation writes. Those last two were missing for months while two merged
+#: operations wrote them on every run, which is the failure mode this set has
+#: by construction: nothing derives it, so it holds the values somebody
+#: remembered rather than the values the code produces. ``tests/
+#: test_backend_registry.py`` closes that by reading the operations.
+#:
+#: The two encoder tags are not interchangeable and the pairing is the point:
+#:
+#:   residue-sparse   select-then-pool, written by encode_residue_sparse
+#:   learned-code     pool-then-select, written by apply_learned_encoder
+#:
+#: Each operation accepts only its own order and refuses the other by name, so
+#: the tag is a fact about how a code was computed rather than a label anyone
+#: chose. That is what lets a reader tell an ablation control from a serving
+#: candidate by filtering instead of by reading prose.
+VALID_BACKENDS: frozenset[str] = frozenset(
+    {"esm", "esm3c", "t5", "ankh", "protst", "auto", "residue-sparse", "learned-code"}
+)
 VALID_LAYER_AGG: frozenset[str] = frozenset({"mean", "last", "concat"})
 VALID_POOLING: frozenset[str] = frozenset({"mean", "max", "cls", "mean_max"})
 
