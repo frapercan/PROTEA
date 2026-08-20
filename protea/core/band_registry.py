@@ -21,7 +21,7 @@ in CI.
 Resolution is deterministic: the IA comes from the snapshot ``ia_url`` or an
 explicit payload ``ia_file``, and the resolver never silently accepts the
 uniform IC=1 fallback for a band-declared cell. This complements the #599
-``_resolve_ia_file`` resolver by binding the propagation / term-universe /
+``resolve_ia_file`` resolver by binding the propagation / term-universe /
 orphan ontology (the snapshot) to the band as well, not just the IA.
 """
 
