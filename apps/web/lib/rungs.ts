@@ -10,6 +10,8 @@
 // a reader comparing rows down a column was comparing 226-to-227 numbers
 // against 220-to-230 ones without being told.
 
+import { baseUrl } from "@/lib/api";
+
 export type Rung = {
   rung: string;
   window: string;
@@ -98,14 +100,53 @@ export function progressLabel(p: RungProgress): string {
   return `${p.computed} of ${p.total} arms computed, ${p.scored} scored`;
 }
 
-export function getRungs(): Promise<RungsResponse> {
+// `async`, and that is load-bearing rather than style.
+//
+// `baseUrl()` throws synchronously when NEXT_PUBLIC_API_URL is unset. In a
+// non-async function that throw escapes before a promise exists, so the
+// caller's `.catch()` never attaches and the exception takes down the whole
+// server render: the front page lost its H1 and the e2e suite caught it.
+//
+// The previous hardcoded path could not do that. A relative URL produced a
+// REJECTED PROMISE, which the caller's catch handled, so the bug it hid was
+// survivable in a way the fix was not. Making this async puts every failure
+// in the same channel, which is what the caller was always written for.
+export async function getRungs(): Promise<RungsResponse> {
   // Not cacheable: this is the surface a reader watches while a rung fills
   // in, and a stale line saying "0 scored" beside a board already showing
   // the scores is worse than a slower one.
-  return fetch("/api-proxy/rungs", { cache: "no-store" }).then((r) => {
-    if (!r.ok) throw new Error(`rungs: ${r.status}`);
-    return r.json() as Promise<RungsResponse>;
-  });
+  // Through baseUrl() rather than a hardcoded public path. A server
+  // component's fetch runs in Node, where a relative URL cannot be resolved
+  // at all: it throws "Failed to parse URL from /api-proxy/rungs" before any
+  // request is made. baseUrl() already handles exactly this, substituting an
+  // internal absolute URL when there is no window, and its own comment
+  // describes this failure. This call was bypassing it.
+  //
+  // The consequence was invisible because the one server-side caller wraps
+  // this in a catch that drops the frame on failure. That catch was written
+  // for an occasional network error. The failure is total and structural, so
+  // a permanent absence read as an intermittent one, and the front page never
+  // once showed the campaign's window.
+  const res = await fetch(`${baseUrl()}/rungs`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`rungs: ${res.status}`);
+  const body: unknown = await res.json();
+  // A 200 is not an answer. The e2e mock replies 200 with `[]` to every
+  // route it does not know, so `body.rungs` came back undefined, the cast
+  // asserted a shape that was not there, and the caller's next line,
+  // `currentRung(rungs)`, threw on `.length` OUTSIDE the promise chain.
+  // Its `.catch()` could not see it and the whole server render went with
+  // it: the front page lost every element and all four of its e2e tests.
+  //
+  // Rejecting here puts a wrong shape in the same channel as a wrong
+  // status, which is the channel the caller already handles.
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !Array.isArray((body as { rungs?: unknown }).rungs)
+  ) {
+    throw new Error("rungs: response has no rungs array");
+  }
+  return body as RungsResponse;
 }
 
 
