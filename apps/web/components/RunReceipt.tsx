@@ -34,6 +34,13 @@ type Receipt = {
     evidence_codes: string[] | null;
   };
   campaign: { rung: string | null; window: string | null; scorer: string | null } | null;
+  run: {
+    /** Null when no job is linked: unattributed, which is not unfinished. */
+    finished: boolean | null;
+    status: string | null;
+    batches_done: number | null;
+    batches_total: number | null;
+  };
   job_id: string | null;
 };
 
@@ -80,6 +87,20 @@ export function RunReceipt({ predictionSetId }: { predictionSetId: string }) {
           </span>
         ) : null}
       </header>
+
+      {r.run.finished === false ? (
+        // Loudest thing on the panel, and first. A cancelled run leaves
+        // its written batches behind and the prediction set carries no
+        // mark saying so, which is how a partial run gets read as a
+        // finished one: every other field below looks completely normal.
+        <p className="mt-1.5 rounded border border-rose-300 bg-rose-50 px-2 py-1 text-[11px] leading-snug text-rose-800">
+          <span className="font-semibold">This run did not finish.</span> The
+          job ended {r.run.status?.toLowerCase() ?? "incomplete"} after{" "}
+          {r.run.batches_done ?? 0} of {r.run.batches_total ?? "?"} batches, so
+          these predictions cover part of the query set. Everything below
+          describes what the run was configured to do, not what it did.
+        </p>
+      ) : null}
 
       {!r.has_receipt ? (
         // Said plainly rather than filled in. This set predates the
