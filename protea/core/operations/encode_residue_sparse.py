@@ -459,19 +459,34 @@ def _pending_sequences(
     Scoped to the SOURCE config rather than to every sequence in the database, so
     the population encoded is the one the caller named and not whatever happens to
     have a sequence row.
+
+    Both memberships are EXISTS rather than a join and a NOT IN, which is not a matter
+    of taste at this size. A join to the embedding table returns one row per chunk, so
+    the DISTINCT that removed the duplicates had to sort the sequence TEXT of the whole
+    corpus, and 210 million residues do not sort for free. NOT IN over a set this large
+    cannot become an anti-join, because a single NULL in the subquery would change the
+    answer and the planner has to assume one. Measured on a resumed corpus run: 22
+    minutes and still going, on a query whose job is to decide what to do next.
     """
-    query = (
-        select(Sequence.id, Sequence.sequence)
-        .join(SequenceEmbedding, SequenceEmbedding.sequence_id == Sequence.id)
-        .where(SequenceEmbedding.embedding_config_id == source_id)
-        .distinct()
-        .order_by(Sequence.id)
-    )
-    if p.skip_existing:
-        done = select(SequenceEmbedding.sequence_id).where(
-            SequenceEmbedding.embedding_config_id == target_id
+    in_source = (
+        select(1)
+        .where(
+            SequenceEmbedding.sequence_id == Sequence.id,
+            SequenceEmbedding.embedding_config_id == source_id,
         )
-        query = query.where(Sequence.id.not_in(done))
+        .exists()
+    )
+    query = select(Sequence.id, Sequence.sequence).where(in_source).order_by(Sequence.id)
+    if p.skip_existing:
+        already_coded = (
+            select(1)
+            .where(
+                SequenceEmbedding.sequence_id == Sequence.id,
+                SequenceEmbedding.embedding_config_id == target_id,
+            )
+            .exists()
+        )
+        query = query.where(~already_coded)
     if p.sequence_id_limit is not None:
         query = query.limit(p.sequence_id_limit)
     return [(int(i), s) for i, s in session.execute(query).all()]
