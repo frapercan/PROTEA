@@ -85,9 +85,12 @@ def test_the_batch_halves_until_it_fits_and_encodes_everything(monkeypatch):
     monkeypatch.setattr(op, "_encode_batch", fake_encode)
     events, session = [], _Session()
 
-    encoded, clipped, residues, densities = encode_until_done(
+    encoded, clipped, residues, densities, oversized = encode_until_done(
         session, _Run(), _sequences(8), _emit(events)
     )
+
+    assert oversized == [], "nothing was too large here"
+
 
     assert encoded == 8, "every sequence encoded despite two refusals"
     assert residues == 80
@@ -97,8 +100,13 @@ def test_the_batch_halves_until_it_fits_and_encodes_everything(monkeypatch):
     assert session.commits == 4
 
 
-def test_a_single_sequence_that_does_not_fit_is_raised_rather_than_halved(monkeypatch):
-    """There is nothing left to halve, and pretending otherwise would loop forever."""
+def test_a_single_sequence_that_does_not_fit_is_skipped_and_recorded(monkeypatch):
+    """Raising here costs every protein behind it in the message, not just this one.
+
+    The consumer retries the whole batch and eventually dead-letters it, so one protein the
+    card cannot hold takes thousands of ordinary ones with it. Observed: a 35,991-residue
+    sequence stopped a corpus run at 91 per cent with 44,904 unencoded.
+    """
 
     def always_oom(_run, _batch, _emit):
         raise RuntimeError("CUDA out of memory")
@@ -106,9 +114,35 @@ def test_a_single_sequence_that_does_not_fit_is_raised_rather_than_halved(monkey
     import protea.core.operations.encode_residue_sparse as op
 
     monkeypatch.setattr(op, "_encode_batch", always_oom)
+    events = []
 
-    with pytest.raises(RuntimeError, match="out of memory"):
-        encode_until_done(_Session(), _Run(), _sequences(1), _emit([]))
+    encoded, _c, _r, _d, oversized = encode_until_done(
+        _Session(), _Run(), [(7, "A" * 35991)], _emit(events)
+    )
+
+    assert encoded == 0
+    assert oversized == [{"sequence_id": 7, "residues": 35991}]
+    assert [e for e, _f in events].count("encode.too_large") == 1, "skipped loudly, not silently"
+
+
+def test_an_oversized_sequence_does_not_stop_the_ones_behind_it(monkeypatch):
+    """The whole point: one protein that cannot fit must not cost the rest of the batch."""
+
+    def oom_only_on_the_giant(_run, batch, _emit):
+        if any(len(s) > 10_000 for _i, s in batch):
+            raise RuntimeError("CUDA out of memory")
+        rows = [{"sequence_id": i} for i, _s in batch]
+        return rows, {"clipped": 0, "residues": 1, "densities": [0.0] * len(batch)}
+
+    import protea.core.operations.encode_residue_sparse as op
+
+    monkeypatch.setattr(op, "_encode_batch", oom_only_on_the_giant)
+    pending = [(1, "A" * 100), (2, "A" * 35991), (3, "A" * 100)]
+
+    encoded, _c, _r, _d, oversized = encode_until_done(_Session(), _Run(), pending, _emit([]))
+
+    assert encoded == 2, "the two ordinary sequences are encoded"
+    assert [o["sequence_id"] for o in oversized] == [2]
 
 
 def test_an_unrelated_failure_is_not_retried_at_all(monkeypatch):
