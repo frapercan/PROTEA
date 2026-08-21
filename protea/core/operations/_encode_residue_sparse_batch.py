@@ -103,12 +103,54 @@ def take_batch(
     return batch
 
 
+def _progress(emit: EmitFn, encoded: int, total: int, residues: int) -> None:
+    """Report after every commit, so a stalled run is distinguishable from a slow one."""
+    emit(
+        "encode.progress",
+        f"{encoded}/{total} sequences",
+        {"encoded": encoded, "total": total, "residues": residues},
+        "info",
+    )
+
+
+def _commit(session: Session, rows: list[dict]) -> None:
+    """Write this batch and make it durable before the next one is attempted.
+
+    Idempotent, so a redelivered message cannot duplicate what it already wrote, and
+    committing per batch is what lets a failure resume rather than restart.
+    """
+    session.execute(pg_insert(SequenceEmbedding).on_conflict_do_nothing(), rows)
+    session.commit()
+
+
+def _skip_oversized(item: tuple[int, str], emit: EmitFn) -> dict:
+    """Record and announce a sequence the card cannot hold at any budget.
+
+    Skipping it costs one protein. Raising costs every protein behind it in the message,
+    because the consumer retries the whole batch and eventually dead-letters it. That is how
+    a 35,991-residue protein stopped a corpus run at 91 per cent with 44,904 sequences
+    unencoded, almost all of them ordinary.
+
+    It is skipped LOUDLY. The identifier and its length go on an event and into the operation
+    result, so what did not fit is a recorded fact rather than a silent gap, which is the only
+    thing that makes skipping defensible at all.
+    """
+    sid, seq = item
+    emit(
+        "encode.too_large",
+        f"sequence {sid} of {len(seq)} residues does not fit this card, skipped",
+        {"sequence_id": sid, "residues": len(seq)},
+        "warning",
+    )
+    return {"sequence_id": sid, "residues": len(seq)}
+
+
 def encode_until_done(
     session: Session,
     run: Any,
     pending: list[tuple[int, str]],
     emit: EmitFn,
-) -> tuple[int, int, int, list[float]]:
+) -> tuple[int, int, int, list[float], list[dict]]:
     """Encode every sequence, shrinking the batch whenever the card refuses one.
 
     Residues are consumed as they come off the card and never accumulated: the code is a
@@ -124,6 +166,7 @@ def encode_until_done(
     global _LAST_GOOD_SIZE
     encoded = clipped = residues_seen = 0
     densities: list[float] = []
+    oversized: list[dict] = []
     budget = _starting_size(getattr(run, "residue_budget", _DEFAULT_RESIDUE_BUDGET))
     cap = run.batch_size
     start = 0
@@ -133,10 +176,14 @@ def encode_until_done(
             rows, stats = _encode_batch(run, batch, emit)
         except Exception as exc:  # noqa: BLE001 - re-raised unless it is a memory fault
             carried = sum(len(s) for _i, s in batch)
-            if not _is_out_of_memory(exc) or len(batch) == 1:
+            if not _is_out_of_memory(exc):
                 raise
-            budget = max(1, carried // 2)
             _release_card()
+            if len(batch) == 1:
+                oversized.append(_skip_oversized(batch[0], emit))
+                start += 1
+                continue
+            budget = max(1, carried // 2)
             emit(
                 "encode.shrinking",
                 f"out of memory on {len(batch)} sequences carrying {carried} residues, "
@@ -145,18 +192,12 @@ def encode_until_done(
                 "warning",
             )
             continue
-        session.execute(pg_insert(SequenceEmbedding).on_conflict_do_nothing(), rows)
-        session.commit()
+        _commit(session, rows)
         _LAST_GOOD_SIZE = max(_LAST_GOOD_SIZE or 0, sum(len(s) for _i, s in batch))
         start += len(batch)
         encoded += len(rows)
         clipped += stats["clipped"]
         residues_seen += stats["residues"]
         densities.extend(stats["densities"])
-        emit(
-            "encode.progress",
-            f"{encoded}/{len(pending)} sequences",
-            {"encoded": encoded, "total": len(pending), "residues": residues_seen},
-            "info",
-        )
-    return encoded, clipped, residues_seen, densities
+        _progress(emit, encoded, len(pending), residues_seen)
+    return encoded, clipped, residues_seen, densities, oversized

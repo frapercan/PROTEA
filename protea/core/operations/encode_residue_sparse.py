@@ -721,7 +721,7 @@ class EncodeResidueSparseBatchOperation(Operation):
         residues rather than the corpus, and a long protein costs time and not
         headroom.
         """
-        encoded, clipped, residues_seen, densities = encode_until_done(
+        encoded, clipped, residues_seen, densities, oversized = encode_until_done(
             session, run, pending, emit
         )
         mean_density = float(np.mean(densities)) if densities else 0.0
@@ -743,6 +743,7 @@ class EncodeResidueSparseBatchOperation(Operation):
                 "residues": residues_seen,
                 "mean_density": mean_density,
                 "clipped_components": clipped,
+                "too_large_to_encode": oversized,
             }
         )
 
