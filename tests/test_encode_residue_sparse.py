@@ -441,8 +441,14 @@ def test_neither_address_is_refused_rather_than_returning_none():
         resolve_encoder_artifact(None, None)
 
 
-def test_a_uri_is_fetched_through_the_store_and_cached(monkeypatch, tmp_path):
-    """Executes the real body: settings, store, download, cache, and the second call."""
+def test_a_uri_is_fetched_through_the_store(monkeypatch, tmp_path):
+    """Executes the real body: settings, store, download, and the file that comes back.
+
+    Whether the download is cached now depends on whether the key names its own content,
+    which is the subject of tests/test_encoder_artifact_cache.py. A plain key like this one
+    is deliberately fetched every time, because a cache that cannot be invalidated is worse
+    than one that is slow.
+    """
     payload = b"not-really-an-npz"
     calls = []
 
@@ -456,15 +462,10 @@ def test_a_uri_is_fetched_through_the_store_and_cached(monkeypatch, tmp_path):
     monkeypatch.setattr(storage_mod, "get_artifact_store", lambda _s: _Store())
     monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
 
-    first = resolve_encoder_artifact(None, "encoders/e.npz")
+    local = resolve_encoder_artifact(None, "encoders/e.npz")
 
-    assert pathlib.Path(first).read_bytes() == payload
+    assert pathlib.Path(local).read_bytes() == payload
     assert calls == ["encoders/e.npz"]
-
-    second = resolve_encoder_artifact(None, "encoders/e.npz")
-
-    assert second == first
-    assert calls == ["encoders/e.npz"], "a cached artifact must not be downloaded twice"
 
 
 # ------------------------------------------------------------------ resuming a batch
