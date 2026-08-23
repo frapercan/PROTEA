@@ -589,6 +589,127 @@ What limits the board is the ordering of candidates already retrieved, which is
 the same conclusion the BP wall reaches from the other direction below.
 
 
+.. _insight-capacity-is-read-through-one-channel:
+
+An 8M-parameter backbone is within the noise of a 650M one, once the score stops asking
+----------------------------------------------------------------------------------------
+
+The section above measures one axis, the encoding, at two points in the
+pipeline. The backbone axis, measured on a different grid in an earlier rung,
+does the same thing, and putting the three axes side by side shows the property
+is the pipeline's rather than any one axis's.
+
+Eight pretrained protein language models were scored on the nine cells across
+neighbourhood sizes and score weightings, on the GOA 226 to 227 frame. That is
+not the sealed board's window and these are not board numbers; the comparison
+between the two columns is the finding, not their level. Read through the
+channel that asks the embedding for everything, the backbones separate by an
+amount that tracks capacity. Read through a weighting that also has identity
+and neighbour consensus available, they do not separate at all.
+
+.. list-table:: Best arm per backbone, mean ``f_micro_w`` over the nine cells
+   :header-rows: 1
+   :widths: 34 11 22 22
+
+   * - Backbone
+     - Params
+     - ``embedding_only``
+     - ``composite``
+   * - ``facebook/esm2_t33_650M_UR50D``
+     - 650M
+     - 0.30826
+     - **0.35728**
+   * - ``Rostlab/prot_t5_xl_half_uniref50-enc``
+     - 1.2B
+     - **0.34194**
+     - 0.35673
+   * - ``ElnaggarLab/ankh-large``
+     - 1.15B
+     - 0.33509
+     - 0.35647
+   * - ``Rostlab/ProstT5``
+     - 1.2B
+     - 0.32803
+     - 0.35632
+   * - ``esmc_600m``
+     - 600M
+     - 0.32034
+     - 0.35628
+   * - ``facebook/esm2_t6_8M_UR50D``
+     - 8M
+     - 0.29610
+     - 0.35617
+   * - ``mila-intel/ProtST-esm1b``
+     - 652M
+     - 0.34039
+     - 0.35608
+   * - ``ElnaggarLab/ankh-base``
+     - 450M
+     - 0.32838
+     - 0.35487
+   * - **spread**
+     -
+     - **0.04584**
+     - **0.00241**
+
+**The 8-million-parameter model is the clearest case.** Against the best
+composite arm it is eighty-one times smaller. Through ``embedding_only`` that
+costs 0.04584 and puts it last of eight. Through ``composite`` it costs
+0.00111, which is below the study's 0.0013 resolution floor: on this evidence
+the platform cannot tell the two apart.
+
+**There is no ordering to report in the composite column.** Its eight entries
+span 0.00241, and each entry is itself a maximum taken over eight to eleven
+arms sharing the neighbourhood sizes 3, 5, 10 and 30, so the spread between the
+backbones is smaller than the selection noise carried by any one of them. The
+unequal budgets do not explain the order either: the backbone searched hardest,
+at eleven arms, placed third, and the one that won had nine. The rank
+correlation between the two columns is 0.000, which
+is not a reversal but the signature of an absent signal: the composite column
+has no order for the ``embedding_only`` order to agree or disagree with. Any
+claim that one of these backbones is the right one, made on this evidence,
+would be a claim about which arm won a coin toss.
+
+**The same shape appears on every representation axis measured.**
+
+.. list-table:: Spread through the loudest channel against the winning one
+   :header-rows: 1
+   :widths: 30 24 24 16
+
+   * - Axis
+     - ``embedding_only``
+     - Winning weighting
+     - Attenuation
+   * - Backbone (8 pretrained PLMs)
+     - 0.04584
+     - 0.00241
+     - 19.0x
+   * - Encoding (4 representations)
+     - 0.0540
+     - 0.0025
+     - 21.6x
+   * - Layer depth (3 depths)
+     - 0.0307
+     - 0.0026
+     - 11.8x
+
+Three axes measured in different rungs, on different grids, spanning an
+eighty-one-fold range of model capacity, four ways of encoding a protein and
+three depths of the same network. All three are large through the channel that
+reads the embedding alone and roughly twenty times smaller through the
+weighting that wins. That is one property of the pipeline observed three times,
+not three findings, and it is the reason this project's remaining headroom is
+argued for at the ranking stage rather than the representation stage.
+
+**What it does not say.** None of this shows that the representation is
+unimportant in general, and none of it licenses picking the cheapest backbone
+for a different pipeline. It says that in a pipeline whose winning score
+weighting reads identity and neighbour consensus, those channels are already
+carrying what the embedding would otherwise have supplied, and the embedding is
+consulted for the part they cannot reach. The twilight-zone result in the
+section above is that part, and it is where the representation still pays.
+
+
 .. _insight-bp-wall-is-a-ranking-limit:
 
 The BP wall is a ranking limit, not an evidence ceiling
