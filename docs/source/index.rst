@@ -92,11 +92,11 @@ metadata enrichment, and job orchestration.
    complexity/index
    guides/plugin-authoring/index
    results
+   ablation
    operate/reproduce-the-sealed-board
    appendix/index
    runbooks/index
    quality/index
-   ablation
    insights
    glossary
    references
