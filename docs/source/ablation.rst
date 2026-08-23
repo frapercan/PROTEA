@@ -509,7 +509,7 @@ the right-hand column that carries it.
      - 2
      - **0.0025**
      - 0.0540
-   * - Layer depth (3 depths)
+   * - Layer depth (4 depths)
      - 2
      - **0.0026**
      - 0.0307
@@ -538,6 +538,96 @@ weighting reads identity and neighbour consensus, those channels are already
 carrying what the embedding would otherwise have supplied, and the embedding is
 consulted for the part they cannot reach. The twilight-zone result in the
 section above is that part, and it is where the representation still pays.
+
+
+.. _insight-the-midpoint-was-measured:
+
+The network's midpoint was measured because the plan said it would be
+----------------------------------------------------------------------
+
+The two ablations this campaign set out to reconcile disagreed about *mid*
+layers. The arms first run did not contain a mid layer: the platform indexes
+hidden states in reverse, so ``layer_indices [10]`` is depth 38 of 48, and the
+comparison intended as mid-against-last was a near-top-against-last. The error
+is recorded here rather than quietly corrected, because the arm had already
+been dispatched at corpus scale before anyone noticed the convention.
+
+**There is no mid peak.** Depth 24, the true midpoint and the fixed point of
+the two conventions, loses to the last layer at every candidate budget:
+
+.. list-table:: Reachability against the last layer, one pipeline, by budget
+   :header-rows: 1
+   :widths: 28 24 24 24
+
+   * - Depth
+     - Budget 10
+     - Budget 25
+     - Budget 50
+   * - 10 of 48
+     - -0.0423
+     - -0.0444
+     - -0.0446
+   * - 24 of 48
+     - -0.0076
+     - -0.0118
+     - -0.0112
+   * - 48 of 48
+     - reference
+     - reference
+     - reference
+
+Every interval separates. Those three depths come from **one** pipeline, float32
+end to end, pooled as the mean over residues and then L2 normalised, with the
+same encoder, chunking, populations and metric, so the curve is one measurement
+rather than three arms compared across instruments. Adding depth 38 from the
+platform pipeline at -0.0053 to -0.0099 gives four depths reading -0.044,
+-0.012, -0.008 and reference: monotone, with the loss shrinking about sixfold
+from depth 10 to the last layer. A peak at the midpoint would have had to be
+invisible to both its neighbours.
+
+**Depth is not free where it matters.** By identity band at budget 25, against
+the last layer:
+
+.. list-table:: What going shallower costs, by sequence identity band
+   :header-rows: 1
+   :widths: 16 21 21 21 21
+
+   * - Depth
+     - Twilight
+     - Distant
+     - Close
+     - Near-identical
+   * - 10 of 48
+     - -0.0703
+     - -0.0665
+     - -0.0131
+     - -0.0049
+   * - 24 of 48
+     - -0.0164
+     - -0.0158
+     - -0.0058
+     - -0.0058
+
+The penalty is largest in twilight and vanishes among near-identical pairs, so
+depth has teeth exactly in the band the served population sits in. That is the
+same shape the encoding axis shows and the opposite of what a free parameter
+would look like.
+
+**What is not claimed.** Depth 38 read flat in twilight, +0.0010 on an interval
+of [-0.013, +0.015], against depth 24's -0.0164 on [-0.032, -0.000]. Those
+intervals overlap heavily and the two arms come from different pipelines, so no
+change of band profile between depths 24 and 38 is asserted here. What is solid
+is the aggregate ordering across all four depths and the
+twilight-against-near-identical contrast within each one.
+
+**On what it cost to answer a question rather than assume it.** The midpoint
+took 226 minutes of one card against a 228-minute estimate. The saving was not
+the hardware but declining to write: only the pooled vector was wanted, so
+residues were averaged as they came off the card and never stored, 274 MB
+instead of 129 GB. The same depth computed through the serving platform would
+have been a full-corpus job of roughly seventeen hours to answer a question that
+needed 89,013 proteins. The layer field of the frozen recipe is therefore
+measured at four depths rather than inherited, and it stays at the last layer.
 
 
 .. _insight-bp-wall-is-a-ranking-limit:
