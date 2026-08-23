@@ -112,14 +112,33 @@ describe("lib/api withAuth + http", () => {
     expect(headers.get("Authorization")).toBeNull();
   });
 
-  it("swallows 401 on GET and resolves to an empty list (public-viewer policy preserved)", async () => {
+  it("raises 401 on GET rather than resolving to an empty list", async () => {
+    // This test asserted the opposite until the policy changed under it and
+    // it was left failing on develop. Resolving a 401 read to `[]` kept an
+    // anonymous dashboard rendering, at the cost of making "no data", "not
+    // signed in" and "not permitted" all look like an empty table. The
+    // rationale for throwing instead is in `http()` in lib/api.ts.
     setSessionCookie(null);
     fetchSpy.mockResolvedValueOnce(new Response("", { status: 401 }));
 
     const api = await import("@/lib/api");
-    const rows = await api.listJobs();
+    await expect(api.listJobs()).rejects.toMatchObject({
+      kind: "unauthorized",
+      status: 401,
+    });
+  });
 
-    expect(rows).toEqual([]);
+  it("says a 403 read is a permission problem, not an authentication one", async () => {
+    // The two must not collapse into one message: signing in again fixes the
+    // first and can never fix the second.
+    setSessionCookie(null);
+    fetchSpy.mockResolvedValueOnce(new Response("", { status: 403 }));
+
+    const api = await import("@/lib/api");
+    await expect(api.listJobs()).rejects.toMatchObject({
+      kind: "forbidden",
+      status: 403,
+    });
   });
 
   it("re-raises 401 on POST so the caller surfaces a sign-in CTA", async () => {
