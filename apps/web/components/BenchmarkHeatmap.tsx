@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import type { BenchmarkEmbedding, BenchmarkRow } from "@/lib/api";
+import { populationNote } from "@/lib/cellPopulation";
 
 /**
  * Small-multiples heatmap for the benchmark matrix.
@@ -22,6 +23,12 @@ import type { BenchmarkEmbedding, BenchmarkRow } from "@/lib/api";
  * Each embedding name and Fmax number is a deep link to the underlying
  * `EvaluationResult` detail page, so the heatmap doubles as a fast
  * router into per-cell drill-down.
+ *
+ * Every bar carries the number of proteins its score was computed over, and
+ * a bar scored on far fewer than its neighbours is marked rather than
+ * dropped. The rule and its caveat live in `lib/cellPopulation.ts`: the count
+ * is taken at the threshold where the metric maximised, so it is a reason to
+ * look and never on its own a verdict.
  */
 export type BenchmarkHeatmapProps = {
   rows: BenchmarkRow[];
@@ -129,15 +136,27 @@ function HeatmapCell({
               const ciTitle = showBand
                 ? ` · CI95 [${r.fmax_ci_low!.toFixed(3)}, ${r.fmax_ci_high!.toFixed(3)}]`
                 : "";
+              const pop = populationNote(r, rows);
               return (
                 <li
                   key={r.embedding_config_id}
                   className="grid grid-cols-[7rem_1fr_3.75rem] items-center gap-2 group"
-                  title={`${name} · ${r.stage} · K=${r.k} · ${r.primary.toFixed(3)} ${r.primary_metric}${stdLabel ? ` ${stdLabel}` : ""}${ciTitle}`}
+                  title={`${name} · ${r.stage} · K=${r.k} · ${r.primary.toFixed(3)} ${r.primary_metric}${stdLabel ? ` ${stdLabel}` : ""}${ciTitle}${pop.label ? ` · ${pop.label}` : ""}`}
                 >
                   <div className="flex items-center gap-1 min-w-0">
                     {isWinner && (
                       <span aria-label="leader" className="text-[10px]">🥇</span>
+                    )}
+                    {pop.underpopulated && (
+                      // Marked, never hidden and never reordered: a row that
+                      // vanished would leave a table that looks complete.
+                      <span
+                        aria-label={`scored on ${pop.count} proteins, against a median of ${pop.median} in this cell`}
+                        title={`Scored on ${pop.count!.toLocaleString()} proteins against a median of ${pop.median!.toLocaleString()} here. Not comparable to the rows beside it on face value.`}
+                        className="text-[10px] leading-none text-amber-600"
+                      >
+                        ⚠
+                      </span>
                     )}
                     <Link
                       href={`/${locale}/instrument/evaluation/${r.evaluation_result_id}`}
