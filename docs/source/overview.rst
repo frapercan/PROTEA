@@ -64,7 +64,11 @@ Where to go next
 ----------------
 
 - New here and want to run something? The quickstart gets you from a clone to a
-  first job in about ten minutes: :doc:`operate/reproduce-the-sealed-board`.
+  first job in about ten minutes: :doc:`appendix/installation_and_quickstart`.
+- Want to rebuild the board itself? That is a different and longer road, and
+  :doc:`operate/reproduce-the-sealed-board` is honest about how long: there is
+  no single-command reproduction, and two of the artifacts it needs are not
+  currently located.
 - Want the architecture, the queues, and the operation catalogue?
   :doc:`architecture/index`.
 - Want to know how the method was arrived at, and which parts of it the
