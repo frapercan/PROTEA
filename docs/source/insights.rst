@@ -600,10 +600,12 @@ does the same thing, and putting the three axes side by side shows the property
 is the pipeline's rather than any one axis's.
 
 Eight pretrained protein language models were scored on the nine cells across
-neighbourhood sizes and score weightings. Read through the channel that asks
-the embedding for everything, they separate by an amount that tracks capacity.
-Read through a weighting that also has identity and neighbour consensus
-available, they do not separate at all.
+neighbourhood sizes and score weightings, on the GOA 226 to 227 frame. That is
+not the sealed board's window and these are not board numbers; the comparison
+between the two columns is the finding, not their level. Read through the
+channel that asks the embedding for everything, the backbones separate by an
+amount that tracks capacity. Read through a weighting that also has identity
+and neighbour consensus available, they do not separate at all.
 
 .. list-table:: Best arm per backbone, mean ``f_micro_w`` over the nine cells
    :header-rows: 1
@@ -660,9 +662,9 @@ the platform cannot tell the two apart.
 span 0.00241, and each entry is itself a maximum taken over eight to eleven
 arms sharing the neighbourhood sizes 3, 5, 10 and 30, so the spread between the
 backbones is smaller than the selection noise carried by any one of them. The
-unequal budgets do not explain the order either, and cut the wrong way: the two
-backbones searched hardest, at eleven arms each, placed third and last. The
-rank correlation between the two columns is 0.000, which
+unequal budgets do not explain the order either: the backbone searched hardest,
+at eleven arms, placed third, and the one that won had nine. The rank
+correlation between the two columns is 0.000, which
 is not a reversal but the signature of an absent signal: the composite column
 has no order for the ``embedding_only`` order to agree or disagree with. Any
 claim that one of these backbones is the right one, made on this evidence,
