@@ -698,6 +698,71 @@ needed 89,013 proteins. The layer field of the frozen recipe is therefore
 measured at four depths rather than inherited, and it stays at the last layer.
 
 
+.. _insight-comparisons-that-looked-single-field:
+
+Four comparisons that looked like they isolated one thing
+----------------------------------------------------------
+
+Every result in this chapter is a comparison, and a comparison is only worth
+what its control is worth. Over a single day of this campaign, four separate
+measurements were found to have varied something besides the field they were
+reporting. None of them announced itself, none produced an error, and each
+looked like a clean single-field comparison to the person who ran it. They are
+collected here because the shape is more useful than any of the four
+corrections.
+
+**An index that counts backwards.** An arm was dispatched at corpus scale to
+compare a mid layer against the last one. The platform reads
+``hidden_states[-(li + 1)]``, so ``layer_indices [10]`` is depth 38 of 48, and
+the comparison intended as mid-against-last was near-top-against-last. The
+lab probe indexes forward, so the two instruments named different layers with
+the same number. Caught by someone who happened to know both conventions.
+
+**A transform that travelled with the field.** The arm establishing
+standardisation as the dominant lever compared a standardised shallow layer
+against a raw last one, so it varied depth and normalisation together against a
+control with neither. There is no arm pairing a standardised last layer against
+a raw one, so the +0.0111 cannot be attributed. Caught by looking for the arm
+that would attribute it and not finding it.
+
+**A field whose name is not its meaning.** ``n_proteins`` reads as a scored
+population and is a count of proteins carrying a prediction *at the threshold
+where the metric maximised*. A correlation of -0.976 between it and the score
+was read, by two people independently, as evidence that arms were scored on
+different populations. The platform already recorded a 17 percent move in that
+count across runs whose cohort was provably identical. Caught by a comment in
+the source, and only after the wrong reading had been published.
+
+**A category that is two categories.** "Donors that cannot contribute a term"
+turned out to be two populations that behave nothing alike: isoform sequences,
+dead by construction because GO attaches to canonical accessions, and
+uncharacterised canonicals with no annotation yet. The first loses a candidate
+slot but usually not the information, because a near-identical parent tends to
+sit in the same neighbourhood; at K=10 half those slots are pure redundancy.
+The second loses both, and only 3.2 percent have an annotated sequence twin.
+Reported together they recommend one filter for two problems, and the composite
+overstated the rate that matters by a factor of three. Caught by rereading a
+number that had already been published.
+
+**What they share.** Each is a comparison that appears to isolate one field and
+does not, and in three of the four the confounding quantity was not even
+visible in the output: an index convention, a normalisation bundled into an arm
+name, a column whose name describes something other than what it holds. The
+detections have nothing in common. One came from a colleague's knowledge of a
+convention, one from a missing arm, one from a source comment, one from
+rereading published prose. No check found any of them, which is the part worth
+taking seriously: they were caught by four accidents, and there is no reason to
+think a fifth would have been.
+
+**What follows from it, in the form used here.** Vary one field. Where a
+transform is involved, run it at a setting where it must be the identity, so
+that the control differs from the arm in exactly the thing being reported.
+Before quoting a field, read what produces it rather than what it is called.
+And before summing two populations under one name, check that they answer the
+same way, because a composite recommends a single remedy for what may be two
+problems.
+
+
 .. _insight-bp-wall-is-a-ranking-limit:
 
 The BP wall is a ranking limit, not an evidence ceiling
