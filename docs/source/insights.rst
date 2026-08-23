@@ -522,11 +522,11 @@ fixed, the four encodings spread 0.0540 under ``embedding_only`` at K=30 and
 exactly 0.0 on embedding similarity and wins 72.7 percent of cells.
 
 The 0.0540 is almost entirely the instrument, and this can be shown rather
-than asserted. It is measured under ``embedding_only``, the channel that
-:ref:`insight-capacity-is-read-through-one-channel` shows is scored on a
-population that moves with the arm. Here the correlation between population and
-score is -0.809, and the shape is specific: the un-encoded baseline is scored
-on the most proteins and scores worst.
+than asserted. It is measured under ``embedding_only``, the channel whose
+scores :ref:`insight-capacity-is-read-through-one-channel` shows are collinear
+with the reported protein count. Here that correlation is -0.809, and the shape
+is specific: the un-encoded baseline reports the highest count and the worst
+score.
 
 .. list-table:: The four arms at K=30 under ``embedding_only``
    :header-rows: 1
@@ -534,7 +534,7 @@ on the most proteins and scores worst.
 
    * - Arm
      - Score
-     - Mean population
+     - Mean ``n_proteins``
    * - sparse pooled
      - 0.23656
      - 2,261
@@ -549,14 +549,15 @@ on the most proteins and scores worst.
      - 2,350
 
 Of the 0.0540, some 0.0313 is the baseline against the encoded arms across a
-5.9 percent population gap, and 0.023 separates the three encoded arms across a
-1.9 percent one.
+5.9 percent gap in that count, and 0.023 separates the three encoded arms
+across a 1.9 percent one.
 
-**Restricted to scorers whose populations agree, the encoding axis at K=30 is
-what it was at K=1.** Across four composite scorers whose arms sit within 1.4
-percent of each other in population, the four encodings spread 0.00194,
-0.00227, 0.00248 and 0.00326. Two to three thousandths, against a headline of
-0.0540 from the same arms at the same budget.
+**Restricted to scorers whose arms report matching counts, the encoding axis at
+K=30 is what it was at K=1.** Across four composite scorers whose arms agree to
+within 1.4 percent, the four encodings spread 0.00194, 0.00227, 0.00248 and
+0.00326. Two to three thousandths, against a headline of 0.0540 from the same
+arms at the same budget. Whether the count reflects coverage or the operating
+point, holding it fixed removes the effect.
 
 **No sentence here should name a winning encoding.** Which one wins at K=30
 flips with the scorer, four scorers to four: the dense fitted map wins under
@@ -703,23 +704,28 @@ evidence the platform cannot tell the two apart.
 
 .. warning::
 
-   **The ``embedding_only`` column is confounded and must not be read as a
-   capacity effect.** The arms are not scored on the same proteins.
-   ``cafaeval`` counts a protein in a cell only where the arm predicted
-   something there, so an arm covering more of the population is scored on
-   more of it, including the proteins for which no good neighbour exists. The
-   eight ``embedding_only`` maxima are scored on populations spanning 7.5
-   percent, from 6,193 to 6,655 proteins summed over the nine cells, and the
-   rank correlation between population size and score is **-0.976**. Sorted by
-   population, the column is very nearly sorted by score.
+   **The ``embedding_only`` column must not be read as a capacity effect.**
+   Its scores are collinear with ``n_proteins``: the eight maxima report 6,193
+   to 6,655 proteins summed over the nine cells, a 7.5 percent range, and the
+   rank correlation between that count and the score is **-0.976**. Sorted by
+   protein count, the column is very nearly sorted by score.
 
-   A quality difference and a population difference are collinear here, and
-   nothing in these summaries separates them: ``cafaeval`` reports per cell,
-   not per protein, so the arms cannot be restricted to a common population
-   after the fact. The 0.04584 spread is therefore an upper bound on what
-   backbone choice buys through this channel, not a measurement of it, and the
-   0.04584 that appeared in earlier drafts of the attenuation ratio inherits
-   that.
+   What that collinearity means cannot be settled from these summaries, and
+   the ambiguity is the point. ``n_proteins`` is the count of proteins
+   carrying a prediction *at the threshold where the metric maximised*, so it
+   moves with the operating point as well as with coverage. The platform
+   records a case where a single 0.98 to 0.99 step in that threshold moved the
+   count by 17 percent across 32 rung-1 runs whose scored cohort was provably
+   identical (see the note in
+   ``protea/core/operations/_run_cafa_artifacts.py``). So a -0.976 correlation
+   is consistent with arms covering different populations and equally
+   consistent with arms whose optima landed at different thresholds, and
+   ``cafaeval`` reports per cell rather than per protein, so neither reading
+   can be confirmed or excluded after the fact.
+
+   Under either reading the column is not a clean measurement of what backbone
+   choice buys. The 0.04584 spread is an upper bound on it, and any attenuation
+   ratio built on that numerator inherits the ambiguity.
 
    The ``composite`` column does not have the problem. Its populations span
    2.4 percent, 6,116 to 6,264, and the population-to-score correlation is
