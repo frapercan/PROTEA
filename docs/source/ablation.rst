@@ -715,16 +715,18 @@ measured at four depths rather than inherited, and it stays at the last layer.
 
 .. _insight-comparisons-that-looked-single-field:
 
-Four comparisons that looked like they isolated one thing
-----------------------------------------------------------
+Six times the page said more than the evidence did
+---------------------------------------------------
 
 Every result in this chapter is a comparison, and a comparison is only worth
-what its control is worth. Over a single day of this campaign, four separate
-measurements were found to have varied something besides the field they were
-reporting. None of them announced itself, none produced an error, and each
-looked like a clean single-field comparison to the person who ran it. They are
-collected here because the shape is more useful than any of the four
-corrections.
+what its control is worth. Over a single day of this campaign, six claims were
+found standing further than what supported them. None announced itself, none
+produced an error, and each looked sound to whoever wrote it. They fall into
+two families that need different defences, and they are collected here because
+the shapes are more useful than the six corrections.
+
+The first family is measurements that varied something besides the field they
+reported.
 
 **An index that counts backwards.** An arm was dispatched at corpus scale to
 compare a mid layer against the last one. The platform reads
@@ -759,15 +761,37 @@ Reported together they recommend one filter for two problems, and the composite
 overstated the rate that matters by a factor of three. Caught by rereading a
 number that had already been published.
 
-**What they share.** Each is a comparison that appears to isolate one field and
-does not, and in three of the four the confounding quantity was not even
-visible in the output: an index convention, a normalisation bundled into an arm
+**What those four share.** Each is a comparison that appears to isolate one
+field and does not, and in three of the four the confounding quantity was not
+even visible in the output: an index convention, a normalisation bundled into an arm
 name, a column whose name describes something other than what it holds. The
 detections have nothing in common. One came from a colleague's knowledge of a
 convention, one from a missing arm, one from a source comment, one from
 rereading published prose. No check found any of them, which is the part worth
 taking seriously: they were caught by four accidents, and there is no reason to
 think a fifth would have been.
+
+**The second family is corrections that did not travel.** Both arrived after
+the first four had been written up, and both were produced by the act of
+correcting rather than by the original error.
+
+*A heading that outlived its claim.* A section asserted two things in its title.
+Both were withdrawn from its body the same afternoon, on evidence set out
+directly beneath, and the title went on asserting them for six hours. A
+paragraph one level down did the same: its measurement was sound and the
+inference it drew from that measurement had just been refuted three paragraphs
+later.
+
+*A number quoted in more than one place.* The figure withdrawn as confounded
+was still quoted in two further paragraphs of the same chapter, one of them the
+paragraph whose whole function is to reconcile the chapter's two halves, which
+is where a careful reader goes precisely when the two seem to conflict.
+
+**What that second family shares** is that the correction landed where the
+finding was made and nowhere else. Nothing objects: a documentation build has
+no opinion about a heading that contradicts the section under it, or about two
+paragraphs of one chapter disagreeing on a number. Both were caught by
+rereading, which is not a method.
 
 **What follows from it, in the form used here.** Vary one field. Where a
 transform is involved, run it at a setting where it must be the identity, so
@@ -776,6 +800,12 @@ Before quoting a field, read what produces it rather than what it is called.
 And before summing two populations under one name, check that they answer the
 same way, because a composite recommends a single remedy for what may be two
 problems.
+
+For the second family the rule is shorter and was learned more expensively than
+it reads: a number does not have one home. When a claim is withdrawn, search
+the whole document for it, including the headings, the summaries and the
+paragraphs written to reconcile it with something else. The correction is not
+finished when the finding is corrected.
 
 
 .. _insight-bp-wall-is-a-ranking-limit:
