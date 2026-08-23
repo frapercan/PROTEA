@@ -521,17 +521,48 @@ fixed, the four encodings spread 0.0540 under ``embedding_only`` at K=30 and
 0.0025 under ``composite_no_embedding``. The second of those carries weight
 exactly 0.0 on embedding similarity and wins 72.7 percent of cells.
 
-The comparison between those two numbers is sound but it is not symmetric, and
-the ``composite_no_embedding`` side is the one to trust. Across this grid the
-winning weighting is flat at every neighbourhood size, spreading 0.0092 to
-0.0142 from K=1 to K=30 on populations that stay within 3.2 to 6.7 percent of
-each other. The ``embedding_only`` side is not measured on a stable population:
-its spread rises from 0.0221 to 0.1563 over the same sweep while the population
-range rises from 2.0 to 20.2 percent, for the reason set out in
-:ref:`insight-capacity-is-read-through-one-channel`. Arms that cover more of
-the population are scored on more of it. Read the left-hand number as an upper
-bound on what the encoding buys through that channel, and the right-hand one as
-the measurement. The layer
+The 0.0540 is almost entirely the instrument, and this can be shown rather
+than asserted. It is measured under ``embedding_only``, the channel that
+:ref:`insight-capacity-is-read-through-one-channel` shows is scored on a
+population that moves with the arm. Here the correlation between population and
+score is -0.809, and the shape is specific: the un-encoded baseline is scored
+on the most proteins and scores worst.
+
+.. list-table:: The four arms at K=30 under ``embedding_only``
+   :header-rows: 1
+   :widths: 34 22 22
+
+   * - Arm
+     - Score
+     - Mean population
+   * - sparse pooled
+     - 0.23656
+     - 2,261
+   * - sparse per-residue
+     - 0.22580
+     - 2,218
+   * - dense fitted
+     - 0.21353
+     - 2,237
+   * - pretrained ankh-base (un-encoded)
+     - 0.18251
+     - 2,350
+
+Of the 0.0540, some 0.0313 is the baseline against the encoded arms across a
+5.9 percent population gap, and 0.023 separates the three encoded arms across a
+1.9 percent one.
+
+**Restricted to scorers whose populations agree, the encoding axis at K=30 is
+what it was at K=1.** Across four composite scorers whose arms sit within 1.4
+percent of each other in population, the four encodings spread 0.00194,
+0.00227, 0.00248 and 0.00326. Two to three thousandths, against a headline of
+0.0540 from the same arms at the same budget.
+
+**No sentence here should name a winning encoding.** Which one wins at K=30
+flips with the scorer, four scorers to four: the dense fitted map wins under
+one set and the sparse pooled map under the other. That is the same
+self-inconsistency the backbone ordering shows under its winning weighting, and
+it means the ordering inside these numbers is not reportable at any budget. The layer
 axis reproduces the pattern independently: the last layer beats depth 38 in all
 sixteen comparisons, by 0.0307 through ``embedding_only`` and 0.0026 through
 the winner, an attenuation of about twelve.
