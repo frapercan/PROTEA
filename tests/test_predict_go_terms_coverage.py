@@ -542,6 +542,15 @@ class TestResolveLiveSchemaSha:
 
 class TestApplyRerankerEmptyScores:
     def test_zero_rows_returns_applied_zero(self) -> None:
+        pytest.importorskip(
+            "protea_reranker_lab",
+            reason=(
+                "protea-reranker-lab lives in the OPTIONAL poetry group "
+                "'test', so a plain `poetry install` does not provide it. "
+                "This asserts feature-schema parity with the offline "
+                "trainer and can only run with `--with test`."
+            ),
+        )
         from protea_reranker_lab.contracts import compute_feature_schema_sha
 
         op = PredictGOTermsBatchOperation()

@@ -271,6 +271,15 @@ class TestBitExactRegression:
 
     @staticmethod
     def _shared_inputs():
+        pytest.importorskip(
+            "protea_reranker_lab",
+            reason=(
+                "protea-reranker-lab lives in the OPTIONAL poetry group "
+                "'test', so a plain `poetry install` does not provide it. "
+                "This asserts feature-schema parity with the offline "
+                "trainer and can only run with `--with test`."
+            ),
+        )
         from protea_reranker_lab.contracts import compute_feature_schema_sha
 
         expected_sha = compute_feature_schema_sha(["knn", "annotation_meta"])
