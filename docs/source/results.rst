@@ -66,6 +66,16 @@ with ``cafaeval`` on the sealed settings) is documented in
 :doc:`/operate/reproduce-the-sealed-board`, which is explicit about which stages are
 job-backed today and which are not yet automated.
 
+**Reproducing it today has a precondition that is not currently met.** The path
+names two artifacts by identity, the learned-encoder head behind ``d8979601``
+and a trained booster, and neither is produced by this repository. As of
+2026-08-23 neither has been located: not in this platform's database or object
+store, and not on the compute node's system disk. That is not the same as
+saying they are gone, and the reproduction page sets out what has and has not
+been searched. But the sentence above describes how the board was produced, not
+something a reader can run this week, and the two should not be read as the
+same claim.
+
 Provenance of the earlier figures
 ----------------------------------
 
