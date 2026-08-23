@@ -57,7 +57,7 @@ the least-studied proteins. The evidence available does not reach there yet. We
 name it the biological-process wall and we show it, rather than hide it, and we
 point to the first crack in it (a representation trained on written descriptions
 of function). The design lessons behind all of this, including why standardising
-a representation matters more than its depth, are collected in :doc:`insights`.
+a representation matters more than its depth, are collected in :doc:`ablation`.
 
 Where to go next
 ----------------

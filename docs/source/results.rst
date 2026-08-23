@@ -18,7 +18,7 @@ nine evaluation cells (NK/LK/PK by BPO/MFO/CCO).
   data leakage that inflates tools scored against a current database.
 - **Champion.** The learned k-WTA retrieval encoder (config ``d8979601``,
   which stores GO-aligned codes rather than a raw PLM vector, a choice the
-  representation ablation in :doc:`insights` motivates) for candidate
+  representation ablation in :doc:`ablation` motivates) for candidate
   generation, followed by a stacked per-category re-ranker (see
   :doc:`/adr/D43-stacked-meta-reranker`). The encoder earns that place by
   retrieving a better candidate set, and not by scoring it: a 104-arm grid
