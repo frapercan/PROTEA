@@ -79,8 +79,8 @@ overlap with any training pair is enforced by the ``export_research_dataset``
 payload validator. See :doc:`/operate/reproduce-the-sealed-board` for the ordered
 reproduction path.
 
-The served last layer is a weak retrieval base, and standardisation is the lever
---------------------------------------------------------------------------------
+The learned code beats every fixed representation, but the ranking among them does not
+---------------------------------------------------------------------------------------
 
 PROTEA's retrieval encoder stores learned, GO-aligned codes rather than a raw
 protein-language-model vector. A controlled ablation on the ankh-base substrate
@@ -95,12 +95,22 @@ last-layer dense baseline. That is plus 47.3 percent over the best fixed choice
 and plus 61.0 percent over the served baseline, winning all nine cells, with the
 largest gains on molecular function.
 
-**Why the last layer is a poor base.**
+**A geometry fact, and what it does not explain.**
 Mean-pooled activations of ankh-base's final layer are compressed to a peak
 absolute value near 0.6 by the model's closing LayerNorm, while the mid layers
-reach magnitudes above 400,000. The final layer's flattened geometry is a weak
-substrate for cosine retrieval, which is one reason the served last layer sat at
-the bottom of the ranking.
+reach magnitudes above 400,000. That difference is real and measured, and it is
+a good reason to expect per-dimension rescaling to help a representation as
+flattened as the last layer's.
+
+It was previously offered here as the reason the served last layer sat at the
+bottom of the fixed-representation ranking. That inference does not survive the
+next paragraph: the ranking it explains comes from a comparison in which the
+last layer was the only arm not standardised. Held to the same treatment as its
+competitors the last layer WINS, at every depth tested and on two instruments,
+which is set out in
+:ref:`insight-the-midpoint-was-measured`. A flattened geometry is a reason
+standardisation helps; it is not evidence that the layer beneath it is a weak
+base.
 
 **Standardisation and depth were varied together, and only the pair was
 measured.**
