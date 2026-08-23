@@ -629,6 +629,14 @@ have been a full-corpus job of roughly seventeen hours to answer a question that
 needed 89,013 proteins. The layer field of the frozen recipe is therefore
 measured at four depths rather than inherited, and it stays at the last layer.
 
+The generalisable part is not that an estimate came in low. The first estimate
+of the midpoint was sixteen hours, and it was correct about the card: what it
+got wrong was assuming the residues had to be stored, and roughly four fifths of
+that price was storage for a quantity this question never needed. An axis came
+close to going unmeasured on a price that was mostly an artefact of how an
+earlier arm had been run. Before accepting that an axis is too expensive to
+check, it is worth asking what the measurement is being asked to write down.
+
 
 .. _insight-bp-wall-is-a-ranking-limit:
 
