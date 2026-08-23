@@ -72,6 +72,39 @@ The ordered path
    in :doc:`/runbooks/reproducible-eval-frame`; the metric definition and the
    LAFA parity mapping are in :doc:`/architecture/evaluation`.
 
+What a clean platform does not have
+------------------------------------
+
+The steps above name two artifacts by identity: the learned-encoder head behind
+config ``d8979601`` (step 3) and a trained booster (step 5). **Neither is
+produced by this repository, and neither is present in a platform brought up
+from scratch.**
+
+Checked against the running instance on 2026-08-23, which was stood up clean on
+2026-07-30:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 52 24
+
+   * - What the path names
+     - Present
+   * - embedding config ``d8979601``
+     - no
+   * - any config on the ``learned-code`` backend
+     - no
+   * - any registered ``RerankerModel``
+     - no, zero rows
+
+That is the clean run behaving as intended rather than a fault, but it means a
+reader following this page against a fresh platform stops at step 3, and the
+board in :doc:`/results` is a sealed historical result rather than something the
+platform will recompute on request. The head artifact has to be supplied from
+outside, by the environment variable named in step 3; the booster has to be
+trained in ``protea-reranker-lab`` and imported, as step 5 says. Those two
+sentences are the reproduction's real precondition, and they were previously
+readable only by inference.
+
 What is not yet automated
 -------------------------
 
