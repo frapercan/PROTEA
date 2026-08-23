@@ -281,6 +281,69 @@ check_docs_freshness() {
 
 check_docs_freshness
 
+# ── is the SERVED frontend build the frontend on disk? ───────────────────────
+#
+# WHY THIS IS A SEPARATE QUESTION FROM THE AGE CHECK ABOVE. That one asks
+# whether a PROCESS is older than the tree it runs from. Next serves from a
+# BUILD, and restarting does not rebuild, so a frontend can be restarted every
+# hour and serve month-old markup with every existing check satisfied. The
+# failure this catches is editing a component and restarting instead of
+# rebuilding, which reads as "my change did nothing" and sends the reader
+# looking in the wrong place.
+#
+# It does NOT catch a checkout that is behind its remote. That is the condition
+# found on 2026-08-23, when the build was three days old and correct: newer
+# than the source it was made from, which was itself 23 commits behind develop.
+# A build cannot be fresher than the checkout it is built in, and whether to
+# advance a checkout is a deploy decision rather than a fault. The separate
+# warning below reports it without calling it one.
+check_frontend_build_freshness() {
+  local build="$WEB/.next"
+  if [[ ! -f "$build/BUILD_ID" ]]; then
+    warn "no frontend build at apps/web/.next"
+    return 0
+  fi
+  local built newest age_days
+  built="$(stat -c %Y "$build/BUILD_ID" 2>/dev/null)"
+  newest="$(find "$WEB/app" "$WEB/components" "$WEB/lib" -type f \
+              \( -name '*.ts' -o -name '*.tsx' -o -name '*.css' \) \
+              -printf '%T@\n' 2>/dev/null | sort -rn | head -1 | cut -d. -f1)"
+  [[ -z "$built" || -z "$newest" ]] && return 0
+  if (( built < newest )); then
+    age_days=$(( (newest - built) / 86400 ))
+    bad "frontend build is ${age_days} day(s) older than apps/web source"
+    echo "        restarting does not rebuild; the served UI is not the UI on disk"
+    echo "        rebuild:  (cd apps/web && npm run build) then restart the frontend"
+  else
+    ok "frontend build is newer than its source"
+  fi
+}
+
+check_frontend_build_freshness
+
+# ── is what is on disk what was merged? ──────────────────────────────────────
+#
+# A warning and never a failure. Serving a checkout that is behind its remote
+# is a deliberate posture: deploys are decided, not drifted into. What is worth
+# saying out loud is HOW far behind, because "a few commits" and "twenty-three,
+# including UI merged this morning" are the same state and different decisions,
+# and nothing else on the machine reports the difference.
+check_checkout_behind_remote() {
+  git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  local upstream behind
+  upstream="$(git -C "$ROOT" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)" || return 0
+  behind="$(git -C "$ROOT" rev-list --count "HEAD..$upstream" 2>/dev/null)"
+  [[ -z "$behind" ]] && return 0
+  if (( behind > 0 )); then
+    warn "checkout is $behind commit(s) behind $upstream"
+    echo "        anything merged since is on disk nowhere; deploying is a decision"
+  else
+    ok "checkout is level with $upstream"
+  fi
+}
+
+check_checkout_behind_remote
+
 echo
 if [[ "$fail" -gt 0 ]]; then
   echo "$fail check(s) failed: what is running is not what is on disk."
