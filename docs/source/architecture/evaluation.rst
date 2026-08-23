@@ -524,7 +524,7 @@ Implementation reference
      v227 to v230 frame) produced by following this protocol.
    - :doc:`/historical/pre-v227`: the superseded GOA 220 to 229 Fmax figures,
      retained for provenance only.
-   - :doc:`/operate/reproduce-0.40765`: the ordered path that reproduces the
+   - :doc:`/operate/reproduce-the-sealed-board`: the ordered path that reproduces the
      sealed board.
    - :doc:`operations`: the ``generate_evaluation_set`` and
      ``run_cafa_evaluation`` operations that implement the protocol live.

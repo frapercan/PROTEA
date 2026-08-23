@@ -20,7 +20,11 @@ nine evaluation cells (NK/LK/PK by BPO/MFO/CCO).
   which stores GO-aligned codes rather than a raw PLM vector, a choice the
   representation ablation in :doc:`insights` motivates) for candidate
   generation, followed by a stacked per-category re-ranker (see
-  :doc:`/adr/D43-stacked-meta-reranker`).
+  :doc:`/adr/D43-stacked-meta-reranker`). The encoder earns that place by
+  retrieving a better candidate set, and not by scoring it: a 104-arm grid
+  over four encodings finds no arm beating any other once the identity and
+  neighbour-consensus channels are switched on, which
+  :ref:`insight-representation-matters-only-in-twilight` sets out in full.
 - **Metric and scoring.** ``f_micro_w`` is the headline metric, scored
   board-faithfully with ``cafaeval`` on the sealed settings (OBO
   ``releases/2025-07-22``, the t0 IA artefact, the release

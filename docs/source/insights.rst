@@ -19,7 +19,7 @@ that closed each issue.
 
 .. seealso::
 
-   - :doc:`/operate/reproduce-0.40765` for the ordered path that reproduces
+   - :doc:`/operate/reproduce-the-sealed-board` for the ordered path that reproduces
      the sealed board.
    - :doc:`/adr/index` for the full decision log.
    - :doc:`/runbooks/index` for on-call operational procedures.
@@ -439,7 +439,7 @@ aggregate across multiple snapshot pairs). The ``EvaluationSet`` row in PROTEA
 captures (1), (2), (3), and (4). The training dataset manifest captures the
 snapshot pair list. Cross-checking that the eval snapshot pair does not
 overlap with any training pair is enforced by the ``export_research_dataset``
-payload validator. See :doc:`/operate/reproduce-0.40765` for the ordered
+payload validator. See :doc:`/operate/reproduce-the-sealed-board` for the ordered
 reproduction path.
 
 The served last layer is a weak retrieval base, and standardisation is the lever
@@ -491,6 +491,103 @@ why the champion stores learned GO-aligned codes. See
 :doc:`/adr/D35-canonical-8plm-embedding-configs` for the embedding config
 registry and :doc:`/adr/D38-neural-head-deferred-dataset-pack-pivot` for the
 neural-head decision this evidence informs.
+
+.. _insight-representation-matters-only-in-twilight:
+
+The representation earns its place at retrieval and loses it at scoring
+-----------------------------------------------------------------------
+
+The ablation above measures the encoding where the encoding is the only
+evidence available, and finds it worth a great deal. Measured again at the
+other end of the same pipeline, with the rest of the evidence switched on, the
+same axis is worth nothing. Both numbers are correct, and the distance between
+them is the most useful thing this project has measured about its own
+representation.
+
+**The grid.** Four encodings (pretrained ankh-base, a dense fitted map, a
+sparse pooled map at 128 of 2048 atoms, and a sparse per-residue code) crossed
+with six neighbourhood sizes, nine score weightings and three knowledge
+regimes, banded by sequence identity, scored board-faithfully on the nine
+category-by-aspect cells. 104 arms per cell.
+
+**No arm beats any other.** The margin between first and second never exceeds
+0.0015 in any of the nine cells, and in five of them the second place is the
+same encoding under a different weighting. The per-cell winner this grid was
+built to find cannot be determined, and that is the result rather than a gap in
+it.
+
+**What separates arms is the channel, not the encoding.** Holding the weighting
+fixed, the four encodings spread 0.0540 under ``embedding_only`` at K=30 and
+0.0025 under ``composite_no_embedding``. The second of those carries weight
+exactly 0.0 on embedding similarity and wins 72.7 percent of cells. The layer
+axis reproduces the pattern independently: the last layer beats depth 38 in all
+sixteen comparisons, by 0.0307 through ``embedding_only`` and 0.0026 through
+the winner, an attenuation of about twelve.
+
+**In the regime this project names as its frontier, the representation does not
+participate at all.** In half the prior-knowledge cells the four encodings score
+identically to six decimal places. That is a stronger statement than a small
+difference, because it is falsifiable and it failed to be falsified: the four
+encodings retrieve the same neighbours and transfer the same terms.
+
+**The ties are smaller than chance would produce**, which is what makes the
+absence of a winner an explanation rather than only an observation. A maximum
+taken over many arms has a floor of roughly ``sigma * sqrt(2 * ln N)``; at the
+study's measured spread that is about 0.0093 for the 104 arms in one cell and
+0.0108 for the 528 in the grid. Every margin here is five to seven times below
+it, including the 0.0021 by which ProtST leads ankh-base on the board. A
+comparison decided before it ran is held to the resolution floor of 0.0013
+instead, which is why a 0.0099 loss on a two-arm test counts and a 0.0021
+margin over a search does not. The discriminator is the search budget, not the
+size of the number.
+
+**Depth and encoding are not the same lever seen twice.** Two instruments
+sharing no code, one scoring ``f_micro_w`` on the task and one measuring
+reachability on a retrieval bank, agree by identity band on what changing depth
+costs:
+
+.. list-table:: Depth 38 minus the last layer, by sequence identity band
+   :header-rows: 1
+   :widths: 20 25 25
+
+   * - Identity band
+     - Task, ``f_micro_w``
+     - Retrieval, reachability
+   * - <= 30 percent
+     - +0.0068
+     - +0.0010
+   * - 30 to 60 percent
+     - -0.0142
+     - -0.0158
+   * - 60 to 90 percent
+     - -0.0129
+     - -0.0099
+   * - > 90 percent
+     - -0.0010
+     - -0.0162
+
+Same sign in three of four bands and close in magnitude in the two middle ones.
+Both instruments say depth is inert in the twilight zone and costs elsewhere,
+which is the opposite shape to the encoding axis, whose effect was largest in
+twilight and zero above ninety percent identity. Depth costs where the answer
+was already easy; the encoding matters only where it was hard.
+
+**How to read this against the section above.** The retrieval ablation reports
+the learned encoder at 0.21500 against 0.13356 for the served last-layer dense
+baseline, a 61.0 percent gain. That measurement gives the encoding the whole
+job: cosine top-30 transfer, with no identity signal, no neighbour consensus and
+no taxonomic prior in the score. The grid here gives it the job it actually has
+in the served pipeline, alongside those other channels, and the winning
+weighting reads it at zero. Neither number is wrong and neither supersedes the
+other. The learned encoder earns its place by retrieving a better candidate set,
+and it does not additionally earn one by scoring it, because by the time the
+candidates are scored the evidence that orders them is coming from somewhere
+else.
+
+The practical consequence is that the retrieval axis is closed by measurement.
+What limits the board is the ordering of candidates already retrieved, which is
+the same conclusion the BP wall reaches from the other direction below.
+
 
 .. _insight-bp-wall-is-a-ranking-limit:
 
