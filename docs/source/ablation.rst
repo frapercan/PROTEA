@@ -89,11 +89,16 @@ motivates that choice, and its lesson is not the one a reader expects.
 **The finding.**
 Scored board-faithfully (cosine top-30 KNN GO transfer into the 15,000-protein
 reference, ``f_micro_w`` over the nine cells), the learned k-WTA encoder
-``d8979601`` reaches mean 0.21500, versus 0.14597 for the best fixed
-representation (a standardised mid layer, L10, k-WTA) and 0.13356 for the served
-last-layer dense baseline. That is plus 47.3 percent over the best fixed choice
-and plus 61.0 percent over the served baseline, winning all nine cells, with the
-largest gains on molecular function.
+``d8979601`` reaches mean 0.21500 against 0.14597 for the best fixed
+representation (a standardised mid layer, L10, k-WTA). That is plus 47.3
+percent, winning all nine cells, with the largest gains on molecular function.
+
+That is the comparison to quote, and it is deliberately not the larger one. The
+same sweep puts the raw last-layer dense arm at 0.13356, which would make the
+gain 61.0 percent, but that arm is the only one in the family carrying no
+standardisation, so a figure against it measures the learned code AND a
+normalisation the competitor lacks. The 47.3 percent is family against family,
+best member to best member, and it is the number this chapter uses.
 
 **A geometry fact, and what it does not explain.**
 Mean-pooled activations of ankh-base's final layer are compressed to a peak
@@ -332,9 +337,9 @@ twilight and zero above ninety percent identity. Depth costs where the answer
 was already easy; the encoding matters only where it was hard.
 
 **How to read this against the section above.** The retrieval ablation reports
-the learned encoder at 0.21500 against 0.13356 for the served last-layer dense
-baseline, a 61.0 percent gain. That measurement gives the encoding the whole
-job: cosine top-30 transfer, with no identity signal, no neighbour consensus and
+the learned encoder at 0.21500 against 0.14597 for the best fixed
+representation, a 47.3 percent gain. That measurement gives the encoding the
+whole job: cosine top-30 transfer, with no identity signal, no neighbour consensus and
 no taxonomic prior in the score. The grid here gives it the job it actually has
 in the served pipeline, alongside those other channels, and the winning
 weighting reads it at zero. Neither number is wrong and neither supersedes the
