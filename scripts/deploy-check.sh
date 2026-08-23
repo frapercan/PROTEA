@@ -246,6 +246,41 @@ fi
     fi
   done
 
+# ── are the SERVED docs the docs on disk? ────────────────────────────────────
+#
+# WHY. On 2026-08-23 the published Sphinx site was found to have been built on
+# 29 July. A month of merged work, an entire campaign's results, had never been
+# public: the chapter written that morning returned 404 while every process
+# reported healthy and every endpoint returned 200. Nothing here was broken.
+# The docs are static files, so no process is old, no build is deleted, and the
+# checks above are all satisfied by a site that is four weeks behind.
+#
+# That is the failure mode this block exists for. A staleness that involves no
+# error does not announce itself, and the next month-long gap will not either.
+check_docs_freshness() {
+  local build="$ROOT/docs/build/html"
+  local index="$build/index.html"
+  if [[ ! -f "$index" ]]; then
+    warn "no built docs at docs/build/html (the API serves nothing at /sphinx)"
+    return 0
+  fi
+  local built newest age_days
+  built="$(stat -c %Y "$index" 2>/dev/null)"
+  newest="$(find "$ROOT/docs/source" -type f \( -name '*.rst' -o -name '*.md' -o -name '*.py' \) \
+              -printf '%T@\n' 2>/dev/null | sort -rn | head -1 | cut -d. -f1)"
+  [[ -z "$built" || -z "$newest" ]] && return 0
+  if (( built < newest )); then
+    age_days=$(( (newest - built) / 86400 ))
+    bad "docs built ${age_days} day(s) before the newest source under docs/source"
+    echo "        the site at /sphinx is serving prose that is no longer written"
+    echo "        rebuild:  python -m sphinx -b html docs/source docs/build/html"
+  else
+    ok "built docs are newer than docs/source"
+  fi
+}
+
+check_docs_freshness
+
 echo
 if [[ "$fail" -gt 0 ]]; then
   echo "$fail check(s) failed: what is running is not what is on disk."
