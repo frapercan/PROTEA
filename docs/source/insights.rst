@@ -694,6 +694,47 @@ has no order for the ``embedding_only`` order to agree or disagree with. Any
 claim that one of these backbones is the right one, made on this evidence,
 would be a claim about which arm won a coin toss.
 
+**The flatness is not an artefact of the operating point.** Every one of the
+sixteen maxima above is at K=3, so the table is a balanced cut of two arms per
+backbone rather than a maximum over unequal budgets. Repeating the comparison
+at the other neighbourhood sizes keeps the result:
+
+.. list-table:: Backbone spread under ``composite``, by neighbourhood size
+   :header-rows: 1
+   :widths: 12 26 26 36
+
+   * - K
+     - Spread
+     - Population range
+     - Note
+   * - 3
+     - 0.00241
+     - 2.4 percent
+     - the cut published above
+   * - 5
+     - 0.04579
+     - 551 percent
+     - unusable, see below
+   * - 10
+     - 0.00943
+     - 2.9 percent
+     - nothing removed
+   * - 30
+     - 0.04354
+     - 2.9 percent
+     - 0.00740 excluding one arm, see below
+
+Two budgets need their exceptions named rather than quietly dropped. At K=5
+one arm is scored on 954 proteins against a norm near 6,100, which is a
+truncated evaluation and not a backbone result; the spread at that budget
+measures the truncation. At K=30 the spread is one outlier: seven backbones
+span 0.00740 and ``ankh-base`` sits alone 0.036 below the next worst, on a
+normal population, and only under this scorer. That arm is a suspect data
+point, not evidence that the backbone matters at K=30.
+
+With those two named, the backbone axis is flat under the winning weighting at
+every budget where the evaluation is sound.
+
 **The same shape appears on every representation axis measured**, and it is
 the right-hand column that carries it.
 
