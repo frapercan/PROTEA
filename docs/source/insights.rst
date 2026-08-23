@@ -731,16 +731,28 @@ evidence the platform cannot tell the two apart.
    2.4 percent, 6,116 to 6,264, and the population-to-score correlation is
    -0.143. That is the column the finding rests on.
 
-**There is no ordering to report in the composite column.** Its eight entries
-span 0.00241, and each entry is itself a maximum taken over eight to eleven
-arms sharing the neighbourhood sizes 3, 5, 10 and 30, so the spread between the
-backbones is smaller than the selection noise carried by any one of them. The
-unequal budgets do not explain the order either: the backbone searched hardest,
-at eleven arms, placed third, and the one that won had nine. The rank
-correlation between the two columns is 0.000, which
-is not a reversal but the signature of an absent signal: the composite column
-has no order for the ``embedding_only`` order to agree or disagree with. Any
-claim that one of these backbones is the right one, made on this evidence,
+**There is no ordering to report in the composite column**, and it fails to be
+one in three independent ways.
+
+*It does not reproduce against its own neighbour.* The rank correlation between
+the two columns is 0.000. That is not a reversal but the signature of an absent
+signal: the composite column has no order for the ``embedding_only`` order to
+agree or disagree with.
+
+*It does not reproduce across neighbourhood sizes.* Taking the four budgets as
+near-independent slices and correlating the orderings they produce, the
+``embedding_only`` side reproduces itself with a mean rank correlation of 0.85
+and never falls below 0.69. The composite side manages 0.56, with three of its
+six pairings below 0.42. An ordering that cannot agree with itself across
+budgets cannot be a reversal of anything.
+
+*It does not survive a change of average.* The nine cells are nine different
+denominators, and the mean used here weights them equally. Recomputed as a
+population-weighted mean, the winner of this very column changes, at spreads of
+0.00241 and 0.00227 that both clear the resolution floor, so this is not the
+floor excusing it.
+
+Any claim that one of these backbones is the right one, made on this evidence,
 would be a claim about which arm won a coin toss.
 
 **The flatness is not an artefact of the operating point.** Every one of the
@@ -783,6 +795,62 @@ point, not evidence that the backbone matters at K=30.
 
 With those two named, the backbone axis is flat under the winning weighting at
 every budget where the evaluation is sound.
+
+**Which average, and what changing it moves.** The nine cells are not nine
+views of one population. They span 1,003 to 6,901 scored proteins, a factor of
+5.6, because a protein enters an aspect only where it gained a term of that
+aspect. Every figure in this chapter is an unweighted mean over the nine, which
+gives a 1,003-protein cell the same voice as a 6,901-protein one. That is a
+choice, and it had never been stated as one.
+
+The alternative was computed rather than argued about: 76 comparisons across
+both grids, each recomputed as a mean weighted by the median ``n_proteins`` per
+cell across the grid. The median is used rather than each arm's own count so
+that every arm carries the same weight vector, which keeps the ambiguity
+described above out of the comparison.
+
+.. list-table:: What the population-weighted mean changes
+   :header-rows: 1
+   :widths: 44 28 28
+
+   * - Quantity
+     - Unweighted
+     - Population-weighted
+   * - Composite spread, median of 56
+     - 0.00267
+     - 0.00195
+   * - Composite spread, maximum of 56
+     - 0.04977
+     - 0.02887
+   * - Backbone spread through ``embedding_only``
+     - 0.04584
+     - 0.02206
+
+**The flatness survives and gets flatter.** Of 56 composite comparisons, exactly
+one widens under reweighting, by 0.00018, which is a seventh of the resolution
+floor. So the claim that the winning weighting absorbs these axes is not an
+artefact of the unweighted mean.
+
+**The rankings do not survive.** The nominal winner changes in 15 of the 76
+comparisons. Five of those sit below the floor, where reordering is expected and
+means nothing. **Ten are at spreads that clear it**, and one of the ten is the
+composite column tabulated above. That is the third of the three independent
+reasons this chapter names no winning backbone, and it is the strongest, because
+it does not appeal to a noise floor at all.
+
+**And the upper bound is bounded under the average that maximises it.** Across
+the twenty ``embedding_only`` comparisons the weighted spread is a median 0.633
+of the unweighted one, near enough to two thirds throughout and closer to a half
+at the larger budgets. So where this chapter calls 0.04584 an upper bound on
+what backbone choice buys through that channel, the same quantity is 0.02206
+under the other average. Both are quoted because quoting only the larger invites
+exactly the question this paragraph answers.
+
+The campaign keeps the unweighted mean, because it is the average the sealed
+board and the CAFA cell structure are already expressed in and changing it would
+make the two incomparable. What is now on record is that the choice is not
+immaterial, that what it moves is the ranking rather than the flatness, and that
+the ranking was already unreportable for two other reasons.
 
 **The same shape appears on every representation axis measured**, and it is
 the right-hand column that carries it.
