@@ -80,6 +80,14 @@ config ``d8979601`` (step 3) and a trained booster (step 5). **Neither is
 produced by this repository, and neither is present in a platform brought up
 from scratch.**
 
+The dependency is wider than those two steps. ``two_tower_classifier.py`` pins
+``d8979601`` as its protein-tower input, so that one config is the substrate
+under the classifier as well as the head behind the board, and it names three
+further artifact families it resolves from the store by environment variable:
+seven ``head_seed*.pt`` checkpoints, ``go_sparse_codes*.npz``, and ``vocab_go``,
+which is the trained term ORDER and therefore not reconstructible by sorting.
+Five families in total, and the same answer for each.
+
 Checked against the running instance on 2026-08-23, which was stood up clean on
 2026-07-30:
 
@@ -87,14 +95,20 @@ Checked against the running instance on 2026-08-23, which was stood up clean on
    :header-rows: 1
    :widths: 52 24
 
-   * - What the path names
+   * - Artifact family
      - Present
-   * - embedding config ``d8979601``
+   * - embedding config ``d8979601`` (head ``ankh_base_hardneg.pt``)
      - no
    * - any config on the ``learned-code`` backend
      - no
    * - any registered ``RerankerModel``
      - no, zero rows
+   * - two-tower checkpoints, ``head_seed*.pt``
+     - no
+   * - GO sparse codes, ``go_sparse_codes*.npz``
+     - no
+   * - trained term order, ``vocab_go*``
+     - no
 
 That is the clean run behaving as intended rather than a fault, but it means a
 reader following this page against a fresh platform stops at step 3, and the
