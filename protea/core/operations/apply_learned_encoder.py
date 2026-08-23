@@ -243,14 +243,36 @@ def refuse_wrong_order(meta: dict, artifact_path: str) -> None:
     shares 12 of 128 atoms with the intended one, at cosine 0.08. Nothing downstream can tell
     them apart, which is why the artifact has to say which it is, and why saying nothing is not
     allowed to mean this one.
+
+    HOW TO ANSWER THE QUESTION RATHER THAN GUESS AT IT. Every artifact predating this guard
+    hits the first branch below, and its operator has no way to know which order was used:
+    that is the whole premise. The answer is recoverable whenever the bundle ships codes it
+    produced. Re-encode a handful of its own proteins through one order and compare against
+    the stored codes. The right order reproduces the strong components exactly, and the wrong
+    one does not come close: the 12-of-128 overlap at cosine 0.08 above is what wrong looks
+    like, against near-perfect agreement on the top atoms and a rank correlation of 1.000 on
+    the indices both select.
+
+    Disagreement confined to the selection boundary is expected and is not evidence of the
+    wrong order. Atoms near the cut are nearly tied, and half-precision storage of the input
+    reshuffles which side of it they land on.
+
+    Deriving the order from the architecture instead is tempting and is not the same thing.
+    An ``in_dim`` matching the pooled width means the head never sees residues, which is a
+    strong argument and not a measurement, and this codebase has spent enough on the
+    difference.
     """
     order = meta.get("order")
     if order is None:
         raise ValueError(
             f"{artifact_path} declares no order. A learned encoder must state whether it was "
             f"fitted to pool before selecting or to select before pooling, because the two "
-            f"produce different codes from identical weights and shapes. Add "
-            f"order={IMPLEMENTED_ORDER!r} to the artifact meta if that is how it was fitted")
+            f"produce different codes from identical weights and shapes. If the bundle "
+            f"ships codes it produced, re-encode a few of its own proteins through this "
+            f"order and compare: the right order reproduces the strong components and "
+            f"agrees on their ranking, the wrong one overlaps by about 12 of 128 atoms at "
+            f"cosine 0.08. Then add order={IMPLEMENTED_ORDER!r} to the artifact meta, with "
+            f"the evidence beside it")
     order = str(order)
     if order not in ORDERS:
         raise ValueError(

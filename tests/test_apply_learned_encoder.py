@@ -145,8 +145,16 @@ def test_this_operation_pools_before_selecting():
 
 def test_an_artifact_that_does_not_declare_its_order_is_refused():
     """Silence is not allowed to mean this one, which is the whole point of the field."""
-    with pytest.raises(ValueError, match="declares no order"):
+    # The message must not stop at naming the fault. An artifact predating this
+    # guard cannot answer it from weights and shapes, which is the guard's own
+    # premise, so the refusal has to carry the procedure that recovers the answer
+    # and the number that distinguishes a wrong order from boundary noise.
+    with pytest.raises(ValueError, match="declares no order") as exc:
         refuse_wrong_order({"in_dim": 8, "dict_dim": 32}, "e.pt")
+    msg = str(exc.value)
+    assert "re-encode" in msg, "the refusal must name the procedure, not only the fault"
+    assert "cosine 0.08" in msg, "and the number that tells a wrong order from boundary noise"
+    assert "pool-then-select" in msg
 
 
 def test_the_other_order_is_refused_and_the_message_says_where_it_belongs():
