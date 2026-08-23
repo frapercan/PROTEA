@@ -99,11 +99,26 @@ Checked against the running instance on 2026-08-23, which was stood up clean on
 That is the clean run behaving as intended rather than a fault, but it means a
 reader following this page against a fresh platform stops at step 3, and the
 board in :doc:`/results` is a sealed historical result rather than something the
-platform will recompute on request. The head artifact has to be supplied from
-outside, by the environment variable named in step 3; the booster has to be
-trained in ``protea-reranker-lab`` and imported, as step 5 says. Those two
-sentences are the reproduction's real precondition, and they were previously
-readable only by inference.
+platform will recompute on request.
+
+.. admonition:: Where those artifacts are is an open question, not a closed one
+   :class: warning
+
+   Neither artifact has been located on the host or on the compute node's
+   system disk. That is not the same as saying they are gone. A 391 GB archive
+   partition on the compute node, which the project's records describe as
+   holding the pre-inversion assets, **has not been searched**: it is present
+   on the device and not mounted, and mounting it needs a privilege neither
+   machine's automation holds.
+
+   So the correct reading of the table above is that the artifacts are not
+   *here*, and that the one place they would most plausibly be has not been
+   looked in. Until it has, this page states a precondition rather than a loss.
+
+The head artifact has to be supplied from outside, by the environment variable
+named in step 3; the booster has to be trained in ``protea-reranker-lab`` and
+imported, as step 5 says. Those two sentences are the reproduction's real
+precondition, and they were previously readable only by inference.
 
 What is not yet automated
 -------------------------
