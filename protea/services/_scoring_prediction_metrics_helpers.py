@@ -16,7 +16,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from protea.core.evaluation import EvalContext, compute_evaluation_data
+from protea.core.evaluation import EvalContext, compute_evaluation_data_for_sets
 from protea.core.metrics import compute_cafa_metrics
 from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -147,11 +147,16 @@ def compute_prediction_metrics(
     config_snap = _validate_prediction_metrics_entities(
         session, prediction_set_id, scoring_config_id
     )
-    eval_data = compute_evaluation_data(
+    # The snapshot the caller names is the PIVOT, the term universe to express
+    # the answer in. It is not an assertion that both annotation sets live in
+    # it, and it must not be used to resolve them: see
+    # ``compute_evaluation_data_for_sets`` for why doing that fails silently
+    # and completely rather than partially.
+    eval_data = compute_evaluation_data_for_sets(
         session,
         old_annotation_set_id=eval_context.old_annotation_set_id,
         new_annotation_set_id=eval_context.new_annotation_set_id,
-        ontology_snapshot_id=eval_context.ontology_snapshot_id,
+        pivot_snapshot_id=eval_context.ontology_snapshot_id,
     )
     scored = _score_prediction_rows(session, prediction_set_id, config_snap)
     metrics = compute_cafa_metrics(scored, eval_data, category=category)

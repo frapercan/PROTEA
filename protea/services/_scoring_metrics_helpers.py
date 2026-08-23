@@ -16,7 +16,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from protea.core.evaluation import compute_evaluation_data
+from protea.core.evaluation import compute_evaluation_data_for_sets
 from protea.core.metrics import compute_cafa_metrics
 from protea.core.reranker import predict as _reranker_predict
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -60,19 +60,25 @@ def _load_eval_data_for_reranker_metrics(
     """Reuse persisted ground-truth when available; otherwise compute on the fly.
 
     Covers the ``mode=reconciled`` case where eval-time annotation
-    snapshots differ from ``ps.ontology_snapshot_id``. Legacy
-    same-snapshot rows fall through to ``compute_evaluation_data``.
+    snapshots differ from ``ps.ontology_snapshot_id``.
+
+    The fallback used to say it covered that case and did not: it called
+    ``compute_evaluation_data``, which resolves both annotation sets through
+    one snapshot and so drops everything not native to it, silently and
+    completely. Rows carrying a ``groundtruth_uri`` never reached it, which is
+    why the published board is unaffected. Rows without one did, and got a
+    delta computed over whichever side happened to match.
     """
     from protea.core.evaluation import load_evaluation_data_for_set
 
     if es.groundtruth_uri:
         eval_data, _pivot_id = load_evaluation_data_for_set(session, es)
         return eval_data
-    return compute_evaluation_data(
+    return compute_evaluation_data_for_sets(
         session,
         old_annotation_set_id=es.old_annotation_set_id,
         new_annotation_set_id=es.new_annotation_set_id,
-        ontology_snapshot_id=ps.ontology_snapshot_id,
+        pivot_snapshot_id=ps.ontology_snapshot_id,
     )
 
 

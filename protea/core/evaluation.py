@@ -45,6 +45,15 @@ from typing import NamedTuple
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+# Re-exported so callers keep importing these from here. The routing branch
+# lives in its own module to keep this file inside the section 3 file-LOC
+# budget and to give the defect it closes room to be explained.
+from protea.core._evaluation_snapshot_routing import (
+    SnapshotMismatchError as SnapshotMismatchError,
+)
+from protea.core._evaluation_snapshot_routing import (
+    compute_evaluation_data_for_sets as compute_evaluation_data_for_sets,
+)
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
 
 # Parquet column for the bucket each (protein, go_id) row belongs to.
@@ -381,9 +390,7 @@ def compute_evaluation_data(
     known = {
         p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()
     }
-    return EvaluationData(
-        nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known, removed=removed
-    )
+    return EvaluationData(nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known, removed=removed)
 
 
 # ---------------------------------------------------------------------------
@@ -486,9 +493,7 @@ def _load_experimental_raw_go_ids(
     return dict(out)
 
 
-def _load_not_raw_go_ids(
-    session: Session, annotation_set_id: uuid.UUID
-) -> dict[str, set[str]]:
+def _load_not_raw_go_ids(session: Session, annotation_set_id: uuid.UUID) -> dict[str, set[str]]:
     """Return ``{protein: {native_go_id}}`` for NOT-qualified rows."""
     rows = session.execute(
         text("""
@@ -640,9 +645,7 @@ def compute_evaluation_data_reconciled(
     known = {
         p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()
     }
-    return EvaluationData(
-        nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known, removed=removed
-    )
+    return EvaluationData(nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known, removed=removed)
 
 
 def _eval_data_to_dataframe(data: EvaluationData):
@@ -666,9 +669,7 @@ def _eval_data_to_dataframe(data: EvaluationData):
             for go_id in go_ids:
                 rows.append((protein, go_id, bucket_name))
     df = pd.DataFrame(rows, columns=["protein_accession", "go_id", "bucket"])
-    df["bucket"] = df["bucket"].astype(
-        pd.CategoricalDtype(categories=list(_GROUNDTRUTH_BUCKETS))
-    )
+    df["bucket"] = df["bucket"].astype(pd.CategoricalDtype(categories=list(_GROUNDTRUTH_BUCKETS)))
     return df
 
 
@@ -684,16 +685,24 @@ def _dataframe_to_eval_data(df) -> EvaluationData:
     # rows, so an older artifact deserializes with removed empty rather than
     # failing.
     bucket_to_dict = {
-        "nk": nk, "lk": lk, "pk": pk, "known": known,
-        "pk_known": pk_known, "removed": removed,
+        "nk": nk,
+        "lk": lk,
+        "pk": pk,
+        "known": known,
+        "pk_known": pk_known,
+        "removed": removed,
     }
     for protein, go_id, bucket in df[["protein_accession", "go_id", "bucket"]].itertuples(
         index=False, name=None
     ):
         bucket_to_dict[str(bucket)][str(protein)].add(str(go_id))
     return EvaluationData(
-        nk=dict(nk), lk=dict(lk), pk=dict(pk),
-        known=dict(known), pk_known=dict(pk_known), removed=dict(removed),
+        nk=dict(nk),
+        lk=dict(lk),
+        pk=dict(pk),
+        known=dict(known),
+        pk_known=dict(pk_known),
+        removed=dict(removed),
     )
 
 

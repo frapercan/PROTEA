@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from protea.core.evaluation import compute_evaluation_data
+from protea.core.evaluation import compute_evaluation_data_for_sets
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     FORMULA_EVIDENCE_WEIGHTED,
@@ -95,11 +95,14 @@ def build_training_gt_pairs(
     ``EvaluationSet`` ORM import (which lives at module level via
     lazy import in the service).
     """
-    eval_data = compute_evaluation_data(
+    # The prediction set's snapshot is the PIVOT here, the universe to answer
+    # in. It says nothing about where the two annotation sets live, and using
+    # it to resolve them silently drops everything that is not native to it.
+    eval_data = compute_evaluation_data_for_sets(
         session,
         old_annotation_set_id=evaluation_set.old_annotation_set_id,
         new_annotation_set_id=evaluation_set.new_annotation_set_id,
-        ontology_snapshot_id=prediction_set.ontology_snapshot_id,
+        pivot_snapshot_id=prediction_set.ontology_snapshot_id,
     )
     ground_truth: dict[str, set[str]] = getattr(eval_data, category)
     gt_pairs: set[tuple[str, str]] = set()
