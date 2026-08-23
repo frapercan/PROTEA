@@ -657,9 +657,12 @@ costs 0.04584 and puts it last of eight. Through ``composite`` it costs
 the platform cannot tell the two apart.
 
 **There is no ordering to report in the composite column.** Its eight entries
-span 0.00241, and each entry is itself a maximum taken over about nine arms, so
-the spread between the backbones is smaller than the selection noise carried by
-any one of them. The rank correlation between the two columns is 0.000, which
+span 0.00241, and each entry is itself a maximum taken over eight to eleven
+arms sharing the neighbourhood sizes 3, 5, 10 and 30, so the spread between the
+backbones is smaller than the selection noise carried by any one of them. The
+unequal budgets do not explain the order either, and cut the wrong way: the two
+backbones searched hardest, at eleven arms each, placed third and last. The
+rank correlation between the two columns is 0.000, which
 is not a reversal but the signature of an absent signal: the composite column
 has no order for the ``embedding_only`` order to agree or disagree with. Any
 claim that one of these backbones is the right one, made on this evidence,
