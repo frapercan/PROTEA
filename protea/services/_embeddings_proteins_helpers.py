@@ -15,8 +15,9 @@ import uuid
 from typing import Any
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
+from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
@@ -97,20 +98,42 @@ def _load_match_counts(
     A "match" = one ``(protein, go_id)`` pair that is both predicted
     in this prediction set and present as a known annotation in
     ``annotation_set_id`` (a precision proxy).
+
+    MATCHED ON THE ACCESSION, NEVER ON ``go_term_id``. That column is an
+    internal surrogate scoped to one ontology snapshot, and 48,196 GO
+    accessions in this database carry more than one of them (up to nine for a
+    single accession). A prediction set and the annotation set it is scored
+    against come from different snapshots by construction under the temporal
+    protocol, so joining the surrogate compares two different objects that
+    happen to name the same term.
+
+    This function did exactly that until 2026-08-23, and the failure was
+    total rather than partial: every prediction set in the database resolved
+    to a different snapshot than its annotation set, so the join matched
+    nothing and the proxy read zero for every protein on the listing screen.
+    A sample of 300 proteins found 0 matches on the surrogate against 5,133 on
+    the accession.
     """
     if not accessions:
         return {}
+    predicted_term = aliased(GOTerm)
+    annotated_term = aliased(GOTerm)
     return {
         acc: cnt
         for acc, cnt in session.query(
             GOPrediction.protein_accession,
-            func.count(func.distinct(GOPrediction.go_term_id)),
+            func.count(func.distinct(predicted_term.go_id)),
         )
+        .join(predicted_term, predicted_term.id == GOPrediction.go_term_id)
         .join(
             ProteinGOAnnotation,
-            (ProteinGOAnnotation.go_term_id == GOPrediction.go_term_id)
-            & (ProteinGOAnnotation.protein_accession == GOPrediction.protein_accession)
+            (ProteinGOAnnotation.protein_accession == GOPrediction.protein_accession)
             & (ProteinGOAnnotation.annotation_set_id == annotation_set_id),
+        )
+        .join(
+            annotated_term,
+            (annotated_term.id == ProteinGOAnnotation.go_term_id)
+            & (annotated_term.go_id == predicted_term.go_id),
         )
         .filter(
             GOPrediction.prediction_set_id == prediction_set_id,
