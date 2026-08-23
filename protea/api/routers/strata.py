@@ -109,16 +109,67 @@ _COMPARE_TTL = 300.0
 _ARMS = text(
     """
     SELECT er.id            AS evaluation_result_id,
+           ec.id            AS embedding_config_id,
            ec.model_name    AS model,
            ec.display_name  AS display_name,
+           ec.layer_indices AS layer_indices,
            ps.limit_per_entry AS k
     FROM evaluation_result er
     JOIN prediction_set ps ON ps.id = er.prediction_set_id
     JOIN embedding_config ec ON ec.id = ps.embedding_config_id
     WHERE er.evaluation_set_id = :esid
-    ORDER BY ec.model_name, ps.limit_per_entry
+    ORDER BY ec.model_name, ec.layer_indices, ps.limit_per_entry
     """
 )
+
+
+def _load_arms(session: Any, evaluation_set_id: str) -> list[dict[str, Any]]:
+    """The arms of an evaluation set, each labelled so no two collide."""
+    return _label(
+        [
+            {
+                "evaluation_result_id": str(r["evaluation_result_id"]),
+                "embedding_config_id": str(r["embedding_config_id"]),
+                "model": r["model"],
+                "display_name": r["display_name"] or r["model"],
+                "layer_indices": r["layer_indices"],
+                "k": r["k"],
+            }
+            for r in session.execute(_ARMS, {"esid": evaluation_set_id}).mappings().all()
+        ]
+    )
+
+
+def _label(arms: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Make each arm's label name the configuration, not just the model.
+
+    An arm is an EmbeddingConfig, and two configs of one model differ in
+    every axis this campaign varies except the model itself. Comparing by
+    display name silently merged them: rung 2's layer axis put ankh-base at
+    layers 48 and 10 into the same evaluation set, and they stayed apart
+    only because nobody had set display_name on the second, so the fallback
+    to model_name happened to differ. With the name set on both, two layers
+    would have averaged into one series and the comparison would have shown
+    a number belonging to neither.
+
+    So the row now carries embedding_config_id, which is the identity, and
+    the label disambiguates when a model appears under more than one
+    configuration in this evaluation set. Models with a single config keep
+    the label they had, because renaming every arm to fix a collision that
+    is not there makes the common case worse.
+    """
+    by_model: dict[str, set[str]] = {}
+    for a in arms:
+        by_model.setdefault(a["model"], set()).add(a["embedding_config_id"])
+    for a in arms:
+        if len(by_model[a["model"]]) < 2:
+            continue
+        layers = a.get("layer_indices")
+        # Layer first when it is what differs, since it is the axis rung 2
+        # declares. Otherwise the config id, which always distinguishes.
+        suffix = f"L{layers}" if layers is not None else a["embedding_config_id"][:8]
+        a["display_name"] = f'{a["display_name"]} [{suffix}]'
+    return arms
 
 
 def _matches(cell: dict[str, Any], where: dict[str, str]) -> bool:
@@ -218,15 +269,7 @@ def compare_strata(
     where = at.where()
 
     with factory() as session:
-        arms = [
-            {
-                "evaluation_result_id": str(r["evaluation_result_id"]),
-                "model": r["model"],
-                "display_name": r["display_name"] or r["model"],
-                "k": r["k"],
-            }
-            for r in session.execute(_ARMS, {"esid": evaluation_set_id}).mappings().all()
-        ]
+        arms = _load_arms(session, evaluation_set_id)
 
     if not arms:
         raise HTTPException(
