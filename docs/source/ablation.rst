@@ -102,17 +102,85 @@ reach magnitudes above 400,000. The final layer's flattened geometry is a weak
 substrate for cosine retrieval, which is one reason the served last layer sat at
 the bottom of the ranking.
 
-**The lever is standardisation, not depth.**
-Among fixed representations the dominant lever is per-dimension standardisation
-(z-score, statistics fit on the reference pool only, non-transductive), not the
-index of the layer. Choosing a different raw layer does not beat the served base;
-standardising a mid layer does. A rerun at the champion's declared 100,000
-protein pool confirms this at scale with high significance: a standardised L10
-beats both the raw L10 and the served last layer, while the raw layer choice is
-statistically null. The same rerun shows that training-pool size, the
-hard-negative objective, and a learned multi-layer mixture are all null in this
-harness, so standardisation is the single lever the fixed-representation family
-exposes.
+**Standardisation and depth were varied together, and only the pair was
+measured.**
+Among fixed representations, per-dimension standardisation (z-score, statistics
+fit on the reference pool only, non-transductive) appears as the dominant lever.
+The arm that established it reads:
+
+.. list-table:: The 2026-07-08 board-faithful confirm
+   :header-rows: 1
+   :widths: 46 18 18
+
+   * - Arm
+     - Score
+     - Against the base
+   * - ``L48-dense``, raw, L2 only
+     - 0.1336
+     - reference
+   * - ``L10-dense-std``
+     - 0.1447
+     - +0.0111
+   * - ``L10-kWTA128-std``
+     - 0.1460
+     - +0.0124
+
+The winning arms are standardised and the baseline they beat is raw, so this
+measures layer AND standardisation together against a control that has neither.
+It cannot be read as a result about either one. The chapter previously read it
+as a layer result, concluding that a shallower layer beats the served base;
+that conclusion does not follow from this table, and no arm pairing a
+standardised last layer against a raw one exists to attribute the gain.
+
+**At matched treatment, in both directions, the shallower layer loses.** Two
+measurements hold the transform fixed rather than varying it alongside the
+depth, one with no standardisation on either side and one with standardisation
+on both:
+
+.. list-table:: Depth 10 against the last layer, treatment held fixed
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Treatment
+     - Instrument
+     - Depth 10 against last
+   * - L2 only, both sides
+     - retrieval probe, 85,982 donors
+     - -0.042 to -0.045
+   * - z-scored, both sides
+     - lab, ``07_layers_standardised``
+     - -0.0292
+
+Two extractions, two metrics, the same direction and a comparable magnitude.
+The only comparison in which the shallower layer wins is the one where it also
+receives a transform its opponent does not.
+
+That also rules out the obvious reconciliation, which was that the lab's local
+extraction is a weaker base (see the caveat below) and might compress what
+separates layers. It does not: run inside the lab, on the lab's own extraction,
+the depth axis resolves cleanly at ``z-layer48`` 0.2545, ``z-layer19`` 0.2391,
+``z-layer10`` 0.2253 and ``z-layer0`` 0.1599.
+
+**Two further reasons not to lean on the July arm.** Its population is 7,401
+LAFA queries of which 86 percent carry prior knowledge, against the
+no-knowledge cell this project names as its frontier, and its reference side is
+a 15,000-protein subset against the probe's 85,982. And the +0.0124 sits at the
+selection floor that :ref:`insight-representation-matters-only-in-twilight`
+prices at about 0.0094 for a search of this size, over a grid of six layers by
+four sparsities by two normalisations.
+
+**A claim withdrawn for want of a receipt.** This section previously stated that
+the raw layer choice is statistically null. No arm supporting that has been
+found. The lab's raw-layer arms are not null: layer 19 at -0.0208, layer 10 at
+-0.0397 and layer 0 at -0.0680, all separating, and all recorded as carrying an
+input-scale confound. The nearest thing to a null in the July record is a global
+Spearman of 0.038 to 0.059 across layers, which that record's own text calls
+low and which measures rank agreement on a different question. The sentence is
+removed rather than rephrased.
+
+What the rerun does support, on arms that vary one field, is that training-pool
+size, the hard-negative objective and a learned multi-layer mixture are all null
+in this harness.
 
 **The caveat, and what resolved it.**
 A controlled re-training of the encoder inside the offline lab harness, on a
