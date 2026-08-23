@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from protea.api.routers.scoring import router
+from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
@@ -572,7 +573,7 @@ class TestMetricsEndpoint:
         assert resp.status_code == 422
 
     @patch("protea.services._scoring_prediction_metrics_helpers.compute_cafa_metrics")
-    @patch("protea.services._scoring_prediction_metrics_helpers.compute_evaluation_data")
+    @patch("protea.services._scoring_prediction_metrics_helpers.compute_evaluation_data_for_sets")
     @patch("protea.services._scoring_prediction_metrics_helpers.compute_score", return_value=0.9)
     def test_returns_metrics_with_curve(self, mock_score, mock_eval, mock_metrics, client, session):
         set_id = uuid4()
@@ -635,7 +636,7 @@ class TestMetricsEndpoint:
         assert data["curve"][0]["threshold"] == 0.5
 
     @patch("protea.services._scoring_prediction_metrics_helpers.compute_cafa_metrics")
-    @patch("protea.services._scoring_prediction_metrics_helpers.compute_evaluation_data")
+    @patch("protea.services._scoring_prediction_metrics_helpers.compute_evaluation_data_for_sets")
     @patch("protea.services._scoring_prediction_metrics_helpers.compute_score", return_value=0.5)
     def test_lk_category(self, mock_score, mock_eval, mock_metrics, client, session):
         set_id = uuid4()
@@ -696,6 +697,19 @@ def _make_eval_set():
     es.groundtruth_uri = None
     es.stats = None
     return es
+
+
+def _make_annotation_set(snapshot_id=None):
+    """An annotation set carrying the snapshot it was built against.
+
+    The delta resolver takes each set's native snapshot from the set itself
+    rather than from the caller, so a double that cannot answer
+    ``session.get(AnnotationSet, ...)`` is refused by name.
+    """
+    a = MagicMock(spec=AnnotationSet)
+    a.id = uuid4()
+    a.ontology_snapshot_id = snapshot_id or uuid4()
+    return a
 
 
 def _make_pred_set():
@@ -765,7 +779,7 @@ class TestTrainingDataEndpoint:
         )
         assert resp.status_code == 422
 
-    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data_for_sets")
     def test_streams_labeled_data_positive(self, mock_eval, session):
         """Prediction matching ground truth gets label=1."""
         ps = _make_pred_set()
@@ -816,7 +830,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "1"
 
-    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data_for_sets")
     def test_streams_labeled_data_negative(self, mock_eval, session):
         """Prediction NOT in ground truth gets label=0."""
         ps = _make_pred_set()
@@ -862,7 +876,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "0"
 
-    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data_for_sets")
     def test_all_columns_present(self, mock_eval, session):
         """Verify all 32 columns are in the TSV header."""
         ps = _make_pred_set()
@@ -907,7 +921,7 @@ class TestTrainingDataEndpoint:
         assert header[3] == "label"
         assert header[-1] == "neighbor_distance_std"
 
-    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data_for_sets")
     def test_pk_category(self, mock_eval, session):
         """PK category uses eval_data.pk for ground truth."""
         ps = _make_pred_set()
@@ -955,7 +969,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "1"
 
-    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data_for_sets")
     def test_none_features_render_as_empty(self, mock_eval, session):
         """None values are rendered as empty strings in the TSV."""
         ps = _make_pred_set()
@@ -1239,7 +1253,7 @@ class TestRerankerMetrics:
     @patch("protea.services._scoring_metrics_helpers.compute_cafa_metrics")
     @patch("protea.services._scoring_metrics_helpers._reranker_predict")
     @patch("protea.services.scoring_service.model_from_string")
-    @patch("protea.services._scoring_metrics_helpers.compute_evaluation_data")
+    @patch("protea.services._scoring_metrics_helpers.compute_evaluation_data_for_sets")
     def test_returns_metrics(
         self, mock_eval, mock_from_str, mock_predict, mock_metrics, client, session
     ):
@@ -1297,11 +1311,16 @@ class TestRerankerMetrics:
         assert "curve" in data
         assert len(data["curve"]) == 1
 
-    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
+    @patch("protea.services._scoring_metrics_helpers.compute_evaluation_data_for_sets")
     def test_empty_predictions_returns_zero_metrics(self, mock_eval, client, session):
         ps = _make_pred_set()
         rm = _make_reranker_model()
         es = _make_eval_set()
+        # The delta resolver reads each annotation set's own snapshot, so the
+        # double has to carry them. Returning None here made the request fail
+        # with SnapshotMismatchError, which is the resolver behaving correctly
+        # against a session that could not answer.
+        ann = _make_annotation_set()
 
         def get_side(model, id_):
             if model is PredictionSet:
@@ -1310,6 +1329,8 @@ class TestRerankerMetrics:
                 return rm
             if model is EvaluationSet:
                 return es
+            if model is AnnotationSet:
+                return ann
             return None
 
         session.get.side_effect = get_side

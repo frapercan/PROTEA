@@ -588,6 +588,85 @@ def _apply_negatives(
     return cleaned
 
 
+class SnapshotMismatchError(ValueError):
+    """A pivot snapshot was named that cannot resolve the annotation sets given."""
+
+
+def compute_evaluation_data_for_sets(
+    session: Session,
+    old_annotation_set_id: uuid.UUID,
+    new_annotation_set_id: uuid.UUID,
+    pivot_snapshot_id: uuid.UUID,
+) -> EvaluationData:
+    """The evaluation delta for two annotation sets, on whichever path is correct.
+
+    WHY THIS EXISTS. :func:`compute_evaluation_data` builds ONE ``go_id`` map
+    from one snapshot and resolves BOTH annotation sets through it. ``go_term.id``
+    is a surrogate scoped to a snapshot, and in this database the id spaces of
+    different snapshots are DISJOINT rather than overlapping: of the six pairs
+    among the 220, 226, 227 and 230 annotation sets, exactly one shares any
+    internal id at all, and that pair is the two sets that happen to sit on the
+    same snapshot. Neither frame the campaign uses is that pair.
+
+    So calling it with a single snapshot across a temporal window does not
+    degrade, it fails completely, and it fails in silence: unresolvable ids are
+    dropped where the loader tests ``if go_id and aspect``. Pass the old
+    snapshot and the new set resolves to nothing, so nothing looks gained. Pass
+    the new one and the old set resolves to nothing, so every protein is
+    classified NK and a request for one category is answered over the whole
+    annotation set. Nothing raises either way, and the second returns a number
+    that looks like a result.
+
+    This resolves each set's native snapshot from the set itself, which is
+    authoritative, and takes ``pivot_snapshot_id`` as the term universe to
+    express the answer in. Same-snapshot work keeps the direct path; anything
+    else takes the reconciled one, which is the same branch
+    ``generate_evaluation_set`` has always made and the reason its numbers are
+    sound.
+
+    Raises
+    ------
+    SnapshotMismatchError
+        An annotation set or the pivot snapshot does not exist.
+    """
+    # Imported here rather than at module scope, matching the rest of this
+    # file, which keeps ORM models out of its import graph.
+    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+    from protea.infrastructure.orm.models.annotation.ontology_snapshot import (
+        OntologySnapshot,
+    )
+
+    old_set = session.get(AnnotationSet, old_annotation_set_id)
+    if old_set is None:
+        raise SnapshotMismatchError(f"AnnotationSet {old_annotation_set_id} not found")
+    new_set = session.get(AnnotationSet, new_annotation_set_id)
+    if new_set is None:
+        raise SnapshotMismatchError(f"AnnotationSet {new_annotation_set_id} not found")
+    if session.get(OntologySnapshot, pivot_snapshot_id) is None:
+        raise SnapshotMismatchError(
+            f"OntologySnapshot {pivot_snapshot_id} not found, so it cannot be the "
+            "term universe for this delta"
+        )
+
+    old_native = old_set.ontology_snapshot_id
+    new_native = new_set.ontology_snapshot_id
+    if old_native == new_native == pivot_snapshot_id:
+        return compute_evaluation_data(
+            session,
+            old_annotation_set_id=old_annotation_set_id,
+            new_annotation_set_id=new_annotation_set_id,
+            ontology_snapshot_id=pivot_snapshot_id,
+        )
+    return compute_evaluation_data_reconciled(
+        session,
+        old_annotation_set_id,
+        new_annotation_set_id,
+        old_native,
+        new_native,
+        pivot_snapshot_id,
+    )
+
+
 def compute_evaluation_data_reconciled(
     session: Session,
     old_annotation_set_id: uuid.UUID,

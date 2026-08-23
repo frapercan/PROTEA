@@ -43,7 +43,7 @@ def prepare_cafa_export(
     Raises :class:`EntityNotFoundError` for missing PredictionSet or
     EvaluationSet so the router can translate to 404.
     """
-    from protea.core.evaluation import compute_evaluation_data
+    from protea.core.evaluation import compute_evaluation_data_for_sets
     from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
     from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
     from protea.services.embeddings_service import EntityNotFoundError
@@ -60,11 +60,15 @@ def prepare_cafa_export(
     ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
     if ann_old is None:
         raise EntityNotFoundError("AnnotationSet", e.old_annotation_set_id)
-    data = compute_evaluation_data(
+    # The old set's snapshot stays the pivot, preserving which term universe
+    # this answers in. What changes is that each annotation set is now resolved
+    # under its OWN snapshot: passing the old one for both meant the new set
+    # resolved to nothing, so nothing looked gained.
+    data = compute_evaluation_data_for_sets(
         session,
-        e.old_annotation_set_id,
-        e.new_annotation_set_id,
-        ann_old.ontology_snapshot_id,
+        old_annotation_set_id=e.old_annotation_set_id,
+        new_annotation_set_id=e.new_annotation_set_id,
+        pivot_snapshot_id=ann_old.ontology_snapshot_id,
     )
     return set(data.nk) | set(data.lk)
 
