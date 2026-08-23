@@ -66,5 +66,8 @@ Where to go next
   first job in about ten minutes: :doc:`operate/reproduce-the-sealed-board`.
 - Want the architecture, the queues, and the operation catalogue?
   :doc:`architecture/index`.
+- Want to know how the method was arrived at, and which parts of it the
+  measurements say could have been left alone? That is the ablation:
+  :doc:`ablation`.
 - Want the design decisions and their trade-offs? The ADRs in
   :doc:`appendix/index`, and the operational lessons in :doc:`insights`.
