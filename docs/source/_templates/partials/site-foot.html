@@ -1,0 +1,34 @@
+{#
+  Shadows shibuya's partials/site-foot.html to stamp every page with the moment
+  it was built.
+
+  WHY. On 2026-08-23 the published site was found to have been built on 29 July.
+  A month of merged work had never been public, and nothing said so: the pages
+  rendered, the processes were healthy, every endpoint returned 200. A staleness
+  that produces no error stays invisible until somebody looks for a page that
+  should exist and gets a 404.
+
+  WHY HERE. The theme renders `last_updated` nowhere, so html_last_updated_fmt
+  alone changes nothing on screen. Overriding the footer BLOCK reaches only the
+  index and search pages, because content pages extend layout/<variant>.html
+  through base.html rather than layout.html. This partial is the one file both
+  paths include.
+
+  The four lines above the stamp are copied from the theme. If the footer ever
+  loses its socials or gains a column, re-sync them from
+  shibuya/theme/shibuya/partials/site-foot.html; nothing here depends on their
+  contents, only on this file being the include point.
+#}
+<footer class="sy-foot">
+  <div class="sy-foot-inner sy-container mx-auto">
+    <div class="sy-foot-reserved md:flex justify-between items-center">
+      {% include "components/foot-copyright.html" %}
+      {% include "partials/foot-socials.html" %}
+    </div>
+    {%- if last_updated %}
+    <div style="margin-top:.5rem;font-size:.75rem;opacity:.6">
+      Documentation built {{ last_updated }}
+    </div>
+    {%- endif %}
+  </div>
+</footer>
