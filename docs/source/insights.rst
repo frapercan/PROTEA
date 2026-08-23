@@ -519,7 +519,51 @@ it.
 **What separates arms is the channel, not the encoding.** Holding the weighting
 fixed, the four encodings spread 0.0540 under ``embedding_only`` at K=30 and
 0.0025 under ``composite_no_embedding``. The second of those carries weight
-exactly 0.0 on embedding similarity and wins 72.7 percent of cells. The layer
+exactly 0.0 on embedding similarity and wins 72.7 percent of cells.
+
+The 0.0540 is almost entirely the instrument, and this can be shown rather
+than asserted. It is measured under ``embedding_only``, the channel whose
+scores :ref:`insight-capacity-is-read-through-one-channel` shows are collinear
+with the reported protein count. Here that correlation is -0.809, and the shape
+is specific: the un-encoded baseline reports the highest count and the worst
+score.
+
+.. list-table:: The four arms at K=30 under ``embedding_only``
+   :header-rows: 1
+   :widths: 34 22 22
+
+   * - Arm
+     - Score
+     - Mean ``n_proteins``
+   * - sparse pooled
+     - 0.23656
+     - 2,261
+   * - sparse per-residue
+     - 0.22580
+     - 2,218
+   * - dense fitted
+     - 0.21353
+     - 2,237
+   * - pretrained ankh-base (un-encoded)
+     - 0.18251
+     - 2,350
+
+Of the 0.0540, some 0.0313 is the baseline against the encoded arms across a
+5.9 percent gap in that count, and 0.023 separates the three encoded arms
+across a 1.9 percent one.
+
+**Restricted to scorers whose arms report matching counts, the encoding axis at
+K=30 is what it was at K=1.** Across four composite scorers whose arms agree to
+within 1.4 percent, the four encodings spread 0.00194, 0.00227, 0.00248 and
+0.00326. Two to three thousandths, against a headline of 0.0540 from the same
+arms at the same budget. Whether the count reflects coverage or the operating
+point, holding it fixed removes the effect.
+
+**No sentence here should name a winning encoding.** Which one wins at K=30
+flips with the scorer, four scorers to four: the dense fitted map wins under
+one set and the sparse pooled map under the other. That is the same
+self-inconsistency the backbone ordering shows under its winning weighting, and
+it means the ordering inside these numbers is not reportable at any budget. The layer
 axis reproduces the pattern independently: the last layer beats depth 38 in all
 sixteen comparisons, by 0.0307 through ``embedding_only`` and 0.0026 through
 the winner, an attenuation of about twelve.
@@ -603,9 +647,10 @@ Eight pretrained protein language models were scored on the nine cells across
 neighbourhood sizes and score weightings, on the GOA 226 to 227 frame. That is
 not the sealed board's window and these are not board numbers; the comparison
 between the two columns is the finding, not their level. Read through the
-channel that asks the embedding for everything, the backbones separate by an
-amount that tracks capacity. Read through a weighting that also has identity
-and neighbour consensus available, they do not separate at all.
+channel that asks the embedding for everything, the backbones separate. Read
+through a weighting that also has identity and neighbour consensus available,
+they do not separate at all. The second of those is the result; the first, as
+set out below, is not safe to attribute to capacity.
 
 .. list-table:: Best arm per backbone, mean ``f_micro_w`` over the nine cells
    :header-rows: 1
@@ -653,10 +698,38 @@ and neighbour consensus available, they do not separate at all.
      - **0.00241**
 
 **The 8-million-parameter model is the clearest case.** Against the best
-composite arm it is eighty-one times smaller. Through ``embedding_only`` that
-costs 0.04584 and puts it last of eight. Through ``composite`` it costs
-0.00111, which is below the study's 0.0013 resolution floor: on this evidence
-the platform cannot tell the two apart.
+composite arm it is eighty-one times smaller, and through ``composite`` that
+costs 0.00111, which is below the study's 0.0013 resolution floor: on this
+evidence the platform cannot tell the two apart.
+
+.. warning::
+
+   **The ``embedding_only`` column must not be read as a capacity effect.**
+   Its scores are collinear with ``n_proteins``: the eight maxima report 6,193
+   to 6,655 proteins summed over the nine cells, a 7.5 percent range, and the
+   rank correlation between that count and the score is **-0.976**. Sorted by
+   protein count, the column is very nearly sorted by score.
+
+   What that collinearity means cannot be settled from these summaries, and
+   the ambiguity is the point. ``n_proteins`` is the count of proteins
+   carrying a prediction *at the threshold where the metric maximised*, so it
+   moves with the operating point as well as with coverage. The platform
+   records a case where a single 0.98 to 0.99 step in that threshold moved the
+   count by 17 percent across 32 rung-1 runs whose scored cohort was provably
+   identical (see the note in
+   ``protea/core/operations/_run_cafa_artifacts.py``). So a -0.976 correlation
+   is consistent with arms covering different populations and equally
+   consistent with arms whose optima landed at different thresholds, and
+   ``cafaeval`` reports per cell rather than per protein, so neither reading
+   can be confirmed or excluded after the fact.
+
+   Under either reading the column is not a clean measurement of what backbone
+   choice buys. The 0.04584 spread is an upper bound on it, and any attenuation
+   ratio built on that numerator inherits the ambiguity.
+
+   The ``composite`` column does not have the problem. Its populations span
+   2.4 percent, 6,116 to 6,264, and the population-to-score correlation is
+   -0.143. That is the column the finding rests on.
 
 **There is no ordering to report in the composite column.** Its eight entries
 span 0.00241, and each entry is itself a maximum taken over eight to eleven
@@ -670,36 +743,88 @@ has no order for the ``embedding_only`` order to agree or disagree with. Any
 claim that one of these backbones is the right one, made on this evidence,
 would be a claim about which arm won a coin toss.
 
-**The same shape appears on every representation axis measured.**
+**The flatness is not an artefact of the operating point.** Every one of the
+sixteen maxima above is at K=3, so the table is a balanced cut of two arms per
+backbone rather than a maximum over unequal budgets. Repeating the comparison
+at the other neighbourhood sizes keeps the result:
 
-.. list-table:: Spread through the loudest channel against the winning one
+.. list-table:: Backbone spread under ``composite``, by neighbourhood size
    :header-rows: 1
-   :widths: 30 24 24 16
+   :widths: 12 26 26 36
+
+   * - K
+     - Spread
+     - Population range
+     - Note
+   * - 3
+     - 0.00241
+     - 2.4 percent
+     - the cut published above
+   * - 5
+     - 0.04579
+     - 551 percent
+     - unusable, see below
+   * - 10
+     - 0.00943
+     - 2.9 percent
+     - nothing removed
+   * - 30
+     - 0.04354
+     - 2.9 percent
+     - 0.00740 excluding one arm, see below
+
+Two budgets need their exceptions named rather than quietly dropped. At K=5
+one arm is scored on 954 proteins against a norm near 6,100, which is a
+truncated evaluation and not a backbone result; the spread at that budget
+measures the truncation. At K=30 the spread is one outlier: seven backbones
+span 0.00740 and ``ankh-base`` sits alone 0.036 below the next worst, on a
+normal population, and only under this scorer. That arm is a suspect data
+point, not evidence that the backbone matters at K=30.
+
+With those two named, the backbone axis is flat under the winning weighting at
+every budget where the evaluation is sound.
+
+**The same shape appears on every representation axis measured**, and it is
+the right-hand column that carries it.
+
+.. list-table:: Spread under the winning weighting, against an upper bound on
+                the spread through the embedding channel alone
+   :header-rows: 1
+   :widths: 28 16 22 22
 
    * - Axis
-     - ``embedding_only``
+     - Rung
      - Winning weighting
-     - Attenuation
+     - ``embedding_only``
    * - Backbone (8 pretrained PLMs)
-     - 0.04584
-     - 0.00241
-     - 19.0x
+     - 1
+     - **0.00241**
+     - at most 0.04584
    * - Encoding (4 representations)
+     - 2
+     - **0.0025**
      - 0.0540
-     - 0.0025
-     - 21.6x
    * - Layer depth (3 depths)
+     - 2
+     - **0.0026**
      - 0.0307
-     - 0.0026
-     - 11.8x
 
-Three axes measured in different rungs, on different grids, spanning an
-eighty-one-fold range of model capacity, four ways of encoding a protein and
-three depths of the same network. All three are large through the channel that
-reads the embedding alone and roughly twenty times smaller through the
-weighting that wins. That is one property of the pipeline observed three times,
-not three findings, and it is the reason this project's remaining headroom is
-argued for at the ranking stage rather than the representation stage.
+Three axes measured in different rungs, on different grids and on different
+frames, spanning an eighty-one-fold range of model capacity, four ways of
+encoding a protein and three depths of the same network. Under the weighting
+that wins, all three collapse to between 0.0024 and 0.0026, which is under
+twice the study's resolution floor and far under the selection floor that
+applies to a maximum taken over a grid. That is one property of the pipeline
+observed three times, not three findings, and it is the reason this project's
+remaining headroom is argued for at the ranking stage rather than the
+representation stage.
+
+The left-hand column is deliberately not converted into an attenuation ratio.
+The backbone entry is an upper bound for the reason given above, and the three
+rows sit on different frames and different populations, so a ratio computed
+down that column would be arithmetic performed on numbers that are not
+commensurable. What the three rows share is the right-hand column, where the
+populations are tight and the axis is gone.
 
 **What it does not say.** None of this shows that the representation is
 unimportant in general, and none of it licenses picking the cheapest backbone
