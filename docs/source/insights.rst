@@ -519,7 +519,19 @@ it.
 **What separates arms is the channel, not the encoding.** Holding the weighting
 fixed, the four encodings spread 0.0540 under ``embedding_only`` at K=30 and
 0.0025 under ``composite_no_embedding``. The second of those carries weight
-exactly 0.0 on embedding similarity and wins 72.7 percent of cells. The layer
+exactly 0.0 on embedding similarity and wins 72.7 percent of cells.
+
+The comparison between those two numbers is sound but it is not symmetric, and
+the ``composite_no_embedding`` side is the one to trust. Across this grid the
+winning weighting is flat at every neighbourhood size, spreading 0.0092 to
+0.0142 from K=1 to K=30 on populations that stay within 3.2 to 6.7 percent of
+each other. The ``embedding_only`` side is not measured on a stable population:
+its spread rises from 0.0221 to 0.1563 over the same sweep while the population
+range rises from 2.0 to 20.2 percent, for the reason set out in
+:ref:`insight-capacity-is-read-through-one-channel`. Arms that cover more of
+the population are scored on more of it. Read the left-hand number as an upper
+bound on what the encoding buys through that channel, and the right-hand one as
+the measurement. The layer
 axis reproduces the pattern independently: the last layer beats depth 38 in all
 sixteen comparisons, by 0.0307 through ``embedding_only`` and 0.0026 through
 the winner, an attenuation of about twelve.
