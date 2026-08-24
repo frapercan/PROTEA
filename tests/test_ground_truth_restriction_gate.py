@@ -163,3 +163,26 @@ def test_the_floor_sits_far_below_the_real_population():
     from protea.core.operations._run_cafa_data_helpers import MIN_GATED_COHORT
 
     assert MIN_GATED_COHORT < 6_216 / 100
+
+
+def test_the_refusal_offers_the_safe_routes_before_the_global_one(monkeypatch):
+    """An escape hatch that does not name its cost gets taken by default.
+
+    The message used to end at "raise
+    PROTEA_TUNING__operation__max_ground_truth_restriction", which reads as the
+    remedy. It is process-wide: it lifts the gate for every evaluation the
+    worker runs afterwards, including ones somebody else dispatched. Two local
+    remedies exist and belong ahead of it.
+    """
+    _limit(monkeypatch, "0.10")
+
+    with pytest.raises(ValueError) as excinfo:
+        _check(23_828, 1_739)
+
+    msg = str(excinfo.value)
+    assert "ground truth built" in msg, "the local remedy must be offered"
+    assert "stored predictions" in msg, "and so must the other one"
+    assert "PROCESS-WIDE" in msg, "the global knob must state its scope"
+    assert msg.index("ground truth built") < msg.index("PROTEA_TUNING__"), (
+        "the safe routes come first, or the global one reads as the remedy"
+    )
