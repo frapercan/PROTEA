@@ -76,8 +76,10 @@ def _refuse_an_undeclared_corpus(count: int) -> None:
         f"this dispatch named no query population and selected {count:,} proteins, "
         f"above the {limit:,} allowed implicitly. Pass query_accessions or "
         "query_set_id to state the population. To score the whole corpus "
-        "deliberately, pass its accessions explicitly, or raise "
-        "PROTEA_TUNING__operation__max_implicit_query_population"
+        "deliberately, pass its accessions explicitly. Raising "
+        "PROTEA_TUNING__operation__max_implicit_query_population also works "
+        "and is process-wide: it lifts this gate for every dispatch the worker "
+        "handles afterwards, including ones somebody else sent"
     )
 
 
