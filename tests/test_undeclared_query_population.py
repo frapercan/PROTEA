@@ -109,3 +109,26 @@ def test_the_default_sits_between_the_delta_and_the_corpus():
     default = get_tuning().operation.max_implicit_query_population
 
     assert 6_216 < default < 616_846
+
+
+def test_the_global_knob_states_that_it_is_global(monkeypatch):
+    """The safe routes were already offered first. The knob was not labelled.
+
+    Audited across the package: three refusals name an environment knob. One
+    correctly frames its escape hatch as being for local development, one was
+    corrected the same night, and this was the third. The ordering here was
+    already right, so all that was missing is what taking the last option costs
+    somebody else.
+    """
+    _limit(monkeypatch, "1000")
+
+    with pytest.raises(ValueError) as excinfo:
+        _refuse_an_undeclared_corpus(616_846)
+
+    msg = str(excinfo.value)
+    assert "process-wide" in msg, "a global knob has to say it is global"
+    assert "somebody else" in msg, "and who else it reaches"
+    assert msg.index("query_set_id") < msg.index("PROTEA_TUNING__"), (
+        "the safe routes stay ahead of the knob"
+    )
+
