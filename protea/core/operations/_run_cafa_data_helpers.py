@@ -71,9 +71,14 @@ def _refuse_a_restricted_cohort(before: int, after: int, dropped: float) -> None
         f"{dropped:.1%} of it, {before:,} proteins down to {after:,}, above the "
         f"{limit:.0%} allowed. The usual cause is evaluating a prediction set "
         "that is still being written: gate on the prediction job reaching "
-        "SUCCEEDED rather than on rows existing. To score a reduced cohort "
-        "deliberately, raise "
-        "PROTEA_TUNING__operation__max_ground_truth_restriction"
+        "SUCCEEDED rather than on rows existing. If the cohort is genuinely "
+        "smaller than the ground truth, score it against a ground truth built "
+        "for it, or read the stored predictions instead of rescoring. Raising "
+        "PROTEA_TUNING__operation__max_ground_truth_restriction also works and "
+        "is the worst option: the setting is PROCESS-WIDE, so it lifts this "
+        "gate for every evaluation the worker runs afterwards, including ones "
+        "dispatched by somebody else, and a partial evaluation reaching the "
+        "board is indistinguishable from a complete one"
     )
 
 
