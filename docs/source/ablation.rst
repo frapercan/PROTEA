@@ -238,8 +238,26 @@ it.
 
 **What separates arms is the channel, not the encoding.** Holding the weighting
 fixed, the four encodings spread 0.0540 under ``embedding_only`` at K=30 and
-0.0025 under ``composite_no_embedding``. The second of those carries weight
-exactly 0.0 on embedding similarity and wins 72.7 percent of cells.
+0.0025 under ``composite_no_embedding``, whose weight on embedding similarity is
+exactly 0.0.
+
+**A percentage that was here and cannot be reproduced.** This sentence used to
+add that the no-embedding weighting "wins 72.7 percent of cells". No grouping of
+this database yields that figure. Five were tried, each defensible and each
+giving something else: the maximum per cell over all arms gives 11.1 percent;
+per (regime, aspect, backbone, neighbourhood size) over the ablation window,
+40.4 percent of 594 groups; the same at K=1 only, 23.2 percent, where
+``alignment_only`` actually leads; restricted to the four rung-2 encodings,
+29.2 percent of 216; and per embedding configuration on the nine-cell mean, 36.4
+percent of 11, where ``composite`` leads with 7.
+
+The figure is removed rather than replaced, because replacing it would repeat
+the fault. What is measurable, and stated with its population, is that over the
+216 (regime, aspect, encoding, neighbourhood size) groups of the rung-2 arms
+``composite_no_embedding`` is the modal winner at 29.2 percent, followed closely
+by ``embedding_plus_vote`` at 26.9 and ``composite`` at 26.4. Modal, not
+dominant, which is a weaker claim than the one it replaces and the one the data
+supports.
 
 The 0.0540 is almost entirely the instrument, and this can be shown rather
 than asserted. It is measured under ``embedding_only``, the channel whose
