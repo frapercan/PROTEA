@@ -13,8 +13,21 @@ it grafts InterPro2GO evidence onto the biological-process (BP) aspect only:
 
 Ported from the reranker-lab offline reference
 (``interpro_lib.interpro_preds`` + ``apply_and_score.build_blend_rows`` with
-``rule='max'`` and BP-only weights), the shipped ``naivemax_bponly`` graft that
-lifts the board-faithful 9-cell mean f_micro_w from 0.3884 to 0.4063.
+``rule='max'`` and BP-only weights), the shipped ``naivemax_bponly`` graft.
+
+ON THE TWO NUMBERS THIS DOCSTRING USED TO CARRY. It read "lifts the
+board-faithful 9-cell mean f_micro_w from 0.3884 to 0.4063", which pairs a
+MEASUREMENT with a FORECAST in one sentence and marks neither. The first is the
+board's own figure for the pre-graft arm, 0.38844 to five digits. The second was
+never a board figure at all: it is what the offline work projected the graft
+would be worth. The board subsequently scored the grafted arm at 0.40765, so the
+projection was close and slightly low, and it is the projection that got
+transcribed here and into ``run_cafa_evaluation``.
+
+Nothing was inflated by this and the sealed headline is the measurement rather
+than the forecast. What the shape cost was legibility: a reader cannot tell
+which of two adjacent numbers was observed. A number that predicts a measurement
+must not be stored in the same shape as the measurement.
 
 The InterPro graded score for a protein reproduces the offline recipe: with the
 protein mapping to ``n`` InterPro entries that carry a GO mapping, a GO term

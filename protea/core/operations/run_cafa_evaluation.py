@@ -124,7 +124,10 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "the score becomes max(base, interpro_graded) (naive max) or a noisy-OR blend "
             "when interpro_graft_weight is set; BP terms InterPro adds are grafted as new "
             "candidates, while MF/CC terms stay untouched. Reproduces the offline "
-            "naivemax_bponly champion (board-faithful 9-cell mean f_micro_w 0.3884 -> 0.4063). "
+            "naivemax_bponly champion. The board's own 9-cell mean f_micro_w is "
+            "0.38844 for the pre-graft arm and 0.40765 for the grafted one; the "
+            "0.4063 this description used to quote was the offline projection of "
+            "the second, not a board figure. See _run_cafa_interpro_graft. "
             "Off by default so existing evals are bit-identical. Requires per-setting "
             "reranker predictions (same seam as softprop)."
         ),
