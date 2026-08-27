@@ -184,7 +184,12 @@ _Q_RESULTS = text(
            er.prediction_set_id::text   AS prediction_set_id,
            er.scoring_config_id::text   AS scoring_config_id,
            er.reranker_model_id::text   AS reranker_model_id,
-           er.frame                     AS frame,
+           -- The seal, not the harness label. ``frame`` is varchar(8) under a
+           -- check constraint admitting only lafa or internal, so it says which
+           -- harness produced a number and nothing about the parameters that
+           -- decide whether two numbers can be read side by side. A result is
+           -- attributable when it carries a digest of those parameters.
+           er.frame_digest              AS frame,
            ps.embedding_config_id::text AS embedding_config_id,
            ps.annotation_set_id::text   AS annotation_set_id
     FROM evaluation_result er
