@@ -7071,6 +7071,30 @@
         ]
       }
     },
+    "/v1/graph": {
+      "get": {
+        "description": "The experiment graph as the record currently supports it.\n\nReads and returns. The session is opened directly rather than through\n``session_scope``, which commits on exit; there is nothing to commit and a\nreporting surface should not hold a transaction open that could.",
+        "operationId": "get_graph_v1_graph_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Graph V1 Graph Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Graph",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
     "/v1/jobs": {
       "get": {
         "description": "List jobs with optional filtering.\n\nBy default only top-level jobs (no parent) are returned. Set\n``include_children=true`` or filter by ``parent_job_id`` to see batch\nsub-jobs from distributed pipelines. Filters travel as discrete query\nparameters on the wire; the dependency bundles them into\n:class:`JobListFilters` for the handler.",
@@ -9202,17 +9226,18 @@
     },
     "/v1/rungs": {
       "get": {
-        "description": "Every rung the record knows about, newest last.",
+        "deprecated": true,
+        "description": "Report that this surface is retired, and name its replacement.\n\nReads nothing and writes nothing. The empty list is the whole of the\nanswer, not a database that happened to come back empty, and the\n``retired`` block says which of the two it is so a caller is never\nleft guessing.",
         "operationId": "list_rungs_v1_rungs_get",
         "parameters": [
           {
-            "description": "Metric to rank each rung's arms by, averaged over every populated cell of the arm. Defaults to the IA-weighted micro F, the one the CAFA and LAFA leaderboards are quoted in.",
+            "description": "Accepted and echoed back so an existing caller's URL still parses. It selects nothing: this endpoint no longer reads the database.",
             "in": "query",
             "name": "metric",
             "required": false,
             "schema": {
               "default": "f_micro_w",
-              "description": "Metric to rank each rung's arms by, averaged over every populated cell of the arm. Defaults to the IA-weighted micro F, the one the CAFA and LAFA leaderboards are quoted in.",
+              "description": "Accepted and echoed back so an existing caller's URL still parses. It selects nothing: this endpoint no longer reads the database.",
               "title": "Metric",
               "type": "string"
             }

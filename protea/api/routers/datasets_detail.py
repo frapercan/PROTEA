@@ -101,9 +101,7 @@ def presigned_redirect(uri: str, filename: str, settings: Settings) -> RedirectR
         bucket,
         key,
         expires=timedelta(minutes=15),
-        response_headers={
-            "response-content-disposition": f'attachment; filename="{filename}"'
-        },
+        response_headers={"response-content-disposition": f'attachment; filename="{filename}"'},
     )
     return RedirectResponse(url=url, status_code=302)
 
@@ -123,9 +121,7 @@ def stream_local_file(uri: str, filename: str) -> StreamingResponse:
                 yield chunk
 
     content_type = (
-        "application/octet-stream"
-        if filename.endswith(".parquet")
-        else "application/json"
+        "application/octet-stream" if filename.endswith(".parquet") else "application/json"
     )
     return StreamingResponse(
         _iter(),

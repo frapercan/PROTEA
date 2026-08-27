@@ -183,8 +183,6 @@ def get_receipt(
         if receipt.get("job_id"):
             c = session.execute(_CAMPAIGN, {"jid": receipt["job_id"]}).mappings().first()
             job = dict(c) if c else None
-        campaign = (
-            {k: job[k] for k in ("rung", "window", "axis", "scorer")} if job else None
-        )
+        campaign = {k: job[k] for k in ("rung", "window", "axis", "scorer")} if job else None
 
     return _payload(row, receipt, campaign, job)

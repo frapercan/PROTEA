@@ -1,10 +1,8 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
-import { CampaignNow } from "@/components/book/CampaignNow";
 import { NineCellGrid } from "@/components/book/NineCellGrid";
 import { ReceiptFootnote } from "@/components/book/ReceiptFootnote";
 import { CHAPTER_ZERO, HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
-import { currentRung, frameLabel, getRungs } from "@/lib/rungs";
 
 /**
  * The front door is the argument, not a dashboard.
@@ -21,24 +19,20 @@ export default async function ArgumentPage() {
   const t = await getTranslations("book");
   const locale = await getLocale();
 
-  // Two windows, and the board gets its own.
+  // The board gets its own window, and it is the only one this page states.
   //
   // The sealed board is LAFA's evaluation of a submitted container over Sep
-  // 2025 to Mar 2026. The campaign is this platform's own temporal split,
-  // currently Apr 2024 to Mar 2026. This caption used to take the campaign's
-  // window, on the reasoning that the literal had drifted to six months for a
-  // two-year window and that a value read from the database cannot drift.
-  // A number cannot drift from a number it was never a copy of: the six
-  // months are the board's period and the two years are ours, so the
-  // substitution captioned an external board with an internal window.
+  // 2025 to Mar 2026. Beside it this page used to print a second window read
+  // live from the campaign, on the reasoning that a value read from the
+  // database cannot drift. It drifted anyway, in the one way that reasoning
+  // does not cover: the reading itself outlived what it read. Its source was
+  // the retired ladder surface, which derived a window from jobs whose
+  // evaluation results had been deleted, so the caption named a period no
+  // surviving result was scored over.
   //
-  // The campaign frame is still read live and still shown, one line down and
-  // labelled as the campaign, which is where a live number belongs and where
-  // it can be checked against the rung it comes from.
-  const rungs = await getRungs()
-    .then((r) => r.rungs)
-    .catch(() => []);
-  const campaignFrame = frameLabel(currentRung(rungs));
+  // Both the campaign caption and the section that followed it are gone with
+  // that surface. The experiment graph at /v1/graph replaces them, and until
+  // it has a page this page states only what the sealed board settled.
   const frameCaption = [HEADLINE.metric, HEADLINE.frame, `validation ${HEADLINE.validation}`]
     .filter(Boolean)
     .join(" · ");
@@ -87,11 +81,7 @@ export default async function ArgumentPage() {
         <h2 id="board-heading" className="sr-only">
           {t("boardHeading")}
         </h2>
-        <NineCellGrid
-          frameCaption={frameCaption}
-          italicLine={t("nineCellItalic")}
-          campaignFrame={campaignFrame}
-        />
+        <NineCellGrid frameCaption={frameCaption} italicLine={t("nineCellItalic")} />
 
         <p className="mt-8 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
           {t.rich("headlineSentence", {
@@ -126,8 +116,6 @@ export default async function ArgumentPage() {
           })}
         </p>
       </section>
-
-      <CampaignNow rungs={rungs} />
 
       {/* The four pillars, as chapters. */}
       <section aria-labelledby="chapters-heading" className="mt-16 border-t border-[var(--border)] pt-10">

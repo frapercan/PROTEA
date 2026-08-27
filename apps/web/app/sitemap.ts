@@ -19,6 +19,7 @@ const PUBLIC_PATHS: ReadonlyArray<{
   { path: "", changeFrequency: "daily", priority: 1.0 },
   { path: "/instrument", changeFrequency: "daily", priority: 0.9 },
   { path: "/instrument/benchmark", changeFrequency: "daily", priority: 0.9 },
+  { path: "/instrument/graph", changeFrequency: "daily", priority: 0.9 },
   { path: "/instrument/proteins", changeFrequency: "daily", priority: 0.8 },
   { path: "/instrument/annotations", changeFrequency: "daily", priority: 0.7 },
   { path: "/instrument/embeddings", changeFrequency: "weekly", priority: 0.7 },

@@ -36,8 +36,13 @@ class FeatureDocInfo(BaseModel):
     without importing the Python enum.
     """
 
-    name: str = Field(..., description="Canonical feature/column name (e.g. ``distance``, ``interpro_hit``).")
-    family: str = Field(..., description="Feature family the column belongs to (e.g. ``knn``, ``interpro``, ``classifier``).")
+    name: str = Field(
+        ..., description="Canonical feature/column name (e.g. ``distance``, ``interpro_hit``)."
+    )
+    family: str = Field(
+        ...,
+        description="Feature family the column belongs to (e.g. ``knn``, ``interpro``, ``classifier``).",
+    )
     status: str = Field(
         ...,
         description=(
@@ -48,10 +53,16 @@ class FeatureDocInfo(BaseModel):
         ),
     )
     summary: str = Field(..., description="One-line plain-language summary for the technician.")
-    definition: str = Field(..., description="Precise definition of what the number means and how it is computed.")
-    producer: str = Field(..., description="Who fills the column (the module, operation, or loader stage).")
+    definition: str = Field(
+        ..., description="Precise definition of what the number means and how it is computed."
+    )
+    producer: str = Field(
+        ..., description="Who fills the column (the module, operation, or loader stage)."
+    )
     unit: str | None = Field(None, description="Physical/logical unit, or null when dimensionless.")
-    value_range: str | None = Field(None, description="Expected value range (e.g. ``[0, 1]``), or null.")
+    value_range: str | None = Field(
+        None, description="Expected value range (e.g. ``[0, 1]``), or null."
+    )
     notes: str | None = Field(
         None,
         description=(

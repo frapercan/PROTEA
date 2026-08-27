@@ -23,7 +23,7 @@ write a candidate without declaring its flow and have the row look complete.
 The producer must say.
 
 Revision ID: b8c31f0a7d42
-Revises: a1f7c39b2e04
+Revises: d7f21a9c4e08
 """
 
 import sqlalchemy as sa
@@ -31,7 +31,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "b8c31f0a7d42"
-down_revision = "a1f7c39b2e04"
+down_revision = "d7f21a9c4e08"
 branch_labels = None
 depends_on = None
 

@@ -88,7 +88,12 @@ def _to_summary(row: ApiKey) -> dict[str, Any]:
     }
 
 
-@router.post("", status_code=201, summary="Mint a new API key", dependencies=[Depends(require_role(ROLE_ADMIN))])
+@router.post(
+    "",
+    status_code=201,
+    summary="Mint a new API key",
+    dependencies=[Depends(require_role(ROLE_ADMIN))],
+)
 @limiter.limit(api_keys_limit)
 def create_api_key(
     request: Request,
@@ -158,7 +163,9 @@ def list_api_keys(
         return [_to_summary(r) for r in rows]
 
 
-@router.delete("/{key_id}", summary="Revoke an API key", dependencies=[Depends(require_role(ROLE_ADMIN))])
+@router.delete(
+    "/{key_id}", summary="Revoke an API key", dependencies=[Depends(require_role(ROLE_ADMIN))]
+)
 def revoke_api_key(
     key_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),

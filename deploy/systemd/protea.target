@@ -1,0 +1,9 @@
+[Unit]
+# Grouping target for the PROTEA app layer on the MAIN HOST (laptop).
+# Infra (postgres/rabbitmq/minio + monitoring) is NOT here: those containers
+# already carry `restart: unless-stopped` and are owned by Docker, not systemd.
+Description=PROTEA application layer (API, frontend, workers, tunnel)
+Documentation=file:///home/bioxaxi2/Thesis-laptop/PROTEA/deploy/systemd/install.sh
+
+[Install]
+WantedBy=default.target

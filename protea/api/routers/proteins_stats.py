@@ -226,14 +226,19 @@ def _compute_sequence_length(factory: sessionmaker[Session]) -> dict[str, Any]:
         total_count = base.count()
         if total_count == 0:
             return {"count": 0, "percentiles": {}, "bins": []}
-        pct_row = session.query(
-            func.min(Protein.length),
-            func.percentile_cont(0.1).within_group(Protein.length.asc()),
-            func.percentile_cont(0.5).within_group(Protein.length.asc()),
-            func.percentile_cont(0.9).within_group(Protein.length.asc()),
-            func.percentile_cont(0.99).within_group(Protein.length.asc()),
-            func.max(Protein.length),
-        ).filter(Protein.is_canonical.is_(True)).filter(Protein.length.is_not(None)).one()
+        pct_row = (
+            session.query(
+                func.min(Protein.length),
+                func.percentile_cont(0.1).within_group(Protein.length.asc()),
+                func.percentile_cont(0.5).within_group(Protein.length.asc()),
+                func.percentile_cont(0.9).within_group(Protein.length.asc()),
+                func.percentile_cont(0.99).within_group(Protein.length.asc()),
+                func.max(Protein.length),
+            )
+            .filter(Protein.is_canonical.is_(True))
+            .filter(Protein.length.is_not(None))
+            .one()
+        )
         pmin, p10, p50, p90, p99, pmax = pct_row
         bins = _histogram_bins(session, int(pmin or 0), int(pmax or 0))
         return {
@@ -360,9 +365,7 @@ def _compute_pipeline_activity(factory: sessionmaker[Session]) -> dict[str, Any]
             .group_by(Job.operation)
             .all()
         )
-        last_24h = [
-            {"operation": op, "count": int(cnt)} for op, cnt in last_24h_rows
-        ]
+        last_24h = [{"operation": op, "count": int(cnt)} for op, cnt in last_24h_rows]
         return {
             "window_days": _PIPELINE_DAYS,
             "items": items,

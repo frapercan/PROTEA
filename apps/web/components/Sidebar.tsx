@@ -172,13 +172,21 @@ function RailContent({
               className={gi > 0 ? "mt-5 pt-4 border-t border-stone-200/80" : ""}
               aria-labelledby={`sidebar-group-${group.id}`}
             >
-              <h2
+              {/* A div, not a heading, and the section keeps its accessible
+                  name through aria-labelledby either way. These six labels are
+                  navigation furniture: as headings they sit in the document
+                  outline ahead of the page title, and because the sidebar
+                  renders twice (one layout for narrow viewports, one for wide)
+                  a reader navigating by heading passes twelve of them before
+                  reaching the h1. Measured, not supposed. */}
+              <div
                 id={`sidebar-group-${group.id}`}
+                role="presentation"
                 className="protea-eyebrow flex items-center gap-2 px-3 pb-2 text-xs uppercase text-stone-500"
               >
                 <GroupIcon className="h-3.5 w-3.5 shrink-0 text-stone-400" aria-hidden />
                 <span>{group.title}</span>
-              </h2>
+              </div>
               <ul className="space-y-px">
                 {group.items.map((item) => {
                   const active = isInternalActive(stripped, item.href);
@@ -328,6 +336,7 @@ export function Sidebar({
       icon: BarChart3,
       items: [
         { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
+        { href: "/instrument/graph", label: t("graph"), hint: "Every decision as a node, with the strength of the evidence behind it", icon: Workflow },
         { href: "/instrument/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge },
       ],
     },

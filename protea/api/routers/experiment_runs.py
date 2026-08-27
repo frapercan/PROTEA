@@ -20,6 +20,7 @@ Linkage to Job / EvaluationResult / RerankerModel rows is intentionally
 out of scope here; the F-EXP campaign work (T-EXP.1-T-EXP.7) defines
 the join shape once it lands.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -69,15 +70,13 @@ class CreateExperimentRunRequest(BaseModel):
     description: str | None = Field(
         default=None,
         description=(
-            "Human-readable intent text shown on the experiment-run "
-            "detail page (D11 narrative)."
+            "Human-readable intent text shown on the experiment-run detail page (D11 narrative)."
         ),
     )
     hypothesis: str | None = Field(
         default=None,
         description=(
-            "What the run is trying to verify or falsify; surfaces in "
-            "the F-EXP campaign view."
+            "What the run is trying to verify or falsify; surfaces in the F-EXP campaign view."
         ),
     )
     config: dict[str, Any] = Field(
@@ -100,8 +99,7 @@ class CreateExperimentRunRequest(BaseModel):
     tags: list[str] = Field(
         default_factory=list,
         description=(
-            "Lightweight grouping tokens (e.g. ``ablation``, "
-            "``benchmark-v1``) used for filtering."
+            "Lightweight grouping tokens (e.g. ``ablation``, ``benchmark-v1``) used for filtering."
         ),
     )
 
@@ -130,8 +128,7 @@ class UpdateExperimentRunRequest(BaseModel):
     description: str | None = Field(
         default=None,
         description=(
-            "Replace the run's narrative description text. ``None`` "
-            "leaves the column untouched."
+            "Replace the run's narrative description text. ``None`` leaves the column untouched."
         ),
     )
     hypothesis: str | None = Field(
@@ -157,23 +154,18 @@ class UpdateExperimentRunRequest(BaseModel):
     config: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Replace the structured config blob. ``None`` leaves it "
-            "untouched; ``{}`` clears it."
+            "Replace the structured config blob. ``None`` leaves it untouched; ``{}`` clears it."
         ),
     )
     provenance: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Replace the provenance overlay. ``None`` leaves it "
-            "untouched; ``{}`` clears it."
+            "Replace the provenance overlay. ``None`` leaves it untouched; ``{}`` clears it."
         ),
     )
     tags: list[str] | None = Field(
         default=None,
-        description=(
-            "Replace the tag list. ``None`` leaves it untouched; "
-            "``[]`` clears it."
-        ),
+        description=("Replace the tag list. ``None`` leaves it untouched; ``[]`` clears it."),
     )
 
 
@@ -205,26 +197,31 @@ def _stamp_status_transition(run: ExperimentRun, new_status: ExperimentRunStatus
     now = utcnow()
     if new_status == ExperimentRunStatus.RUNNING and run.started_at is None:
         run.started_at = now
-    if new_status in (
-        ExperimentRunStatus.DONE,
-        ExperimentRunStatus.ABANDONED,
-    ) and run.finished_at is None:
+    if (
+        new_status
+        in (
+            ExperimentRunStatus.DONE,
+            ExperimentRunStatus.ABANDONED,
+        )
+        and run.finished_at is None
+    ):
         run.finished_at = now
     run.status = new_status
 
 
-@router.post("", status_code=201, summary="Create an experiment run", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.post(
+    "",
+    status_code=201,
+    summary="Create an experiment run",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def create_experiment_run(
     body: CreateExperimentRunRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Create a new ``ExperimentRun`` row in ``planned`` status."""
     with session_scope(factory) as session:
-        existing = (
-            session.query(ExperimentRun.id)
-            .filter(ExperimentRun.name == body.name)
-            .first()
-        )
+        existing = session.query(ExperimentRun.id).filter(ExperimentRun.name == body.name).first()
         if existing is not None:
             raise HTTPException(
                 status_code=409,
@@ -248,8 +245,7 @@ def list_experiment_runs(
     status: ExperimentRunStatus | None = Query(
         default=None,
         description=(
-            "Filter by ``ExperimentRunStatus`` (``planned``, "
-            "``running``, ``done``, ``abandoned``)."
+            "Filter by ``ExperimentRunStatus`` (``planned``, ``running``, ``done``, ``abandoned``)."
         ),
     ),
     limit: int = Query(
@@ -297,7 +293,11 @@ def get_experiment_run(
         return _serialise_experiment_run(run)
 
 
-@router.patch("/{run_id}", summary="Update an experiment run", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.patch(
+    "/{run_id}",
+    summary="Update an experiment run",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def update_experiment_run(
     run_id: UUID,
     body: UpdateExperimentRunRequest,
@@ -323,7 +323,12 @@ def update_experiment_run(
         return _serialise_experiment_run(run)
 
 
-@router.delete("/{run_id}", status_code=204, summary="Delete an experiment run", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.delete(
+    "/{run_id}",
+    status_code=204,
+    summary="Delete an experiment run",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def delete_experiment_run(
     run_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
