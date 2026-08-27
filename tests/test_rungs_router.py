@@ -1,184 +1,119 @@
-"""The campaign as a line, tested where the decisions are.
+"""The retired ladder endpoint, tested where the retirement can fail.
 
-Three of them are easy to get wrong in ways that look right: counting
-jobs where a reader counts arms, reading a headline off the cell that
-flatters it, and letting the question a rung asks drift from what it
-actually varies.
+The failure modes here are not arithmetic, because there is no longer any
+arithmetic. They are the three ways a retirement breaks something that was
+working: it stops answering, it answers in a shape its client rejects, or
+it goes quiet without saying it is retired, so an empty response reads as
+an empty database.
+
+There is a fourth, which is the one that caused the retirement. The old
+implementation derived its answer by joining the job table to
+``evaluation_result``. Those jobs are still there and those results are
+not, and a LEFT JOIN reports a full grid of successes from that pairing.
+A test that the SQL is gone is a test that the claim cannot come back.
 """
 
 from __future__ import annotations
 
-from protea.api.routers.rungs import _arm_counts, _arm_key, _best, _question
+from fastapi.testclient import TestClient
+
+from protea.api.routers import rungs as rungs_module
+from protea.api.routers.rungs import list_rungs, router
 
 
-def _arm(model: str, k: int, status: str, scorer: str | None = None) -> dict:
-    return {"model": model, "k": k, "status": status, "scorer": scorer}
+class TestItStillAnswers:
+    """``scripts/deploy-check.sh`` fails the deploy on anything but 200.
 
-
-class TestArmCounts:
-    def test_counts_the_grid_not_the_jobs(self):
-        # A retried arm is one arm. Counting jobs made a 2-arm rung report
-        # 3 successes, which reads as a grid that grew rather than as a
-        # retry that worked.
-        arms = [
-            _arm("ankh", 3, "FAILED"),
-            _arm("ankh", 3, "SUCCEEDED"),
-            _arm("esm", 3, "SUCCEEDED"),
-        ]
-        assert _arm_counts(arms) == {
-            "arms": 2,
-            "succeeded": 2,
-            "running": 0,
-            "failed": 0,
-        }
-
-    def test_an_arm_is_running_until_something_succeeds(self):
-        arms = [_arm("ankh", 1, "FAILED"), _arm("ankh", 1, "RUNNING")]
-        counts = _arm_counts(arms)
-        assert counts == {"arms": 1, "succeeded": 0, "running": 1, "failed": 0}
-
-    def test_an_arm_all_of_whose_attempts_failed_is_failed(self):
-        arms = [_arm("ankh", 1, "FAILED"), _arm("ankh", 1, "FAILED")]
-        assert _arm_counts(arms)["failed"] == 1
-
-    def test_no_arm_is_counted_twice(self):
-        arms = [_arm("a", 1, "SUCCEEDED"), _arm("a", 1, "RUNNING")]
-        counts = _arm_counts(arms)
-        assert counts["succeeded"] + counts["running"] + counts["failed"] == counts["arms"]
-
-
-class TestArmKey:
-    def test_two_scorers_over_one_run_are_two_arms(self):
-        # Rung 1's third axis re-scores prediction sets that already exist.
-        # Keyed on (model, K) alone, eight scorers collapse into one cell and
-        # the rung reports a grid an eighth of its real size.
-        a = _arm("ankh", 3, "SUCCEEDED", scorer="composite")
-        b = _arm("ankh", 3, "SUCCEEDED", scorer="vote_fraction")
-        assert _arm_key(a) != _arm_key(b)
-
-    def test_the_same_run_under_the_same_scorer_is_one_arm(self):
-        a = _arm("ankh", 3, "FAILED", scorer="composite")
-        b = _arm("ankh", 3, "SUCCEEDED", scorer="composite")
-        assert _arm_key(a) == _arm_key(b)
-        assert _arm_counts([a, b]) == {"arms": 1, "succeeded": 1, "running": 0, "failed": 0}
-
-    def test_no_scorer_is_its_own_arm_not_a_missing_one(self):
-        # The None fallback is a scorer: arithmetically embedding_only. An
-        # arm that ran under it is a real arm and must not merge with one
-        # that named a config.
-        assert _arm_key(_arm("ankh", 3, "SUCCEEDED")) != _arm_key(
-            _arm("ankh", 3, "SUCCEEDED", scorer="embedding_only")
-        )
-
-
-class TestQuestion:
-    def test_names_every_axis_that_varies(self):
-        q = _question({"a", "b"}, {1, 3, 30}, {"x", "y"})
-        assert "2 representations" in q
-        assert "1 to 30" in q
-        assert "2 score weightings" in q
-
-    def test_names_only_the_axis_that_varies(self):
-        assert "representations" not in _question({"a"}, {1, 3}, set())
-        assert "neighbours" not in _question({"a", "b"}, {3}, set())
-        assert "weightings" not in _question({"a", "b"}, {1, 3}, {"x"})
-
-    def test_the_scoring_axis_is_named_even_when_it_is_the_only_one(self):
-        # Rung 1's third axis re-scores one model at one K. The rung is
-        # still asking something and must say what.
-        assert "8 score weightings" in _question({"a"}, {3}, set("abcdefgh"))
-
-    def test_says_so_when_nothing_varies(self):
-        # "which of 1 representation" is not a question.
-        assert _question({"a"}, {3}, set()) == "a single configuration, measured"
-
-
-class TestBest:
-    @staticmethod
-    def _row(model, k, values):
-        return {
-            "model": model,
-            "k": k,
-            "evaluation_result_id": f"{model}-{k}",
-            "results": {"NK": {a: {"f_micro_w": v} for a, v in values.items()}},
-        }
-
-    def test_averages_the_grid_rather_than_reading_one_cell(self):
-        # A rung's headline must not be the cell that happened to flatter
-        # it: one strong aspect can hide two weak ones.
-        rows = [
-            self._row("spiky", 3, {"MFO": 0.9, "BPO": 0.1, "CCO": 0.1}),
-            self._row("even", 3, {"MFO": 0.4, "BPO": 0.4, "CCO": 0.4}),
-        ]
-        assert _best(rows, "f_micro_w")["model"] == "even"
-
-    def test_reports_how_many_cells_it_averaged(self):
-        rows = [self._row("a", 3, {"MFO": 0.4, "BPO": 0.2})]
-        assert _best(rows, "f_micro_w")["cells"] == 2
-
-    def test_returns_none_when_nothing_carries_the_metric(self):
-        # Not zero, and not an arbitrary arm: a rung with no scored cell
-        # has no best, and saying otherwise would invent one.
-        rows = [{"model": "a", "k": 3, "evaluation_result_id": "x", "results": {}}]
-        assert _best(rows, "f_micro_w") is None
-
-    def test_skips_arms_missing_the_metric_rather_than_scoring_them_zero(self):
-        rows = [
-            self._row("scored", 3, {"MFO": 0.3}),
-            {"model": "unscored", "k": 3, "evaluation_result_id": "y", "results": {}},
-        ]
-        assert _best(rows, "f_micro_w")["model"] == "scored"
-
-    def test_ignores_a_non_numeric_cell(self):
-        rows = [
-            {
-                "model": "a",
-                "k": 3,
-                "evaluation_result_id": "z",
-                "results": {"NK": {"MFO": {"f_micro_w": None}, "BPO": {"f_micro_w": 0.5}}},
-            }
-        ]
-        best = _best(rows, "f_micro_w")
-        assert best["cells"] == 1
-        assert best["value"] == 0.5
-
-
-class TestAnArmIsAFinishedRun:
-    """A cancelled job leaves its written batches behind.
-
-    The prediction set carries no mark saying it is half written: the
-    completion state lives on the job. Four sets match (rung 1, ankh-base,
-    K=30) in the live database and three came from FAILED or CANCELLED
-    jobs, one of them holding 1,024 proteins from a single batch written
-    before the cancel. Selecting sets and inspecting them cannot tell those
-    apart, however carefully, because the distinguishing fact is not in the
-    object being held.
+    The smoke loop there curls this path and treats a non-200 as a broken
+    deploy. Retirement is a fact about meaning, and expressing it as a
+    status code would turn a check that is right to be strict red on every
+    deploy from now on.
     """
 
-    def test_the_query_requires_a_succeeded_job(self):
-        from protea.api.routers.rungs import _ARMS
+    def test_the_route_is_registered_at_the_prefix_deploy_check_walks(self):
+        # The other check in deploy-check.sh reads each router module's
+        # declared prefix and requires it in the served OpenAPI document.
+        # Hiding the route from the schema fails that check.
+        assert router.prefix == "/rungs"
+        assert [r for r in router.routes if getattr(r, "include_in_schema", False)]
 
-        sql = str(_ARMS)
-        assert "j.status::text = 'SUCCEEDED'" in sql
+    def test_it_is_marked_deprecated_so_the_schema_says_so(self):
+        # The body carries the explanation; the flag is what a generated
+        # client and the docs page read.
+        route = next(r for r in router.routes if getattr(r, "path", None) == "/rungs")
+        assert route.deprecated is True
 
-    def test_the_query_requires_the_batches_to_agree(self):
-        # SUCCEEDED is the job's verdict; the batch counts are its
-        # arithmetic. A gate wants both, because they are recorded by
-        # different code at different times.
-        from protea.api.routers.rungs import _ARMS
+    def test_it_answers_two_hundred(self):
+        client = TestClient(_app())
+        assert client.get("/rungs").status_code == 200
 
-        sql = str(_ARMS)
-        assert "batches_completed" in sql and "expected_batches" in sql
 
-    def test_the_gate_sits_on_the_join_not_the_where(self):
-        # It has to be a join condition. Moved into WHERE it would drop the
-        # whole arm rather than only its prediction set, and an arm whose
-        # job is still running would vanish from the rung instead of
-        # showing as running.
-        from protea.api.routers.rungs import _ARMS
+class TestTheShapeItsClientAccepts:
+    """``getRungs`` rejects any 200 whose body has no array under ``rungs``.
 
-        sql = str(_ARMS)
-        head = sql[: sql.index("UNION ALL")]
-        join_at = head.index("LEFT JOIN prediction_set")
-        where_at = head.index("WHERE j.operation")
-        assert join_at < head.index("SUCCEEDED") < where_at
+    It was written that way after a mock replied 200 with ``[]`` to every
+    unknown route, the cast asserted a shape that was not there, and the
+    caller threw outside the promise chain where its own catch could not
+    see it. Dropping the key would put the retirement into that same error
+    path instead of through the empty branch every consumer already has.
+    """
+
+    def test_the_body_carries_an_empty_rungs_array(self):
+        body = list_rungs()
+        assert body["rungs"] == []
+        assert isinstance(body["rungs"], list)
+
+    def test_the_metric_parameter_is_echoed_rather_than_dropped(self):
+        # An existing caller's URL still parses. It selects nothing.
+        assert list_rungs(metric="s_min")["metric"] == "s_min"
+
+    def test_a_caller_passing_unknown_params_still_gets_two_hundred(self):
+        # deploy-check.sh appends ``?limit=3`` to every endpoint it smokes.
+        client = TestClient(_app())
+        assert client.get("/rungs?limit=3").status_code == 200
+
+
+class TestEmptyDoesNotReadAsUnpopulated:
+    def test_it_declares_itself_retired(self):
+        assert list_rungs()["retired"]["retired"] is True
+
+    def test_it_names_its_replacement(self):
+        assert list_rungs()["retired"]["superseded_by"] == "/v1/graph"
+
+    def test_it_says_which_kind_of_empty_this_is(self):
+        # Without this a reader cannot tell a retired surface from a
+        # database that happens to hold nothing, and those call for
+        # opposite responses.
+        assert "retired, not unpopulated" in list_rungs()["retired"]["empty_means"]
+
+
+class TestTheCountingCannotComeBack:
+    """The deleted derivation, asserted deleted.
+
+    Left in the module and merely unreferenced, it would be one call away
+    from being restored by somebody who saw an empty response and took it
+    for a bug. The job rows it counted are still in the database; only the
+    results it claimed to summarise are gone.
+    """
+
+    def test_no_query_survives_in_the_module(self):
+        assert not hasattr(rungs_module, "_ARMS")
+        assert not hasattr(rungs_module, "_WINDOW_DATES")
+
+    def test_no_counting_helper_survives_in_the_module(self):
+        for gone in ("_arm_counts", "_arm_key", "_best", "_question"):
+            assert not hasattr(rungs_module, gone)
+
+    def test_the_endpoint_needs_no_database_at_all(self):
+        # Callable with no session factory and no dependency override. A
+        # signature that still wanted one would mean something in here is
+        # still prepared to read.
+        assert list_rungs()["rungs"] == []
+
+
+def _app():
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.include_router(router)
+    return app

@@ -32,6 +32,7 @@ from protea.api.routers import datasets as datasets_router
 from protea.api.routers import embeddings as embeddings_router
 from protea.api.routers import experiment_runs as experiment_runs_router
 from protea.api.routers import features as features_router
+from protea.api.routers import graph as graph_router
 from protea.api.routers import jobs as jobs_router
 from protea.api.routers import jobs_availability as jobs_availability_router
 from protea.api.routers import maintenance as maintenance_router
@@ -207,6 +208,7 @@ _ROUTER_MODULES = (
     stack_router,
     experiment_runs_router,
     metrics_router,
+    graph_router,
 )
 
 # T4.1 (D4 accepted 2026-05-06): version prefix for the public API.

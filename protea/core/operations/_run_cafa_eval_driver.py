@@ -55,6 +55,7 @@ class CafaEvalRunContext:
     ia_path: str | None
     toi_path: str
     shared_pred_dir: str
+    max_k_position: int | None = None
     th_step: float = 0.01
     max_terms: int | None = None
     max_k_position: int | None = None
