@@ -65,8 +65,8 @@ _BASE_SCORE_COLS: tuple[str, ...] = (
 class WritePredictionsContext:
     """Shared inputs for the per-setting prediction TSV writers.
 
-    Bundles the four query-shaped fields (``pred_set_id``,
-    ``delta_proteins``, ``max_distance``) plus the destination
+    Bundles the query-shaped fields (``pred_set_id``,
+    ``delta_proteins``, ``max_distance``, ``max_k_position``) plus the destination
     ``path`` consumed by all three artifact writers
     (``write_predictions``, ``write_predictions_reranked``,
     ``write_predictions_per_aspect``). The session, scoring
@@ -77,8 +77,8 @@ class WritePredictionsContext:
     pred_set_id: uuid.UUID
     delta_proteins: set[str]
     max_distance: float | None
-    max_k_position: int | None = None
     path: str
+    max_k_position: int | None = None
 
 
 def download_obo(url: str, dest: str) -> None:

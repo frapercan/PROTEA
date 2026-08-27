@@ -404,6 +404,7 @@ class TestBaseCacheAtomicWrite:
         out = _pred_base_cache.load_or_build_base(
             pred_id,
             None,
+            None,
             delta,
             count_fn=lambda: 3,
             build_fn=lambda: (df, 3),
@@ -415,6 +416,7 @@ class TestBaseCacheAtomicWrite:
         # Second call hits the cache (count matches) and returns the frame.
         again = _pred_base_cache.load_or_build_base(
             pred_id,
+            None,
             None,
             delta,
             count_fn=lambda: 3,
@@ -428,7 +430,7 @@ class TestBaseCacheAtomicWrite:
         delta = ["P1"]
         df = _base_frame()
         _pred_base_cache.load_or_build_base(
-            pred_id, None, delta, count_fn=lambda: 3, build_fn=lambda: (df, 3)
+            pred_id, None, None, delta, count_fn=lambda: 3, build_fn=lambda: (df, 3)
         )
         # A fresh COUNT that diverges from the sidecar forces a rebuild.
         rebuilt = {"called": False}
@@ -438,7 +440,7 @@ class TestBaseCacheAtomicWrite:
             return df, 5
 
         _pred_base_cache.load_or_build_base(
-            pred_id, None, delta, count_fn=lambda: 5, build_fn=build
+            pred_id, None, None, delta, count_fn=lambda: 5, build_fn=build
         )
         assert rebuilt["called"] is True
 
@@ -495,3 +497,42 @@ def test_batch_context_builds_no_reranker_run_context():
     assert run_ctx.has_rerankers is False
     assert run_ctx.shared_pred_dir == "/tmp/preds"
     assert run_ctx.th_step == 0.01
+
+
+class TestDepthIsPartOfTheCacheKey:
+    """The base frame is the candidate set after the cut, so K must key it.
+
+    Sharing one key across depths served the deepest arm's parquet to every
+    other arm, and the depth sweep came back flat with no error to show for
+    it. The regression is silent by construction, so it needs its own test.
+    """
+
+    def test_two_depths_do_not_share_a_parquet(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_pred_base_cache, "_PRED_CACHE_DIR", tmp_path)
+        pred_id = uuid.uuid4()
+        delta = ["P1", "P2"]
+        shallow, deep = _pred_base_cache._cache_paths(pred_id, None, 1, delta)
+        wide, _ = _pred_base_cache._cache_paths(pred_id, None, 10, delta)
+        unbounded, _ = _pred_base_cache._cache_paths(pred_id, None, None, delta)
+        assert shallow != wide
+        assert wide != unbounded
+        assert shallow != unbounded
+
+    def test_a_shallow_arm_does_not_read_the_deep_arm_frame(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_pred_base_cache, "_PRED_CACHE_DIR", tmp_path)
+        pred_id = uuid.uuid4()
+        delta = ["P1"]
+        df = _base_frame()
+        _pred_base_cache.load_or_build_base(
+            pred_id, None, 10, delta, count_fn=lambda: 3, build_fn=lambda: (df, 3)
+        )
+        built = {"called": False}
+
+        def build():
+            built["called"] = True
+            return df, 3
+
+        _pred_base_cache.load_or_build_base(
+            pred_id, None, 1, delta, count_fn=lambda: 3, build_fn=build
+        )
+        assert built["called"] is True

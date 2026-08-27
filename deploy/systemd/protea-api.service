@@ -1,0 +1,33 @@
+[Unit]
+# PROTEA API. Replaces the hand-rolled `setsid ./.venv/bin/uvicorn ...` recipe.
+#
+# WHY A UNIT AND NOT THE PIDFILE RECIPE: logs/pids/api.pid currently holds 1475504,
+# which is DEAD -- the live uvicorn is 1475506. `setsid` forks, and the recorded
+# `$!` is the setsid parent, not the server. Any pidfile-driven keeper reading
+# that file concludes "API down" and launches a SECOND uvicorn. systemd tracks
+# the real process by cgroup, so that whole failure mode disappears.
+Description=PROTEA API (uvicorn, :8000)
+PartOf=protea.target
+After=protea-wait-infra.service
+Requires=protea-wait-infra.service
+
+[Service]
+Type=exec
+WorkingDirectory=/home/bioxaxi2/Thesis-laptop/PROTEA
+EnvironmentFile=/home/bioxaxi2/Thesis-laptop/PROTEA/.env
+
+# The venv is used DIRECTLY. Never `poetry run`: pyproject pins torch to the
+# pytorch-cpu source, and any code path that can reach `poetry install` is a
+# live threat to the 2.11.0+cu128 build. manage.sh:465 _restart_api() uses
+# `poetry run uvicorn` -- that is exactly why this unit does not call it.
+ExecStart=/home/bioxaxi2/Thesis-laptop/PROTEA/.venv/bin/uvicorn \
+    protea.api.app:create_app --factory \
+    --host 0.0.0.0 --port 8000 --root-path /api-proxy
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=protea.target

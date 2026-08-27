@@ -39,17 +39,26 @@ def _delta_hash(delta_proteins: Iterable[str]) -> str:
 def _cache_paths(
     pred_set_id: uuid.UUID,
     max_distance: float | None,
+    max_k_position: int | None,
     delta_proteins: Iterable[str],
 ) -> tuple[Path, Path]:
-    """Return ``(parquet_path, count_path)`` for the deduped base frame."""
+    """Return ``(parquet_path, count_path)`` for the deduped base frame.
+
+    ``max_k_position`` belongs in the key, not only in the filter. The base
+    frame is the candidate set after the cut, so two depths produce different
+    frames; sharing one key would serve the deepest arm's parquet to every
+    other arm and a depth sweep would come back flat.
+    """
     md = "none" if max_distance is None else f"{max_distance:g}"
-    key = f"{pred_set_id}__md{md}__{_delta_hash(delta_proteins)}"
+    mk = "none" if max_k_position is None else str(max_k_position)
+    key = f"{pred_set_id}__md{md}__k{mk}__{_delta_hash(delta_proteins)}"
     return _PRED_CACHE_DIR / f"{key}.parquet", _PRED_CACHE_DIR / f"{key}.count"
 
 
 def load_or_build_base(
     pred_set_id: uuid.UUID,
     max_distance: float | None,
+    max_k_position: int | None,
     delta_proteins: Iterable[str],
     *,
     count_fn: Callable[[], int],
@@ -69,7 +78,7 @@ def load_or_build_base(
     import pandas as pd
 
     delta = list(delta_proteins)
-    parquet_path, count_path = _cache_paths(pred_set_id, max_distance, delta)
+    parquet_path, count_path = _cache_paths(pred_set_id, max_distance, max_k_position, delta)
     if parquet_path.exists() and count_path.exists():
         cached_count = _read_count(count_path)
         if cached_count is not None and cached_count == count_fn():

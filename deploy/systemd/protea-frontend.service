@@ -1,0 +1,23 @@
+[Unit]
+# PROTEA frontend, Next.js standalone build. Matches the live process:
+#   node .next/standalone/server.js   (cwd apps/web; server.js chdir()s itself)
+Description=PROTEA frontend (Next.js standalone, :3000)
+PartOf=protea.target
+After=protea-api.service
+
+[Service]
+Type=exec
+WorkingDirectory=/home/bioxaxi2/Thesis-laptop/PROTEA/apps/web
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=0.0.0.0
+ExecStart=/usr/bin/node .next/standalone/server.js
+
+# No build step here. This unit SERVES an existing .next/standalone build; it
+# never runs `next build`, `npm ci` or `pnpm install`. A boot is not a deploy.
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=protea.target

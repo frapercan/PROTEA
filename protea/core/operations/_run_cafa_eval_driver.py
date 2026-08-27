@@ -42,7 +42,6 @@ class CafaEvalRunContext:
     pred_set_id: uuid.UUID
     delta_proteins: set[str]
     max_distance: float | None
-    max_k_position: int | None = None
     artifacts_root: Path
     has_rerankers: bool
     reranker_models: dict[str, dict[str, dict[str, Any]]]
@@ -58,6 +57,7 @@ class CafaEvalRunContext:
     shared_pred_dir: str
     th_step: float = 0.01
     max_terms: int | None = None
+    max_k_position: int | None = None
     softprop: bool = False
     interpro_graft: bool = False
     interpro_protein2ipr_file: str | None = None
