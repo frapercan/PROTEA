@@ -138,6 +138,7 @@ export function CommandPalette() {
     ): NavItem => ({ kind: "nav", id, label, href, group });
     return [
       k("home",        tk("home", "Home"),                                   "/",                       "Navigate"),
+      k("graph",       tk("graph", "Experiment graph"),                   "/instrument/graph",                  "Navigate"),
       k("benchmark",   tk("benchmark", "Benchmark"),                         "/instrument/benchmark",              "Navigate"),
       k("proteins",    tk("proteins", "Proteins"),                           "/instrument/proteins",               "Data"),
       k("annotations", tk("annotations", "Annotations"),                     "/instrument/annotations",            "Data"),

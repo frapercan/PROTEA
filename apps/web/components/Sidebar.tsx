@@ -327,6 +327,7 @@ export function Sidebar({
       hint: t("resultsHint"),
       icon: BarChart3,
       items: [
+        { href: "/instrument/graph", label: t("graph"), hint: "The experiment graph: ten nodes, the strength of each edge, and the nine panels it resolves", icon: Workflow },
         { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
         { href: "/instrument/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge },
       ],
