@@ -16,6 +16,9 @@ from protea.core.operations.archive_ontology_snapshot import (
 from protea.core.operations.audit_evaluation_frames import (
     AuditEvaluationFramesOperation,
 )
+from protea.core.operations.audit_per_protein_artifacts import (
+    AuditPerProteinArtifactsOperation,
+)
 from protea.core.operations.batch_rescore_evaluation import (
     BatchRescoreEvaluationOperation,
 )
@@ -82,6 +85,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(PingOperation())
     registry.register(ExportGateBundleOperation())
     registry.register(AuditEvaluationFramesOperation())
+    registry.register(AuditPerProteinArtifactsOperation())
     registry.register(StratifyEvaluationOperation())
     registry.register(ApplyLearnedEncoderOperation())
     registry.register(InsertProteinsOperation())

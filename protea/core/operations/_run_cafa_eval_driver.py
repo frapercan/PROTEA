@@ -29,6 +29,14 @@ from protea.core.evaluation import EvaluationData
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 
+# The frame literals, named once. They are arguments to the cafaeval call AND
+# facts the grid artefact stamps, and a stamp thirty lines from the call it
+# describes is the classic shape of a value that drifts from the thing it
+# claims. One constant each means the two cannot disagree.
+CAFAEVAL_PROP = "fill"
+CAFAEVAL_NORM = "cafa"
+CAFAEVAL_NO_ORPHANS = True
+
 
 @dataclass(frozen=True)
 class CafaEvalRunContext:
@@ -55,6 +63,21 @@ class CafaEvalRunContext:
     ia_path: str | None
     toi_path: str
     shared_pred_dir: str
+    # Identity of the frame the numbers live in. None of the three is a
+    # property of the cafaeval call, so none of them can be derived at the
+    # write point; they are threaded down from the operation that resolved
+    # them. Default None so an existing caller still builds a context, and the
+    # grid artefact then refuses to be written rather than stamping a
+    # substitute: the consumer's comparability gate is on presence first, so an
+    # unstamped file compares equal to another unstamped file and two runs
+    # under different frames would be published as a method difference.
+    ontology_snapshot_id: str | None = None
+    evaluation_set_id: str | None = None
+    #: Which information-accretion table, as a UUID when the run named a set,
+    #: a content hash when it passed a bare file or the snapshot's URL, and the
+    #: literal "null" only when there was no IA table at all, in which case
+    #: there is no weighted variant either.
+    information_accretion_frame: str | None = None
     th_step: float = 0.01
     max_terms: int | None = None
     softprop: bool = False
@@ -164,9 +187,9 @@ def _invoke_cafaeval_signal_safe(
             gt_file,
             ia=ctx.ia_path,
             exclude=known_file,
-            prop="fill",
-            norm="cafa",
-            no_orphans=True,
+            prop=CAFAEVAL_PROP,
+            norm=CAFAEVAL_NORM,
+            no_orphans=CAFAEVAL_NO_ORPHANS,
             toi_file=ctx.toi_path,
             max_terms=ctx.max_terms,
             th_step=ctx.th_step,
@@ -253,6 +276,122 @@ def _persist_per_protein(
         )
 
 
+def _emit_grid_drops(setting: str, dropped: list[dict[str, str]], emit: EmitFn) -> None:
+    """Name every namespace left out of the grid file, one event each.
+
+    The consumer reads an absent namespace as a null panel on a successful job,
+    so a drop nobody reported is a result with nine nulls and no complaint.
+
+    At error level, not warning. A drop means a panel this evaluation was asked
+    for cannot be compared with an interval, and the operator's next sight of it
+    is the consumer refusing and naming this producer. ``code`` travels beside
+    the prose so the landing calibration can count refusals over a re-run
+    without grepping messages.
+    """
+    for entry in dropped:
+        emit(
+            "run_cafa_evaluation.per_protein_grid_namespace_dropped",
+            None,
+            {"setting": setting, **entry},
+            "error",
+        )
+
+
+def _emit_grid_written(setting: str, artifact: Any, out: Any, emit: EmitFn) -> None:
+    """What was written, so an absent panel downstream can be told from a refused one."""
+    emit(
+        "run_cafa_evaluation.per_protein_grid_written",
+        None,
+        {
+            "setting": setting,
+            "rows": len(artifact.rows),
+            "variants": list(artifact.variants),
+            "n_tau": artifact.n_tau,
+            "path": str(out),
+        },
+        "info",
+    )
+
+
+def _grid_frame(ctx: CafaEvalRunContext, setting: str) -> Any:
+    """The footer's frame, built from the run's own values and nothing else.
+
+    The three cafaeval literals come from the constants the call site uses, so
+    the stamp cannot claim a normalisation the run did not use. The three
+    identities come off the context, where they may be None; ``GridFrame.stamp``
+    is what refuses, so the refusal names every missing key at once instead of
+    the first one.
+    """
+    from protea.core.operations._run_cafa_per_protein import GridFrame
+    from protea.core.parquet_export import resolve_protea_git_sha
+
+    return GridFrame(
+        setting=setting,
+        th_step=ctx.th_step,
+        max_terms=ctx.max_terms,
+        normalization=CAFAEVAL_NORM,
+        prop=CAFAEVAL_PROP,
+        no_orphans=CAFAEVAL_NO_ORPHANS,
+        ontology_snapshot_id=ctx.ontology_snapshot_id,
+        evaluation_set_id=ctx.evaluation_set_id,
+        information_accretion_frame=ctx.information_accretion_frame,
+        producer_git_sha=resolve_protea_git_sha(),
+    )
+
+
+def _persist_per_protein_grid(
+    ctx: CafaEvalRunContext,
+    setting: str,
+    sink: Any,
+    emit: EmitFn,
+) -> None:
+    """Write the whole-threshold-curve artefact BESIDE the single-tau one.
+
+    A new file, never a widened old one. ``stratify_evaluation`` reads
+    ``per_protein.parquet`` and would break under a changed schema, and an old
+    file and a new file sharing one name is the detection problem made
+    permanently unsolvable. Both are written; the legacy one keeps its exact
+    content, and ``_upload_artifacts`` walks the directory, so the second file
+    reaches the store under the key the consumer probes with no change to the
+    upload path.
+
+    Never fatal, for the same reason its sibling is not: a run whose aggregate
+    is sound should not be discarded because an extra table could not be
+    written. Every refusal is emitted at ERROR, because an absent artefact
+    reaches the consumer as a refusal whose own remedy text is "re-run
+    run_cafa_evaluation", which the operator has already done: re-running
+    reproduces the same silence unless the reason was loud the first time.
+    """
+    from protea.core.operations._run_cafa_per_protein import (
+        GRID_FILENAME,
+        grid_rows_from_sink,
+        write_grid_parquet,
+    )
+
+    try:
+        artifact = grid_rows_from_sink(sink)
+        _emit_grid_drops(setting, artifact.dropped, emit)
+        setting_dir = ctx.artifacts_root / setting
+        setting_dir.mkdir(parents=True, exist_ok=True)
+        out = write_grid_parquet(
+            setting_dir / GRID_FILENAME,
+            artifact,
+            _grid_frame(ctx, setting).stamp(artifact.variants),
+        )
+        _emit_grid_written(setting, artifact, out, emit)
+    except Exception as exc:
+        emit(
+            "run_cafa_evaluation.per_protein_grid_failed",
+            None,
+            {
+                "setting": setting,
+                "error": str(exc),
+                "code": getattr(exc, "code", exc.__class__.__name__),
+            },
+            "error",
+        )
+
+
 def _run_cafaeval_for_setting(
     *,
     setting: str,
@@ -274,6 +413,7 @@ def _run_cafaeval_for_setting(
         result = _artifacts.parse_results(dfs_best)
         _persist_setting_artifacts(ctx, setting, df, dfs_best)
         _persist_per_protein(ctx, setting, sink, result, emit)
+        _persist_per_protein_grid(ctx, setting, sink, emit)
         emit(
             "run_cafa_evaluation.setting_done",
             None,
