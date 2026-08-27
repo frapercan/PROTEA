@@ -120,7 +120,7 @@ export function FrameTimeline({ timeline }: FrameTimelineProps) {
   );
 
   return (
-    <figure className="overflow-x-auto" data-testid="graph-timeline">
+    <figure tabIndex={0} className="overflow-x-auto" data-testid="graph-timeline">
       <svg
         viewBox={`0 0 ${W} ${H}`}
         className="min-w-[720px] w-full"
@@ -164,7 +164,7 @@ export function FrameTimeline({ timeline }: FrameTimelineProps) {
             <text
               x={xOf(y.at) + 3}
               y={BAND_TOP - 14}
-              className="fill-slate-400 text-[10px]"
+              className="fill-slate-500 text-[10px]"
             >
               {y.label}
             </text>
@@ -242,7 +242,7 @@ export function FrameTimeline({ timeline }: FrameTimelineProps) {
                 x={lx}
                 y={AXIS_Y + 35}
                 textAnchor="middle"
-                className="fill-slate-400 text-[9px]"
+                className="fill-slate-500 text-[9px]"
                 fontFamily="ui-monospace, monospace"
               >
                 {m.date}

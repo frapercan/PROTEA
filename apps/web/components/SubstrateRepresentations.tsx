@@ -104,7 +104,7 @@ function StateChip({ state, label }: { state: string; label: string }) {
 /** The mark for a value the record does not carry. Never a zero, never a dash. */
 function Absent({ what }: { what: string }) {
   return (
-    <span className="text-xs text-slate-400" title={what}>
+    <span className="text-xs text-slate-500" title={what}>
       ∅ {what}
     </span>
   );
@@ -199,7 +199,7 @@ export function SubstrateRepresentations({ representations }: Props) {
         {t("paramsNote", { recorded: withParams, total: rows.length })}
       </p>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <div tabIndex={0} className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="w-full min-w-[62rem] text-sm">
           <caption className="sr-only">{t("caption")}</caption>
           <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
@@ -293,7 +293,7 @@ function Row({ row, corpus }: { row: GraphRepresentation; corpus: number | null 
         <div className="font-medium text-slate-900">{row.label}</div>
         {row.display_name === null ? (
           <div className="mt-0.5">
-            <span className="text-[11px] text-slate-400" title={t("unnamedWhy")}>
+            <span className="text-[11px] text-slate-500" title={t("unnamedWhy")}>
               {t("unnamed")}
             </span>
           </div>
@@ -326,7 +326,7 @@ function Row({ row, corpus }: { row: GraphRepresentation; corpus: number | null 
           <div className="mt-1 font-mono text-[11px] whitespace-nowrap text-slate-600">
             {row.trained_on.source ?? t("unrecorded")} {row.trained_on.version ?? ""}
             {row.trained_on.published_at && (
-              <span className="text-slate-400"> · {row.trained_on.published_at}</span>
+              <span className="text-slate-500"> · {row.trained_on.published_at}</span>
             )}
           </div>
         )}
@@ -434,7 +434,7 @@ function Row({ row, corpus }: { row: GraphRepresentation; corpus: number | null 
           zeros reads as a column that failed to load. */}
       <td className="px-3 py-3 text-right">
         {row.prediction_sets === 0 && row.results === 0 ? (
-          <span className="text-xs text-slate-400">{t("useNever")}</span>
+          <span className="text-xs text-slate-500">{t("useNever")}</span>
         ) : (
           <div className="space-y-0.5">
             <div className="text-xs text-slate-900">

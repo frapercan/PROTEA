@@ -35,6 +35,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Ban, RefreshCw, Ruler, Waypoints } from "lucide-react";
 
+import { Explain } from "@/components/Explain";
 import { Skeleton } from "@/components/Skeleton";
 import {
   PANEL_CATEGORIES,
@@ -84,7 +85,7 @@ const FLOOR_BOX: Record<FloorState, string> = {
   top: "rounded-md border-2 border-emerald-600 bg-emerald-50 text-emerald-900",
   mid: "rounded-md border border-amber-500 text-amber-900",
   thin: "rounded-none border border-rose-300 border-l-4 border-l-rose-500 bg-rose-50 text-rose-900",
-  absent: "rounded-md border border-dashed border-slate-300 text-slate-400",
+  absent: "rounded-md border border-dashed border-slate-300 text-slate-500",
 };
 
 /** The same four states as a single square, for the nine small grids. */
@@ -241,7 +242,7 @@ function ArmCoverageStrip({ loads }: { loads: SettingLoad[] }) {
               {c.state === "ok" ? (
                 <span className="font-mono">
                   {c.withStrata.toLocaleString(locale)}
-                  <span className="text-slate-400">
+                  <span className="text-slate-600">
                     {" / "}
                     {c.total.toLocaleString(locale)}
                   </span>
@@ -319,12 +320,13 @@ function AxisMatrix({
               {t("canRoute")}
             </span>
           ) : (
-            <span
-              className="inline-flex items-center gap-1 rounded-none border border-rose-400 border-l-4 border-l-rose-600 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-900"
-              title={t("cannotRouteWhy")}
-            >
+            <span className="inline-flex items-center gap-1 rounded-none border border-rose-400 border-l-4 border-l-rose-600 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-900">
               <Ban className="h-3 w-3 shrink-0" aria-hidden />
               {t("cannotRoute")}
+              {/* Why this axis cannot route is the finding this section is
+                  built around, not a footnote. It sat in a native tooltip,
+                  where it was truncated on desktop and absent on touch. */}
+              <Explain label={t("cannotRoute")}>{t("cannotRouteWhy")}</Explain>
             </span>
           )}
         </div>
@@ -333,7 +335,7 @@ function AxisMatrix({
         </p>
       </div>
 
-      <div className="overflow-x-auto">
+      <div tabIndex={0} className="overflow-x-auto">
         <table className="w-full min-w-[44rem] text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
             <tr>
@@ -368,7 +370,7 @@ function AxisMatrix({
                     <span className="font-mono text-xs font-semibold text-slate-900">
                       {panelLabel(panel)}
                     </span>
-                    <span className="mt-0.5 block font-mono text-[10px] text-slate-400">
+                    <span className="mt-0.5 block font-mono text-[10px] text-slate-500">
                       {t("placedOf", {
                         placed: popText(placedHere),
                         units: unitCount == null ? "∅" : unitCount.toLocaleString(locale),
@@ -399,7 +401,7 @@ function AxisMatrix({
                       // has no basis for, and a zero is the one reading that
                       // looks like a measurement.
                       <span
-                        className="font-mono text-xs text-slate-400"
+                        className="font-mono text-xs text-slate-500"
                         title={t("gridNoFloors")}
                       >
                         {t("regionsUnknown")}
@@ -409,13 +411,13 @@ function AxisMatrix({
                         {regions >= 2 ? (
                           regions.toLocaleString(locale)
                         ) : (
-                          <span className="text-slate-400">{t("inheritsPanel")}</span>
+                          <span className="text-slate-600">{t("inheritsPanel")}</span>
                         )}
                       </span>
                     ) : (
                       <span
                         className="inline-flex items-center justify-end gap-1 font-mono text-xs text-rose-800"
-                        title={t("cannotRouteWhy")}
+                        /* no title: the reason lives in a control below */
                       >
                         <Ban className="h-3 w-3 shrink-0" aria-hidden />
                         <span className="line-through decoration-rose-500 decoration-2">
@@ -473,7 +475,7 @@ function SquareLegend({
           <span className="text-[11px] text-slate-600">{t(`floorState.${state}`)}</span>
         </span>
       ))}
-      <span className="ml-auto font-mono text-[10px] text-slate-400">
+      <span className="ml-auto font-mono text-[10px] text-slate-500">
         {t("gridShape", { rows: rows.length, cols: cols.length })}
       </span>
       {floors.length === 0 && (
@@ -543,7 +545,7 @@ function TripleGrid({
   return (
     <div className="space-y-3" data-testid="strata-triple">
       <SquareLegend floors={floors} rows={rowBands} cols={cols} />
-      <div className="overflow-x-auto">
+      <div tabIndex={0} className="overflow-x-auto">
         <div className="grid min-w-[46rem] gap-2 sm:grid-cols-3">
           {byPanel.map((panel) => {
             const unjudged = floors.length === 0;
@@ -562,7 +564,7 @@ function TripleGrid({
                   <span
                     className={`font-mono text-xs ${
                       unjudged
-                        ? "text-slate-400"
+                        ? "text-slate-500"
                         : none
                           ? "font-semibold text-rose-800"
                           : "text-slate-900"
@@ -572,7 +574,7 @@ function TripleGrid({
                     {unjudged
                       ? t("regionsUnknown")
                       : panel.clearing.toLocaleString(locale)}
-                    <span className="text-slate-400">
+                    <span className="text-slate-600">
                       {" / "}
                       {panel.withPopulation.toLocaleString(locale)}
                     </span>
