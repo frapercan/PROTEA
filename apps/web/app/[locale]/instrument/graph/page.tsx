@@ -279,7 +279,14 @@ function FrameCard({ frame }: { frame: GraphResponse["frame"] }) {
     >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5">
         <div className="flex flex-wrap items-baseline gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+          {/* The heading is a word of jargon on a page a newcomer reads
+              first. It gets its sentence beside it rather than in a tooltip,
+              because a reader who does not know what a frame is cannot judge
+              anything else the page says. */}
+          <h2
+            className="cursor-help text-sm font-semibold uppercase tracking-wider text-slate-500 decoration-dotted underline-offset-4 hover:underline"
+            title={t("frameWhat")}
+          >
             {t("frameHeading")}
           </h2>
           <span className="font-mono text-base font-semibold text-slate-900">
@@ -486,6 +493,23 @@ function NodesTable({ nodes }: { nodes: GraphNode[] }) {
                 </td>
                 <td className="px-3 py-3">
                   <div className="space-y-1.5">
+                    {/* The value first, because it is what a reader came for.
+                        A strength tells them how firmly the decision is held
+                        and nothing at all about what was decided. */}
+                    {node.held.length > 0 && (
+                      <dl className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        {node.held.map((h) => (
+                          <div key={h.field} className="flex items-baseline gap-1.5">
+                            <dt className="text-[10px] uppercase tracking-wider text-slate-400">
+                              {h.field}
+                            </dt>
+                            <dd className="font-mono text-xs font-medium text-slate-900">
+                              {h.value}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    )}
                     <div className="flex flex-wrap items-baseline gap-2">
                       <span className="text-[10px] uppercase tracking-wider text-slate-500">
                         {t("colVarying")}
@@ -630,6 +654,24 @@ function PanelGrid({ panels, metric }: { panels: GraphPanel[]; metric: Metric })
                     </span>
                   </span>
                 </div>
+                {/* What the panel can resolve, from its population alone.
+                    Printed beside the spread on purpose: a spread smaller than
+                    this is not a small result, it is no result, and a reader
+                    who sees only the spread has no way to tell. */}
+                {panel?.detectable_effect != null && (
+                  <div className="mt-1.5 flex items-baseline justify-between gap-2 border-b border-dashed border-slate-200 pb-1.5 text-xs">
+                    <span className="text-slate-500">{t("panelDetectable")}</span>
+                    <span
+                      className={`font-mono ${
+                        summary != null && summary.spread < panel.detectable_effect
+                          ? "font-semibold text-amber-700"
+                          : "text-slate-900"
+                      }`}
+                    >
+                      {panel.detectable_effect.toFixed(4)}
+                    </span>
+                  </div>
+                )}
                 {!panel ? (
                   <p className="mt-2 text-xs text-slate-400">{t("panelAbsent")}</p>
                 ) : summary === null ? (

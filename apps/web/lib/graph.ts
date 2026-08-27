@@ -74,6 +74,12 @@ export type GraphFrame = {
 };
 
 /** One decision over a field or a group of inseparable fields. */
+/** One field of a node and the value it stands at. */
+export type HeldValue = {
+  field: string;
+  value: string;
+};
+
 export type GraphNode = {
   key: string;
   title: string;
@@ -85,6 +91,14 @@ export type GraphNode = {
   levels_available: number;
   varying_fields: string[];
   constant_fields: string[];
+  /**
+   * What the node currently stands at, field by field.
+   *
+   * A strength says how firmly a decision is held and nothing about what was
+   * decided. Without the value, an inherited default nobody chose reads
+   * exactly like a deliberate choice nobody measured.
+   */
+  held: HeldValue[];
   /** Why this node cannot answer. Null when it can. */
   blocked_reason: string | null;
   results: number;
@@ -108,6 +122,13 @@ export type GraphPanel = {
   category: string;
   aspect: string;
   units: number | null;
+  /**
+   * The smallest difference this panel could resolve, from its population
+   * alone, at the cheapest contrast class measured. A gap smaller than this
+   * is not a small result; it is no result, and the panel says so before
+   * anything is run.
+   */
+  detectable_effect: number | null;
   results: PanelResult[];
 };
 

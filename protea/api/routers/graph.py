@@ -172,7 +172,13 @@ _SPEC_BY_KEY: dict[str, Spec] = {s.key: s for s in SPECS}
 Built = tuple[dict[str, Any], str, str]
 
 
-def _node(key: str, edge: Edge, reason: str, fields: tuple[list[str], list[str]]) -> dict[str, Any]:
+def _node(
+    key: str,
+    edge: Edge,
+    reason: str,
+    fields: tuple[list[str], list[str]],
+    held: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     """Assemble one node of the response.
 
     ``blocked_reason`` carries the reason the node stands where it does, not
@@ -180,11 +186,18 @@ def _node(key: str, edge: Edge, reason: str, fields: tuple[list[str], list[str]]
     ``blocked``, which is the contract a reader depends on, and it is null only
     for a node that reached ``measured`` and therefore needs no account of
     itself beyond the measurement.
+
+    ``held`` is the value the node currently stands at, named field by field.
+    A strength says how firmly a decision is held and says nothing about what
+    was decided, and a reader who cannot see the value cannot tell an inherited
+    default from a deliberate choice that happens to be unmeasured. Both read
+    ``inherited`` and only one of them is a surprise.
     """
     spec = _SPEC_BY_KEY[key]
     strength = strength_of(edge)
     varying, constant = fields
     return {
+        "held": held or [],
         "key": spec.key,
         "title": spec.title,
         "stage": spec.stage,
@@ -197,6 +210,39 @@ def _node(key: str, edge: Edge, reason: str, fields: tuple[list[str], list[str]]
         "blocked_reason": None if strength == MEASURED else reason,
         "results": edge.results,
     }
+
+
+#: Longest value worth printing inline beside a node. Past this a value is a
+#: paragraph rather than a fact, and it crowds out the row it belongs to.
+_VALUE_LIMIT = 120
+
+
+def held_values(rows: list[dict[str, Any]], fields: tuple[str, ...]) -> list[dict[str, str]]:
+    """The value each field stands at, or every value it took if it varied.
+
+    Emitted so a reader can see WHAT was decided beside how firmly it is held.
+    A node reading ``inherited`` with no visible value is indistinguishable
+    from one nobody has looked at, and those are different situations: the
+    first is a default nobody chose, the second is a choice nobody measured.
+
+    Fields absent from every row are dropped rather than shown empty, because a
+    field the record cannot speak to is not a value standing at nothing.
+    """
+    out: list[dict[str, str]] = []
+    for field in fields:
+        seen = sorted({str(r[field]) for r in rows if r.get(field) is not None})
+        if not seen:
+            continue
+        text_value = " · ".join(seen[:4]) + ("…" if len(seen) > 4 else "")
+        # A value long enough to need wrapping stops being a value a reader can
+        # take in at a glance and becomes a paragraph competing with the row it
+        # sits in. The scoring weights are a nested object and run to hundreds
+        # of characters; the field is worth naming, the blob is not worth
+        # printing, and the levels below carry the same information usably.
+        if len(text_value) > _VALUE_LIMIT:
+            text_value = f"{len(seen)} value(s), too long to show"
+        out.append({"field": field, "value": text_value})
+    return out
 
 
 def split_fields(
@@ -330,7 +376,13 @@ def _frame_node(record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | 
         )
     fields = ("window_from", "window_to", "window_role", "mode", "pivot_version")
     return (
-        _node("frame", edge, reason, split_fields(record["evaluation_sets"], fields)),
+        _node(
+            "frame",
+            edge,
+            reason,
+            split_fields(record["evaluation_sets"], fields),
+            held_values(record["evaluation_sets"], fields),
+        ),
         "a frame to read numbers in",
         "an evaluation set with a pivot snapshot and an accretion table",
     )
@@ -391,7 +443,13 @@ def _substrate_node(record: dict[str, list[dict[str, Any]]]) -> Built:
             "nothing in the frame selects the one that was."
         )
     return (
-        _node("substrate", edge, reason, split_fields(used, _SUBSTRATE_FIELDS)),
+        _node(
+            "substrate",
+            edge,
+            reason,
+            split_fields(used, _SUBSTRATE_FIELDS),
+            held_values(used, _SUBSTRATE_FIELDS),
+        ),
         "a representation to retrieve in",
         "an embedding configuration with stored embeddings",
     )
@@ -465,7 +523,13 @@ def _bank_node(record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | N
             "and none of them is the window's lower endpoint that the frame would fix."
         )
     return (
-        _node("bank", edge, reason, split_fields(sets, _BANK_FIELDS)),
+        _node(
+            "bank",
+            edge,
+            reason,
+            split_fields(sets, _BANK_FIELDS),
+            held_values(sets, _BANK_FIELDS),
+        ),
         "a corpus to draw donors from",
         "an annotation set at the window's lower endpoint",
     )
@@ -532,7 +596,13 @@ def _retriever_node(record: dict[str, list[dict[str, Any]]]) -> Built:
             "been."
         )
     return (
-        _node("retriever", edge, reason, split_fields(sets, _RETRIEVER_FIELDS)),
+        _node(
+            "retriever",
+            edge,
+            reason,
+            split_fields(sets, _RETRIEVER_FIELDS),
+            held_values(sets, _RETRIEVER_FIELDS),
+        ),
         "a way of drawing candidates from the bank",
         "a prediction set",
     )
@@ -627,7 +697,13 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
             "carries both."
         )
     return (
-        _node("scoring", edge, reason, split_fields(used, _SCORING_FIELDS)),
+        _node(
+            "scoring",
+            edge,
+            reason,
+            split_fields(used, _SCORING_FIELDS),
+            held_values(used, _SCORING_FIELDS),
+        ),
         "a weighting to score candidates with",
         "a scoring configuration with a surviving result",
     )

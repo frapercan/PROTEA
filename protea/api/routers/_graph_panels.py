@@ -17,6 +17,7 @@ never a rounded guess and never a zero.
 from __future__ import annotations
 
 import io
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -78,6 +79,36 @@ def panel_units_from_groundtruth(
     }
 
 
+#: The paired standard deviation of the within-protein difference, for the
+#: cheapest contrast class this project has measured: two arms sharing their
+#: retrieval and differing in one downstream knob. Derived in
+#: ABLATION-ARCHITECTURE.md from a fold study, and it is the LOW end. Two arms
+#: that retrieve different neighbours are noisier, so a panel that cannot
+#: resolve at this value cannot resolve at any.
+_SIGMA_PAIRED = 0.081
+
+#: (z at 95 per cent + z at 80 per cent power), the constant that turns a
+#: population into the smallest difference it can detect.
+_Z_SUM = 2.8016
+
+
+def detectable_effect(units: int | None) -> float | None:
+    """The smallest difference this panel could resolve, from its population.
+
+    Pure arithmetic over a number the record already carries, which is why it
+    can be shown for a panel nobody has scored: a population states what a panel
+    could decide before anything is run, and a panel printed without it invites
+    reading a gap of 0.002 in a panel that cannot see 0.008 as a result.
+
+    Computed at the low end of the contrast classes, so it is a floor on the
+    floor. Returns nothing when the population is unknown, since an effect
+    derived from an absent population would be a number about nothing.
+    """
+    if not units or units <= 0:
+        return None
+    return round(_Z_SUM * _SIGMA_PAIRED / math.sqrt(units), 4)
+
+
 def level_fields(rows: list[dict[str, Any]]) -> tuple[str, ...]:
     """Which fields name a level here, read off what varies across results."""
     varying = tuple(f for f in _LEVEL_FIELDS if len({repr(r.get(f)) for r in rows}) > 1)
@@ -114,6 +145,7 @@ def build_panels(
             "category": category,
             "aspect": aspect,
             "units": counted.get((category, aspect)),
+            "detectable_effect": detectable_effect(counted.get((category, aspect))),
             "results": [
                 {
                     "level": _level_name(r, fields),
