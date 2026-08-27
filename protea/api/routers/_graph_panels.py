@@ -45,7 +45,13 @@ _SCORED_BUCKETS: frozenset[str] = frozenset({"nk", "lk", "pk"})
 #: The fields a published result can be told apart by. A level is named by
 #: whichever of them actually moved, so a record that varied one thing reads as
 #: one word instead of a tuple with two constants in it.
-_LEVEL_FIELDS: tuple[str, ...] = ("scoring_name", "embedding_name", "depth")
+_LEVEL_FIELDS: tuple[str, ...] = (
+    "scoring_name",
+    "embedding_name",
+    "depth",
+    "donor_policy",
+    "metric",
+)
 
 
 def panel_units_from_groundtruth(

@@ -21,14 +21,16 @@ declare up front cannot be answered at all.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from protea.api.routers._graph_panels import PANEL_KEYS, panel_units
-from protea.api.routers._graph_reads import QUERIES, read_record
+from protea.api.routers._graph_panels import PANEL_KEYS, panel_units_from_groundtruth
+from protea.api.routers._graph_reads import PARAM_QUERIES, QUERIES, read_record
 from protea.api.routers.graph import (
     BLOCKED,
     CHOSEN,
@@ -41,6 +43,7 @@ from protea.api.routers.graph import (
     router,
     strength_of,
 )
+from protea.infrastructure.settings import Settings
 
 _STRENGTHS = {MEASURED, CHOSEN, INHERITED, UNPOWERED, BLOCKED}
 
@@ -73,6 +76,10 @@ class FakeSession:
 
     def __init__(self, record: dict[str, list[dict[str, Any]]]) -> None:
         self._by_id = {id(QUERIES[name]): rows for name, rows in record.items()}
+        # The parameterised reads answer empty unless the record names them. A
+        # statement outside both registries still raises, which is the point.
+        for name, clause in PARAM_QUERIES.items():
+            self._by_id.setdefault(id(clause), record.get(name, []))
         self.statements: list[Any] = []
 
     def execute(self, clause: Any, *args: Any, **kwargs: Any) -> _FakeResult:
@@ -103,6 +110,12 @@ def _client(record: dict[str, list[dict[str, Any]]]) -> tuple[TestClient, FakeSe
     session = FakeSession(record)
     app = FastAPI()
     app.state.session_factory = lambda: session
+    # The router reads settings to reach the window's ground truth, which is
+    # where a panel population is counted. A bare app has none, so the whole
+    # surface answers 500 and every assertion below reads as a broken endpoint.
+    app.state.settings = Settings(
+        db_url="sqlite://", amqp_url="amqp://", artifacts_dir=str(Path(tempfile.mkdtemp()))
+    )
     app.include_router(router, prefix="/v1")
     return TestClient(app), session
 
@@ -398,10 +411,13 @@ def test_the_modules_do_not_import_the_committing_session_helper() -> None:
 # ── Shape and honesty of the payload ──────────────────────────────────────────
 
 
-def test_the_payload_has_the_four_declared_blocks_and_ten_nodes() -> None:
+def test_the_payload_has_the_five_declared_blocks_and_ten_nodes() -> None:
     client, _ = _client(populated_record({"a": 0.1, "b": 0.2}))
     body = client.get("/v1/graph").json()
-    assert set(body) == {"frame", "nodes", "panels", "blocked"}
+    # The timeline is a fifth block, not a field of the frame: a window is an
+    # interval and the releases inside it are dated marks, which a table of
+    # frame fields has nowhere to put.
+    assert set(body) == {"frame", "timeline", "nodes", "panels", "blocked"}
     assert [n["key"] for n in body["nodes"]] == [s.key for s in SPECS]
     assert [n["stage"] for n in body["nodes"]] == list(range(len(SPECS)))
     assert {n["strength"] for n in body["nodes"]} <= _STRENGTHS
@@ -416,28 +432,58 @@ def test_all_nine_panels_are_reported_even_when_none_is_scored() -> None:
     assert all(p["units"] is None for p in panels)
 
 
-def test_an_unscored_panel_reports_no_population_rather_than_zero() -> None:
+def _groundtruth_parquet(rows: list[tuple[str, str, str]]) -> bytes:
+    """Serialise (protein, bucket, go_id) triples the way the window stores them."""
+    import io as _io
+
+    import pandas as _pd
+
+    buf = _io.BytesIO()
+    _pd.DataFrame(rows, columns=["protein_accession", "bucket", "go_id"]).to_parquet(buf)
+    return buf.getvalue()
+
+
+ASPECT_OF = {"GO:1": "P", "GO:2": "F", "GO:3": "C"}
+
+
+def test_a_panel_population_is_counted_from_the_ground_truth() -> None:
+    """One protein counts once per panel however many terms it gained there."""
+    payload = _groundtruth_parquet(
+        [
+            ("P1", "nk", "GO:1"),
+            ("P1", "nk", "GO:1"),
+            ("P2", "nk", "GO:1"),
+            ("P1", "nk", "GO:2"),
+            ("P3", "pk", "GO:3"),
+        ]
+    )
+    units = panel_units_from_groundtruth(payload, ASPECT_OF)
+    assert units[("NK", "BPO")] == 2
+    assert units[("NK", "MFO")] == 1
+    assert units[("PK", "CCO")] == 1
+
+
+def test_a_protein_counts_in_every_bucket_it_belongs_to() -> None:
+    """LK and PK overlap by design, so the panels are not a partition."""
+    payload = _groundtruth_parquet([("P1", "lk", "GO:1"), ("P1", "pk", "GO:1")])
+    units = panel_units_from_groundtruth(payload, ASPECT_OF)
+    assert units[("LK", "BPO")] == 1
+    assert units[("PK", "BPO")] == 1
+
+
+def test_a_panel_nobody_populated_is_absent_rather_than_zero() -> None:
     """Null, never a zero: the two say different things and only one is true."""
-    assert panel_units([]) is None
-    assert panel_units([{"n_at_tau": None, "coverage_at_tau": None}]) is None
+    payload = _groundtruth_parquet([("P1", "nk", "GO:1")])
+    units = panel_units_from_groundtruth(payload, ASPECT_OF)
+    assert ("LK", "MFO") not in units
 
 
-def test_the_population_is_reconciled_from_coverage_and_agrees_across_results() -> None:
-    """Two results that scored the same cohort pin it to the same number."""
-    rows = [
-        {"n_at_tau": 1443, "coverage_at_tau": 0.9563},
-        {"n_at_tau": 1193, "coverage_at_tau": 0.7906},
-    ]
-    assert panel_units(rows) == 1509
-
-
-def test_results_that_disagree_beyond_rounding_report_no_population() -> None:
-    """Disagreement is reported as unknown, not settled by picking a side."""
-    rows = [
-        {"n_at_tau": 1443, "coverage_at_tau": 0.9563},
-        {"n_at_tau": 900, "coverage_at_tau": 0.9000},
-    ]
-    assert panel_units(rows) is None
+def test_a_term_outside_the_pivot_is_dropped_rather_than_guessed() -> None:
+    """A term the pivot does not place has no aspect, so it counts nowhere."""
+    payload = _groundtruth_parquet([("P1", "nk", "GO:1"), ("P1", "nk", "GO:999")])
+    units = panel_units_from_groundtruth(payload, ASPECT_OF)
+    assert units[("NK", "BPO")] == 1
+    assert sum(units.values()) == 1
 
 
 def test_the_frame_is_undeclared_while_any_published_result_is_unsealed() -> None:

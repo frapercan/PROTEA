@@ -328,6 +328,13 @@ QUERIES: dict[str, TextClause] = {
 }
 
 
+#: The parameterised reads. They cannot sit in ``QUERIES`` because that dict is
+#: run without arguments, but leaving them unregistered made the read surface
+#: wider than the module declared it to be, and a test double built from
+#: ``QUERIES`` alone refused a statement the endpoint legitimately issues.
+PARAM_QUERIES: dict[str, TextClause] = {}  # populated below, after the statements exist
+
+
 def read_record(session: Session) -> dict[str, list[dict[str, Any]]]:
     """Run every read once and return the rows by name.
 
@@ -377,3 +384,6 @@ def read_timeline(session: Session) -> list[dict[str, Any]]:
     position the record does not support.
     """
     return [dict(r) for r in session.execute(_TIMELINE).mappings().all()]
+
+
+PARAM_QUERIES["pivot_aspects"] = _PIVOT_ASPECTS
