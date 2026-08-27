@@ -20,12 +20,17 @@ half. This writes one row per (result, category, aspect) carrying the FULL condi
 set alongside the metric, plus an explicit flag for the rows whose job is gone and whose
 conditioning set is therefore unrecoverable for ever.
 """
-import hashlib, json, os, re, sys
+
+import hashlib
+import json
+import os
+import re
+
 import pandas as pd
 from sqlalchemy import create_engine, text
 
 ROOT = "/home/bioxaxi2/Thesis-laptop/PROTEA"
-url = re.search(r'^PROTEA_DB_URL=(.*)$', open(f"{ROOT}/.env").read(), re.M).group(1).strip()
+url = re.search(r"^PROTEA_DB_URL=(.*)$", open(f"{ROOT}/.env").read(), re.M).group(1).strip()
 os.environ["PGOPTIONS"] = "-c default_transaction_read_only=on -c statement_timeout=600s"
 eng = create_engine(url, connect_args={"application_name": "protea-floor-census"})
 
@@ -96,45 +101,70 @@ with eng.connect() as c:
 # (36, 18 and 17 jobs). Their absence means the operation's default was used, not that the
 # value is unknown. What genuinely cannot be recovered is a result whose job is gone: with
 # no job there is no operation, so not even the defaults are determined.
-COND = ["evaluation_set_id","prediction_set_id","scoring_config_id","leakage_role",
-        "temporal_window","max_terms","max_distance","protein_subset_label",
-        "ia_set_id","protein_fold","k","embedding_config_id","producing_operation"]
+COND = [
+    "evaluation_set_id",
+    "prediction_set_id",
+    "scoring_config_id",
+    "leakage_role",
+    "temporal_window",
+    "max_terms",
+    "max_distance",
+    "protein_subset_label",
+    "ia_set_id",
+    "protein_fold",
+    "k",
+    "embedding_config_id",
+    "producing_operation",
+]
 df["conditioning_complete"] = df["job_recoverable"] & df["ia_set_id"].notna()
-for c in ("max_terms","max_distance","protein_subset_label"):
+for c in ("max_terms", "max_distance", "protein_subset_label"):
     df[c + "_defaulted"] = df["job_recoverable"] & df[c].isna()
 
 out = "/home/bioxaxi2/Thesis-laptop/PROTEA/results/floor_census"
 os.makedirs(out, exist_ok=True)
 pq = f"{out}/floor_census.parquet"
 df.to_parquet(pq, index=False)
-sha = hashlib.sha256(open(pq,"rb").read()).hexdigest()
+sha = hashlib.sha256(open(pq, "rb").read()).hexdigest()
 
 man = {
-  "produced_at_utc": str(df["created_at"].max()),
-  "rows": len(df), "results": df.result_id.nunique(),
-  "sha256": sha, "bytes": os.path.getsize(pq),
-  "conditioning_fields": COND,
-  "rows_with_complete_conditioning": int(df.conditioning_complete.sum()),
-  "rows_without": int((~df.conditioning_complete).sum()),
-  "pct_usable": round(100*df.conditioning_complete.mean(),2),
-  "results_with_recoverable_job": int(df.groupby("result_id").job_recoverable.first().sum()),
-  "producing_operations": df.groupby("result_id").producing_operation.first()
-                             .fillna("(job absent)").value_counts().to_dict(),
-  "frame_known": int(df.groupby("result_id").ia_set_id.first().notna().sum()),
-  "distinct_frames": sorted(x for x in df.ia_set_id.dropna().unique()),
-  "note": ("The census is a join of evaluation_result against job.payload. A wipe that "
-           "removes results and keeps jobs orphans one half and deletes the other, so the "
-           "numbers become unrecomputable from either. This file carries both halves."),
+    "produced_at_utc": str(df["created_at"].max()),
+    "rows": len(df),
+    "results": df.result_id.nunique(),
+    "sha256": sha,
+    "bytes": os.path.getsize(pq),
+    "conditioning_fields": COND,
+    "rows_with_complete_conditioning": int(df.conditioning_complete.sum()),
+    "rows_without": int((~df.conditioning_complete).sum()),
+    "pct_usable": round(100 * df.conditioning_complete.mean(), 2),
+    "results_with_recoverable_job": int(df.groupby("result_id").job_recoverable.first().sum()),
+    "producing_operations": df.groupby("result_id")
+    .producing_operation.first()
+    .fillna("(job absent)")
+    .value_counts()
+    .to_dict(),
+    "frame_known": int(df.groupby("result_id").ia_set_id.first().notna().sum()),
+    "distinct_frames": sorted(x for x in df.ia_set_id.dropna().unique()),
+    "note": (
+        "The census is a join of evaluation_result against job.payload. A wipe that "
+        "removes results and keeps jobs orphans one half and deletes the other, so the "
+        "numbers become unrecomputable from either. This file carries both halves."
+    ),
 }
-json.dump(man, open(f"{out}/manifest.json","w"), indent=2)
+json.dump(man, open(f"{out}/manifest.json", "w"), indent=2)
 
 print(f"  filas               {len(df):,}  ({df.result_id.nunique():,} resultados x 9 paneles)")
 print(f"  sha256              {sha[:32]}...")
 print(f"  tamano              {os.path.getsize(pq):,} bytes")
-print(f"  condicionante completo  {df.conditioning_complete.sum():,} / {len(df):,}  ({100*df.conditioning_complete.mean():.1f}%)")
-print(f"  resultados con job      {df.groupby('result_id').job_recoverable.first().sum():,} / {df.result_id.nunique():,}")
+print(
+    f"  condicionante completo  {df.conditioning_complete.sum():,} / {len(df):,}  ({100 * df.conditioning_complete.mean():.1f}%)"
+)
+print(
+    f"  resultados con job      {df.groupby('result_id').job_recoverable.first().sum():,} / {df.result_id.nunique():,}"
+)
 print()
 print("  por panel, filas utilizables:")
-g = df.groupby(["category","aspect"]).conditioning_complete.agg(["sum","count"])
-for (c,a),r in g.iterrows():
-    print(f"    {c} {a}   {int(r['sum']):>5,} / {int(r['count']):>5,}   {100*r['sum']/r['count']:>5.1f}%")
+g = df.groupby(["category", "aspect"]).conditioning_complete.agg(["sum", "count"])
+for (c, a), r in g.iterrows():
+    print(
+        f"    {c} {a}   {int(r['sum']):>5,} / {int(r['count']):>5,}   {100 * r['sum'] / r['count']:>5.1f}%"
+    )
