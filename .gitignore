@@ -75,3 +75,10 @@ sops_age_key.txt
 # Local DB/AMQP config — must NOT be committed (it has wiped the live DB when
 # inherited by test worktrees). Copy system.yaml.example and edit locally.
 protea/config/system.yaml
+
+# Downloaded reference data and local run logs. A taxonomy dump is 75 MB and is
+# fetched, not authored: committing one puts it in every clone for ever, and it
+# arrived here through a broad `git add -A` rather than a decision.
+taxdump.tar.gz
+.run-logs/
+poetry.toml
