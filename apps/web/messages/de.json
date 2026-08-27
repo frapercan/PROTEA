@@ -311,7 +311,11 @@
     "nothingBlocked": "Nichts ist blockiert.",
     "panelDetectable": "Detektierbar",
     "frameWhat": "Der Rahmen macht eine Zahl vergleichbar: das Zeitfenster, der GO-Graph, unter dem bewertet wird, die Akkretionstabelle, die die Terme gewichtet, und die ausgewertete Population.",
-    "months": "Monate"
+    "months": "Monate",
+    "timelineHeading": "Frame timeline",
+    "timelineWindow": "experimental window",
+    "timelinePivot": "pivot",
+    "timelineAria": "Annotation and ontology releases placed against the experimental window"
   },
   "jobs": {
     "title": "Jobs",

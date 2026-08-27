@@ -35,6 +35,8 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+
+import { FrameTimeline } from "@/components/FrameTimeline";
 import {
   Ban,
   Circle,
@@ -1051,6 +1053,23 @@ export default function GraphPage() {
         <>
           {/* 1. The frame. Everything below is unreadable without it. */}
           <FrameCard frame={graph.frame} />
+
+          {/* The axis sits directly under the frame block it describes. It says
+              nothing the block does not, and shows three things the block
+              cannot: that the pivot falls inside the window, that an ontology
+              contemporary with the window's opening exists and was not chosen,
+              and that a release lies beyond the closing end. */}
+          {graph.timeline && graph.timeline.marks.length > 0 && (
+            <section
+              className="rounded-lg border border-slate-200 bg-white px-4 pb-2 pt-3"
+              aria-labelledby="graph-timeline-heading"
+            >
+              <h2 id="graph-timeline-heading" className="sr-only">
+                {t("timelineHeading")}
+              </h2>
+              <FrameTimeline timeline={graph.timeline} />
+            </section>
+          )}
 
           {/* 2. The nodes. */}
           <section className="space-y-3" data-testid="graph-nodes">

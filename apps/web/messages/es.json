@@ -310,7 +310,11 @@
     "nothingBlocked": "No hay nada bloqueado.",
     "panelDetectable": "Detectable",
     "frameWhat": "El marco es lo que hace comparable un número: la ventana temporal, el grafo GO bajo el que se puntúa, la tabla de acreción que pesa los términos y la población que se evaluó. Dos cifras de marcos distintos no miden lo mismo aunque lleven el mismo nombre.",
-    "months": "meses"
+    "months": "meses",
+    "timelineHeading": "Línea temporal del marco",
+    "timelineWindow": "ventana experimental",
+    "timelinePivot": "pivote",
+    "timelineAria": "Releases de anotación y de ontología situadas contra la ventana experimental"
   },
   "jobs": {
     "title": "Trabajos",

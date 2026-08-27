@@ -285,7 +285,33 @@ _Q_FLOORS = text(
 
 #: The read surface, by name. Iterating this is the only way the router talks to
 #: the database.
+
+#: Everything the record can place on a date, annotation releases and ontology
+#: releases alike. They are read together because the frame is built from both
+#: and a reader judging a window needs to see them on one axis: which releases
+#: fall inside it, which ontology it is scored under, and where that ontology
+#: sits relative to the ends it is reconciling.
+_TIMELINE = text("""
+    SELECT 'annotation_set'                       AS kind,
+           'GOA ' || a.source_version             AS label,
+           a.source_version                       AS version,
+           a.source_published_at::date::text      AS date,
+           a.id::text                             AS id
+    FROM annotation_set a
+    WHERE a.source_published_at IS NOT NULL
+    UNION ALL
+    SELECT 'ontology_snapshot',
+           o.obo_version,
+           o.obo_version,
+           NULLIF(REPLACE(o.obo_version, 'releases/', ''), '')::date::text,
+           o.id::text
+    FROM ontology_snapshot o
+    WHERE o.obo_version LIKE 'releases/%'
+    ORDER BY 4
+""")
+
 QUERIES: dict[str, TextClause] = {
+    "timeline": _TIMELINE,
     "evaluation_sets": _Q_EVALUATION_SETS,
     "accretion": _Q_ACCRETION,
     "query_sets": _Q_QUERY_SETS,
@@ -340,3 +366,14 @@ def read_pivot_aspects(session: Session, record: dict[str, list[dict[str, Any]]]
         return {}
     rows = session.execute(_PIVOT_ASPECTS, {"snapshot_id": snapshot_id}).mappings().all()
     return {str(r["go_id"]): str(r["aspect"]) for r in rows}
+
+
+def read_timeline(session: Session) -> list[dict[str, Any]]:
+    """Every dated release the record holds, annotation and ontology together.
+
+    Rows without a usable date are dropped rather than stacked at one end. A
+    release whose publication date was never fetched is not a release that
+    happened at an unknown edge of the axis, and placing it there invents a
+    position the record does not support.
+    """
+    return [dict(r) for r in session.execute(_TIMELINE).mappings().all()]

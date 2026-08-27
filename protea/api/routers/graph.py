@@ -832,6 +832,59 @@ def _routing_node(record: dict[str, list[dict[str, Any]]]) -> Built:
 # ── Assembly ──────────────────────────────────────────────────────────────────
 
 
+def build_timeline(
+    marks: list[dict[str, Any]], head: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """The frame laid out on a date axis, with each release's part in it named.
+
+    A table can say the window runs from 220 to 227 and the pivot is the July
+    graph. Only an axis shows what that arrangement means: the pivot sits inside
+    the window it reconciles rather than at either end, an ontology contemporary
+    with the window's opening exists and was not the one chosen, and a release
+    beyond the closing end is the cohort nobody is allowed to look at yet.
+
+    Every role is derived from dates the record already holds. Nothing is
+    positioned by assumption, and a release the record cannot date does not
+    appear at all rather than appearing at a guessed end.
+    """
+    if not head or not marks:
+        return None
+    start, end = head.get("window_from_date"), head.get("window_to_date")
+    pivot_version = head.get("pivot_version")
+    out: list[dict[str, Any]] = []
+    for mark in marks:
+        when = mark.get("date")
+        if not when:
+            continue
+        inside = bool(start and end and start <= when <= end)
+        if when == start:
+            role = "window_start"
+        elif when == end:
+            role = "window_end"
+        elif mark["version"] == pivot_version:
+            role = "pivot"
+        elif start and when < start:
+            role = "before"
+        elif end and when > end:
+            role = "beyond"
+        else:
+            role = "inside"
+        out.append(
+            {
+                "kind": mark["kind"],
+                "label": mark["label"],
+                "date": when,
+                "role": role,
+                "in_window": inside,
+                "is_pivot": mark["version"] == pivot_version,
+            }
+        )
+    return {
+        "window": {"from": start, "to": end},
+        "marks": sorted(out, key=lambda m: m["date"]),
+    }
+
+
 def build_graph(
     record: dict[str, list[dict[str, Any]]],
     units: Mapping[tuple[str, str], int] | None = None,
@@ -861,6 +914,10 @@ def build_graph(
         "frame": build_frame(record),
         "nodes": [node for node, _, _ in built],
         "panels": build_panels(record["panels"], units),
+        "timeline": build_timeline(
+            record.get("timeline", []),
+            record["evaluation_sets"][0] if record["evaluation_sets"] else None,
+        ),
         "blocked": [
             {
                 "node": node["key"],

@@ -67,6 +67,22 @@ export type WindowSpan = {
   months: number;
 };
 
+/** One dated release on the frame's axis, and its part in the frame. */
+export type TimelineMark = {
+  kind: "annotation_set" | "ontology_snapshot";
+  label: string;
+  date: string;
+  role: "window_start" | "window_end" | "pivot" | "inside" | "before" | "beyond";
+  in_window: boolean;
+  is_pivot: boolean;
+};
+
+/** Every dated release the record holds, laid out against the window. */
+export type GraphTimeline = {
+  window: { from: string | null; to: string | null };
+  marks: TimelineMark[];
+};
+
 export type GraphFrame = {
   /**
    * The dates behind the release numbers.
@@ -159,6 +175,7 @@ export type GraphBlocked = {
 export type GraphResponse = {
   frame: GraphFrame;
   nodes: GraphNode[];
+  timeline: GraphTimeline | null;
   panels: GraphPanel[];
   blocked: GraphBlocked[];
 };

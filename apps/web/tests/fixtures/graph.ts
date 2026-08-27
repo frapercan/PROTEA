@@ -40,6 +40,7 @@ export const GRAPH_FIXTURE: GraphResponse = {
     sealed_rows: 0,
     unsealed_rows: 8,
   },
+  timeline: null,
   nodes: [
     {
       key: "frame",
@@ -702,6 +703,7 @@ export const EMPTY_GRAPH_FIXTURE: GraphResponse = {
     sealed_rows: 0,
     unsealed_rows: 0,
   },
+  timeline: null,
   nodes: [],
   panels: [],
   blocked: [],
