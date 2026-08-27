@@ -42,6 +42,7 @@ class CafaEvalRunContext:
     pred_set_id: uuid.UUID
     delta_proteins: set[str]
     max_distance: float | None
+    max_k_position: int | None = None
     artifacts_root: Path
     has_rerankers: bool
     reranker_models: dict[str, dict[str, dict[str, Any]]]
@@ -89,6 +90,7 @@ def _write_setting_predictions(
         pred_set_id=ctx.pred_set_id,
         delta_proteins=ctx.delta_proteins,
         max_distance=ctx.max_distance,
+        max_k_position=ctx.max_k_position,
         path=pred_path,
     )
     if "" in rr_aspect_map:
@@ -108,8 +110,6 @@ def _write_setting_predictions(
             known_gos=setting_known,
         )
     return pred_dir
-
-
 
 
 def _new_per_protein_sink() -> Any:
@@ -193,8 +193,6 @@ def _persist_setting_artifacts(
     setting_dir = ctx.artifacts_root / setting
     setting_dir.mkdir(exist_ok=True)
     _write_results(df, dfs_best, str(setting_dir))
-
-
 
 
 def _persist_per_protein(

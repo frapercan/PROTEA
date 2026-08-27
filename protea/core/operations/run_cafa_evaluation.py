@@ -63,6 +63,16 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
     evaluation_set_id: str
     prediction_set_id: str
     max_distance: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_k_position: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Score only the first N neighbours of each query. Candidates are "
+            "written to a fixed depth and carry the rank they were retrieved at, "
+            "so every smaller depth is a truncation of a list already stored and "
+            "needs no new retrieval pass. Null scores every stored neighbour."
+        ),
+    )
     scoring_config_id: str | None = Field(default=None)
     reranker_id_nk: str | None = Field(default=None)
     reranker_id_lk: str | None = Field(default=None)
@@ -546,6 +556,7 @@ class RunCafaEvaluationOperation:
             pred_set_id=inputs.pred_set_id,
             delta_proteins=delta_proteins,
             max_distance=p.max_distance,
+            max_k_position=p.max_k_position,
             artifacts_root=artifacts_root,
             has_rerankers=has_rerankers,
             reranker_models=ctx.reranker_models,
@@ -605,6 +616,7 @@ class RunCafaEvaluationOperation:
                 pred_set_id=ctx.inputs.pred_set_id,
                 delta_proteins=delta_proteins,
                 max_distance=p.max_distance,
+                max_k_position=p.max_k_position,
                 path=os.path.join(pred_dir, "predictions.tsv"),
             ),
             scoring_config=ctx.scoring_snapshot,
@@ -621,8 +633,12 @@ class RunCafaEvaluationOperation:
     ) -> str | None:
         """Resolve the IA table and apply the band guard to it, in that order."""
         ia_path = resolve_ia_file(
-            tmpdir, snapshot, p.ia_file, emit,
-            session, p.information_accretion_set_id,
+            tmpdir,
+            snapshot,
+            p.ia_file,
+            emit,
+            session,
+            p.information_accretion_set_id,
         )
         cls._enforce_band(p.band, snapshot, p.ia_file, emit)
         return ia_path
