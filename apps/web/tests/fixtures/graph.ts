@@ -20,6 +20,7 @@ export const GRAPH_FIXTURE: GraphResponse = {
     declared: false,
     evaluation_set_id: "c9daabc4-19bd-4c6b-8da5-c19e4bd880c4",
     window: "220->227",
+    window_span: null,
     window_role: "valid",
     mode: "reconciled",
     pivot_snapshot: {
@@ -692,6 +693,7 @@ export const EMPTY_GRAPH_FIXTURE: GraphResponse = {
     declared: false,
     evaluation_set_id: null,
     window: null,
+    window_span: null,
     window_role: null,
     mode: null,
     pivot_snapshot: null,

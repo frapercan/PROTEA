@@ -59,7 +59,23 @@ export function isEdgeStrength(v: unknown): v is EdgeStrength {
  * to one, and a number that cannot be attributed cannot be compared. The
  * page shows the unsealed count before it shows any score.
  */
+/** When a window opened, when it closed, and how long it ran. */
+export type WindowSpan = {
+  from: string;
+  to: string;
+  days: number;
+  months: number;
+};
+
 export type GraphFrame = {
+  /**
+   * The dates behind the release numbers.
+   *
+   * 220 and 227 name two files and date nothing. How long a window ran bounds
+   * how much annotation could accumulate in it, which is the first thing asked
+   * of a temporal benchmark and the last thing a bare release number answers.
+   */
+  window_span: WindowSpan | null;
   declared: boolean;
   evaluation_set_id: string | null;
   /** Rendered verbatim; the endpoint formats it, e.g. `220->227`. */

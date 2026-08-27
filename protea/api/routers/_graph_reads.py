@@ -33,6 +33,12 @@ _Q_EVALUATION_SETS = text(
            os.obo_version                            AS pivot_version,
            lo.source_version                         AS window_from,
            hi.source_version                         AS window_to,
+           -- A release number names a file and dates nothing. 220 and 227 are
+           -- fourteen months apart, and a reader who cannot see that cannot
+           -- judge how much annotation the window had room to accumulate,
+           -- which is the first thing anyone asks of a temporal benchmark.
+           lo.source_published_at::date::text        AS window_from_date,
+           hi.source_published_at::date::text        AS window_to_date,
            es.old_annotation_set_id::text            AS bank_annotation_set_id,
            es.groundtruth_uri                        AS groundtruth_uri
     FROM evaluation_set es

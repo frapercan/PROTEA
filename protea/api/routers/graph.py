@@ -67,6 +67,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -289,6 +290,11 @@ def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     unsealed = len(results) - sealed
     ends = (head["window_from"], head["window_to"]) if head else (None, None)
     window = f"{ends[0]}->{ends[1]}" if all(ends) else None
+    # The release numbers name two files and date nothing. Fourteen months
+    # separate 220 from 227, and how long a window ran is the first thing asked
+    # of a temporal benchmark: it bounds how much annotation could accumulate,
+    # and therefore what any panel drawn from it could possibly resolve.
+    span = _window_span(head) if head else None
     pivot = (
         {"id": head["pivot_snapshot_id"], "version": head["pivot_version"]}
         if head and head["pivot_snapshot_id"]
@@ -306,6 +312,7 @@ def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         ),
         "evaluation_set_id": head["id"] if head else None,
         "window": window,
+        "window_span": span,
         "window_role": head["window_role"] if head else None,
         "mode": head["mode"] if head else None,
         "pivot_snapshot": pivot,
@@ -329,6 +336,20 @@ def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
 # One per node. Each returns the node, the artifact it cannot produce, and the
 # precondition for producing it; the last two are read only when the node comes
 # out blocked. Every count in them is derived from the rows, never asserted.
+
+
+def _window_span(head: dict[str, Any]) -> dict[str, Any] | None:
+    """When the window opened, when it closed, and how long it ran.
+
+    Returns nothing when either publication date is missing rather than
+    computing a span from one end, because a window with one date is not a
+    shorter window, it is an undated one.
+    """
+    start, end = head.get("window_from_date"), head.get("window_to_date")
+    if not start or not end:
+        return None
+    days = (date.fromisoformat(end) - date.fromisoformat(start)).days
+    return {"from": start, "to": end, "days": days, "months": round(days / 30.44, 1)}
 
 
 def _frame_node(record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None) -> Built:

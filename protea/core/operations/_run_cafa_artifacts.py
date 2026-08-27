@@ -77,8 +77,8 @@ class WritePredictionsContext:
     pred_set_id: uuid.UUID
     delta_proteins: set[str]
     max_distance: float | None
-    max_k_position: int | None = None
     path: str
+    max_k_position: int | None = None
 
 
 def download_obo(url: str, dest: str) -> None:

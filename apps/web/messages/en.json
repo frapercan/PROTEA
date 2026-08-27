@@ -309,7 +309,8 @@
     "colPrecondition": "Precondition",
     "nothingBlocked": "Nothing is blocked.",
     "panelDetectable": "Detectable",
-    "frameWhat": "The frame is what makes a number comparable: the time window, the GO graph it is scored under, the accretion table that weights its terms, and the population it was measured over. Two numbers from different frames are not measuring the same thing however alike they are named."
+    "frameWhat": "The frame is what makes a number comparable: the time window, the GO graph it is scored under, the accretion table that weights its terms, and the population it was measured over. Two numbers from different frames are not measuring the same thing however alike they are named.",
+    "months": "months"
   },
   "jobs": {
     "title": "Jobs",

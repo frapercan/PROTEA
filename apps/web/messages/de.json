@@ -310,7 +310,8 @@
     "colPrecondition": "Vorbedingung",
     "nothingBlocked": "Nichts ist blockiert.",
     "panelDetectable": "Detektierbar",
-    "frameWhat": "Der Rahmen macht eine Zahl vergleichbar: das Zeitfenster, der GO-Graph, unter dem bewertet wird, die Akkretionstabelle, die die Terme gewichtet, und die ausgewertete Population."
+    "frameWhat": "Der Rahmen macht eine Zahl vergleichbar: das Zeitfenster, der GO-Graph, unter dem bewertet wird, die Akkretionstabelle, die die Terme gewichtet, und die ausgewertete Population.",
+    "months": "Monate"
   },
   "jobs": {
     "title": "Jobs",

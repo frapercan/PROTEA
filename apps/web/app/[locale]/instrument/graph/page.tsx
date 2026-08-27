@@ -292,6 +292,17 @@ function FrameCard({ frame }: { frame: GraphResponse["frame"] }) {
           <span className="font-mono text-base font-semibold text-slate-900">
             {frame.window ?? t("unrecorded")}
           </span>
+          {/* The dates, beside the release numbers rather than instead of them.
+              The numbers are what a payload names and what a job reports; the
+              dates are what tells a reader how long the window had to fill. */}
+          {frame.window_span && (
+            <span className="font-mono text-xs text-slate-500">
+              {frame.window_span.from} → {frame.window_span.to}
+              <span className="ml-1.5 text-slate-400">
+                ({frame.window_span.months} {t("months")})
+              </span>
+            </span>
+          )}
           {frame.window_role && (
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
               {frame.window_role}
