@@ -420,6 +420,7 @@ export default function EvaluationDetailPage() {
                               <StrataPanel
                                 evaluationResultId={r.id}
                                 predictionSetId={r.prediction_set_id}
+                                evaluationSetId={r.evaluation_set_id}
                                 locale={params.locale}
                               />
                             </td>

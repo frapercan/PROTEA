@@ -40,6 +40,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
+from protea.core.provenance import capture_provenance
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
@@ -93,9 +94,26 @@ _ROWS = text("""
 #: the failure this operation exists to end rather than to commit.
 _DIGEST_WIDTH = 24
 
-_SEAL = text(
-    "UPDATE evaluation_result SET frame_digest = :frame WHERE id = CAST(:id AS uuid)"
-)
+_SEAL = text("UPDATE evaluation_result SET frame_digest = :frame WHERE id = CAST(:id AS uuid)")
+
+#: Store the material beside the address.
+#:
+#: A digest answers whether two results are comparable and nothing else. Given
+#: one alone, nobody can say which window or which accretion table it stands
+#: for, and recovering it means recomputing from rows that may be gone. The
+#: address without its contents is the same defect the address was introduced to
+#: fix, one level along.
+#:
+#: ON CONFLICT DO NOTHING and not an update: the key is derived from the
+#: material, so a second write of different material under one key is a
+#: collision or a producer bug. Silently overwriting would make a frame mean
+#: something new while every row already sealed under it kept pointing there.
+_RECORD_FRAME = text("""
+    INSERT INTO evaluation_frame (digest, material, fields, provenance)
+    VALUES (:digest, CAST(:material AS jsonb), CAST(:fields AS jsonb),
+            CAST(:provenance AS jsonb))
+    ON CONFLICT (digest) DO NOTHING
+""")
 
 
 def frame_digest(row: dict[str, Any]) -> str | None:
@@ -175,6 +193,25 @@ class SealEvaluationFramesOperation(Operation):
                 continue
 
             digests[digest] = digests.get(digest, 0) + 1
+            # Recorded for every row whose frame is computable, not only for
+            # rows that still need the stamp. A first version wrote it inside
+            # the branch that seals, so a re-run over rows already sealed
+            # reported success and left the expansion empty: the operation had
+            # nothing left to stamp and therefore never reached the insert. An
+            # artefact that appears only on the first run of an idempotent
+            # operation is one nobody will have when they need it.
+            if not p.dry_run:
+                session.execute(
+                    _RECORD_FRAME,
+                    {
+                        "digest": digest,
+                        "material": json.dumps(
+                            {f: row.get(f) for f in _FRAME_FIELDS}, sort_keys=True
+                        ),
+                        "fields": json.dumps(list(_FRAME_FIELDS)),
+                        "provenance": json.dumps(capture_provenance()),
+                    },
+                )
             current = row.get("frame")
             if current == digest:
                 already += 1

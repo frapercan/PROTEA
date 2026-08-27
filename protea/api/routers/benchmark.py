@@ -526,8 +526,15 @@ def _aggregate_benchmark_matrix(
     eval_set_ids: set[str] = set()
     stages_seen: set[str] = set()
     ks_seen: set[int] = set()
-    for (er, embedding_config_id, row_k, scoring_name,
-         pred_set_id, pred_set_meta, pred_set_created) in session.execute(stmt).all():
+    for (
+        er,
+        embedding_config_id,
+        row_k,
+        scoring_name,
+        pred_set_id,
+        pred_set_meta,
+        pred_set_created,
+    ) in session.execute(stmt).all():
         meta = pred_set_meta or {}
         eid = str(embedding_config_id)
         if eid.lower() in cfg.hidden_embeddings:
@@ -544,7 +551,10 @@ def _aggregate_benchmark_matrix(
         _fold_evaluation_cells(
             er,
             _RowKey(
-                eid=eid, esid=esid, st=st, row_k=int(row_k),
+                eid=eid,
+                esid=esid,
+                st=st,
+                row_k=int(row_k),
                 pred_set_id=str(pred_set_id),
                 pred_status=str(meta.get("status") or ""),
                 self_hit_rate=meta.get("self_hit_rate"),
@@ -627,51 +637,50 @@ def _cell_payload(
     """
     primary, primary_metric = _primary_score(cell)
     return {
-
-            "embedding_config_id": row.eid,
-            "evaluation_set_id": row.esid,
-            "stage": row.st,
-            "k": row.row_k,
-            "category": cat,
-            "aspect": asp,
-            "primary": round(primary, 4),
-            "primary_metric": primary_metric,
-            # Every stored metric travels, not just the headline. Two
-            # independent axes decide what a figure means: macro (fmax*)
-            # averages the per-protein score, micro (f_micro*) sums the
-            # confusion matrix first; the _w suffix is IA weighting. A
-            # reader given only one of them cannot tell which they hold.
-            "f_micro_w": _round(cell.get("f_micro_w")),
-            "f_micro": _round(cell.get("f_micro")),
-            "fmax_w": _round(cell.get("fmax_w")),
-            "fmax": round(float(cell["fmax"]), 4),
-            "precision_w": _round(cell.get("precision_w")),
-            "recall_w": _round(cell.get("recall_w")),
-            "precision": _round(cell.get("precision")),
-            "recall": _round(cell.get("recall")),
-            "coverage_w": _round(cell.get("coverage_w")),
-            "coverage": _round(cell.get("coverage")),
-            "n_proteins": cell.get("n_proteins"),
-            "evaluation_result_id": str(er.id),
-            # F-METHOD-EVAL-SURFACE: per-result provenance, read through
-            # so the matrix can badge frame / window / arms / leakage
-            # without a second request. ``None`` on legacy rows.
-            "frame": er.frame,
-            "temporal_window": er.temporal_window,
-            "arms_enabled": er.arms_enabled,
-            "leakage_role": er.leakage_role,
-            # R0.1 reproducible-frame provenance: the Job that produced
-            # this result. ``None`` flags an orphan artifact (the
-            # job_id=None archaeology trap) vs a job-backed, traceable run.
-            "job_id": str(er.job_id) if er.job_id else None,
-            # Which generation produced the cell. See _prefers.
-            "prediction_set_id": row.pred_set_id or None,
-            "prediction_set_status": row.pred_status or None,
-            "self_hit_rate": row.self_hit_rate,
-            "_created_at": row.pred_created,
-            # The evaluation's own instant, distinct from the prediction
-            # set's: several evaluations can share one prediction set.
-            "_evaluated_at": er.created_at,
+        "embedding_config_id": row.eid,
+        "evaluation_set_id": row.esid,
+        "stage": row.st,
+        "k": row.row_k,
+        "category": cat,
+        "aspect": asp,
+        "primary": round(primary, 4),
+        "primary_metric": primary_metric,
+        # Every stored metric travels, not just the headline. Two
+        # independent axes decide what a figure means: macro (fmax*)
+        # averages the per-protein score, micro (f_micro*) sums the
+        # confusion matrix first; the _w suffix is IA weighting. A
+        # reader given only one of them cannot tell which they hold.
+        "f_micro_w": _round(cell.get("f_micro_w")),
+        "f_micro": _round(cell.get("f_micro")),
+        "fmax_w": _round(cell.get("fmax_w")),
+        "fmax": round(float(cell["fmax"]), 4),
+        "precision_w": _round(cell.get("precision_w")),
+        "recall_w": _round(cell.get("recall_w")),
+        "precision": _round(cell.get("precision")),
+        "recall": _round(cell.get("recall")),
+        "coverage_w": _round(cell.get("coverage_w")),
+        "coverage": _round(cell.get("coverage")),
+        "n_proteins": cell.get("n_proteins"),
+        "evaluation_result_id": str(er.id),
+        # F-METHOD-EVAL-SURFACE: per-result provenance, read through
+        # so the matrix can badge frame / window / arms / leakage
+        # without a second request. ``None`` on legacy rows.
+        "frame": er.frame,
+        "temporal_window": er.temporal_window,
+        "arms_enabled": er.arms_enabled,
+        "leakage_role": er.leakage_role,
+        # R0.1 reproducible-frame provenance: the Job that produced
+        # this result. ``None`` flags an orphan artifact (the
+        # job_id=None archaeology trap) vs a job-backed, traceable run.
+        "job_id": str(er.job_id) if er.job_id else None,
+        # Which generation produced the cell. See _prefers.
+        "prediction_set_id": row.pred_set_id or None,
+        "prediction_set_status": row.pred_status or None,
+        "self_hit_rate": row.self_hit_rate,
+        "_created_at": row.pred_created,
+        # The evaluation's own instant, distinct from the prediction
+        # set's: several evaluations can share one prediction set.
+        "_evaluated_at": er.created_at,
     }
 
 

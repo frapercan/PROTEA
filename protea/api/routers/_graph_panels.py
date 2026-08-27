@@ -45,7 +45,21 @@ _SCORED_BUCKETS: frozenset[str] = frozenset({"nk", "lk", "pk"})
 #: The fields a published result can be told apart by. A level is named by
 #: whichever of them actually moved, so a record that varied one thing reads as
 #: one word instead of a tuple with two constants in it.
-_LEVEL_FIELDS: tuple[str, ...] = ("scoring_name", "embedding_name", "depth")
+#: Every field a level can differ in. A level is named by whichever of these
+#: actually moved, so a record varying one thing reads as one word.
+#:
+#: The list has to be complete or the naming lies. When the donor policy was
+#: missing, two arms differing only in it rendered under one name: a panel's
+#: head became ambiguous, and the spread silently absorbed the bank effect into
+#: a number a reader takes for scoring variation. A level named by fewer fields
+#: than it varies in is the same defect as an axis compared on two.
+_LEVEL_FIELDS: tuple[str, ...] = (
+    "scoring_name",
+    "embedding_name",
+    "depth",
+    "donor_policy",
+    "metric",
+)
 
 
 def panel_units_from_groundtruth(
@@ -107,6 +121,69 @@ def detectable_effect(units: int | None) -> float | None:
     if not units or units <= 0:
         return None
     return round(_Z_SUM * _SIGMA_PAIRED / math.sqrt(units), 4)
+
+
+#: The paired standard deviation of the contrast a ROUTING decision makes: two
+#: arms that retrieve different neighbours, rather than two arms that share a
+#: retrieval and differ in one downstream knob. Retrieval is the noisiest thing
+#: an arm can vary, so this class sits well above the configuration class, and
+#: it is the class that matters here because sending a protein to one arm
+#: instead of another IS a contrast between arms that retrieve differently.
+#: The value is the one that reproduces the population floor of 332 declared in
+#: ``agent-farm/plans/SURVIVOR-CASCADE.md`` section 2, which is where the
+#: crossing arithmetic on this campaign was first worked out.
+_SIGMA_ROUTING = 0.13
+
+#: The difference a floor is asked to resolve, in weighted micro F. Two points
+#: is the smallest gap this project has ever been willing to act on: the median
+#: gap between adjacent scoring presets on the previous campaign was 0.0030,
+#: and a floor set there would demand populations no panel in this record has.
+_TARGET_EFFECT = 0.02
+
+
+def population_floor(sigma: float, target: float = _TARGET_EFFECT) -> int:
+    """Smallest population that can resolve ``target`` at 95 per cent and 80.
+
+    The inverse of :func:`detectable_effect`, and deliberately not rounded
+    down: a floor that a population merely approaches is not a floor.
+    """
+    return math.ceil((_Z_SUM * sigma / target) ** 2)
+
+
+def contrast_floors() -> dict[str, Any]:
+    """The population floors, one per contrast class, and what fixes them.
+
+    Published rather than left implicit because a surface that marks a cell as
+    thin has to be able to say against WHAT, and a floor invented on the client
+    is a floor nobody can audit. Both classes travel together: the same cell is
+    usually reportable and unroutable at once, and a page that showed only one
+    of the two numbers would read as if there were only one question.
+
+    Ordered by population, cheapest first, so a reader meets the permissive
+    floor before the strict one.
+    """
+    classes = [
+        {
+            "key": "reporting",
+            "sigma_paired": _SIGMA_PAIRED,
+            "population": population_floor(_SIGMA_PAIRED),
+            "contrast": ("two arms that share their retrieval and differ in one downstream knob"),
+        },
+        {
+            "key": "routing",
+            "sigma_paired": _SIGMA_ROUTING,
+            "population": population_floor(_SIGMA_ROUTING),
+            "contrast": (
+                "two arms that retrieve different neighbours, which is the "
+                "contrast a routing decision makes"
+            ),
+        },
+    ]
+    return {
+        "target_effect": _TARGET_EFFECT,
+        "z_sum": _Z_SUM,
+        "classes": sorted(classes, key=lambda c: c["population"]),
+    }
 
 
 def level_fields(rows: list[dict[str, Any]]) -> tuple[str, ...]:

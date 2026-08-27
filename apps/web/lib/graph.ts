@@ -164,6 +164,90 @@ export type GraphPanel = {
   results: PanelResult[];
 };
 
+/**
+ * What state one registered representation is in. Exhaustive, and ordered.
+ *
+ * - `retrieved` a prediction set was computed in it.
+ * - `built`     it holds stored embeddings and nothing was ever retrieved in
+ *               it. A real alternative, passed over.
+ * - `unbuilt`   it holds no stored embedding at all. Not an untried
+ *               alternative: an unbuilt one. It is listed and excluded from
+ *               the Substrate node's denominator, because counting it would
+ *               overstate what was passed over.
+ */
+export type RepresentationState = "retrieved" | "built" | "unbuilt";
+
+/** Declaration order, which is also the order the endpoint sends rows in. */
+export const REPRESENTATION_STATES: RepresentationState[] = [
+  "retrieved",
+  "built",
+  "unbuilt",
+];
+
+/** The annotation release an encoding was fitted against. */
+export type TrainedOn = {
+  annotation_set_id: string | null;
+  source: string | null;
+  version: string | null;
+  published_at: string | null;
+};
+
+/**
+ * One registered representation, with what was ever done in it.
+ *
+ * Two fields are nullable for reasons that must survive to the page rather
+ * than being repaired here. `param_count` is unrecorded for several of these,
+ * and a size nobody wrote down is a fact about the record, so it is never
+ * filled in and never used to order anything. `trained_on` is null for a
+ * pretrained backbone used as it ships, which is a positive statement and not
+ * a missing value: an encoding fitted against an annotation release and one
+ * that saw none of ours are not two settings of the same knob.
+ *
+ * `coverage` is null when the endpoint refuses to divide, which happens when
+ * chunking is on and a stored row is one chunk rather than one sequence.
+ */
+export type GraphRepresentation = {
+  id: string;
+  /** `display_name` when the record carries one, else the raw model name. */
+  label: string;
+  display_name: string | null;
+  model_name: string;
+  model_backend: string;
+  family: string | null;
+  param_count: number | null;
+  /** Reverse indexing: 0 is the last layer. Rendered verbatim, e.g. `[10]`. */
+  layer_indices: string | null;
+  layer_agg: string | null;
+  pooling: string | null;
+  normalize: boolean;
+  normalize_residues: boolean;
+  max_length: string | null;
+  use_chunking: boolean;
+  embeddings_stored: number;
+  coverage: number | null;
+  state: RepresentationState;
+  trained_on: TrainedOn | null;
+  prediction_sets: number;
+  results: number;
+};
+
+/**
+ * The Substrate node's denominator, expanded.
+ *
+ * The counts here are that node's own ratio restated off the same rows, so
+ * the section cannot disagree with the node it explains.
+ */
+export type GraphRepresentations = {
+  /** Sequences in the corpus a coverage is a fraction of. */
+  corpus_sequences: number | null;
+  total: number;
+  /** How many hold stored embeddings. This is the node's `levels_available`. */
+  built: number;
+  /** How many were ever retrieved against. The node's `levels_instantiated`. */
+  retrieved: number;
+  rows: GraphRepresentation[];
+};
+
 /** A level that cannot be produced, and what would unblock it. */
 export type GraphBlocked = {
   node: string;
@@ -172,12 +256,48 @@ export type GraphBlocked = {
   precondition: string;
 };
 
+/**
+ * One contrast class, and the population a cell needs to decide inside it.
+ *
+ * A cell marked too thin has to be able to say too thin for WHAT, and the
+ * answer differs by a factor of two and a half between the two classes this
+ * record prices. Served rather than restated on the client, because a floor
+ * invented in a component is a floor nobody can audit.
+ */
+export type ContrastFloor = {
+  key: string;
+  sigma_paired: number;
+  population: number;
+  contrast: string;
+};
+
+/** The floors, ascending, with the difference they are asked to resolve. */
+export type ContrastFloors = {
+  target_effect: number;
+  z_sum: number;
+  classes: ContrastFloor[];
+};
+
 export type GraphResponse = {
   frame: GraphFrame;
   nodes: GraphNode[];
   timeline: GraphTimeline | null;
   panels: GraphPanel[];
   blocked: GraphBlocked[];
+  /**
+   * Optional because an API build that predates it does not send the key at
+   * all. The surface renders nothing rather than an empty table when it is
+   * absent, which is the difference between "this build cannot say" and
+   * "there are no representations".
+   */
+  representations?: GraphRepresentations | null;
+  /**
+   * Optional for the same reason as `representations`: an API build that
+   * predates the key sends nothing, and a surface that marked every cell
+   * against a floor it invented would be worse than one that says the build
+   * cannot tell it what the floor is.
+   */
+  floors?: ContrastFloors | null;
 };
 
 /** Canonical row order for the panel grid. */
@@ -201,6 +321,10 @@ export function isEmptyGraph(g: GraphResponse): boolean {
   // what is blocked and what each blocked node is waiting for. Treating that as
   // empty hides the only actionable content an empty record carries.
   if (g.blocked.length > 0) return false;
+  // Thirteen registered representations with nothing retrieved in them is not
+  // an empty record. It is the record saying that the substrate was never
+  // decided, which is the one thing this page exists to make visible.
+  if ((g.representations?.rows.length ?? 0) > 0) return false;
   return true;
 }
 
@@ -242,7 +366,7 @@ export function indexPanelResults(panel: GraphPanel | undefined): Map<string, Pa
 export function panelSummary(
   panel: GraphPanel,
   metric: "f_micro_w" | "tau",
-): { best: PanelResult; spread: number } | null {
+): { best: PanelResult; spread: number; axes: number } | null {
   // Only results that actually carry the metric can be summarised. A stored
   // result missing it is not a zero, so it takes no part in the best or the
   // spread, and a panel where none carries it has no summary at all.
@@ -257,7 +381,17 @@ export function panelSummary(
     if (v < lo) lo = v;
     if (v > hi) hi = v;
   }
-  return { best, spread: hi - lo };
+  // How many axes the spread is made of. A level name carries one segment per
+  // field that varied, so a panel whose levels read "preset / policy" is
+  // spanning two axes at once and its spread is their combined range. Reporting
+  // that number as if it described one knob is the same defect as comparing two
+  // arms that differ in two fields: the reader attributes all of it to the one
+  // the card happens to name.
+  const axes = Math.max(
+    ...scored.map((r) => r.level.split(" / ").length),
+    1,
+  );
+  return { best, spread: hi - lo, axes };
 }
 
 /**

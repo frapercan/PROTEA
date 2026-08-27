@@ -21,14 +21,9 @@ import {
 export function NineCellGrid({
   frameCaption,
   italicLine,
-  campaignFrame,
 }: {
   frameCaption: string;
   italicLine: string;
-  /** The platform's own current window, read live, shown as a separate claim
-   *  from the board's. Null when the rungs surface could not be reached, in
-   *  which case the line is dropped rather than guessed. */
-  campaignFrame?: string | null;
 }) {
   return (
     <figure className="m-0">
@@ -119,13 +114,15 @@ export function NineCellGrid({
           of a submitted container and does not move. The figures behind them
           are withdrawn while the campaign recomputes, so each cell names which
           side of the frontier it is on and not by how much.
-          {campaignFrame ? (
-            <>
-              {" "}
-              The campaign itself runs a different window, {campaignFrame}, and
-              its arms are live on the benchmark surface.
-            </>
-          ) : null}
+          {/*
+            This caption used to carry a second sentence naming the campaign's
+            own window and pointing at the grid that was filling it in. Both
+            came from the retired ladder surface, which counted jobs whose
+            evaluation results had been deleted, so the window it named was not
+            the window any surviving result was scored over. It is dropped
+            rather than corrected here: the replacement claim belongs to the
+            experiment graph, which reads its frame from the evaluation set.
+          */}
         </p>
       </figcaption>
     </figure>

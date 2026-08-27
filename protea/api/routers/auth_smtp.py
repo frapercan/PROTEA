@@ -272,9 +272,7 @@ def magic_link_request(
     base_url = str(request.base_url).rstrip("/")
 
     with session_scope(factory) as session:
-        user: User | None = (
-            session.query(User).filter(User.email == body.email).first()
-        )
+        user: User | None = session.query(User).filter(User.email == body.email).first()
         if user is not None and user.status is UserStatus.ACTIVE:
             try:
                 send_magic_link(settings, session, user, base_url)
@@ -370,9 +368,7 @@ def password_reset_request(
     base_url = str(request.base_url).rstrip("/")
 
     with session_scope(factory) as session:
-        user: User | None = (
-            session.query(User).filter(User.email == body.email).first()
-        )
+        user: User | None = session.query(User).filter(User.email == body.email).first()
         if user is not None and user.status is UserStatus.ACTIVE:
             try:
                 send_password_reset(settings, session, user, base_url)

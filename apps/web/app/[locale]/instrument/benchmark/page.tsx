@@ -21,9 +21,7 @@ import {
 } from "@/lib/benchmarkHelpers";
 import { downloadCsv, rowsToCsv } from "@/lib/benchmarkCsv";
 import { MetricSelector, availableMetrics } from "@/components/MetricSelector";
-import { RungSpine } from "@/components/RungSpine";
 import { StratumCompare } from "@/components/StratumCompare";
-import { defaultEvalSet, getRungs, type Rung } from "@/lib/rungs";
 import { PRIMARY_METRIC, isUnweighted, metricValue } from "@/lib/metrics";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
 import {
@@ -130,24 +128,20 @@ export default function BenchmarkPage() {
     null,
   );
   const [matrix, setMatrix] = useState<BenchmarkMatrixResponse | null>(null);
-  // The campaign line. Also the source of the board's default view: it
-  // used to open on every evaluation set at once, which puts two
-  // temporal windows in one table and invites comparing down a column
-  // across windows without being told.
-  const [rungs, setRungs] = useState<Rung[]>([]);
   const [error, setError] = useState<string | null>(null);
   // URL-synced filters: copy the page link and the chips persist.
   const [stage, setStage] = useUrlParam("stage", null);
-  // An absent param now means "whatever the current rung is", not "all".
-  // The two used to be the same value, so a reader arriving with no
-  // opinion got every evaluation set in one table: rows from a 226-to-227
-  // window sitting under rows from 220-to-230, comparable down a column
-  // only by accident. "all" is still reachable and now says so in the URL,
-  // which is the one place a deliberate choice should be recorded.
+  // An absent param means "all", and that is a weaker default than the one
+  // it replaces. It used to mean "whatever the current campaign step is",
+  // resolved through the retired ladder surface, which kept a reader who
+  // arrived with no opinion from getting two temporal windows in one table.
+  // That surface is retired, so the resolution is gone with it. The risk it
+  // guarded against is not live today, because the database holds a single
+  // evaluation set and "all" therefore selects exactly that one; it returns
+  // the moment a second one lands, and the experiment graph is where the
+  // frame to pick between them will come from.
   const [evalSetIdRaw, setEvalSetIdRaw] = useUrlParam("eval_set", null);
-  const evalSetId = (evalSetIdRaw ??
-    defaultEvalSet(rungs) ??
-    "all") as string | "all";
+  const evalSetId = (evalSetIdRaw ?? "all") as string | "all";
   const setEvalSetId = (v: string | "all") => setEvalSetIdRaw(v);
   const [selectedK, setSelectedK] = useUrlNumber("k", null);
   // Lineage chip filter (URL-synced). Default "all" is encoded as the
@@ -216,14 +210,6 @@ export default function BenchmarkPage() {
   // changes a chip; the global-champion banner stays correct either
   // way, and the user's URL ``/en/instrument/benchmark/?k=3`` (the slow path that
   // motivated this refactor) now resolves in one round-trip.
-  useEffect(() => {
-    // Failure here must not blank the board: the line is context, and a
-    // board with no context still answers the question it was asked.
-    getRungs()
-      .then((r) => setRungs(r.rungs))
-      .catch(() => setRungs([]));
-  }, []);
-
   useEffect(() => {
     setError(null);
     const urlPinned = {
@@ -484,19 +470,20 @@ export default function BenchmarkPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-      {/* The question before the answer. Above the header on purpose: a
-          reader landing on a matrix of numbers has no way to see which
-          campaign produced them or how far along it is. */}
-      <RungSpine
-        rungs={rungs}
-        activeEvalSetId={evalSetId === "all" ? null : evalSetId}
-      />
-      {/* Directly under the campaign line and above the matrix, because the
-          matrix ranks arms over the whole population and that number is the
-          one for the band that needs least help. Measured on rung 1, the
-          spread across eight representations is 0.0848 with no close donor
-          and 0.0081 with one. Only shown for a single evaluation set: "all"
-          would compare arms across temporal windows. */}
+      {/* A campaign line used to sit here, above the header, so a reader
+          landing on a matrix of numbers could see which campaign produced
+          them. It is retired. It read the ladder surface, which derived a
+          full grid of finished work by counting jobs against evaluation
+          results that had been deleted, so the context it supplied was the
+          one thing on this page with nothing behind it. The matrix below is
+          unaffected: it reads persisted results directly. The experiment
+          graph at /v1/graph is where the question comes back. */}
+      {/* Above the matrix, because the matrix ranks over the whole
+          population and that number is the one for the band that needs
+          least help. The spread across eight representations was measured
+          at 0.0848 with no close donor and 0.0081 with one. Only shown for
+          a single evaluation set: "all" would compare across temporal
+          windows. */}
       {evalSetId !== "all" ? (
         <StratumCompare evaluationSetId={evalSetId} k={selectedK} />
       ) : null}

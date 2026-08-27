@@ -298,9 +298,7 @@ def _check_dedup(session: Session, dedup_key: str) -> None:
         )
 
 
-def _insert_job_and_event(
-    session: Session, body: CreateJobRequest, dedup_key: str
-) -> Any:
+def _insert_job_and_event(session: Session, body: CreateJobRequest, dedup_key: str) -> Any:
     """Insert Job + JobEvent rows and return the new job_id.
 
     Flushed but not committed; the caller's ``session_scope`` context manager
@@ -400,13 +398,9 @@ def list_jobs(
         return [_serialise_job_summary(j, registry, session) for j in rows]
 
 
-def _serialise_job_summary(
-    j: Job, registry: OperationRegistry, session: Session
-) -> dict[str, Any]:
+def _serialise_job_summary(j: Job, registry: OperationRegistry, session: Session) -> dict[str, Any]:
     """Shape a Job ORM row for the list endpoint (no payload / meta)."""
-    description, summary = _operation_metadata(
-        registry, j.operation, j.payload, session=session
-    )
+    description, summary = _operation_metadata(registry, j.operation, j.payload, session=session)
     return {
         "id": str(j.id),
         "operation": j.operation,
@@ -585,9 +579,7 @@ def create_job_comment(
         # Stamp created_at explicitly so the response carries it even when
         # the test fixture replaces session.flush() with a no-op (the ORM-
         # level ``default=utcnow`` only fires at the SQL INSERT boundary).
-        comment = JobComment(
-            job_id=job_id, body=body.body, author=body.author, created_at=utcnow()
-        )
+        comment = JobComment(job_id=job_id, body=body.body, author=body.author, created_at=utcnow())
         session.add(comment)
         session.flush()
         return _serialise_job_comment(comment)
@@ -625,15 +617,13 @@ def list_job_comments(
         q = session.query(JobComment).filter(JobComment.job_id == job_id)
         if after is not None:
             q = q.filter(JobComment.created_at > after)
-        rows = (
-            q.order_by(JobComment.created_at.asc(), JobComment.id.asc())
-            .limit(limit)
-            .all()
-        )
+        rows = q.order_by(JobComment.created_at.asc(), JobComment.id.asc()).limit(limit).all()
         return [_serialise_job_comment(c) for c in rows]
 
 
-@router.delete("/{job_id}", summary="Delete a job", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.delete(
+    "/{job_id}", summary="Delete a job", dependencies=[Depends(require_role(ROLE_OPERATOR))]
+)
 def delete_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -649,7 +639,9 @@ def delete_job(
     return {"deleted": str(job_id)}
 
 
-@router.post("/{job_id}/cancel", summary="Cancel a job", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.post(
+    "/{job_id}/cancel", summary="Cancel a job", dependencies=[Depends(require_role(ROLE_OPERATOR))]
+)
 def cancel_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),

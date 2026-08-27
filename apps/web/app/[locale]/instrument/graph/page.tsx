@@ -37,6 +37,8 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 
 import { FrameTimeline } from "@/components/FrameTimeline";
+import { SubstrateRepresentations } from "@/components/SubstrateRepresentations";
+import { StratificationSection } from "@/components/StratificationSection";
 import {
   Ban,
   Circle,
@@ -48,6 +50,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Skeleton } from "@/components/Skeleton";
+import { stratumHref } from "@/lib/stratumProteins";
 import { ApiError } from "@/lib/api";
 import {
   EDGE_STRENGTHS,
@@ -634,7 +637,19 @@ function fmt(v: number | null | undefined, metric: Metric): string {
  * panel with 5,811 units and an empty panel with none are different
  * situations and a blank cell would render them the same.
  */
-function PanelGrid({ panels, metric }: { panels: GraphPanel[]; metric: Metric }) {
+function PanelGrid({
+  panels,
+  metric,
+  evaluationSetId,
+}: {
+  panels: GraphPanel[];
+  metric: Metric;
+  /** The frame's evaluation set, or null when it names none. The descent into
+   *  a panel's proteins needs it, and the link is simply absent without it:
+   *  a control that leads to a page which cannot resolve its own cell is
+   *  worse than no control. */
+  evaluationSetId: string | null;
+}) {
   const t = useTranslations("graph");
   const locale = useLocale();
   const byKey = indexPanels(panels);
@@ -707,13 +722,43 @@ function PanelGrid({ panels, metric }: { panels: GraphPanel[]; metric: Metric })
                       <dt className="text-slate-500" title={t("panelSpreadHint")}>
                         {t("panelSpread")}
                       </dt>
-                      <dd className="font-mono text-slate-700">{fmt(summary.spread, metric)}</dd>
+                      <dd className="font-mono text-slate-700">
+                        {fmt(summary.spread, metric)}
+                        {summary.axes > 1 && (
+                          <span
+                            className="ml-1 text-amber-700"
+                            title={t("panelSpreadMixed", { axes: summary.axes })}
+                          >
+                            ×{summary.axes}
+                          </span>
+                        )}
+                      </dd>
                     </div>
                     <div className="flex items-baseline justify-between gap-2">
                       <dt className="text-slate-500">{t("panelLevels")}</dt>
                       <dd className="font-mono text-slate-700">{panel.results.length}</dd>
                     </div>
                   </dl>
+                )}
+                {/* The descent, as a link and never as a fetch. This page is
+                    the one an operator refreshes while a run seals its rows,
+                    and the proteins behind a cell cost a parquet read plus a
+                    retrieval query per arm; loading that here would make the
+                    fast surface wait on the slow one. The coordinates travel
+                    in the URL, so the cell opens on the panel that was
+                    clicked rather than on a default. */}
+                {evaluationSetId && (
+                  <Link
+                    href={stratumHref({
+                      evaluationSetId,
+                      category: cat,
+                      aspect: asp,
+                    })}
+                    className="mt-2 inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-700 hover:underline"
+                  >
+                    {t("panelOpen")}
+                    <ChevronRight className="h-3 w-3" aria-hidden />
+                  </Link>
                 )}
               </div>
             );
@@ -1084,6 +1129,44 @@ export default function GraphPage() {
             <NodesTable nodes={nodes} />
           </section>
 
+          {/* 2b. The Substrate node's denominator, expanded. It sits directly
+              under the node table because it is one node's levels and nothing
+              else: a ratio of "1 / 13" names neither the representation in use
+              nor the twelve it was picked over, and the page cannot leave the
+              one decision nobody ever took as a fraction.
+
+              Absent on an API build that predates the key, and the section
+              disappears rather than rendering an empty table: "this build
+              cannot say" and "there are none" are different answers. */}
+          {graph.representations && (
+            <section
+              id="representations"
+              className="space-y-3"
+              data-testid="graph-representations-section"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="flex flex-wrap items-baseline gap-2 text-lg font-semibold tracking-tight text-slate-900">
+                  {t("rep.heading")}
+                  {/* Back to the row this section expands, named by the node's
+                      own title rather than by a word repeated here. */}
+                  {nodes.some((node) => node.key === "substrate") && (
+                    <a
+                      href="#node-substrate"
+                      className="text-xs font-normal text-blue-700 hover:underline"
+                    >
+                      {t("rep.fromNode", {
+                        node:
+                          nodes.find((node) => node.key === "substrate")?.title ?? "substrate",
+                      })}
+                    </a>
+                  )}
+                </h2>
+                <p className="max-w-xl text-xs text-slate-500">{t("rep.hint")}</p>
+              </div>
+              <SubstrateRepresentations representations={graph.representations} />
+            </section>
+          )}
+
           {/* 3. The nine panels, never nine collapsed into one. */}
           <section className="space-y-3" data-testid="graph-panels">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -1092,9 +1175,26 @@ export default function GraphPage() {
               </h2>
               <p className="max-w-xl text-xs text-slate-500">{t("panelsHint")}</p>
             </div>
-            <PanelGrid panels={graph.panels} metric={metric} />
+            <PanelGrid
+              panels={graph.panels}
+              metric={metric}
+              evaluationSetId={graph.frame.evaluation_set_id}
+            />
             <PanelMatrix panels={graph.panels} metric={metric} />
           </section>
+
+          {/* 3bis. The nine panels are the coarsest crossing the record
+              carries, and drawing them alone reads as if they were the
+              partition. Two more axes were measured. Directly under the
+              nine, because the finding is about what happens to THOSE
+              panels when the partition is refined, and a reader who has
+              just been shown nine populations is the reader who can see
+              that six of them come back empty. */}
+          <StratificationSection
+            evaluationSetId={graph.frame.evaluation_set_id}
+            floors={graph.floors}
+            panels={graph.panels}
+          />
 
           {/* 4. What is blocked, with the precondition on the line. */}
           <section className="space-y-3" data-testid="graph-blocked-section">
