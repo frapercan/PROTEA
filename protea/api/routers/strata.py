@@ -155,6 +155,13 @@ def _load_arms(session: Any, evaluation_set_id: str) -> list[dict[str, Any]]:
                 "display_name": r["display_name"] or r["model"],
                 "layer_indices": r["layer_indices"],
                 "k": r["k"],
+                # Added on the other side of this merge, and kept: two arms that
+                # differ only in scoring or in donor policy render under one
+                # label without them, and a comparison whose rows cannot be told
+                # apart is the defect this endpoint exists to avoid.
+                "scoring_name": r["scoring_name"],
+                "donor_policy": r["donor_policy"],
+                "metric": r["metric"],
             }
             for r in session.execute(_ARMS, {"esid": evaluation_set_id}).mappings().all()
         ]
@@ -294,22 +301,7 @@ def compare_strata(
     where = at.where()
 
     with factory() as session:
-<<<<<<< HEAD
         arms = _load_arms(session, evaluation_set_id)
-=======
-        arms = [
-            {
-                "evaluation_result_id": str(r["evaluation_result_id"]),
-                "model": r["model"],
-                "display_name": r["display_name"] or r["model"],
-                "k": r["k"],
-                "scoring_name": r["scoring_name"],
-                "donor_policy": r["donor_policy"],
-                "metric": r["metric"],
-            }
-            for r in session.execute(_ARMS, {"esid": evaluation_set_id}).mappings().all()
-        ]
->>>>>>> origin/feat/the-graph-surface-reads-its-strata
 
     if not arms:
         raise HTTPException(
