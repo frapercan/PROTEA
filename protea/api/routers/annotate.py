@@ -61,9 +61,7 @@ _DEFAULT_CONFIG = {
 def _config_has_embeddings(session: Session, config_id: uuid.UUID) -> bool:
     """True when ``sequence_embedding`` carries at least one row for the config."""
     return bool(
-        session.query(
-            exists().where(SequenceEmbedding.embedding_config_id == config_id)
-        ).scalar()
+        session.query(exists().where(SequenceEmbedding.embedding_config_id == config_id)).scalar()
     )
 
 

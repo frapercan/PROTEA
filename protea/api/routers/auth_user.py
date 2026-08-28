@@ -152,11 +152,7 @@ def create_session(
 def find_session(session: Session, raw_token: str) -> UserSession | None:
     """Return the UserSession row for a token, or None if not found."""
     token_hash = _hash_token(raw_token)
-    return (
-        session.query(UserSession)
-        .filter(UserSession.token_hash == token_hash)
-        .first()
-    )
+    return session.query(UserSession).filter(UserSession.token_hash == token_hash).first()
 
 
 def revoke_session(session: Session, raw_token: str) -> bool:
@@ -286,7 +282,9 @@ def _clear_session_cookie(response: Response) -> None:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/signup", status_code=201, summary="Register a new user account", operation_id="user_signup")
+@router.post(
+    "/signup", status_code=201, summary="Register a new user account", operation_id="user_signup"
+)
 def signup(
     body: SignupRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -334,7 +332,12 @@ def signup(
     }
 
 
-@router.post("/login", status_code=200, summary="Authenticate with email and password", operation_id="user_login")
+@router.post(
+    "/login",
+    status_code=200,
+    summary="Authenticate with email and password",
+    operation_id="user_login",
+)
 def login(
     request: Request,
     response: Response,
@@ -416,7 +419,9 @@ def _issue_login_session(
     return token, claims
 
 
-@router.post("/logout", status_code=204, summary="Invalidate the current session", operation_id="user_logout")
+@router.post(
+    "/logout", status_code=204, summary="Invalidate the current session", operation_id="user_logout"
+)
 def logout(
     response: Response,
     protea_session: str | None = Cookie(default=None),

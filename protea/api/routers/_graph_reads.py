@@ -9,11 +9,11 @@ both are checked by ``tests/test_graph_endpoint.py``:
   instead of matching on SQL text, and the router can be exercised with no
   database at all.
 
-Cost. All of these are small. The widest touches thirteen embedding
-configurations; the only one that reaches a large table groups candidate rows by
-their prediction set, which the planner satisfies with a parallel scan in tens
-of milliseconds. Nothing here is cached, because a surface whose job is to
-report what the record holds right now must not answer from a copy of what it
+Cost. All of these are small. Two reach a large table: the candidate rows
+grouped by prediction set, and the stored-embedding rows grouped by embedding
+configuration. The planner satisfies both with a parallel index-only scan in a
+few hundred milliseconds. Nothing here is cached, because a surface whose job is
+to report what the record holds right now must not answer from a copy of what it
 held earlier.
 """
 
@@ -93,6 +93,20 @@ _Q_QUERY_SETS = text(
 #: A configuration with no stored embedding is not an untried alternative, it is
 #: an unbuilt one, and counting it as available would overstate what was passed
 #: over.
+#:
+#: ``stored`` is what settles that second question with a number rather than a
+#: boolean. It is a row count, and a row is a sequence only while chunking is
+#: off, so ``use_chunking`` travels beside it and the caller refuses to turn a
+#: chunked count into a coverage ratio.
+#:
+#: ``param_count`` is nullable and null for several of these. It is carried
+#: through as null rather than filled in, and nothing here orders by it: a
+#: column that is missing for half the rows cannot rank them.
+#:
+#: ``trained_on_annotation_set_id`` splits the list in two. An encoding fitted
+#: against an annotation release and a pretrained backbone used as it ships are
+#: not two settings of one knob, so the release it was fitted against is read
+#: here rather than left as an opaque id.
 _Q_SUBSTRATES = text(
     """
     SELECT ec.id::text                              AS id,
@@ -108,6 +122,14 @@ _Q_SUBSTRATES = text(
            ec.chunk_size::text                      AS chunk_size,
            ec.chunk_overlap::text                   AS chunk_overlap,
            COALESCE(ec.display_name, ec.model_name) AS label,
+           ec.display_name                          AS display_name,
+           ec.family                                AS family,
+           ec.param_count                           AS param_count,
+           ec.trained_on_annotation_set_id::text    AS trained_on_id,
+           tr.source                                AS trained_on_source,
+           tr.source_version                        AS trained_on_version,
+           tr.source_published_at::date::text       AS trained_on_date,
+           COALESCE(cov.stored, 0)                  AS stored,
            EXISTS (
                SELECT 1 FROM prediction_set ps WHERE ps.embedding_config_id = ec.id
            )                                        AS in_use,
@@ -115,7 +137,27 @@ _Q_SUBSTRATES = text(
                SELECT 1 FROM sequence_embedding se WHERE se.embedding_config_id = ec.id
            )                                        AS producible
     FROM embedding_config ec
+    LEFT JOIN annotation_set tr ON tr.id = ec.trained_on_annotation_set_id
+    -- Grouped once and joined, not one correlated count per configuration.
+    -- The grouping is an index-only scan over ix_sequence_embedding_
+    -- embedding_config_id; thirteen correlated counts would each walk the
+    -- heap instead.
+    LEFT JOIN (
+        SELECT embedding_config_id, count(*) AS stored
+        FROM sequence_embedding
+        GROUP BY embedding_config_id
+    ) cov ON cov.embedding_config_id = ec.id
     ORDER BY ec.model_name
+    """
+)
+
+#: The corpus a representation's coverage is a fraction OF. Sequences and not
+#: proteins: embeddings are stored per distinct amino-acid sequence, so proteins
+#: sharing a sequence share one row and a protein count would put the ratio
+#: under one against a fully embedded corpus.
+_Q_CORPUS = text(
+    """
+    SELECT count(*) AS sequences FROM sequence
     """
 )
 
@@ -214,6 +256,17 @@ _Q_PANELS = text(
            sc.name                                  AS scoring_name,
            COALESCE(ec.display_name, ec.model_name) AS embedding_name,
            ps.limit_per_entry::text                 AS depth,
+           -- The donor policy is a level of the Bank node, so two arms that
+           -- differ only in it are two levels. Leaving it out of the fields a
+           -- level is named by rendered both under one name, which made the
+           -- head of a panel ambiguous and folded the bank effect into what
+           -- reads as scoring spread.
+           CASE
+               WHEN ps.meta -> 'donor_policy' ->> 'evidence_codes' IS NULL
+                   THEN 'permissive'
+               ELSE 'evidence-gated'
+           END                                      AS donor_policy,
+           ps.meta ->> 'metric'                     AS metric,
            cat.k                                    AS category,
            asp.k                                    AS aspect,
            (asp.v ->> 'f_micro_w')::float8          AS f_micro_w,
@@ -316,6 +369,7 @@ QUERIES: dict[str, TextClause] = {
     "accretion": _Q_ACCRETION,
     "query_sets": _Q_QUERY_SETS,
     "substrates": _Q_SUBSTRATES,
+    "corpus": _Q_CORPUS,
     "prediction_sets": _Q_PREDICTION_SETS,
     "banks": _Q_BANKS,
     "scoring": _Q_SCORING,

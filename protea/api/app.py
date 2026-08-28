@@ -49,6 +49,7 @@ from protea.api.routers import showcase as showcase_router
 from protea.api.routers import stack as stack_router
 from protea.api.routers import strata as strata_router
 from protea.api.routers import stratum_members as stratum_members_router
+from protea.api.routers import stratum_proteins as stratum_proteins_router
 from protea.api.routers import support as support_router
 from protea.api.routers.annotations.sets import (
     ANNOTATION_SETS_TTL_SECONDS,
@@ -200,6 +201,7 @@ _ROUTER_MODULES = (
     rungs_router,
     strata_router,
     stratum_members_router,
+    stratum_proteins_router,
     support_router,
     datasets_router,
     reranker_models_router,

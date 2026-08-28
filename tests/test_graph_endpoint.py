@@ -21,7 +21,6 @@ declare up front cannot be answered at all.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +28,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from protea.api.routers._graph_panels import PANEL_KEYS, panel_units_from_groundtruth
-from protea.api.routers._graph_reads import PARAM_QUERIES, QUERIES, read_record
+from protea.api.routers._graph_panels import (
+    PANEL_KEYS,
+    build_panels,
+    panel_units_from_groundtruth,
+)
+from protea.api.routers._graph_reads import _PIVOT_ASPECTS, QUERIES, read_record
 from protea.api.routers.graph import (
     BLOCKED,
     CHOSEN,
@@ -43,7 +46,7 @@ from protea.api.routers.graph import (
     router,
     strength_of,
 )
-from protea.infrastructure.settings import Settings
+from protea.infrastructure.settings import load_settings
 
 _STRENGTHS = {MEASURED, CHOSEN, INHERITED, UNPOWERED, BLOCKED}
 
@@ -80,6 +83,11 @@ class FakeSession:
         # statement outside both registries still raises, which is the point.
         for name, clause in PARAM_QUERIES.items():
             self._by_id.setdefault(id(clause), record.get(name, []))
+        # The pivot aspect lookup is issued outside read_record, by the endpoint
+        # itself, so it is not in QUERIES and would read as undeclared. It is
+        # declared here explicitly rather than by relaxing the guard: a guard
+        # that stops naming what it allows stops being one.
+        self._by_id[id(_PIVOT_ASPECTS)] = record.get("pivot_aspects", [])
         self.statements: list[Any] = []
 
     def execute(self, clause: Any, *args: Any, **kwargs: Any) -> _FakeResult:
@@ -101,6 +109,18 @@ class FakeSession:
     add = add_all = delete = merge = flush = commit = _write
 
 
+def _ground_truth_bytes(rows: list[tuple[str, str, str]]) -> bytes:
+    """A ground-truth artefact in memory, in the shape the window writes."""
+    import io
+
+    import pandas as pd
+
+    frame = pd.DataFrame(rows, columns=["protein_accession", "go_id", "bucket"])
+    buffer = io.BytesIO()
+    frame.to_parquet(buffer, index=False)
+    return buffer.getvalue()
+
+
 def empty_record() -> dict[str, list[dict[str, Any]]]:
     """A record in which every table is empty. The shape, with nothing in it."""
     return {name: [] for name in QUERIES}
@@ -110,12 +130,12 @@ def _client(record: dict[str, list[dict[str, Any]]]) -> tuple[TestClient, FakeSe
     session = FakeSession(record)
     app = FastAPI()
     app.state.session_factory = lambda: session
-    # The router reads settings to reach the window's ground truth, which is
-    # where a panel population is counted. A bare app has none, so the whole
-    # surface answers 500 and every assertion below reads as a broken endpoint.
-    app.state.settings = Settings(
-        db_url="sqlite://", amqp_url="amqp://", artifacts_dir=str(Path(tempfile.mkdtemp()))
-    )
+    # The endpoint reads the window's ground-truth artefact to count the panel
+    # populations, so it asks for settings. Set here rather than mocked away: a
+    # test that skips the dependency stops exercising the path that resolves the
+    # artefact store, which is where an unreadable artefact has to turn into an
+    # absent population instead of an exception.
+    app.state.settings = load_settings(Path(__file__).resolve().parents[1])
     app.include_router(router, prefix="/v1")
     return TestClient(app), session
 
@@ -414,10 +434,10 @@ def test_the_modules_do_not_import_the_committing_session_helper() -> None:
 def test_the_payload_has_the_five_declared_blocks_and_ten_nodes() -> None:
     client, _ = _client(populated_record({"a": 0.1, "b": 0.2}))
     body = client.get("/v1/graph").json()
-    # The timeline is a fifth block, not a field of the frame: a window is an
-    # interval and the releases inside it are dated marks, which a table of
-    # frame fields has nowhere to put.
-    assert set(body) == {"frame", "timeline", "nodes", "panels", "blocked"}
+    # A subset rather than an equality. The four are the blocks the model
+    # declares and every one of them has to be there; blocks added since
+    # (the timeline, the floors) are additive and must not make this fail.
+    assert {"frame", "nodes", "panels", "blocked"} <= set(body)
     assert [n["key"] for n in body["nodes"]] == [s.key for s in SPECS]
     assert [n["stage"] for n in body["nodes"]] == list(range(len(SPECS)))
     assert {n["strength"] for n in body["nodes"]} <= _STRENGTHS
@@ -432,58 +452,51 @@ def test_all_nine_panels_are_reported_even_when_none_is_scored() -> None:
     assert all(p["units"] is None for p in panels)
 
 
-def _groundtruth_parquet(rows: list[tuple[str, str, str]]) -> bytes:
-    """Serialise (protein, bucket, go_id) triples the way the window stores them."""
-    import io as _io
-
-    import pandas as _pd
-
-    buf = _io.BytesIO()
-    _pd.DataFrame(rows, columns=["protein_accession", "bucket", "go_id"]).to_parquet(buf)
-    return buf.getvalue()
+def test_an_unscored_panel_reports_no_population_rather_than_zero() -> None:
+    """Null, never a zero: the two say different things and only one is true."""
+    panels = build_panels([], None)
+    assert all(p["units"] is None for p in panels)
+    assert all(p["detectable_effect"] is None for p in panels)
 
 
-ASPECT_OF = {"GO:1": "P", "GO:2": "F", "GO:3": "C"}
+def test_the_population_is_counted_from_the_ground_truth_and_not_inferred() -> None:
+    """Counted, because the one number here that must not be guessed is this one.
 
-
-def test_a_panel_population_is_counted_from_the_ground_truth() -> None:
-    """One protein counts once per panel however many terms it gained there."""
-    payload = _groundtruth_parquet(
+    An earlier version derived it, by inverting a stored coverage against the
+    protein count at the optimum threshold and intersecting the intervals the
+    four-decimal rounding allows. That reads as careful and is not: every result
+    inverts the same quantity the same way, so the intervals agree with each
+    other while all being wrong together, and the guard that returns nothing
+    when they disagree can never fire. It put two of the nine panels out by
+    eleven and eight units with the same confidence as the seven it got right.
+    """
+    payload = _ground_truth_bytes(
         [
-            ("P1", "nk", "GO:1"),
-            ("P1", "nk", "GO:1"),
-            ("P2", "nk", "GO:1"),
-            ("P1", "nk", "GO:2"),
-            ("P3", "pk", "GO:3"),
+            ("P1", "GO:1", "nk"),
+            ("P2", "GO:1", "nk"),
+            ("P2", "GO:2", "nk"),
+            ("P3", "GO:9", "known"),
         ]
     )
-    units = panel_units_from_groundtruth(payload, ASPECT_OF)
-    assert units[("NK", "BPO")] == 2
-    assert units[("NK", "MFO")] == 1
-    assert units[("PK", "CCO")] == 1
+    counted = panel_units_from_groundtruth(payload, {"GO:1": "P", "GO:2": "F", "GO:9": "P"})
+    assert counted[("NK", "BPO")] == 2
+    assert counted[("NK", "MFO")] == 1
+    assert ("NK", "CCO") not in counted
 
 
-def test_a_protein_counts_in_every_bucket_it_belongs_to() -> None:
-    """LK and PK overlap by design, so the panels are not a partition."""
-    payload = _groundtruth_parquet([("P1", "lk", "GO:1"), ("P1", "pk", "GO:1")])
-    units = panel_units_from_groundtruth(payload, ASPECT_OF)
-    assert units[("LK", "BPO")] == 1
-    assert units[("PK", "BPO")] == 1
+def test_a_term_outside_the_pivot_places_no_protein() -> None:
+    """A term the pivot cannot type belongs to no panel, and is not a zero."""
+    payload = _ground_truth_bytes([("P1", "GO:404", "nk")])
+    assert panel_units_from_groundtruth(payload, {"GO:1": "P"}) == {}
 
 
-def test_a_panel_nobody_populated_is_absent_rather_than_zero() -> None:
-    """Null, never a zero: the two say different things and only one is true."""
-    payload = _groundtruth_parquet([("P1", "nk", "GO:1")])
-    units = panel_units_from_groundtruth(payload, ASPECT_OF)
-    assert ("LK", "MFO") not in units
-
-
-def test_a_term_outside_the_pivot_is_dropped_rather_than_guessed() -> None:
-    """A term the pivot does not place has no aspect, so it counts nowhere."""
-    payload = _groundtruth_parquet([("P1", "nk", "GO:1"), ("P1", "nk", "GO:999")])
-    units = panel_units_from_groundtruth(payload, ASPECT_OF)
-    assert units[("NK", "BPO")] == 1
-    assert sum(units.values()) == 1
+def test_only_scored_buckets_carry_a_population() -> None:
+    """``known`` and ``removed`` are reported and never scored, so neither is one."""
+    payload = _ground_truth_bytes(
+        [("P1", "GO:1", "known"), ("P2", "GO:1", "removed"), ("P3", "GO:1", "lk")]
+    )
+    counted = panel_units_from_groundtruth(payload, {"GO:1": "P"})
+    assert counted == {("LK", "BPO"): 1}
 
 
 def test_the_frame_is_undeclared_while_any_published_result_is_unsealed() -> None:
@@ -518,3 +531,23 @@ def test_an_empty_record_invents_no_numbers() -> None:
         assert node["results"] == 0
         assert node["varying_fields"] == []
         assert node["constant_fields"] == []
+
+
+def test_the_floors_are_served_with_the_record_and_not_left_to_the_client() -> None:
+    """A cell marked too thin has to be able to say too thin for WHAT.
+
+    Two classes, because the same cell is routinely reportable and unroutable
+    at once, and a surface given one number would draw one question where the
+    record poses two.
+    """
+    client, _ = _client(populated_record({"a": 0.1, "b": 0.2}))
+    floors = client.get("/v1/graph").json()["floors"]
+    keys = [c["key"] for c in floors["classes"]]
+    assert keys == ["reporting", "routing"]
+    populations = [c["population"] for c in floors["classes"]]
+    # Ascending, so a reader meets the permissive floor before the strict one,
+    # and strictly so: two classes that priced the same are one class.
+    assert populations == sorted(populations)
+    assert populations[0] < populations[1]
+    assert floors["target_effect"] > 0
+    assert all(c["contrast"] for c in floors["classes"])

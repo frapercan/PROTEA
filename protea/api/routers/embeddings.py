@@ -126,7 +126,11 @@ def prewarm_embedding_configs(
     )
 
 
-@router.post("/configs", summary="Create an embedding config", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.post(
+    "/configs",
+    summary="Create an embedding config",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def create_embedding_config(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -167,7 +171,11 @@ def get_embedding_config(
         return _config_to_dict(c, embedding_count=embedding_count)
 
 
-@router.delete("/configs/{config_id}", summary="Delete an embedding config", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.delete(
+    "/configs/{config_id}",
+    summary="Delete an embedding config",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def delete_embedding_config(
     config_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -502,7 +510,11 @@ def download_predictions_cafa(
     )
 
 
-@router.delete("/prediction-sets/{set_id}", summary="Delete a prediction set", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.delete(
+    "/prediction-sets/{set_id}",
+    summary="Delete a prediction set",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def delete_prediction_set(
     set_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),

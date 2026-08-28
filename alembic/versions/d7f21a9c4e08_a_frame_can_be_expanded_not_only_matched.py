@@ -21,10 +21,9 @@ provenance column carries what produced the first sighting, including the code
 version, so a frame can be traced to the tree that defined it.
 """
 
+from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
-
-from alembic import op
 
 revision = "d7f21a9c4e08"
 down_revision = "c4e88a1b6d30"

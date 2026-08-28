@@ -36,7 +36,10 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 
+import { Explain } from "@/components/Explain";
 import { FrameTimeline } from "@/components/FrameTimeline";
+import { SubstrateRepresentations } from "@/components/SubstrateRepresentations";
+import { StratificationSection } from "@/components/StratificationSection";
 import {
   Ban,
   Circle,
@@ -48,6 +51,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Skeleton } from "@/components/Skeleton";
+import { stratumHref } from "@/lib/stratumProteins";
 import { ApiError } from "@/lib/api";
 import {
   EDGE_STRENGTHS,
@@ -191,7 +195,7 @@ function FieldList({
   max?: number;
 }) {
   if (fields.length === 0) {
-    return <span className="text-xs text-slate-400">{empty}</span>;
+    return <span className="text-xs text-slate-500">{empty}</span>;
   }
   const shown = max === undefined ? fields : fields.slice(0, max);
   const rest = fields.slice(shown.length);
@@ -207,7 +211,7 @@ function FieldList({
       ))}
       {rest.length > 0 && (
         <span
-          className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-500"
+          className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600"
           title={rest.join(", ")}
         >
           +{rest.length}
@@ -285,12 +289,12 @@ function FrameCard({ frame }: { frame: GraphResponse["frame"] }) {
               first. It gets its sentence beside it rather than in a tooltip,
               because a reader who does not know what a frame is cannot judge
               anything else the page says. */}
-          <h2
-            className="cursor-help text-sm font-semibold uppercase tracking-wider text-slate-500 decoration-dotted underline-offset-4 hover:underline"
-            title={t("frameWhat")}
-          >
-            {t("frameHeading")}
-          </h2>
+          <span className="inline-flex items-center gap-1">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+              {t("frameHeading")}
+            </h2>
+            <Explain label={t("frameHeading")}>{t("frameWhat")}</Explain>
+          </span>
           <span className="font-mono text-base font-semibold text-slate-900">
             {frame.window ?? t("unrecorded")}
           </span>
@@ -300,7 +304,7 @@ function FrameCard({ frame }: { frame: GraphResponse["frame"] }) {
           {frame.window_span && (
             <span className="font-mono text-xs text-slate-500">
               {frame.window_span.from} → {frame.window_span.to}
-              <span className="ml-1.5 text-slate-400">
+              <span className="ml-1.5 text-slate-500">
                 ({frame.window_span.months} {t("months")})
               </span>
             </span>
@@ -380,7 +384,7 @@ function FrameCard({ frame }: { frame: GraphResponse["frame"] }) {
           {frame.evaluation_set_id ? (
             <Ident value={frame.evaluation_set_id} />
           ) : (
-            <span className="text-slate-400">{t("unrecorded")}</span>
+            <span className="text-slate-500">{t("unrecorded")}</span>
           )}
         </Field>
         <Field label={t("pivot")}>
@@ -390,7 +394,7 @@ function FrameCard({ frame }: { frame: GraphResponse["frame"] }) {
               <Ident value={frame.pivot_snapshot.id} head={8} />
             </span>
           ) : (
-            <span className="text-slate-400">{t("unrecorded")}</span>
+            <span className="text-slate-500">{t("unrecorded")}</span>
           )}
         </Field>
         <Field label={t("accretion")}>
@@ -400,7 +404,7 @@ function FrameCard({ frame }: { frame: GraphResponse["frame"] }) {
               <Ident value={frame.information_accretion_set.sha256} />
             </span>
           ) : (
-            <span className="text-slate-400">{t("unrecorded")}</span>
+            <span className="text-slate-500">{t("unrecorded")}</span>
           )}
         </Field>
         <Field label={t("querySet")}>
@@ -412,7 +416,7 @@ function FrameCard({ frame }: { frame: GraphResponse["frame"] }) {
               </span>
             </span>
           ) : (
-            <span className="text-slate-400">{t("unrecorded")}</span>
+            <span className="text-slate-500">{t("unrecorded")}</span>
           )}
         </Field>
       </dl>
@@ -425,7 +429,7 @@ function FrameCard({ frame }: { frame: GraphResponse["frame"] }) {
 /** The pipeline in one glance: stage order, strength, nothing else. */
 function Spine({ nodes }: { nodes: GraphNode[] }) {
   return (
-    <div className="overflow-x-auto" data-testid="graph-spine">
+    <div tabIndex={0} className="overflow-x-auto" data-testid="graph-spine">
       <ol className="flex min-w-max items-center gap-1 pb-1">
         {nodes.map((node, i) => (
           <li key={node.key} className="flex items-center gap-1">
@@ -450,7 +454,7 @@ function NodesTable({ nodes }: { nodes: GraphNode[] }) {
   const n = (v: number) => v.toLocaleString(locale);
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+    <div tabIndex={0} className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
       <table className="w-full min-w-[62rem] text-sm">
         <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
           <tr>
@@ -476,7 +480,7 @@ function NodesTable({ nodes }: { nodes: GraphNode[] }) {
                         edge, so a column of rows can be scanned without
                         reading any of them. */}
                     <span className={`w-1 shrink-0 self-stretch rounded-sm ${s.rail}`} aria-hidden />
-                    <span className="pt-0.5 font-mono text-xs text-slate-400">{node.stage}</span>
+                    <span className="pt-0.5 font-mono text-xs text-slate-500">{node.stage}</span>
                   </div>
                 </td>
                 <td className="px-3 py-3">
@@ -496,8 +500,8 @@ function NodesTable({ nodes }: { nodes: GraphNode[] }) {
                 </td>
                 <td className="px-3 py-3 text-right whitespace-nowrap font-mono text-sm text-slate-900">
                   {n(node.levels_instantiated)}
-                  <span className="text-slate-400"> / {n(node.levels_available)}</span>
-                  <div className="text-[10px] uppercase tracking-wider text-slate-400">
+                  <span className="text-slate-600"> / {n(node.levels_available)}</span>
+                  <div className="text-[10px] uppercase tracking-wider text-slate-600">
                     {t("instantiatedOfAvailable")}
                   </div>
                 </td>
@@ -513,7 +517,7 @@ function NodesTable({ nodes }: { nodes: GraphNode[] }) {
                       <dl className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                         {node.held.map((h) => (
                           <div key={h.field} className="flex items-baseline gap-1.5">
-                            <dt className="text-[10px] uppercase tracking-wider text-slate-400">
+                            <dt className="text-[10px] uppercase tracking-wider text-slate-500">
                               {h.field}
                             </dt>
                             <dd className="font-mono text-xs font-medium text-slate-900">
@@ -530,7 +534,7 @@ function NodesTable({ nodes }: { nodes: GraphNode[] }) {
                       <FieldList fields={node.varying_fields} empty={t("none")} />
                     </div>
                     <div className="flex flex-wrap items-baseline gap-2">
-                      <span className="text-[10px] uppercase tracking-wider text-slate-400">
+                      <span className="text-[10px] uppercase tracking-wider text-slate-500">
                         {t("colConstant")}
                       </span>
                       <FieldList fields={node.constant_fields} empty={t("none")} max={6} />
@@ -634,7 +638,19 @@ function fmt(v: number | null | undefined, metric: Metric): string {
  * panel with 5,811 units and an empty panel with none are different
  * situations and a blank cell would render them the same.
  */
-function PanelGrid({ panels, metric }: { panels: GraphPanel[]; metric: Metric }) {
+function PanelGrid({
+  panels,
+  metric,
+  evaluationSetId,
+}: {
+  panels: GraphPanel[];
+  metric: Metric;
+  /** The frame's evaluation set, or null when it names none. The descent into
+   *  a panel's proteins needs it, and the link is simply absent without it:
+   *  a control that leads to a page which cannot resolve its own cell is
+   *  worse than no control. */
+  evaluationSetId: string | null;
+}) {
   const t = useTranslations("graph");
   const locale = useLocale();
   const byKey = indexPanels(panels);
@@ -642,7 +658,7 @@ function PanelGrid({ panels, metric }: { panels: GraphPanel[]; metric: Metric })
   const aspects = axisOrder(panels.map((p) => p.aspect), PANEL_ASPECTS);
 
   return (
-    <div className="overflow-x-auto" data-testid="graph-panel-grid">
+    <div tabIndex={0} className="overflow-x-auto" data-testid="graph-panel-grid">
       <div
         className="grid min-w-[46rem] gap-2"
         style={{ gridTemplateColumns: `repeat(${aspects.length}, minmax(0, 1fr))` }}
@@ -662,7 +678,7 @@ function PanelGrid({ panels, metric }: { panels: GraphPanel[]; metric: Metric })
                   </span>
                   <span className="font-mono text-sm text-slate-900">
                     {panel?.units != null ? panel.units.toLocaleString(locale) : "∅"}
-                    <span className="ml-1 text-[10px] uppercase tracking-wider text-slate-400">
+                    <span className="ml-1 text-[10px] uppercase tracking-wider text-slate-500">
                       {t("units")}
                     </span>
                   </span>
@@ -686,9 +702,9 @@ function PanelGrid({ panels, metric }: { panels: GraphPanel[]; metric: Metric })
                   </div>
                 )}
                 {!panel ? (
-                  <p className="mt-2 text-xs text-slate-400">{t("panelAbsent")}</p>
+                  <p className="mt-2 text-xs text-slate-500">{t("panelAbsent")}</p>
                 ) : summary === null ? (
-                  <p className="mt-2 text-xs text-slate-400">{t("panelNoResults")}</p>
+                  <p className="mt-2 text-xs text-slate-500">{t("panelNoResults")}</p>
                 ) : (
                   <dl className="mt-2 space-y-1 text-xs">
                     <div className="flex items-baseline justify-between gap-2">
@@ -704,16 +720,50 @@ function PanelGrid({ panels, metric }: { panels: GraphPanel[]; metric: Metric })
                       </dd>
                     </div>
                     <div className="flex items-baseline justify-between gap-2">
-                      <dt className="text-slate-500" title={t("panelSpreadHint")}>
+                      <dt className="flex items-center gap-1 text-slate-500">
                         {t("panelSpread")}
+                        <Explain label={t("panelSpread")}>{t("panelSpreadHint")}</Explain>
                       </dt>
-                      <dd className="font-mono text-slate-700">{fmt(summary.spread, metric)}</dd>
+                      <dd className="font-mono text-slate-700">
+                        {fmt(summary.spread, metric)}
+                        {summary.axes > 1 && (
+                          <span className="ml-1 inline-flex items-center gap-0.5 text-amber-700">
+                            ×{summary.axes}
+                            <Explain
+                              align="right"
+                              label={t("panelSpread")}
+                            >
+                              {t("panelSpreadMixed", { axes: summary.axes })}
+                            </Explain>
+                          </span>
+                        )}
+                      </dd>
                     </div>
                     <div className="flex items-baseline justify-between gap-2">
                       <dt className="text-slate-500">{t("panelLevels")}</dt>
                       <dd className="font-mono text-slate-700">{panel.results.length}</dd>
                     </div>
                   </dl>
+                )}
+                {/* The descent, as a link and never as a fetch. This page is
+                    the one an operator refreshes while a run seals its rows,
+                    and the proteins behind a cell cost a parquet read plus a
+                    retrieval query per arm; loading that here would make the
+                    fast surface wait on the slow one. The coordinates travel
+                    in the URL, so the cell opens on the panel that was
+                    clicked rather than on a default. */}
+                {evaluationSetId && (
+                  <Link
+                    href={stratumHref({
+                      evaluationSetId,
+                      category: cat,
+                      aspect: asp,
+                    })}
+                    className="mt-2 inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-700 hover:underline"
+                  >
+                    {t("panelOpen")}
+                    <ChevronRight className="h-3 w-3" aria-hidden />
+                  </Link>
                 )}
               </div>
             );
@@ -774,7 +824,7 @@ function PanelMatrix({ panels, metric }: { panels: GraphPanel[]; metric: Metric 
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white" data-testid="graph-matrix">
+    <div tabIndex={0} className="overflow-x-auto rounded-lg border border-slate-200 bg-white" data-testid="graph-matrix">
       <table className="w-full min-w-[54rem] text-sm">
         <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
           <tr>
@@ -815,7 +865,7 @@ function PanelMatrix({ panels, metric }: { panels: GraphPanel[]; metric: Metric 
                 {/* The column's population sits in its head. A number is
                     not comparable to the one beside it without knowing how
                     many units each was measured over. */}
-                <div className="mt-0.5 font-mono text-[10px] normal-case tracking-normal text-slate-400">
+                <div className="mt-0.5 font-mono text-[10px] normal-case tracking-normal text-slate-500">
                   {c.panel?.units != null ? c.panel.units.toLocaleString(locale) : "∅"}
                 </div>
               </th>
@@ -866,7 +916,7 @@ function BlockedList({ blocked }: { blocked: GraphResponse["blocked"] }) {
     );
   }
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white" data-testid="graph-blocked">
+    <div tabIndex={0} className="overflow-x-auto rounded-lg border border-slate-200 bg-white" data-testid="graph-blocked">
       <table className="w-full min-w-[52rem] text-sm">
         <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
           <tr>
@@ -1084,6 +1134,44 @@ export default function GraphPage() {
             <NodesTable nodes={nodes} />
           </section>
 
+          {/* 2b. The Substrate node's denominator, expanded. It sits directly
+              under the node table because it is one node's levels and nothing
+              else: a ratio of "1 / 13" names neither the representation in use
+              nor the twelve it was picked over, and the page cannot leave the
+              one decision nobody ever took as a fraction.
+
+              Absent on an API build that predates the key, and the section
+              disappears rather than rendering an empty table: "this build
+              cannot say" and "there are none" are different answers. */}
+          {graph.representations && (
+            <section
+              id="representations"
+              className="space-y-3"
+              data-testid="graph-representations-section"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="flex flex-wrap items-baseline gap-2 text-lg font-semibold tracking-tight text-slate-900">
+                  {t("rep.heading")}
+                  {/* Back to the row this section expands, named by the node's
+                      own title rather than by a word repeated here. */}
+                  {nodes.some((node) => node.key === "substrate") && (
+                    <a
+                      href="#node-substrate"
+                      className="text-xs font-normal text-blue-700 hover:underline"
+                    >
+                      {t("rep.fromNode", {
+                        node:
+                          nodes.find((node) => node.key === "substrate")?.title ?? "substrate",
+                      })}
+                    </a>
+                  )}
+                </h2>
+                <p className="max-w-xl text-xs text-slate-500">{t("rep.hint")}</p>
+              </div>
+              <SubstrateRepresentations representations={graph.representations} />
+            </section>
+          )}
+
           {/* 3. The nine panels, never nine collapsed into one. */}
           <section className="space-y-3" data-testid="graph-panels">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -1092,9 +1180,26 @@ export default function GraphPage() {
               </h2>
               <p className="max-w-xl text-xs text-slate-500">{t("panelsHint")}</p>
             </div>
-            <PanelGrid panels={graph.panels} metric={metric} />
+            <PanelGrid
+              panels={graph.panels}
+              metric={metric}
+              evaluationSetId={graph.frame.evaluation_set_id}
+            />
             <PanelMatrix panels={graph.panels} metric={metric} />
           </section>
+
+          {/* 3bis. The nine panels are the coarsest crossing the record
+              carries, and drawing them alone reads as if they were the
+              partition. Two more axes were measured. Directly under the
+              nine, because the finding is about what happens to THOSE
+              panels when the partition is refined, and a reader who has
+              just been shown nine populations is the reader who can see
+              that six of them come back empty. */}
+          <StratificationSection
+            evaluationSetId={graph.frame.evaluation_set_id}
+            floors={graph.floors}
+            panels={graph.panels}
+          />
 
           {/* 4. What is blocked, with the precondition on the line. */}
           <section className="space-y-3" data-testid="graph-blocked-section">

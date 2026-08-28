@@ -94,7 +94,11 @@ def get_annotation_set(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.delete("/sets/{set_id}", summary="Delete an annotation set", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.delete(
+    "/sets/{set_id}",
+    summary="Delete an annotation set",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def delete_annotation_set(
     set_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -109,7 +113,11 @@ def delete_annotation_set(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/sets/load-goa", summary="Trigger GOA annotation load", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.post(
+    "/sets/load-goa",
+    summary="Trigger GOA annotation load",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def load_goa_annotations(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -130,7 +138,11 @@ def load_goa_annotations(
         raise HTTPException(status_code=422, detail=exc.errors) from exc
 
 
-@router.post("/sets/load-quickgo", summary="Trigger QuickGO annotation load", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.post(
+    "/sets/load-quickgo",
+    summary="Trigger QuickGO annotation load",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def load_quickgo_annotations(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),

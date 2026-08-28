@@ -19,6 +19,15 @@ export type StratumRow = {
   model: string;
   display_name: string;
   k: number;
+  // What the arm did downstream of the retrieval. Optional because an older
+  // API build does not send them, and a surface that assumed otherwise would
+  // print "undefined" where it means "this build cannot say". Eight arms of
+  // this campaign share a prediction set and differ only here, so a table
+  // naming an arm by its model alone shows eight identical labels at eight
+  // different scores.
+  scoring_name?: string | null;
+  donor_policy?: string | null;
+  metric?: string | null;
   n_proteins: number;
   f_micro_w: number;
   precision_w?: number;
