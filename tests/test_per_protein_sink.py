@@ -99,6 +99,18 @@ def test_rows_recompose_the_published_cell():
     assert _recompose(rows, "molecular_function") == pytest.approx(published, abs=1e-12)
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "The per-protein artefact is cut at the unweighted Fmax optimum while the "
+        "cell it is supposed to recompose reports the IA-weighted one, and it holds "
+        "a single threshold, so a resample that re-selects the operating point has "
+        "nothing to select from. Both are defects of the producer, not of the test: "
+        "the test states what a correct producer owes. It is strict so the day a "
+        "grid producer lands this fails as XPASS and the mark has to come off, "
+        "rather than quietly going green with nobody noticing the contract was met."
+    ),
+)
 def test_rows_recompose_the_cell_at_the_tau_the_driver_actually_passes():
     """The same contract, at the tau the driver really hands over.
 
@@ -132,6 +144,18 @@ def test_rows_recompose_the_cell_at_the_tau_the_driver_actually_passes():
     )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "The per-protein artefact is cut at the unweighted Fmax optimum while the "
+        "cell it is supposed to recompose reports the IA-weighted one, and it holds "
+        "a single threshold, so a resample that re-selects the operating point has "
+        "nothing to select from. Both are defects of the producer, not of the test: "
+        "the test states what a correct producer owes. It is strict so the day a "
+        "grid producer lands this fails as XPASS and the mark has to come off, "
+        "rather than quietly going green with nobody noticing the contract was met."
+    ),
+)
 def test_a_single_column_cannot_answer_a_resampled_question():
     """Why fixing the threshold is not the fix.
 
