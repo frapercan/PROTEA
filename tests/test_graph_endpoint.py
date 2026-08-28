@@ -28,6 +28,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from protea.api.routers._graph_edges import (
+    BLOCKED,
+    CHOSEN,
+    INHERITED,
+    MEASURED,
+    SPECS,
+    UNPOWERED,
+    Edge,
+    strength_of,
+)
 from protea.api.routers._graph_panels import (
     PANEL_KEYS,
     build_panels,
@@ -38,16 +48,6 @@ from protea.api.routers._graph_reads import (
     PARAM_QUERIES,
     QUERIES,
     read_record,
-)
-from protea.api.routers._graph_edges import (
-    BLOCKED,
-    CHOSEN,
-    INHERITED,
-    MEASURED,
-    SPECS,
-    UNPOWERED,
-    Edge,
-    strength_of,
 )
 from protea.api.routers.graph import build_graph, router
 from protea.infrastructure.settings import load_settings

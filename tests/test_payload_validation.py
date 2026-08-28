@@ -55,6 +55,9 @@ from protea.core.operations.archive_ontology_snapshot import (
 from protea.core.operations.audit_evaluation_frames import (
     AuditEvaluationFramesPayload,
 )
+from protea.core.operations.audit_per_protein_artifacts import (
+    AuditPerProteinArtifactsPayload,
+)
 from protea.core.operations.batch_rescore_evaluation import BatchRescoreEvaluationPayload
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrencePayload
 from protea.core.operations.compare_paired_panels import ComparePairedPanelsPayload
@@ -430,6 +433,17 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         AuditEvaluationFramesPayload,
         {"max_combinations": 0},
         ("max_combinations",),
+    ),
+    # invariant: the census probes the object store once per (result, setting),
+    # so an unbounded run is unbounded I/O against the store and an unbounded
+    # detail list written into a JobEvent as JSONB. A cap of zero would probe
+    # nothing and report a complete-looking census of an empty corpus, which is
+    # the one way a calibration helper can do harm.
+    (
+        "audit_per_protein_artifacts",
+        AuditPerProteinArtifactsPayload,
+        {"max_results": 0},
+        ("max_results",),
     ),
     # invariant: a report of zero examples is a report of nothing. The seal is
     # asked twice on purpose, and the first answer is the list of what the second

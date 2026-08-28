@@ -22,6 +22,74 @@ from typing import Any
 
 import numpy as np
 
+# The whole-threshold-curve artefact this file's own output cannot replace.
+#
+# ``rows_from_sink`` below collapses the sink to one column, and the column it
+# picks is the tau that maximises the UNWEIGHTED protein-mean Fmax while the
+# masses it writes are weighted, so that file cannot carry an interval:
+# ``compare_paired_panels`` re-selects the operating point inside every
+# resample. A second producer writes a second file beside it, and the legacy
+# file keeps its exact content because ``stratify_evaluation`` reads it.
+#
+# The implementation lives in :mod:`._run_cafa_grid_artifact`, because two
+# artefacts with two schemas in one module had stopped being readable on their
+# own. It is re-exported here because this is the import path the consumer's
+# refusal message names, and a name in a message that does not resolve sends
+# the operator looking for a producer that appears not to exist.
+from protea.core.operations._run_cafa_grid_artifact import (
+    DROP_COLUMN_SHAPE,
+    DROP_ELIGIBILITY_DISAGREES,
+    DROP_NO_UNWEIGHTED_RECORD,
+    DROP_NO_WEIGHTED_RECORD,
+    DROP_POOLED_SUMS_DIFFER,
+    DROP_UNMAPPABLE_ROWS,
+    DROP_VARIANT_POPULATIONS_DIFFER,
+    GRID_FILENAME,
+    GRID_META_PREFIX,
+    GRID_SCHEMA_VERSION,
+    GRID_SEMANTIC_KEYS,
+    GRID_VARIANT_COLUMNS,
+    GRID_VARIANTS,
+    GridArtifact,
+    GridFrame,
+    GridProducerError,
+    SinkAlignmentError,
+    UnstampableFrameError,
+    grid_rows_from_sink,
+    tau_grid_for,
+    write_grid_parquet,
+)
+
+#: Re-exported, so ``_run_cafa_per_protein`` stays the import path the
+#: consumer's refusal message names. Declared here rather than aliased on the
+#: import, which is the other way to mark a re-export and costs one statement
+#: per name.
+__all__ = [
+    "DROP_COLUMN_SHAPE",
+    "DROP_ELIGIBILITY_DISAGREES",
+    "DROP_NO_UNWEIGHTED_RECORD",
+    "DROP_NO_WEIGHTED_RECORD",
+    "DROP_POOLED_SUMS_DIFFER",
+    "DROP_UNMAPPABLE_ROWS",
+    "DROP_VARIANT_POPULATIONS_DIFFER",
+    "GRID_FILENAME",
+    "GRID_META_PREFIX",
+    "GRID_SCHEMA_VERSION",
+    "GRID_SEMANTIC_KEYS",
+    "GRID_VARIANTS",
+    "GRID_VARIANT_COLUMNS",
+    "GridArtifact",
+    "GridFrame",
+    "GridProducerError",
+    "PerProteinShapeError",
+    "SinkAlignmentError",
+    "UnstampableFrameError",
+    "grid_rows_from_sink",
+    "rows_from_sink",
+    "tau_grid_for",
+    "write_grid_parquet",
+]
+
 
 #: cafaeval builds its thresholds as ``np.arange(th_step, 1, th_step)``. We
 #: rebuild the same vector to find which column the reported tau sits in, and

@@ -548,7 +548,6 @@ class TestADeclaredDepthIsChecked:
 
     def test_a_frame_wider_than_the_declared_depth_is_refused(self, monkeypatch):
         from protea.core.operations import _depth_guard as A
-        from protea.core.operations import _run_cafa_artifacts as ART
 
         counts = iter([100, 500])  # restricted, then unrestricted
         counter = lambda _s, _c: next(counts)
@@ -558,7 +557,6 @@ class TestADeclaredDepthIsChecked:
 
     def test_a_frame_matching_the_declared_depth_passes(self, monkeypatch):
         from protea.core.operations import _depth_guard as A
-        from protea.core.operations import _run_cafa_artifacts as ART
 
         counts = iter([100, 500])
         counter = lambda _s, _c: next(counts)
@@ -567,14 +565,12 @@ class TestADeclaredDepthIsChecked:
     def test_a_depth_that_admits_everything_is_not_a_cut(self, monkeypatch):
         """At the deepest level the restricted and full frames coincide."""
         from protea.core.operations import _depth_guard as A
-        from protea.core.operations import _run_cafa_artifacts as ART
 
         counter = lambda _s, _c: 500
         A.assert_depth_was_applied(object(), self._ctx(10), _base_frame_of(500), counter)
 
     def test_an_undeclared_depth_is_not_checked(self, monkeypatch):
         from protea.core.operations import _depth_guard as A
-        from protea.core.operations import _run_cafa_artifacts as ART
 
         def boom(*_a, **_k):
             raise AssertionError("must not count when no depth was declared")

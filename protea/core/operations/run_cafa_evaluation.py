@@ -44,10 +44,12 @@ from protea.core.operations._run_cafa_reranker_loader import (
     load_reranker_models_for_payload,
 )
 from protea.core.operations._run_cafa_setup import (  # noqa: F401
+    StagedInputs,
     _emit_evaluation_setup_events,
     _EvalInputs,
     _load_terms_of_interest,
     _PipelineCtx,
+    bundle_run_context,
 )
 from protea.core.utils import job_id_from_payload
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
@@ -297,6 +299,8 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         return v
 
 
+
+
 class RunCafaEvaluationOperation:
     """Runs the CAFA evaluator against NK, LK and PK settings.
 
@@ -531,8 +535,12 @@ class RunCafaEvaluationOperation:
         artifacts_root: Path,
         emit: EmitFn,
     ) -> CafaEvalRunContext:
-        """Download OBO + IA, restrict GT, write GT/TOI/predictions files, and
-        bundle every cafaeval input into a ``CafaEvalRunContext``."""
+        """Download OBO and IA, restrict the ground truth, write its files.
+
+        The bundling is separate. The docstring used to join the two with an
+        "and", which is usually where a method has two jobs: staging touches the
+        filesystem and the store, and bundling only names what was staged.
+        """
         inputs = ctx.inputs
         tmpdir = str(artifacts_root.parent)
         obo_path = resolve_obo(tmpdir, inputs.snapshot, emit)
@@ -555,31 +563,14 @@ class RunCafaEvaluationOperation:
         has_rerankers = bool(ctx.reranker_models)
         if not has_rerankers:
             self._write_shared_prediction_file(session, p, ctx, artifacts_root, delta_proteins)
-        return CafaEvalRunContext(
-            pred_set_id=inputs.pred_set_id,
-            delta_proteins=delta_proteins,
-            max_distance=p.max_distance,
-            max_k_position=p.max_k_position,
-            artifacts_root=artifacts_root,
-            has_rerankers=has_rerankers,
-            reranker_models=ctx.reranker_models,
-            scoring_config_snapshot=ctx.scoring_snapshot,
-            data=data,
-            obo_path=obo_path,
-            nk_path=gt_paths["nk"],
-            lk_path=gt_paths["lk"],
-            pk_path=gt_paths["pk"],
-            pk_known_path=gt_paths["pk_known"],
-            ia_path=ia_path,
-            toi_path=toi_path,
-            shared_pred_dir=os.path.join(str(artifacts_root), "predictions"),
-            th_step=p.th_step,
-            max_terms=p.max_terms,
-            softprop=p.softprop,
-            interpro_graft=p.interpro_graft,
-            interpro_protein2ipr_file=p.interpro_protein2ipr_file,
-            interpro_ipr2go_file=p.interpro_ipr2go_file,
-            interpro_graft_weight=p.interpro_graft_weight,
+        return bundle_run_context(
+            p,
+            ctx,
+            artifacts_root,
+            StagedInputs(
+                obo_path, ia_path, gt_paths, toi_path, data, delta_proteins, has_rerankers
+            ),
+            emit,
         )
 
     @staticmethod

@@ -20,6 +20,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history, so a test that reads a sibling branch's file can
+          # reach it. The default is depth 1 of one ref, under which
+          # tests/test_per_protein_grid_producer.py skipped its whole round
+          # trip against the consumer's reader and still reported green.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v6
         with:
