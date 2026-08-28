@@ -4,7 +4,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, Float, ForeignKey, Index, Integer, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from protea.infrastructure.orm.base import Base
@@ -101,6 +101,43 @@ class GOPrediction(Base):
     #: NULL on every row retrieved before this column existed. Null is not zero
     #: and not one: it says the retrieval predates the question.
     sequence_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: The donors that carried this term, one entry each, parallel across the
+    #: three arrays and ordered by ``donor_k_positions``. This is the detail a
+    #: later depth cut needs and that the aggregates below threw away: they are
+    #: functions of the neighbourhood the retrieval used, so truncating that
+    #: neighbourhood afterwards leaves them describing a wider candidate set
+    #: than the one they are then labelled with.
+    #:
+    #: With these, a cut at depth d recounts rather than inherits: the voters
+    #: are the entries whose rank is at or below d, and the distance
+    #: aggregates are taken over the same subset.
+    #:
+    #: One entry per DISTINCT donor, which is not what ``vote_count`` counts.
+    #: ``vote_count`` counts annotation rows, and 5,518,069 of 14,694,523
+    #: (protein, term) pairs carry more than one, up to sixteen, so a single
+    #: donor can vote sixteen times. That is why a ten-neighbour retrieval
+    #: stores a vote fraction above 1.0 on 104,627 rows.
+    #:
+    #: NULL on every row retrieved before these columns existed. An empty
+    #: array would say the term had no donors, which cannot happen: a term is
+    #: on the row because something donated it.
+    donor_accessions: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), nullable=True
+    )
+    donor_k_positions: Mapped[list[int] | None] = mapped_column(
+        ARRAY(Integer), nullable=True
+    )
+    #: NULL when the run did not count in sequences at all, never half-filled.
+    donor_sequence_ranks: Mapped[list[int] | None] = mapped_column(
+        ARRAY(Integer), nullable=True
+    )
+    donor_distances: Mapped[list[float] | None] = mapped_column(
+        ARRAY(Float), nullable=True
+    )
+    #: Voters, as opposed to ``vote_count``'s annotation rows. Stored rather
+    #: than derived from the array length so a reader that selects only this
+    #: does not have to fetch four arrays to learn one number.
+    donor_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     go_term_frequency: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ref_annotation_density: Mapped[int | None] = mapped_column(Integer, nullable=True)
     neighbor_distance_std: Mapped[float | None] = mapped_column(Float, nullable=True)
