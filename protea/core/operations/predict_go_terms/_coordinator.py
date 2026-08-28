@@ -337,6 +337,9 @@ class PredictGOTermsOperation:
             "donor_policy": (
                 p.donor_policy.model_dump(mode="json") if p.donor_policy else None
             ),
+            # Retriever, not donor policy: who may be a neighbour, not which
+            # annotations may donate. See _self_neighbour for the measurement.
+            "exclude_self_neighbour": getattr(p, "exclude_self_neighbour", False),
             "compute_protst": getattr(p, "compute_protst", False),
             "compute_ia": getattr(p, "compute_ia", False),
             "ia_file": getattr(p, "ia_file", None),

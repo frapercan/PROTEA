@@ -25,6 +25,10 @@ from protea.core.operations.predict_go_terms._common import (
     AspectSeparatedKnnContext,
     PredictGOTermsBatchPayload,
 )
+from protea.core.operations.predict_go_terms._self_neighbour import (
+    search_k_for,
+    without_self,
+)
 
 if TYPE_CHECKING:
     from protea.core.operations.predict_go_terms._batch_op import (
@@ -60,11 +64,16 @@ class _AspectKnnPreSearch:
         ref_f32 = (
             aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
         )
+        # Per aspect, the same rule as the unified path: ask for one more when
+        # the query may not be its own neighbour, then drop it. Aspect-separated
+        # retrieval hits this harder, because a protein present in all three
+        # aspect corpora retrieves itself three times.
+        exclude_self = bool(getattr(p, "exclude_self_neighbour", False))
         result = search_knn(
             query_embeddings,
             ref_f32,
             aspect_refs["accessions"],
-            k=p.limit_per_entry,
+            k=search_k_for(p.limit_per_entry, exclude_self),
             distance_threshold=p.distance_threshold,
             backend=p.search_backend,
             metric=p.metric,
@@ -75,7 +84,9 @@ class _AspectKnnPreSearch:
             faiss_hnsw_m=p.faiss_hnsw_m,
             faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
         )
-        return aspect, result
+        return aspect, without_self(
+            result, list(valid_accessions), p.limit_per_entry, exclude_self
+        )
 
     @staticmethod
     def run(

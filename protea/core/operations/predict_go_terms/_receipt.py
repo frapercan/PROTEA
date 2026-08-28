@@ -55,6 +55,12 @@ def run_receipt(p: PredictGOTermsPayload, job_id: UUID) -> dict[str, Any]:
         "search_backend": p.search_backend,
         "metric": p.metric,
         "donor_policy": p.donor_policy.model_dump(),
+        # Recorded unconditionally, including when false. False is the historical
+        # behaviour and saying so is the point: without it, a receipt from before
+        # the flag existed and a receipt from a run that deliberately allowed
+        # self-retrieval are the same bytes, and the retriever's two levels
+        # cannot be told apart in the record.
+        "exclude_self_neighbour": getattr(p, "exclude_self_neighbour", False),
         "aspect_separated_knn": p.aspect_separated_knn,
         "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
         "batch_size": p.batch_size,
