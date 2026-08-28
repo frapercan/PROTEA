@@ -250,3 +250,24 @@ def test_the_row_census_is_off_unless_asked(store: ReadOnlyStore) -> None:
         FakeSession(RESULTS), {}, emit=lambda *a, **k: None
     ).result
     assert out["legacy_rows"] is None
+
+
+def test_a_store_pointing_nowhere_is_refused_not_reported_as_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one wrong answer this audit can give is a well-formed zero.
+
+    Every probe is an ``exists()`` against a store resolved from the module's own
+    path, so a tree without configuration answers absent to all of them. The
+    result is a clean "nothing to migrate", which licenses a merge, and nothing
+    in it says the store was never reachable. It happened on the first real run:
+    360 absent and 0 legacy, when the true answer was 360 legacy.
+    """
+    empty = ReadOnlyStore(set())
+    monkeypatch.setattr(
+        "protea.infrastructure.storage.factory.get_artifact_store", lambda *a, **k: empty
+    )
+    with pytest.raises(RuntimeError, match="indistinguishable from a store pointing nowhere"):
+        AuditPerProteinArtifactsOperation().execute(
+            FakeSession(RESULTS), {"max_results": 10}, emit=lambda *a, **k: None
+        )

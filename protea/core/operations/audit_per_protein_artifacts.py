@@ -63,6 +63,7 @@ per result is the access pattern ``stratify_evaluation`` and
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import Field
@@ -264,6 +265,58 @@ def _row_census(
     return totals
 
 
+def _resolve_store(emit: EmitFn) -> tuple[Any, Path]:
+    """Resolve the artifact store and say where the configuration came from.
+
+    The root is derived from this module's own path, so a tree that carries no
+    configuration points the store at nothing and every probe answers absent.
+    Emitting the root is what lets a reader tell a real zero from a misdirected
+    one; refusing the all-absent case is what stops the misdirected one being
+    acted on.
+    """
+    from protea.infrastructure.settings import load_settings
+    from protea.infrastructure.storage.factory import get_artifact_store
+
+    config_root = Path(__file__).resolve().parents[3]
+    store = get_artifact_store(load_settings(config_root))
+    emit(
+        "audit_per_protein_artifacts.config",
+        f"artifact store resolved from {config_root}",
+        {"config_root": str(config_root)},
+        "info",
+    )
+    return store, config_root
+
+
+def _refuse_a_store_pointing_nowhere(
+    counts: dict[str, int], n_results: int, config_root: Path
+) -> None:
+    """A zero and an inability to read must not look alike.
+
+    This audit's answer is acted on: "nothing to migrate" licenses a merge. But
+    every probe is an ``exists()`` against a store resolved from this module's
+    own path, so a store pointing nowhere returns absent for all of them and
+    produces a perfectly well-formed zero that is the opposite of the truth.
+
+    That happened on the first real run: 360 absent and 0 legacy, when the true
+    answer was 360 legacy. The cause was a tree carrying no configuration, and
+    nothing in the output said so.
+
+    A system that has run evaluations does not hold zero artefacts across every
+    result and every setting. If the emptiness is real, the operator says so by
+    probing a single result rather than the whole surface.
+    """
+    total = sum(counts.values())
+    if n_results > 1 and total and counts.get("absent") == total:
+        raise RuntimeError(
+            f"every one of {total} probes across {n_results} results came back absent, with "
+            f"the artifact store resolved from {config_root}. That is indistinguishable from "
+            "a store pointing nowhere, and reporting it as 'nothing to migrate' is the one "
+            "wrong answer this audit can give, because a merge would be licensed by it. Check "
+            "the configuration at that path, or probe a single result if the emptiness is real."
+        )
+
+
 class AuditPerProteinArtifactsOperation(Operation):
     """Read-only census of the per-protein artefacts on the store."""
 
@@ -287,12 +340,11 @@ class AuditPerProteinArtifactsOperation(Operation):
     ) -> OperationResult:
         p = AuditPerProteinArtifactsPayload.model_validate(payload)
         settings = p.validated_settings()
-        from pathlib import Path
-
-        from protea.infrastructure.settings import load_settings
-        from protea.infrastructure.storage.factory import get_artifact_store
-
-        store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
+        # Resolve the configuration root explicitly and SAY WHERE IT CAME FROM.
+        # The root is derived from this module's own path, so running from a tree
+        # that carries no configuration points the store at nothing. Emitting it
+        # is what lets a reader tell a real zero from a misdirected one.
+        store, config_root = _resolve_store(emit)
         ids, truncated = _result_ids(session, p.max_results)
         emit(
             "audit_per_protein_artifacts.start",
@@ -305,6 +357,7 @@ class AuditPerProteinArtifactsOperation(Operation):
             for rid in ids
         ]
         counts = _tally(per_result)
+        _refuse_a_store_pointing_nowhere(counts, len(ids), config_root)
         rejected, readable = _verdict(per_result)
         rows = _row_census(store, per_result, settings) if p.probe_legacy_rows else None
         emit(
