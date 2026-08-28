@@ -179,6 +179,10 @@ _Q_PREDICTION_SETS = text(
            ps.meta ->> 'search_backend'            AS search_backend,
            ps.meta ->> 'aspect_separated_knn'      AS aspect_separated,
            ps.meta ->> 'expand_votes_to_ancestors' AS expand_to_ancestors,
+           -- Null on every set written before the flag existed, which is not the
+           -- same as false and must not be coalesced into it: null says the run
+           -- predates the question, false says the run was asked and allowed it.
+           ps.meta ->> 'exclude_self_neighbour'     AS exclude_self_neighbour,
            ps.meta -> 'donor_policy' ->> 'reviewed_only'  AS donor_reviewed_only,
            ps.meta -> 'donor_policy' ->> 'evidence_codes' AS donor_evidence_codes,
            ps.meta -> 'donor_policy' ->> 'exclude_reference_prefixes' AS donor_exclusions,

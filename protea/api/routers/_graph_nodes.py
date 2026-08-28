@@ -245,6 +245,11 @@ _RETRIEVER_FIELDS: tuple[str, ...] = (
     "search_backend",
     "aspect_separated",
     "expand_to_ancestors",
+    # Who may be a neighbour, which is this node and not the bank: the donor
+    # policy decides which annotations may donate, this decides who is retrieved
+    # at all. Left out, two runs differing only in whether a protein could
+    # retrieve itself rendered as one level.
+    "exclude_self_neighbour",
 )
 
 
