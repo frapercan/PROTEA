@@ -336,7 +336,7 @@ export function Sidebar({
       icon: BarChart3,
       items: [
         { href: "/instrument/graph", label: t("graph"), hint: "The experiment graph: ten nodes, the strength of each edge, and the nine panels it resolves", icon: Workflow },
-        { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
+        { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable; CAFA uses per-protein fmax_w) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
         { href: "/instrument/graph", label: t("graph"), hint: "Every decision as a node, with the strength of the evidence behind it", icon: Workflow },
         { href: "/instrument/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge },
       ],
@@ -348,7 +348,20 @@ export function Sidebar({
       icon: Server,
       items: [
         { href: "/instrument/jobs", label: t("jobs"), hint: "Live job queue and event audit trail", icon: Inbox },
-        { href: "/maintenance", label: t("maintenance"), hint: "Vacuum orphan sequences and unindexed embeddings", icon: Wrench },
+        // Admin only, for the same reason the page itself is: it answers 403 to
+        // anyone else. Shown to everyone it was a link to a dead end, and worse,
+        // Next prefetches sidebar links, so every anonymous visit fired a request
+        // that failed before the visitor had clicked anything.
+        ...(isAdmin
+          ? [
+              {
+                href: "/maintenance",
+                label: t("maintenance"),
+                hint: "Vacuum orphan sequences and unindexed embeddings",
+                icon: Wrench,
+              },
+            ]
+          : []),
         { href: "/instrument/stack", label: t("stack"), hint: "Eight repositories, open PRs, deploy targets", icon: Boxes },
       ],
     },

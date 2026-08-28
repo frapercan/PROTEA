@@ -602,7 +602,15 @@ function StrengthLegend() {
 
 // ── Panels ───────────────────────────────────────────────────────────────
 
-type Metric = "f_micro_w" | "tau";
+/**
+ * f_micro_w is LAFA's average, fmax_w is CAFA's, and tau is the operating
+ * point. The first two are not two views of one number: pooled weights a
+ * protein by how many terms it gained, per-protein weights every protein
+ * alike, and on this campaign's own data they name a different best depth in
+ * 27 of 72 series. The selector exists so that disagreement is something a
+ * reader can see rather than something a footnote claims.
+ */
+type Metric = "f_micro_w" | "fmax_w" | "tau";
 
 /**
  * Grid axes taken from the payload, ordered by the model's own order.
@@ -666,7 +674,23 @@ function PanelGrid({
         {categories.map((cat) =>
           aspects.map((asp) => {
             const panel = byKey.get(panelKey(cat, asp));
-            const summary = panel ? panelSummary(panel, metric) : null;
+            // All three at once, not one chosen. f_micro_w and fmax_w are the two
+            // boards' averages and they disagree about the winner in 27 of 72 series
+            // on this campaign, so showing one at a time hid the single fact a reader
+            // most needs. tau is neither, it is where the optimum landed.
+            const rows = panel
+              ? (["f_micro_w", "fmax_w", "tau"] as const).map((m) => ({
+                  metric: m,
+                  board: m === "f_micro_w" ? "LAFA" : m === "fmax_w" ? "CAFA" : "",
+                  summary: panelSummary(panel, m),
+                }))
+              : [];
+            const micro = rows.find((r) => r.metric === "f_micro_w")?.summary ?? null;
+            const macro = rows.find((r) => r.metric === "fmax_w")?.summary ?? null;
+            // The two boards naming different winners is the finding, not a detail.
+            const boardsDisagree =
+              micro != null && macro != null && micro.best.level !== macro.best.level;
+            const summary = micro;
             return (
               <div
                 key={panelKey(cat, asp)}
@@ -707,39 +731,56 @@ function PanelGrid({
                   <p className="mt-2 text-xs text-slate-500">{t("panelNoResults")}</p>
                 ) : (
                   <dl className="mt-2 space-y-1 text-xs">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <dt className="text-slate-500">{t("panelBest")}</dt>
-                      <dd className="min-w-0 truncate font-mono text-slate-900" title={summary.best.level}>
-                        {summary.best.level}
-                      </dd>
-                    </div>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <dt className="text-slate-500">{metric}</dt>
-                      <dd className="font-mono font-semibold text-slate-900">
-                        {fmt(summary.best[metric], metric)}
-                      </dd>
-                    </div>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <dt className="flex items-center gap-1 text-slate-500">
-                        {t("panelSpread")}
-                        <Explain label={t("panelSpread")}>{t("panelSpreadHint")}</Explain>
-                      </dt>
-                      <dd className="font-mono text-slate-700">
-                        {fmt(summary.spread, metric)}
-                        {summary.axes > 1 && (
-                          <span className="ml-1 inline-flex items-center gap-0.5 text-amber-700">
-                            ×{summary.axes}
-                            <Explain
-                              align="right"
-                              label={t("panelSpread")}
+                    {/* One block per metric. Each carries its OWN winner, because the
+                        two boards do not always name the same one, and a card that
+                        printed one level with three numbers under it would be
+                        asserting an agreement this campaign has measured to be false
+                        in 27 of 72 series. */}
+                    {rows.map(({ metric: m, board, summary: sm }) =>
+                      sm == null ? null : (
+                        <div key={m} className="border-t border-dashed border-slate-100 pt-1 first:border-0 first:pt-0">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <dt className="flex items-center gap-1 font-mono text-slate-500">
+                              {m}
+                              {board ? (
+                                <span className="rounded bg-slate-100 px-1 text-[9px] font-sans font-semibold uppercase tracking-wider text-slate-600">
+                                  {board}
+                                </span>
+                              ) : null}
+                            </dt>
+                            <dd className="font-mono font-semibold text-slate-900">{fmt(sm.best[m], m)}</dd>
+                          </div>
+                          <div className="flex items-baseline justify-between gap-2">
+                            <dd className="min-w-0 truncate font-mono text-[11px] text-slate-600" title={sm.best.level}>
+                              {sm.best.level}
+                            </dd>
+                            <dd
+                              className={`shrink-0 font-mono text-[11px] ${
+                                m !== "tau" &&
+                                panel?.detectable_effect != null &&
+                                sm.spread < panel.detectable_effect
+                                  ? "font-semibold text-amber-700"
+                                  : "text-slate-500"
+                              }`}
+                              title={
+                                m === "tau"
+                                  ? t("panelSpread")
+                                  : `${t("panelSpread")} ${fmt(sm.spread, m)}`
+                              }
                             >
-                              {t("panelSpreadMixed", { axes: summary.axes })}
-                            </Explain>
-                          </span>
-                        )}
-                      </dd>
-                    </div>
-                    <div className="flex items-baseline justify-between gap-2">
+                              ±{fmt(sm.spread, m)}
+                              {sm.axes > 1 && <span className="ml-0.5 text-amber-700">×{sm.axes}</span>}
+                            </dd>
+                          </div>
+                        </div>
+                      ),
+                    )}
+                    {boardsDisagree && (
+                      <p className="mt-1 rounded bg-amber-50 px-1.5 py-1 text-[10px] leading-snug text-amber-800">
+                        {t("panelBoardsDisagree")}
+                      </p>
+                    )}
+                    <div className="flex items-baseline justify-between gap-2 border-t border-dashed border-slate-100 pt-1">
                       <dt className="text-slate-500">{t("panelLevels")}</dt>
                       <dd className="font-mono text-slate-700">{panel.results.length}</dd>
                     </div>
@@ -1063,15 +1104,28 @@ export default function GraphPage() {
           <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-600">{t("subtitle")}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {/* One control, and it changes which number is shown, never how
-              many numbers are shown. Both metrics come from the payload. */}
+          {/* The cards below carry all three metrics at once, because the two
+              boards disagree about the winner often enough that choosing one
+              for the reader hides the finding. This control is narrower than it
+              used to be: it drives the level-by-panel matrix only, where three
+              numbers per cell would be unreadable. */}
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">
+            {t("matrixMetric")}
+          </span>
           <div className="inline-flex overflow-hidden rounded-md border border-slate-300">
-            {(["f_micro_w", "tau"] as Metric[]).map((m) => (
+            {(
+              [
+                ["f_micro_w", "LAFA", "Pooled over the population and IA-weighted, so a protein that gained fifty terms weighs fifty times one that gained one. LAFA's headline, and the board this campaign submits to."],
+                ["fmax_w", "CAFA", "Averaged over proteins and IA-weighted, so every protein weighs the same. CAFA's metric, computed the CAFA way. It disagrees with the pooled average about the best depth in 27 of 72 series on this campaign's own data."],
+                ["tau", "", "The decision threshold each cell's optimum landed on, not a score."],
+              ] as [Metric, string, string][]
+            ).map(([m, board, why]) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setMetric(m)}
                 aria-pressed={metric === m}
+                title={why}
                 className={`px-2.5 py-1.5 font-mono text-xs ${
                   metric === m
                     ? "bg-slate-800 text-white"
@@ -1079,6 +1133,9 @@ export default function GraphPage() {
                 }`}
               >
                 {m}
+                {board ? (
+                  <span className="ml-1 font-sans text-[10px] opacity-70">{board}</span>
+                ) : null}
               </button>
             ))}
           </div>

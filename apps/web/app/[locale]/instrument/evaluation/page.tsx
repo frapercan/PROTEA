@@ -184,7 +184,7 @@ function ResultsTable({ results }: { results: Record<string, SettingResults> }) 
         </span>
         <span className="text-[11px] text-slate-500">
           Per-cell threshold-optimal F1 (not IA-weighted). For the
-          IA-weighted f_micro_w matrix used on the LAFA / CAFA leaderboards,
+          IA-weighted f_micro_w matrix used on the LAFA leaderboard (CAFA uses per-protein Fmax, stored alongside as fmax_w),
           see <span className="font-mono">/benchmark</span>.
         </span>
       </div>

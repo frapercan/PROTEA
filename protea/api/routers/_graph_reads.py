@@ -270,6 +270,13 @@ _Q_PANELS = text(
            cat.k                                    AS category,
            asp.k                                    AS aspect,
            (asp.v ->> 'f_micro_w')::float8          AS f_micro_w,
+           -- CAFA's own metric, stored in the same cell and never surfaced.
+           -- The two boards do not share an average: LAFA reads f_micro_w,
+           -- CAFA reads the protein-centric Fmax, which cafaeval computes
+           -- under normalization='cafa' (its default, and ours). Reading only
+           -- one of them made the surface answer for one board while the page
+           -- said it answered for both.
+           (asp.v ->> 'fmax_w')::float8             AS fmax_w,
            (asp.v ->> 'tau')::float8                AS tau,
            (asp.v ->> 'n_proteins')::int            AS n_at_tau,
            (asp.v ->> 'coverage_at_tau')::float8    AS coverage_at_tau

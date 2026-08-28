@@ -25,7 +25,7 @@ const panel = (
   category: string,
   aspect: string,
   units: number,
-  results: { level: string; f_micro_w: number; tau: number }[] = [],
+  results: { level: string; f_micro_w: number; fmax_w: number; tau: number }[] = [],
 ): GraphPanel => ({ category, aspect, units, detectable_effect: null, results });
 
 const emptyFrame: GraphResponse["frame"] = {
@@ -45,10 +45,10 @@ const emptyFrame: GraphResponse["frame"] = {
 describe("panelLevels", () => {
   it("collects every level that appears on any panel", () => {
     const levels = panelLevels([
-      panel("NK", "BPO", 10, [{ level: "b", f_micro_w: 0.2, tau: 0.5 }]),
+      panel("NK", "BPO", 10, [{ level: "b", f_micro_w: 0.2, fmax_w: 0.2500, tau: 0.5 }]),
       panel("PK", "CCO", 20, [
-        { level: "a", f_micro_w: 0.1, tau: 0.5 },
-        { level: "b", f_micro_w: 0.3, tau: 0.5 },
+        { level: "a", f_micro_w: 0.1, fmax_w: 0.1500, tau: 0.5 },
+        { level: "b", f_micro_w: 0.3, fmax_w: 0.3500, tau: 0.5 },
       ]),
     ]);
     expect(levels).toEqual(["a", "b"]);
@@ -57,8 +57,8 @@ describe("panelLevels", () => {
   it("orders alphabetically, which is a claim about nothing", () => {
     const levels = panelLevels([
       panel("NK", "BPO", 10, [
-        { level: "zeta", f_micro_w: 0.9, tau: 0.5 },
-        { level: "alpha", f_micro_w: 0.1, tau: 0.5 },
+        { level: "zeta", f_micro_w: 0.9, fmax_w: 0.9500, tau: 0.5 },
+        { level: "alpha", f_micro_w: 0.1, fmax_w: 0.1500, tau: 0.5 },
       ]),
     ]);
     expect(levels).toEqual(["alpha", "zeta"]);
@@ -67,9 +67,9 @@ describe("panelLevels", () => {
 
 describe("panelSummary", () => {
   const p = panel("NK", "BPO", 1509, [
-    { level: "embedding_only", f_micro_w: 0.1682, tau: 0.99 },
-    { level: "composite_no_embedding", f_micro_w: 0.2652, tau: 0.43 },
-    { level: "vote_fraction", f_micro_w: 0.2343, tau: 0.31 },
+    { level: "embedding_only", f_micro_w: 0.1682, fmax_w: 0.2182, tau: 0.99 },
+    { level: "composite_no_embedding", f_micro_w: 0.2652, fmax_w: 0.3152, tau: 0.43 },
+    { level: "vote_fraction", f_micro_w: 0.2343, fmax_w: 0.2843, tau: 0.31 },
   ]);
 
   it("names the leader and the spread inside one panel", () => {

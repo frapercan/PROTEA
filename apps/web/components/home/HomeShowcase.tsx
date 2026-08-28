@@ -54,16 +54,17 @@ const CATEGORY_TOOLTIPS: Record<string, string> = {
 };
 
 // Definition of the IA-weighted headline metric. f_micro_w is the
-// information-accretion-weighted micro-averaged F: the LAFA / CAFA headline
+// information-accretion-weighted micro-averaged F: LAFA's headline. CAFA's is
+// protein-centric Fmax, which is fmax_w, so the two boards are not the same
 // number, the only one comparable to the external leaderboards (FIX-METRIC-IA).
 const FMICRO_TOOLTIP =
-  "f_micro_w: the information-accretion-weighted micro-averaged F score. The LAFA / CAFA headline metric, comparable to the external leaderboards. Rare, specific GO terms count more than common ones.";
+  "f_micro_w: the information-accretion-weighted micro-averaged F score. LAFA's headline metric, and this board's. Rare, specific GO terms count more than common ones. CAFA scores differently, per protein rather than pooled, and that number is fmax_w.";
 
 // Shown when a cell still carries the legacy unweighted Fmax (no real IA
 // score yet). Surfaces the gap honestly rather than mixing it into the
 // IA-weighted headline.
 const NOT_IA_TOOLTIP =
-  "Not IA-weighted: this result predates real information-accretion scoring and reports the unweighted Fmax, which is not directly comparable to the LAFA / CAFA leaderboards.";
+  "Not IA-weighted: this result predates real information-accretion scoring and reports the unweighted Fmax, which is not directly comparable to either board.";
 
 /** Mean ± 95% CI half-width across all (category, aspect) tasks, pooling the
  *  per-task means. This is the honest headline: the central tendency across

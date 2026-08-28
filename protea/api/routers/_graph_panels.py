@@ -227,6 +227,12 @@ def build_panels(
                 {
                     "level": _level_name(r, fields),
                     "f_micro_w": r.get("f_micro_w"),
+                    # The same cell under CAFA's average. Both are stored and
+                    # they do not agree: on this campaign they name a different
+                    # best depth in 27 of 72 series. A surface that offers only
+                    # one is answering for one board while looking like it
+                    # answers for the axis.
+                    "fmax_w": r.get("fmax_w"),
                     "tau": r.get("tau"),
                 }
                 for r in sorted(scored, key=lambda r: r.get("f_micro_w") or 0.0, reverse=True)

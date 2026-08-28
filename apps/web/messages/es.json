@@ -511,7 +511,9 @@
       "regionsUnknown": "se desconoce",
       "tripleUnjudgeable": "{cells} celdas tienen población. Si alguna puede decidir algo no se puede saber aquí, porque esta compilación no sirve ningún suelo contra el que leerlas.",
       "tripleTruncated": "Calculado sobre {answered} de las {total} categorías de conocimiento: las que faltan no están contadas ni en el numerador ni en el denominador."
-    }
+    },
+    "panelBoardsDisagree": "Los dos tableros nombran un ganador distinto aquí. LAFA agrupa sobre la población y CAFA promedia por proteína, así que un panel donde una proteína ganó cincuenta términos y otra ganó uno no es la misma pregunta dos veces.",
+    "matrixMetric": "matriz"
   },
   "jobs": {
     "title": "Trabajos",

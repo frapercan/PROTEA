@@ -12,8 +12,26 @@
 //
 //   weighting   PLAIN counts every GO term alike. IA-WEIGHTED weights each term
 //               by its information accretion, so a rare, specific term counts
-//               more than a common one. This is the CAFA / LAFA convention and
-//               the only variant comparable to those leaderboards.
+//               more than a common one.
+//
+// THE TWO BOARDS DO NOT USE THE SAME AVERAGE, and for a long time this file said
+// they did. Verified 2026-08-28:
+//
+//   CAFA   Fmax, protein-centric. Precision and recall are averaged OVER
+//          PROTEINS at each threshold and the F of those averages is maximised.
+//          cafaeval computes it under normalization='cafa', which is its default
+//          and the one this project uses, so `fmax` and `fmax_w` in every stored
+//          row already ARE the CAFA metric.
+//   LAFA   f_micro_w, the IA-weighted micro. Read directly from LAFA's own
+//          output file, evaluation_best_f_micro_w.tsv column 31, in
+//          docs/EVAL_LAFA_PARITY.md.
+//
+// So a number is comparable to ONE board, never to both at once, and which one
+// depends on which average it carries. On this campaign's own data the choice is
+// not cosmetic: micro and macro name a different best depth in 27 of 72 series,
+// and depth declines monotonically in 60 of 72 series under micro against 38 of
+// 72 under macro. A metric that changes the answer is a condition of the result,
+// not a convention of reading.
 //
 // Both axes are real and both are useful, which is why all four combinations
 // are kept and named rather than one being picked for the reader.
@@ -21,9 +39,12 @@
 /**
  * The metric the surface leads with, matching the API's own choice.
  *
- * f_micro_w because it is the CAFA / LAFA headline and the only variant
- * comparable to those leaderboards. Kept here so the front end and
- * protea/api/metrics.py cannot drift into disagreeing about the default.
+   * f_micro_w because it is LAFA's headline, and LAFA is the board this
+   * campaign submits to. It is NOT CAFA's: CAFA scores protein-centric Fmax,
+   * which is `fmax_w`, stored alongside in the same row. Named as a CHOICE
+   * because on this campaign's own data it changes which depth wins in 27 of
+   * 72 series. Kept here so the front end and protea/api/metrics.py cannot
+   * drift into disagreeing about the default.
  */
 export const PRIMARY_METRIC = "f_micro_w";
 
@@ -52,7 +73,7 @@ export const METRICS: MetricSpec[] = [
     averaging: "micro",
     weighting: "ia",
     meaning:
-      "The headline metric of this project and of the CAFA / LAFA leaderboards. Sums the confusion matrix over the whole population, weighting each GO term by how specific it is.",
+      "This project's headline, and LAFA's. Sums the confusion matrix over the whole population, weighting each GO term by how specific it is, so a protein with fifty gained terms weighs fifty times one with a single term. Not CAFA's metric: that is fmax_w, in the same row.",
   },
   {
     key: "fmax_w",
@@ -60,7 +81,7 @@ export const METRICS: MetricSpec[] = [
     averaging: "macro",
     weighting: "ia",
     meaning:
-      "The best per-protein F over the threshold sweep, with rare terms counting more. Every protein counts once, so a protein with one annotation weighs as much as one with fifty.",
+      "CAFA's metric. The best per-protein F over the threshold sweep, with rare terms counting more. Every protein counts once, so a protein with one annotation weighs as much as one with fifty. This is the number to quote against a CAFA leaderboard, not f_micro_w.",
   },
   {
     key: "f_micro",

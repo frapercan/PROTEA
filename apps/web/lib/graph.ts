@@ -140,6 +140,10 @@ export type GraphNode = {
 export type PanelResult = {
   level: string;
   f_micro_w: number | null;
+  /** The same cell under CAFA's protein-centric average. Both boards are real
+   *  and they disagree: on this campaign they name a different best depth in
+   *  27 of 72 series, so a surface offering one is answering for one board. */
+  fmax_w: number | null;
   tau: number | null;
 };
 
@@ -365,7 +369,7 @@ export function indexPanelResults(panel: GraphPanel | undefined): Map<string, Pa
  */
 export function panelSummary(
   panel: GraphPanel,
-  metric: "f_micro_w" | "tau",
+  metric: "f_micro_w" | "fmax_w" | "tau",
 ): { best: PanelResult; spread: number; axes: number } | null {
   // Only results that actually carry the metric can be summarised. A stored
   // result missing it is not a zero, so it takes no part in the best or the

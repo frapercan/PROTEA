@@ -511,7 +511,9 @@
       "regionsUnknown": "unknown",
       "tripleUnjudgeable": "{cells} cells carry a population. Whether any of them can decide anything is not knowable here, because this build serves no floor to read them against.",
       "tripleTruncated": "Computed over {answered} of {total} knowledge categories: the missing ones are in neither the numerator nor the denominator."
-    }
+    },
+    "panelBoardsDisagree": "The two boards name a different winner here. LAFA pools over the population, CAFA averages over proteins, so a panel where one protein gained fifty terms and another gained one is not the same question twice.",
+    "matrixMetric": "matrix"
   },
   "jobs": {
     "title": "Jobs",

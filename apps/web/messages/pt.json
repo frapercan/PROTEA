@@ -512,7 +512,9 @@
       "regionsUnknown": "desconhecido",
       "tripleUnjudgeable": "{cells} células têm população. Se alguma pode decidir algo não é possível saber aqui, porque esta compilação não serve nenhum piso contra o qual as ler.",
       "tripleTruncated": "Computed over {answered} of {total} knowledge categories: the missing ones are in neither the numerator nor the denominator."
-    }
+    },
+    "panelBoardsDisagree": "Os dois quadros nomeiam um vencedor diferente aqui. LAFA agrupa sobre a população e CAFA faz a média por proteína, portanto um painel onde uma proteína ganhou cinquenta termos e outra ganhou um não é a mesma pergunta duas vezes.",
+    "matrixMetric": "matriz"
   },
   "jobs": {
     "title": "Jobs",

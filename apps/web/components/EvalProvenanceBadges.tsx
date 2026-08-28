@@ -27,6 +27,10 @@ const CHIP = "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px
 
 const ARM_ON = "bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200";
 const ARM_OFF = "bg-slate-50 text-slate-400 ring-1 ring-inset ring-slate-200 line-through";
+// An arm the record does not mention. Struck through would claim it did not
+// contribute; this says nobody looked. The two used to render identically,
+// which is the whole reason the distinction now exists.
+const ARM_UNKNOWN = "bg-white text-slate-400 ring-1 ring-dashed ring-slate-300 italic";
 
 type Props = {
   provenance: EvalProvenance | null | undefined;
@@ -89,10 +93,17 @@ export function EvalProvenanceBadges({
           {arms.map((a) => (
             <span
               key={a.key}
-              className={`${CHIP} ${a.enabled ? ARM_ON : ARM_OFF}`}
-              title={`${a.label} arm ${a.enabled ? "enabled" : "disabled"} for this evaluation.`}
+              className={`${CHIP} ${
+                a.enabled === null ? ARM_UNKNOWN : a.enabled ? ARM_ON : ARM_OFF
+              }`}
+              title={
+                a.enabled === null
+                  ? `${a.label} arm not recorded for this evaluation. Not the same as off: the run did not inspect this arm, so the record says nothing about it.`
+                  : `${a.label} arm ${a.enabled ? "enabled" : "disabled"} for this evaluation.`
+              }
             >
               {a.label}
+              {a.enabled === null ? "?" : null}
             </span>
           ))}
         </span>

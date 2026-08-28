@@ -402,13 +402,18 @@ class TestEvalProvenanceStamping:
             p, es, has_rerankers=False
         )
         assert role == "select"
+        # Only the arms the operation can determine. mlp_tower and interpro used
+        # to be written as literal False, which is a claim nothing here supports:
+        # the run does not inspect either, so False meant "not looked at" and
+        # read as "did not contribute". Absent is now absent, and the first run
+        # that uses one of them will not be mislabelled by a constant.
         assert arms == {
             "knn": True,
             "reranker": False,
-            "mlp_tower": False,
-            "interpro": False,
             "interpro_graft": False,
         }
+        assert "mlp_tower" not in arms
+        assert "interpro" not in arms
         assert frame is None and window is None
 
     def test_build_provenance_explicit_wins(self):

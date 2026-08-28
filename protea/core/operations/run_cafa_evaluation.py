@@ -465,11 +465,15 @@ class RunCafaEvaluationOperation:
             leakage_role = leakage_role or None
         arms_enabled = p.arms_enabled
         if arms_enabled is None:
+            # Only the arms this run can actually determine. `mlp_tower` and
+            # `interpro` used to be written as literal False, which is a claim
+            # the operation cannot support: nothing here inspects either arm, so
+            # False meant "not looked at" while reading as "did not contribute".
+            # The first run that used one of them would have been mislabelled by
+            # a constant. Omitted is now omitted, and a reader can tell.
             arms_enabled = {
                 "knn": True,
                 "reranker": has_rerankers,
-                "mlp_tower": False,
-                "interpro": False,
                 # The InterPro BP graft (PR #700) only runs in the per-setting
                 # reranker path; without rerankers the arm is skipped with a
                 # warning. Record it as on only when the payload opted in AND the

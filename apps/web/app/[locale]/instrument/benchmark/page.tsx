@@ -121,11 +121,11 @@ const LINEAGE_CHIPS: {
 
 /** IA-weighted headline metric definition (FIX-METRIC-IA). */
 const FMICRO_TOOLTIP =
-  "f_micro_w: the information-accretion-weighted micro-averaged F score. The LAFA / CAFA headline metric, comparable to the external leaderboards. Rare, specific GO terms count more than common ones.";
+  "f_micro_w: the information-accretion-weighted micro-averaged F score. LAFA's headline metric, and this board's. Rare, specific GO terms count more than common ones. CAFA scores differently, per protein rather than pooled, and that number is fmax_w.";
 
 /** Shown on cells still carrying the legacy unweighted Fmax (no real IA yet). */
 const NOT_IA_TOOLTIP =
-  "Not IA-weighted: this cell predates real information-accretion scoring and reports the unweighted Fmax, which is not directly comparable to the LAFA / CAFA leaderboards.";
+  "Not IA-weighted: this cell predates real information-accretion scoring and reports the unweighted Fmax, which is not directly comparable to either board.";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -484,8 +484,8 @@ export default function BenchmarkPage() {
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             Per-embedding IA-weighted{" "}
-            <span className="font-mono">f_micro_w</span> (LAFA / CAFA
-            comparable) across categories and aspects for every evaluation run
+            <span className="font-mono">f_micro_w</span> (LAFA comparable; CAFA scores
+            per protein, see fmax_w) across categories and aspects for every evaluation run
             in the database.{" "}
             <Link
               href={`/${locale}/`}

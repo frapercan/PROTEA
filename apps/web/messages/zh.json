@@ -512,7 +512,9 @@
       "regionsUnknown": "未知",
       "tripleUnjudgeable": "{cells} 个单元格带有样本。其中是否有能做出判定的，这里无从得知，因为此构建未提供可据以判读的下限。",
       "tripleTruncated": "Computed over {answered} of {total} knowledge categories: the missing ones are in neither the numerator nor the denominator."
-    }
+    },
+    "panelBoardsDisagree": "两个榜单在这里给出了不同的优胜者。LAFA 在总体上汇总，CAFA 按蛋白质取平均，因此一个蛋白质获得五十个术语而另一个只获得一个的面板，并不是同一个问题问了两遍。",
+    "matrixMetric": "矩阵"
   },
   "jobs": {
     "title": "任务",

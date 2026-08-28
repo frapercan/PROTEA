@@ -57,7 +57,7 @@ const FRAME_BADGE: Record<EvalFrame, Badge> = {
     label: "LAFA-frame",
     className: "bg-violet-50 text-violet-800 ring-1 ring-inset ring-violet-200",
     title:
-      "Scored in the parity-locked LAFA frame: the number is comparable to the LAFA / CAFA leaderboards.",
+      "Scored in the parity-locked LAFA frame: the number is comparable to the LAFA leaderboard. For CAFA, quote fmax_w from the same row instead.",
   },
   internal: {
     label: "internal",
@@ -140,17 +140,22 @@ export const ARM_ORDER: { key: string; label: string }[] = [
   { key: "interpro", label: "InterPro" },
 ];
 
-export type ArmBadge = { key: string; label: string; enabled: boolean };
+/** `enabled` is null when the record does not carry this arm at all, which is
+ *  not the same as false. The producer used to write mlp_tower and interpro as
+ *  literal false because nothing inspected them, so "not looked at" and "did not
+ *  contribute" arrived at the reader as the same badge. `Boolean(undefined)`
+ *  carried that collapse all the way to the screen. */
+export type ArmBadge = { key: string; label: string; enabled: boolean | null };
 
-/** One badge per canonical arm with its enabled flag, or ``null`` when the
- *  composition was never recorded (so the caller can show an empty state
- *  rather than a row of all-off badges). */
+/** One badge per canonical arm, or ``null`` when the composition was never
+ *  recorded at all (so the caller can show an empty state rather than a row of
+ *  all-off badges). An arm the record does not mention gets `enabled: null`. */
 export function armsList(arms: EvalArms | null | undefined): ArmBadge[] | null {
   if (arms == null || typeof arms !== "object") return null;
   return ARM_ORDER.map((a) => ({
     key: a.key,
     label: a.label,
-    enabled: Boolean(arms[a.key]),
+    enabled: a.key in arms ? Boolean(arms[a.key]) : null,
   }));
 }
 

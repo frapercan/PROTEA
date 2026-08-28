@@ -61,9 +61,16 @@ describe("armsList", () => {
     expect(arms?.find((a) => a.key === "interpro")?.enabled).toBe(false);
   });
 
-  it("defaults missing arm keys to disabled", () => {
-    const arms = armsList({ knn: true });
-    expect(arms?.find((a) => a.key === "reranker")?.enabled).toBe(false);
+  it("reports an arm the record does not mention as unrecorded, not as off", () => {
+    // The producer wrote mlp_tower and interpro as literal false because nothing
+    // inspected them, so "not looked at" reached the reader as "did not
+    // contribute". Absent must stay absent, or the first run that uses one of
+    // those arms is mislabelled by a constant.
+    const badges = armsList({ knn: true, reranker: false });
+    expect(badges?.find((b) => b.key === "knn")?.enabled).toBe(true);
+    expect(badges?.find((b) => b.key === "reranker")?.enabled).toBe(false);
+    expect(badges?.find((b) => b.key === "mlp_tower")?.enabled).toBeNull();
+    expect(badges?.find((b) => b.key === "interpro")?.enabled).toBeNull();
   });
 
   it("returns null when the composition was never recorded", () => {

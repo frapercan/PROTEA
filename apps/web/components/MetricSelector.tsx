@@ -7,8 +7,11 @@
 //   fmax      macro: the per-protein score averaged over proteins, so a
 //             protein with one annotation weighs as much as one with fifty
 //   f_micro   micro: tp / fp / fn summed over the population, then divided
-//   _w        information-accretion weighted, the CAFA / LAFA convention and
-//             the only variant comparable to those leaderboards
+//   _w        information-accretion weighted, which both boards use
+//
+// The two boards differ on the AVERAGE, not on the weighting, and this file
+// used to say otherwise. CAFA scores fmax_w, per protein. LAFA scores
+// f_micro_w, pooled. A number is comparable to one of them, never both.
 //
 // The choice lives in the URL so a link carries it: sending someone a
 // leaderboard that silently renders under their own last selection is how two

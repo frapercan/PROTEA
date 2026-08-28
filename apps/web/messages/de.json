@@ -512,7 +512,9 @@
       "regionsUnknown": "unbekannt",
       "tripleUnjudgeable": "{cells} Zellen tragen eine Population. Ob eine davon etwas entscheiden kann, ist hier nicht feststellbar, denn dieser Build liefert keine Schwelle, gegen die sie zu lesen wären.",
       "tripleTruncated": "Computed over {answered} of {total} knowledge categories: the missing ones are in neither the numerator nor the denominator."
-    }
+    },
+    "panelBoardsDisagree": "Die beiden Ranglisten nennen hier einen anderen Sieger. LAFA fasst über die Population zusammen, CAFA mittelt über Proteine, also ist ein Panel, in dem ein Protein fünfzig Begriffe gewann und ein anderes einen, nicht zweimal dieselbe Frage.",
+    "matrixMetric": "Matrix"
   },
   "jobs": {
     "title": "Jobs",
