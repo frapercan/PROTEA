@@ -20,6 +20,9 @@ from protea.core.operations.batch_rescore_evaluation import (
     BatchRescoreEvaluationOperation,
 )
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrenceOperation
+from protea.core.operations.compare_paired_panels import (
+    ComparePairedPanelsOperation,
+)
 from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsBatchOperation,
     ComputeEmbeddingsOperation,
@@ -87,6 +90,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(AuditEvaluationFramesOperation())
     registry.register(SealEvaluationFramesOperation())
     registry.register(StratifyEvaluationOperation())
+    registry.register(ComparePairedPanelsOperation())
     registry.register(ApplyLearnedEncoderOperation())
     registry.register(InsertProteinsOperation())
     registry.register(FetchUniProtMetadataOperation())

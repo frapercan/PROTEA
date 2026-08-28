@@ -57,6 +57,7 @@ from protea.core.operations.audit_evaluation_frames import (
 )
 from protea.core.operations.batch_rescore_evaluation import BatchRescoreEvaluationPayload
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrencePayload
+from protea.core.operations.compare_paired_panels import ComparePairedPanelsPayload
 from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsBatchPayload,
     ComputeEmbeddingsPayload,
@@ -136,6 +137,20 @@ from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
 # pydantic's locator for model level validators.
 PayloadNegativeCase = tuple[str, type[BaseModel], dict[str, Any], tuple[str | int, ...]]
 PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
+    # invariant: a weighted estimator name over unweighted components is the
+    # defect this operation exists to prevent, so "auto" is not a value. There
+    # is no fallback from ia_weighted; an artefact with no weighted components
+    # is a refusal, not an unweighted number under a weighted name.
+    (
+        "compare_paired_panels",
+        ComparePairedPanelsPayload,
+        {
+            "evaluation_result_id": "a",
+            "baseline_evaluation_result_id": "b",
+            "weighting": "auto",
+        },
+        ("weighting",),
+    ),
     # invariant: a population floor of zero would report every cell, including
     # the ones holding a single protein, at the same weight as one holding
     # thousands. The floor is the whole point of withholding.
