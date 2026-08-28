@@ -38,6 +38,7 @@ def _frame() -> pd.DataFrame:
         "go_id": "GO:0000007",
         "distance": 0.10,
         "vote_count": 9,
+        "donor_count": 4,
         "neighbor_vote_fraction": 4.9,
         "neighbor_mean_distance": 0.25,
         "neighbor_distance_std": 0.11,
@@ -62,7 +63,7 @@ class TestTheRecountReplacesTheStoredAggregates:
     def test_a_protein_cut_recounts_to_its_own_survivors(self) -> None:
         out = recount_frame_aggregates(_frame(), DepthCut(max_k_position=2))
         row = out.iloc[0]
-        assert row["vote_count"] == 2
+        assert row["donor_count"] == 2
         assert row["neighbor_vote_fraction"] == pytest.approx(1.0)
         assert row["neighbor_mean_distance"] == pytest.approx(0.15)
 
@@ -71,8 +72,16 @@ class TestTheRecountReplacesTheStoredAggregates:
         is 1.0 and not 2.0."""
         out = recount_frame_aggregates(_frame(), DepthCut(max_sequence_rank=1))
         row = out.iloc[0]
-        assert row["vote_count"] == 2
+        assert row["donor_count"] == 2
         assert row["neighbor_vote_fraction"] == pytest.approx(1.0)
+
+    def test_a_cut_never_redefines_vote_count_under_its_readers(self) -> None:
+        """It counts annotation rows and a recount counts donors. One column
+        meaning voters in a cut arm and paperwork in an uncut one is the
+        defect this campaign keeps finding."""
+        out = recount_frame_aggregates(_frame(), DepthCut(max_k_position=2))
+        assert out.iloc[0]["vote_count"] == 9
+        assert out.iloc[0]["donor_count"] == 2
 
     def test_the_stored_fraction_above_one_does_not_survive_a_cut(self) -> None:
         """5.69% of stored rows carry a fraction above 1; a cut must not."""
@@ -116,7 +125,7 @@ class TestARowWithoutALedgerCarriesTheAbsence:
         out = recount_frame_aggregates(df, DepthCut(max_k_position=2))
         row = out.iloc[0]
         assert row["neighbor_vote_fraction"] is None
-        assert row["vote_count"] is None
+        assert row["donor_count"] is None
 
 
 class TestTheRunRefusesBeforeItGetsHere:

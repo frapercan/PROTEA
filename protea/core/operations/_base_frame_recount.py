@@ -63,8 +63,15 @@ DONOR_LEDGER_COLS: tuple[str, ...] = (
 #: Written by the recount. Every one of them is a function of the cut; the
 #: minima are not here because the argument of a minimum is the term's
 #: shallowest donor, which survives every cut that keeps the row at all.
+#:
+#: ``vote_count`` is NOT here, deliberately. It counts annotation rows and a
+#: recount counts donors, and those differ on 37.6 per cent of pairs. Writing
+#: the donor count into it would leave one column meaning voters in a cut arm
+#: and paperwork in an uncut one, which is the defect this campaign keeps
+#: finding: a level that is not named by every field that varies. The donor
+#: count goes to ``donor_count``, which already means exactly that.
 _RECOUNTED: tuple[str, ...] = (
-    "vote_count",
+    "donor_count",
     "neighbor_vote_fraction",
     "neighbor_mean_distance",
     "neighbor_distance_std",
@@ -101,7 +108,7 @@ def recount_frame_aggregates(df: Any, cut: DepthCut | None) -> Any:
     recounted: dict[str, list[Any]] = {name: [] for name in _RECOUNTED}
     for row in df[list(DONOR_LEDGER_COLS)].to_dict("records"):
         got = recount_at_depth(_as_lists(row), cut)
-        recounted["vote_count"].append(None if got is None else got.donor_count)
+        recounted["donor_count"].append(None if got is None else got.donor_count)
         recounted["neighbor_vote_fraction"].append(
             None if got is None else got.vote_fraction()
         )

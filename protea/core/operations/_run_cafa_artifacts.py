@@ -52,6 +52,11 @@ _BASE_SCORE_COLS: tuple[str, ...] = (
     "evidence_code",
     "taxonomic_distance",
     "neighbor_vote_fraction",
+    # Voters, as opposed to vote_count's annotation rows. Selected always,
+    # not only under a cut, so the frame's schema does not depend on which
+    # arm built it. Under a cut the recount overwrites it with the count at
+    # that depth; without one it is what the retrieval wrote.
+    "donor_count",
     # --- A-SCORE rich axes (coverage A3 / ref-density F / anc2vec G / IA-prior E) ---
     "alignment_length_nw",
     "gaps_pct_nw",
@@ -311,6 +316,7 @@ def _base_select(ctx: WritePredictionsContext, *, with_ledger: bool = False) -> 
             GOPrediction.evidence_code,
             GOPrediction.taxonomic_distance,
             GOPrediction.neighbor_vote_fraction,
+            GOPrediction.donor_count,
             GOPrediction.alignment_length_nw,
             GOPrediction.gaps_pct_nw,
             GOPrediction.alignment_length_sw,
