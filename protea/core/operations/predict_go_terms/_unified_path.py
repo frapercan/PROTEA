@@ -28,6 +28,9 @@ from protea.core.operations._predict_go_terms_adapter import (
 from protea.core.operations.predict_go_terms._common import (
     _UnifiedPredictContext,
 )
+from protea.core.operations.predict_go_terms._sequence_identity import (
+    load_sequence_identities,
+)
 
 if TYPE_CHECKING:
     from protea.core.operations.predict_go_terms._batch_op import (
@@ -120,6 +123,7 @@ def unified_predict_via_pipeline(
             ref_tax_ids=ref_tax_ids,
             query_tax_ids=query_tax_ids,
             alignment_cache=SessionAlignmentCache(session),
+            ref_sequence_identities=load_sequence_identities(session, unique_neighbors),
         )
     )
 

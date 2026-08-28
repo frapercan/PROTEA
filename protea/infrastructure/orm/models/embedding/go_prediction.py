@@ -78,6 +78,29 @@ class GOPrediction(Base):
     # --- Re-ranker features ---
     vote_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     k_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Rank of the nearest distinct SEQUENCE carrying this term, dense over the
+    #: retrieved neighbourhood. ``k_position`` ranks proteins; two proteins with
+    #: the same sequence are the same point of the embedding space and occupy two
+    #: protein ranks but one sequence rank.
+    #:
+    #: This matters because the corpus holds 616,846 proteins over 528,294
+    #: distinct sequences, 38,694 of them shared, one by 114 proteins. Depth
+    #: counted in proteins can therefore mean a single point of the space looked
+    #: at over and over.
+    #:
+    #: The two are kept apart rather than deduplicated: among shared sequences
+    #: that carry annotations, 18.7 per cent have proteins with different term
+    #: sets, so a shared sequence is one point of the space and several donors of
+    #: annotation, and collapsing them would lose the second.
+    #:
+    #: Stored rather than derived because it is fixed by the retrieval and does
+    #: not move with a later cut, which is the line between what belongs on the
+    #: row and what has to be recomputed. ``vote_count`` and the ``neighbor_*``
+    #: aggregates sit on the wrong side of that line and are being moved off it.
+    #:
+    #: NULL on every row retrieved before this column existed. Null is not zero
+    #: and not one: it says the retrieval predates the question.
+    sequence_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     go_term_frequency: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ref_annotation_density: Mapped[int | None] = mapped_column(Integer, nullable=True)
     neighbor_distance_std: Mapped[float | None] = mapped_column(Float, nullable=True)
