@@ -63,25 +63,47 @@ class DepthCut:
 class RecountedAggregates:
     """What the surviving donors of one row add up to.
 
-    ``vote_count`` here counts donors, not annotation rows, which is what
-    the column of that name has always counted. The two differ on 37.6
-    per cent of pairs in this corpus, so they are not interchangeable and
-    this one is named for what it holds.
+    ``donor_count`` counts donors, not annotation rows, which is what the
+    column named ``vote_count`` has always counted. The two differ on
+    37.6 per cent of pairs in this corpus, so they are not
+    interchangeable and this one is named for what it holds.
+
+    ``sequence_count`` is the same survivors counted in distinct
+    sequences. It is not redundant: two donors sharing a sequence are two
+    donors and one sequence, which is the entire reason depth is counted
+    in sequences at all.
     """
 
     donor_count: int
+    sequence_count: int | None
     mean_distance: float | None
     min_distance: float | None
     distance_std: float | None
+    cut: DepthCut
 
-    def vote_fraction(self, depth: int) -> float | None:
-        """Donors that voted, over the depth they were drawn from.
+    def vote_fraction(self) -> float | None:
+        """Voters over the depth they were drawn from, in one unit.
 
-        Bounded by 1 by construction, because a depth admits at most that
-        many donors and each is counted once. The stored column of this
-        name is not: it divides annotation rows by the retrieval K and
-        reaches 4.9.
+        The numerator has to be counted in the same unit as the
+        denominator or the result is not a fraction. A cut at sequence
+        depth 1 can admit two donors, because two proteins can share one
+        sequence, so donors over that depth would give 2.0. Counted in
+        sequences it gives 1.0, which is what the depth admitted and what
+        it was asked.
+
+        Bounded by 1 either way. The stored column of this name is not:
+        it divides annotation rows by the retrieval K and reaches 4.9 on
+        104,627 rows.
+
+        Returns None when the row carries no sequence ranks and the cut
+        is counted in sequences, since there is then nothing to count in
+        that unit rather than a zero.
         """
+        if self.cut.max_sequence_rank is not None:
+            if self.sequence_count is None or self.cut.max_sequence_rank <= 0:
+                return None
+            return self.sequence_count / self.cut.max_sequence_rank
+        depth = int(self.cut.max_k_position or 0)
         if depth <= 0:
             return None
         return self.donor_count / depth
@@ -119,14 +141,31 @@ def recount_at_depth(row: dict[str, Any], cut: DepthCut) -> RecountedAggregates 
     distances = row.get("donor_distances")
     if ranks is None or distances is None or len(ranks) != len(distances):
         return None
-    kept = [float(d) for rank, d in zip(ranks, distances, strict=True) if rank <= depth]
-    if not kept:
-        return RecountedAggregates(0, None, None, None)
+    survivors = [
+        (rank, float(d))
+        for rank, d in zip(ranks, distances, strict=True)
+        if rank <= depth
+    ]
+    sequence_ranks = row.get("donor_sequence_ranks")
+    kept_sequences = (
+        None
+        if sequence_ranks is None or len(sequence_ranks) != len(distances)
+        else len({
+            seq
+            for seq, rank in zip(sequence_ranks, ranks, strict=True)
+            if rank <= depth
+        })
+    )
+    if not survivors:
+        return RecountedAggregates(0, kept_sequences and 0, None, None, None, cut)
+    kept = [d for _, d in survivors]
     mean = math.fsum(kept) / len(kept)
     variance = math.fsum((d - mean) ** 2 for d in kept) / len(kept)
     return RecountedAggregates(
         donor_count=len(kept),
+        sequence_count=kept_sequences,
         mean_distance=mean,
         min_distance=min(kept),
         distance_std=math.sqrt(variance) if len(kept) > 1 else 0.0,
+        cut=cut,
     )

@@ -73,18 +73,51 @@ class TestTheRecountUsesOnlyTheSurvivingDonors:
         assert got.distance_std == 0.0
 
 
+#: Donors only at protein positions 1 and 4, so the fraction is genuinely
+#: below 1 and a numerator counted in the wrong unit shows up as a number
+#: rather than as a coincidence.
+_SPARSE: dict[str, Any] = {
+    "donor_accessions": ["R1", "R4"],
+    "donor_k_positions": [1, 4],
+    "donor_sequence_ranks": [1, 3],
+    "donor_distances": [0.10, 0.40],
+    "donor_count": 2,
+}
+
+
 class TestTheFractionIsAFraction:
-    def test_it_cannot_exceed_one(self) -> None:
+    def test_it_cannot_exceed_one_counting_proteins(self) -> None:
         """The stored column of this name reaches 4.9 on 104,627 rows."""
         for depth in (1, 2, 3, 4, 30):
             got = recount_at_depth(_ROW, DepthCut(max_k_position=depth))
             assert got is not None
-            assert 0.0 <= (got.vote_fraction(depth) or 0.0) <= 1.0
+            assert 0.0 <= (got.vote_fraction() or 0.0) <= 1.0
+
+    def test_it_cannot_exceed_one_counting_sequences_either(self) -> None:
+        """Two proteins can share one sequence, so donors over a sequence
+        depth is not a fraction: at depth 1 it would give 2.0."""
+        got = recount_at_depth(_ROW, DepthCut(max_sequence_rank=1))
+        assert got is not None
+        assert got.donor_count == 2
+        assert got.sequence_count == 1
+        assert got.vote_fraction() == pytest.approx(1.0)
+
+    def test_the_numerator_is_counted_in_the_unit_of_the_denominator(self) -> None:
+        got = recount_at_depth(_SPARSE, DepthCut(max_sequence_rank=3))
+        assert got is not None
+        assert got.donor_count == 2
+        assert got.sequence_count == 2
+        assert got.vote_fraction() == pytest.approx(2 / 3)
+
+    def test_a_sparse_neighbourhood_scores_below_one(self) -> None:
+        got = recount_at_depth(_SPARSE, DepthCut(max_k_position=10))
+        assert got is not None
+        assert got.vote_fraction() == pytest.approx(0.2)
 
     def test_a_depth_of_zero_has_no_fraction_rather_than_a_division(self) -> None:
-        got = recount_at_depth(_ROW, DepthCut(max_k_position=1))
+        got = recount_at_depth(_ROW, DepthCut(max_k_position=0))
         assert got is not None
-        assert got.vote_fraction(0) is None
+        assert got.vote_fraction() is None
 
 
 class TestARowWithoutALedger:
