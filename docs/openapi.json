@@ -10559,6 +10559,155 @@
         ]
       }
     },
+    "/v1/strata/{evaluation_result_id}/proteins": {
+      "get": {
+        "description": "One page of a panel's proteins, and the counts that frame the page.\n\nThe counts are four and they are deliberately not one. ``panel_population``\nis every protein the artefact scored in this cell, which is the number the\npanel prints. ``placed`` is how many of them could be put on the retrieval\naxes. ``matched`` is how many survive the bands the caller pinned.\n``returned`` is how many are on this page. A single total would collapse a\nretrieval gap, a filter and a page size into one number that answers none\nof the three questions.",
+        "operationId": "stratum_proteins_v1_strata__evaluation_result_id__proteins_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_result_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Evaluation Result Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "One of: f_asc, f_desc, identity_asc, identity_desc, accession.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "f_asc",
+              "description": "One of: f_asc, f_desc, identity_asc, identity_desc, accession.",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows on this page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Rows on this page.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip.",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Knowledge setting, which is both the artefact directory and the category axis. One at a time: the three are different populations.",
+            "in": "query",
+            "name": "setting",
+            "required": false,
+            "schema": {
+              "default": "NK",
+              "description": "Knowledge setting, which is both the artefact directory and the category axis. One at a time: the three are different populations.",
+              "title": "Setting",
+              "type": "string"
+            }
+          },
+          {
+            "description": "GO aspect, in either spelling: BPO or P, MFO or F, CCO or C.",
+            "in": "query",
+            "name": "aspect",
+            "required": true,
+            "schema": {
+              "description": "GO aspect, in either spelling: BPO or P, MFO or F, CCO or C.",
+              "title": "Aspect",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Length band, or unset for the whole panel. A property of the sequence, so it is identical under every arm.",
+            "in": "query",
+            "name": "length",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Length band, or unset for the whole panel. A property of the sequence, so it is identical under every arm.",
+              "title": "Length"
+            }
+          },
+          {
+            "description": "Identity band to the nearest non-self donor, or unset for the whole panel. A property of THIS arm's retrieval: K changes which donors come back, so the same protein can sit in different bands under two arms.",
+            "in": "query",
+            "name": "homology",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Identity band to the nearest non-self donor, or unset for the whole panel. A property of THIS arm's retrieval: K changes which donors come back, so the same protein can sit in different bands under two arms.",
+              "title": "Homology"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Stratum Proteins V1 Strata  Evaluation Result Id  Proteins Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "The proteins one panel is made of, with what each scored",
+        "tags": [
+          "strata"
+        ]
+      }
+    },
     "/v1/stratum/{prediction_set_id}/members": {
       "get": {
         "description": "The proteins a stratum is made of, with what put each one there.\n\nEvery row carries the identity to its nearest donor and whether that\ndonor is experimental, because that is what the band IS: a reader who\ncannot see what put a protein in a band cannot check the band, and a\nband nobody can check is a label.\n\nIt does NOT yet carry WHICH donor. ``Neighbourhood`` resolves five\nfacts about the retrieved donors and the accession is not among them,\nso naming it here would mean changing what retrieval returns. Until\nthen a reader can check the distance but not follow it, and this\ndocstring says so rather than implying otherwise.",

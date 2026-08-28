@@ -158,6 +158,18 @@ class SealEvaluationFramesOperation(Operation):
         "seal. Defaults to a dry run."
     )
 
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        """Say which of the two runs this is, because they differ in kind.
+
+        The dry run reports what a stamping run would write and touches
+        nothing; the second writes a provenance column. A reader scanning a job
+        list has to tell them apart without opening the payload, which is the
+        whole reason the operation asks to be called twice.
+        """
+        if payload.get("dry_run", True):
+            return "dry run: report the frame digest each result would be stamped with"
+        return "stamp evaluation_result.frame with the digest of its window, pivot and caps"
+
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
