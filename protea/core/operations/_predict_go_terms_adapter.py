@@ -83,6 +83,12 @@ class AdapterInputs(NamedTuple):
     # unchanged. Holds a lookup/store port rather than a Session: alignments
     # are reused across runs, but the adapter has no business knowing where.
     alignment_cache: Any = None
+    # Accession to sequence identity for the reference bank, so the method
+    # can number a neighbour list by distinct sequence instead of by
+    # protein. Optional and defaulted so every existing caller is
+    # unchanged; when it is empty the method leaves ``sequence_rank`` null
+    # rather than guessing a rank.
+    ref_sequence_identities: dict[str, str] | None = None
 
 
 class AdapterResult(NamedTuple):
@@ -103,13 +109,16 @@ class AdapterResult(NamedTuple):
 
 def _build_predict_config(
     p: PredictGOTermsBatchPayload, *, use_cos: bool, aspect_separated: bool,
-    prediction_set_id: uuid.UUID,
+    prediction_set_id: uuid.UUID, sequence_keys: dict[str, str] | None = None,
 ) -> PredictConfig:
     """Translate the PROTEA payload into the ``PredictConfig`` shape.
 
     ``prediction_set_id`` is forwarded via ``PredictConfig`` (the F2C.5a
     contract) so ``pipeline.predict`` stamps it on every row without
-    adding to its already-saturated kwarg signature.
+    adding to its already-saturated kwarg signature. ``sequence_keys``
+    travels the same way and for the same reason: it is what lets the
+    method rank a neighbour list by distinct sequence rather than by
+    protein.
     """
     return PredictConfig(
         k=p.limit_per_entry,
@@ -121,6 +130,7 @@ def _build_predict_config(
         compute_taxonomy=False,
         pre_normalized=use_cos,
         prediction_set_id=str(prediction_set_id),
+        sequence_keys=sequence_keys,
     )
 
 
@@ -333,6 +343,7 @@ def call_pipeline_predict(inputs: AdapterInputs) -> AdapterResult:
     cfg = _build_predict_config(
         p, use_cos=use_cos, aspect_separated=False,
         prediction_set_id=inputs.prediction_set_id,
+        sequence_keys=inputs.ref_sequence_identities,
     )
     predictions, diagnostics = pipeline_predict(
         query_accessions=inputs.valid_accessions,
@@ -380,6 +391,7 @@ def call_pipeline_predict_aspect_separated(
     cfg = _build_predict_config(
         p, use_cos=use_cos, aspect_separated=True,
         prediction_set_id=inputs.prediction_set_id,
+        sequence_keys=inputs.ref_sequence_identities,
     )
     predictions, diagnostics = pipeline_predict(
         query_accessions=inputs.valid_accessions,
