@@ -989,7 +989,7 @@ version = "1.3.3"
 description = "Python library for calculating contours of 2D quadrilateral grids"
 optional = false
 python-versions = ">=3.11"
-groups = ["main"]
+groups = ["main", "test"]
 files = [
     {file = "contourpy-1.3.3-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:709a48ef9a690e1343202916450bc48b9e51c049b089c7f79a267b46cffcdaa1"},
     {file = "contourpy-1.3.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:23416f38bfd74d5d28ab8429cc4d63fa67d5068bd711a85edb1c3fb0c3e2f381"},
@@ -1227,7 +1227,7 @@ version = "0.12.1"
 description = "Composable style cycles"
 optional = false
 python-versions = ">=3.8"
-groups = ["main"]
+groups = ["main", "test"]
 files = [
     {file = "cycler-0.12.1-py3-none-any.whl", hash = "sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30"},
     {file = "cycler-0.12.1.tar.gz", hash = "sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c"},
@@ -1426,7 +1426,7 @@ version = "4.63.0"
 description = "Tools to manipulate font files"
 optional = false
 python-versions = ">=3.10"
-groups = ["main"]
+groups = ["main", "test"]
 files = [
     {file = "fonttools-4.63.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:e3297a6a4059b4acc3a1e9a8b04741f240a80044eef08ebd32e8b5bcdddce75b"},
     {file = "fonttools-4.63.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:b1cd75a03ad8cb5bc40c90bfde68c0c47de423aa19e5c0f362b43520645eea94"},
@@ -2163,7 +2163,7 @@ version = "1.5.0"
 description = "A fast implementation of the Cassowary constraint solver"
 optional = false
 python-versions = ">=3.10"
-groups = ["main"]
+groups = ["main", "test"]
 files = [
     {file = "kiwisolver-1.5.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:32cc0a5365239a6ea0c6ed461e8838d053b57e397443c0ca894dcc8e388d4374"},
     {file = "kiwisolver-1.5.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:cc0b66c1eec9021353a4b4483afb12dfd50e3669ffbb9152d6842eb34c7e29fd"},
@@ -2600,7 +2600,7 @@ version = "3.11.0"
 description = "Python plotting package"
 optional = false
 python-versions = ">=3.11"
-groups = ["main"]
+groups = ["main", "test"]
 files = [
     {file = "matplotlib-3.11.0-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:f857524b442f0f36e641868ce2171aafa88cb0bc0644f4e1d8a5df9b32649fef"},
     {file = "matplotlib-3.11.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:57baa92fdc82948ed716eae6d2579d4d6f40965cd8d2f416755b4a72580a3233"},
@@ -3652,7 +3652,7 @@ version = "12.2.0"
 description = "Python Imaging Library (fork)"
 optional = false
 python-versions = ">=3.10"
-groups = ["main"]
+groups = ["main", "test"]
 files = [
     {file = "pillow-12.2.0-cp310-cp310-macosx_10_10_x86_64.whl", hash = "sha256:a4e8f36e677d3336f35089648c8955c51c6d386a13cf6ee9c189c5f5bd713a9f"},
     {file = "pillow-12.2.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:2e589959f10d9824d39b350472b92f0ce3b443c0a3442ebf41c40cb8361c5b97"},
@@ -3958,7 +3958,7 @@ develop = false
 
 [package.dependencies]
 numpy = ">=1.24"
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "7500dc2313ed2df9c53821f2a10588c1ee7abe81"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "74d329ff22a77baa5142f477889dd6e2e2ca2a4f"}
 
 [package.extras]
 all = ["esm (>=3.1)", "sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
@@ -3971,8 +3971,8 @@ t5 = ["sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-backends.git"
-reference = "47f023551a274880b941a1e712e705e74ffd0871"
-resolved_reference = "47f023551a274880b941a1e712e705e74ffd0871"
+reference = "9b76719a14d729390be7d0faf957fae06a31ced5"
+resolved_reference = "9b76719a14d729390be7d0faf957fae06a31ced5"
 
 [[package]]
 name = "protea-contracts"
@@ -3980,7 +3980,7 @@ version = "1.7.0"
 description = "Shared ABCs, payload schemas, feature registry contract and compute_schema_sha helper for the PROTEA stack."
 optional = false
 python-versions = ">=3.12,<4.0"
-groups = ["main", "plugins"]
+groups = ["main", "plugins", "test"]
 files = []
 develop = false
 
@@ -3992,8 +3992,8 @@ pydantic = ">=2.5"
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-contracts.git"
-reference = "7500dc2313ed2df9c53821f2a10588c1ee7abe81"
-resolved_reference = "7500dc2313ed2df9c53821f2a10588c1ee7abe81"
+reference = "74d329ff22a77baa5142f477889dd6e2e2ca2a4f"
+resolved_reference = "74d329ff22a77baa5142f477889dd6e2e2ca2a4f"
 
 [[package]]
 name = "protea-method"
@@ -4010,48 +4010,55 @@ faiss-cpu = ">=1.7"
 lightgbm = ">=4.0"
 numpy = ">=1.24"
 pandas = ">=2.0"
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "7500dc2313ed2df9c53821f2a10588c1ee7abe81"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "74d329ff22a77baa5142f477889dd6e2e2ca2a4f"}
 
 [package.extras]
-esm = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@47f023551a274880b941a1e712e705e74ffd0871", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
+esm = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@9b76719a14d729390be7d0faf957fae06a31ced5", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
 mil = ["torch (>=2.0,<3.0)"]
-t5 = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@47f023551a274880b941a1e712e705e74ffd0871", "sentencepiece (>=0.2)", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
+t5 = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@9b76719a14d729390be7d0faf957fae06a31ced5", "sentencepiece (>=0.2)", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-method.git"
-reference = "fc73d3e76b841c5cee37419129e2cd56b2e461e0"
-resolved_reference = "fc73d3e76b841c5cee37419129e2cd56b2e461e0"
+reference = "5907ad9542faefcefe9b45f637475e528eaf3ce5"
+resolved_reference = "5907ad9542faefcefe9b45f637475e528eaf3ce5"
 
 [[package]]
 name = "protea-reranker-lab"
 version = "0.2.0"
 description = "Research sandbox for iterating on PROTEA's GO-term reranker."
 optional = false
-python-versions = ">=3.11"
+python-versions = ">=3.12,<4.0"
 groups = ["test"]
 files = []
 develop = false
 
 [package.dependencies]
 lightgbm = ">=4.3"
+matplotlib = ">=3.8"
 numpy = ">=1.26"
 pandas = ">=2.2"
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "74d329ff22a77baa5142f477889dd6e2e2ca2a4f"}
 pyarrow = ">=15"
 pydantic = ">=2.6"
 pyyaml = ">=6"
 scikit-learn = ">=1.4"
+scipy = ">=1.11"
 wandb = ">=0.16"
+
+[package.extras]
+dev = ["mypy (>=1.0)", "pytest (>=8)"]
+native = ["boto3 (>=1.34)", "minio (>=7.2)", "mlflow-skinny (>=2.10)"]
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-reranker-lab.git"
-reference = "main"
-resolved_reference = "2311c67edf6c6da045dffc9cf1a40dce9b0af1e3"
+reference = "6d4dc2d4b5330485b8830b20f7789356af7be1d4"
+resolved_reference = "6d4dc2d4b5330485b8830b20f7789356af7be1d4"
 
 [[package]]
 name = "protea-runners"
-version = "0.1.0"
+version = "0.0.1"
 description = "Experiment runner plugins for the PROTEA stack: LightGBM training, KNN baseline, future GNN and retrieval-neural runners."
 optional = false
 python-versions = ">=3.12,<4.0"
@@ -4062,14 +4069,14 @@ develop = false
 [package.dependencies]
 lightgbm = ">=4.0"
 numpy = ">=1.24"
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "7500dc2313ed2df9c53821f2a10588c1ee7abe81"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "74d329ff22a77baa5142f477889dd6e2e2ca2a4f"}
 pyarrow = ">=14"
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-runners.git"
-reference = "f9b1e646ee86af8ecc9b694f611d9e8dbb8e55e2"
-resolved_reference = "f9b1e646ee86af8ecc9b694f611d9e8dbb8e55e2"
+reference = "ccd06fd80c12b5195339478dae7255d1ea58f4a6"
+resolved_reference = "ccd06fd80c12b5195339478dae7255d1ea58f4a6"
 
 [[package]]
 name = "protea-sources"
@@ -4082,14 +4089,14 @@ files = []
 develop = false
 
 [package.dependencies]
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "7500dc2313ed2df9c53821f2a10588c1ee7abe81"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "74d329ff22a77baa5142f477889dd6e2e2ca2a4f"}
 requests = ">=2.31"
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-sources.git"
-reference = "0b637193475712872875597eba89f722291dff78"
-resolved_reference = "0b637193475712872875597eba89f722291dff78"
+reference = "ad0810b9a2d117c336189d6f3f55cb3fa9aba86a"
+resolved_reference = "ad0810b9a2d117c336189d6f3f55cb3fa9aba86a"
 
 [[package]]
 name = "protobuf"
@@ -4668,7 +4675,7 @@ version = "3.3.2"
 description = "pyparsing - Classes and methods to define and execute parsing grammars"
 optional = false
 python-versions = ">=3.9"
-groups = ["main"]
+groups = ["main", "test"]
 files = [
     {file = "pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d"},
     {file = "pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc"},
@@ -7026,4 +7033,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "32a7b06302e69e75d160f695d6702fab3823f68aca6dffee04f3fc21bf40adf9"
+content-hash = "4640f3bfb10e0bad333873897e40f69331dbcce88d624a50af01fcd4284420ca"
