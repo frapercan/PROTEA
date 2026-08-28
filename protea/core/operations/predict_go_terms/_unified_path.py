@@ -132,17 +132,25 @@ def unified_load_annotations(
     """Pre-search KNN to resolve the unique-neighbour set, then load
     the lazy go-map only for those references."""
     from protea.core.knn_search import search_knn
+    from protea.core.operations.predict_go_terms._self_neighbour import (
+        search_k_for,
+        without_self,
+    )
 
     p = ctx.p
     use_cos = p.metric == "cosine"
     ref_embeddings_f32 = (
         ctx.ref_data["embeddings_f32_cos"] if use_cos else ctx.ref_data["embeddings_f32"]
     )
+    # One more than asked for when the query may not be its own neighbour, so
+    # that dropping the self hit below leaves limit_per_entry real donors rather
+    # than one fewer. See _self_neighbour for the measurement that prompted it.
+    exclude_self = bool(getattr(p, "exclude_self_neighbour", False))
     neighbors = search_knn(
         ctx.query_embeddings,
         ref_embeddings_f32,
         ctx.ref_data["accessions"],
-        k=p.limit_per_entry,
+        k=search_k_for(p.limit_per_entry, exclude_self),
         distance_threshold=p.distance_threshold,
         backend=p.search_backend,
         metric=p.metric,
@@ -152,6 +160,9 @@ def unified_load_annotations(
         faiss_nprobe=p.faiss_nprobe,
         faiss_hnsw_m=p.faiss_hnsw_m,
         faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+    )
+    neighbors = without_self(
+        neighbors, list(ctx.valid_accessions), p.limit_per_entry, exclude_self
     )
     unique_neighbors: set[str] = {ref_acc for top_refs in neighbors for ref_acc, _ in top_refs}
     annotations = op._load_annotations_for(session, ctx.annotation_set_id, unique_neighbors)
