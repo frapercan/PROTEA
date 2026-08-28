@@ -451,12 +451,11 @@ def _emit_pairing(panel: dict[str, Any], key: str, p: ComparePairedPanelsPayload
 def _emit_panel(
     panel: dict[str, Any], key: str, p: ComparePairedPanelsPayload, emit: EmitFn
 ) -> None:
-    """Everything a reader needs about one panel, at the level it belongs.
+    """What the panel measured, at the level it belongs.
 
-    The underpowered warning is the one that matters. It is what separates a
-    null that says something from a null that says nothing, and it is a warning
-    rather than an info line so it survives into the job event log at a level
-    someone filters on.
+    What a reader should CONCLUDE from it is emitted separately, because the
+    two answer different questions and are filtered at different levels: this
+    one is always info, and a verdict about power is a warning.
     """
     _emit_pairing(panel, key, p, emit)
     reported = (
@@ -481,6 +480,21 @@ def _emit_panel(
         },
         "info",
     )
+    _emit_verdict(panel, key, emit)
+
+
+def _emit_verdict(panel: dict[str, Any], key: str, emit: EmitFn) -> None:
+    """Which of the three readings of an interval covering zero this one is.
+
+    The distinction is the operation's reason to exist. An interval covering
+    zero can mean the two systems are the same down to a size worth caring
+    about, or that the comparison could never have resolved anything, or that
+    nobody declared what size was worth caring about so the question is
+    unanswered. Those are different conclusions and only the first is evidence.
+
+    The first is info and the other two are warnings, so a reader filtering the
+    job event log on level sees the ones that need an action.
+    """
     mde, effect = panel["minimum_detectable_effect"], panel.get("effect_of_interest")
     if panel["status"] == "underpowered" and mde is not None:
         emit(
