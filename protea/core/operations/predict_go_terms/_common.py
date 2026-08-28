@@ -96,6 +96,7 @@ _STORE_FLOAT_KEYS: tuple[str, ...] = (
     "taxonomic_common_ancestors",
     "vote_count",
     "k_position",
+    "sequence_rank",
     "go_term_frequency",
     "ref_annotation_density",
     "neighbor_distance_std",
@@ -103,6 +104,19 @@ _STORE_FLOAT_KEYS: tuple[str, ...] = (
     "neighbor_min_distance",
     "neighbor_mean_distance",
     *_NEW_V6_FEATURE_KEYS,
+)
+
+
+#: The donor ledger, written as-is rather than through ``_clean_float``.
+#: ``donor_count`` counts distinct donors; ``vote_count`` above counts
+#: annotation rows, and 5,518,069 of 14,694,523 (protein, term) pairs carry
+#: more than one, so the two are different numbers and both are kept.
+_STORE_DONOR_KEYS: tuple[str, ...] = (
+    "donor_accessions",
+    "donor_k_positions",
+    "donor_sequence_ranks",
+    "donor_distances",
+    "donor_count",
 )
 
 
@@ -253,6 +267,14 @@ def _row_from_prediction(
     # ``PROTEA_GO_PREDICTION_JSONB_WRITE_ENABLED``; when the flag is
     # off (default) ``maybe_jsonb`` returns ``None`` and the column
     # stays NULL.
+    # The donor ledger. These are arrays and a plain integer, not floats, so
+    # they cannot ride ``_STORE_FLOAT_KEYS``: ``_clean_float`` would turn each
+    # list into None and the columns would fill with the silence they exist to
+    # end. Absent from the dict means the producer did not run, and the column
+    # stays NULL, which is not the same as an empty array: a term is on the row
+    # because something donated it, so it never has zero donors.
+    for key in _STORE_DONOR_KEYS:
+        row[key] = pred.get(key)
     row["predictions_jsonb"] = maybe_jsonb(
         [(row["go_term_id"], row["distance"], row.get("evidence_code"))]
     )

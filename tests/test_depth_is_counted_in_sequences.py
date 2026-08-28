@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 from protea_contracts import PredictGOTermsBatchPayload
 
+from protea.core.operations._donor_recount import DepthCut, recount_at_depth
 from protea.core.operations._predict_go_terms_adapter import (
     AdapterInputs,
     call_pipeline_predict,
@@ -84,3 +85,28 @@ def test_a_neighbour_missing_from_the_map_stops_the_run() -> None:
     """Silence here is how an arm gets scored against the wrong depth."""
     with pytest.raises(Exception, match="sequence identity"):
         _run({"R1": "s1"})
+
+
+def test_the_donor_ledger_arrives_with_the_rank() -> None:
+    """The two repos meet here: the method produces it, PROTEA stores it.
+
+    R1 and R2 are one sequence, so a cut at sequence depth 1 admits both
+    donors while a cut at protein depth 1 admits one. Recounting that from
+    the row is the whole point of carrying the ledger.
+    """
+    rows = _run({"R1": "s1", "R2": "s1", "R3": "s2"})
+    row = rows[0]
+    assert row["donor_accessions"] == ["R1", "R2", "R3"]
+    assert row["donor_k_positions"] == [1, 2, 3]
+    assert row["donor_sequence_ranks"] == [1, 1, 2]
+    assert row["donor_count"] == 3
+
+    by_sequence = recount_at_depth(row, DepthCut(max_sequence_rank=1))
+    by_protein = recount_at_depth(row, DepthCut(max_k_position=1))
+    assert by_sequence is not None and by_protein is not None
+    assert by_sequence.donor_count == 2
+    assert by_sequence.sequence_count == 1
+    assert by_protein.donor_count == 1
+    # Two donors at sequence depth 1 is two donors and one sequence. The
+    # fraction counts in the unit of its denominator, so it is 1.0 and not 2.0.
+    assert by_sequence.vote_fraction() == 1.0
