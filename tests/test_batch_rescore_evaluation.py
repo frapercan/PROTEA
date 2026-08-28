@@ -396,10 +396,7 @@ class TestBaseCacheAtomicWrite:
         df = _base_frame()
 
         out = _pred_base_cache.load_or_build_base(
-            pred_id,
-            None,
-            None,
-            delta,
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, None, delta),
             count_fn=lambda: 3,
             build_fn=lambda: (df, 3),
         )
@@ -409,10 +406,7 @@ class TestBaseCacheAtomicWrite:
         assert leftovers == []
         # Second call hits the cache (count matches) and returns the frame.
         again = _pred_base_cache.load_or_build_base(
-            pred_id,
-            None,
-            None,
-            delta,
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, None, delta),
             count_fn=lambda: 3,
             build_fn=lambda: (_ for _ in ()).throw(AssertionError("should not rebuild")),
         )
@@ -424,7 +418,7 @@ class TestBaseCacheAtomicWrite:
         delta = ["P1"]
         df = _base_frame()
         _pred_base_cache.load_or_build_base(
-            pred_id, None, None, delta, count_fn=lambda: 3, build_fn=lambda: (df, 3)
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, None, delta), count_fn=lambda: 3, build_fn=lambda: (df, 3)
         )
         # A fresh COUNT that diverges from the sidecar forces a rebuild.
         rebuilt = {"called": False}
@@ -434,7 +428,7 @@ class TestBaseCacheAtomicWrite:
             return df, 5
 
         _pred_base_cache.load_or_build_base(
-            pred_id, None, None, delta, count_fn=lambda: 5, build_fn=build
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, None, delta), count_fn=lambda: 5, build_fn=build
         )
         assert rebuilt["called"] is True
 
@@ -518,7 +512,7 @@ class TestDepthIsPartOfTheCacheKey:
         delta = ["P1"]
         df = _base_frame()
         _pred_base_cache.load_or_build_base(
-            pred_id, None, 10, delta, count_fn=lambda: 3, build_fn=lambda: (df, 3)
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, 10, delta), count_fn=lambda: 3, build_fn=lambda: (df, 3)
         )
         built = {"called": False}
 
@@ -527,7 +521,7 @@ class TestDepthIsPartOfTheCacheKey:
             return df, 3
 
         _pred_base_cache.load_or_build_base(
-            pred_id, None, 1, delta, count_fn=lambda: 3, build_fn=build
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, 1, delta), count_fn=lambda: 3, build_fn=build
         )
         assert built["called"] is True
 
@@ -553,36 +547,39 @@ class TestADeclaredDepthIsChecked:
         )
 
     def test_a_frame_wider_than_the_declared_depth_is_refused(self, monkeypatch):
-        from protea.core.operations import _run_cafa_artifacts as A
+        from protea.core.operations import _depth_guard as A
+        from protea.core.operations import _run_cafa_artifacts as ART
 
         counts = iter([100, 500])  # restricted, then unrestricted
-        monkeypatch.setattr(A, "_count_base_rows", lambda _s, _c: next(counts))
+        counter = lambda _s, _c: next(counts)
         with pytest.raises(A.DepthNotApplied) as err:
-            A._assert_depth_was_applied(object(), self._ctx(3), _base_frame_of(500))
+            A.assert_depth_was_applied(object(), self._ctx(3), _base_frame_of(500), counter)
         assert "max_k_position=3" in str(err.value)
 
     def test_a_frame_matching_the_declared_depth_passes(self, monkeypatch):
-        from protea.core.operations import _run_cafa_artifacts as A
+        from protea.core.operations import _depth_guard as A
+        from protea.core.operations import _run_cafa_artifacts as ART
 
         counts = iter([100, 500])
-        monkeypatch.setattr(A, "_count_base_rows", lambda _s, _c: next(counts))
-        A._assert_depth_was_applied(object(), self._ctx(3), _base_frame_of(100))
+        counter = lambda _s, _c: next(counts)
+        A.assert_depth_was_applied(object(), self._ctx(3), _base_frame_of(100), counter)
 
     def test_a_depth_that_admits_everything_is_not_a_cut(self, monkeypatch):
         """At the deepest level the restricted and full frames coincide."""
-        from protea.core.operations import _run_cafa_artifacts as A
+        from protea.core.operations import _depth_guard as A
+        from protea.core.operations import _run_cafa_artifacts as ART
 
-        monkeypatch.setattr(A, "_count_base_rows", lambda _s, _c: 500)
-        A._assert_depth_was_applied(object(), self._ctx(10), _base_frame_of(500))
+        counter = lambda _s, _c: 500
+        A.assert_depth_was_applied(object(), self._ctx(10), _base_frame_of(500), counter)
 
     def test_an_undeclared_depth_is_not_checked(self, monkeypatch):
-        from protea.core.operations import _run_cafa_artifacts as A
+        from protea.core.operations import _depth_guard as A
+        from protea.core.operations import _run_cafa_artifacts as ART
 
         def boom(*_a, **_k):
             raise AssertionError("must not count when no depth was declared")
 
-        monkeypatch.setattr(A, "_count_base_rows", boom)
-        A._assert_depth_was_applied(object(), self._ctx(None), _base_frame_of(500))
+        A.assert_depth_was_applied(object(), self._ctx(None), _base_frame_of(500), boom)
 
 
 def _base_frame_of(n: int):

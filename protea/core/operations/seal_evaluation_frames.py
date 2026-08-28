@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass, field
 from typing import Annotated, Any
 
 from pydantic import Field
@@ -149,6 +150,76 @@ class SealEvaluationFramesPayload(ProteaPayload, frozen=True):
     max_examples: PositiveInt = 20
 
 
+@dataclass
+class _Tally:
+    """What one pass over the stored results found, before anything is said."""
+
+    sealed: int = 0
+    already: int = 0
+    conflicts: list[dict[str, str]] = field(default_factory=list)
+    unattributable: list[dict[str, str]] = field(default_factory=list)
+    digests: dict[str, int] = field(default_factory=dict)
+
+
+def _walk(session: Session, rows: list[dict[str, Any]], p: Any) -> _Tally:
+    """Classify every row and, unless this is a dry run, write what it implies.
+
+    Separated from ``execute`` so the method stays inside its size budget and,
+    more usefully, so the classification reads as one thing: each row is
+    unattributable, already correct, in conflict, or ready to seal, and those
+    four are the whole vocabulary.
+    """
+    t = _Tally()
+
+    for row in rows:
+        digest = frame_digest(row)
+        if digest is None:
+            if len(t.unattributable) < p.max_examples:
+                t.unattributable.append(
+                    {
+                        "id": row["id"],
+                        "why": (
+                            "no producing job, so the accretion set is unrecoverable"
+                            if not row["has_job"]
+                            else "the evaluation set or accretion set is missing"
+                        ),
+                    }
+                )
+            continue
+
+        t.digests[digest] = t.digests.get(digest, 0) + 1
+        # Recorded for every row whose frame is computable, not only for
+        # rows that still need the stamp. A first version wrote it inside
+        # the branch that seals, so a re-run over rows already sealed
+        # reported success and left the expansion empty: the operation had
+        # nothing left to stamp and therefore never reached the insert. An
+        # artefact that appears only on the first run of an idempotent
+        # operation is one nobody will have when they need it.
+        if not p.dry_run:
+            session.execute(
+                _RECORD_FRAME,
+                {
+                    "digest": digest,
+                    "material": json.dumps({f: row.get(f) for f in _FRAME_FIELDS}, sort_keys=True),
+                    "fields": json.dumps(list(_FRAME_FIELDS)),
+                    "provenance": json.dumps(capture_provenance()),
+                },
+            )
+        current = row.get("frame")
+        if current == digest:
+            t.already += 1
+            continue
+        if current:
+            if len(t.conflicts) < p.max_examples:
+                t.conflicts.append({"id": row["id"], "held": current, "computed": digest})
+            continue
+        if not p.dry_run:
+            session.execute(_SEAL, {"frame": digest, "id": row["id"]})
+        t.sealed += 1
+
+    return t
+
+
 class SealEvaluationFramesOperation(Operation):
     name = "seal_evaluation_frames"
     description = (
@@ -182,59 +253,9 @@ class SealEvaluationFramesOperation(Operation):
             "info",
         )
 
-        sealed = 0
-        already = 0
-        conflicts: list[dict[str, str]] = []
-        unattributable: list[dict[str, str]] = []
-        digests: dict[str, int] = {}
-
-        for row in rows:
-            digest = frame_digest(row)
-            if digest is None:
-                if len(unattributable) < p.max_examples:
-                    unattributable.append(
-                        {
-                            "id": row["id"],
-                            "why": (
-                                "no producing job, so the accretion set is unrecoverable"
-                                if not row["has_job"]
-                                else "the evaluation set or accretion set is missing"
-                            ),
-                        }
-                    )
-                continue
-
-            digests[digest] = digests.get(digest, 0) + 1
-            # Recorded for every row whose frame is computable, not only for
-            # rows that still need the stamp. A first version wrote it inside
-            # the branch that seals, so a re-run over rows already sealed
-            # reported success and left the expansion empty: the operation had
-            # nothing left to stamp and therefore never reached the insert. An
-            # artefact that appears only on the first run of an idempotent
-            # operation is one nobody will have when they need it.
-            if not p.dry_run:
-                session.execute(
-                    _RECORD_FRAME,
-                    {
-                        "digest": digest,
-                        "material": json.dumps(
-                            {f: row.get(f) for f in _FRAME_FIELDS}, sort_keys=True
-                        ),
-                        "fields": json.dumps(list(_FRAME_FIELDS)),
-                        "provenance": json.dumps(capture_provenance()),
-                    },
-                )
-            current = row.get("frame")
-            if current == digest:
-                already += 1
-                continue
-            if current:
-                if len(conflicts) < p.max_examples:
-                    conflicts.append({"id": row["id"], "held": current, "computed": digest})
-                continue
-            if not p.dry_run:
-                session.execute(_SEAL, {"frame": digest, "id": row["id"]})
-            sealed += 1
+        t = _walk(session, rows, p)
+        sealed, already = t.sealed, t.already
+        conflicts, unattributable, digests = t.conflicts, t.unattributable, t.digests
 
         if not p.dry_run:
             session.commit()

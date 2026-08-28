@@ -56,6 +56,74 @@ def _coverage(stored: int, corpus: int | None, chunked: bool) -> float | None:
     return stored / corpus
 
 
+def _count_by_config(rows: list[dict[str, Any]] | None) -> dict[str, int]:
+    """How many of ``rows`` each representation produced, keyed by its config id.
+
+    Counted off the rows the rest of the graph already read, so this section
+    cannot disagree with the nodes it expands. A representation that produced
+    none is reported at zero rather than omitted: the absence is the finding.
+    """
+    out: dict[str, int] = {}
+    for row in rows or []:
+        key = row.get("embedding_config_id")
+        if key:
+            out[key] = out.get(key, 0) + 1
+    return out
+
+
+def _representation_row(
+    row: dict[str, Any],
+    corpus: int | None,
+    sets_by_config: dict[str, int],
+    results_by_config: dict[str, int],
+) -> dict[str, Any]:
+    """One representation as the surface shows it.
+
+    ``param_count`` is passed through exactly as stored, null included. It is
+    null for several of these and nothing orders by it or fills it in: a column
+    missing for half the rows cannot rank them, and a size nobody recorded is a
+    fact about the record rather than a gap to guess at.
+    """
+    state = RETRIEVED if row.get("in_use") else BUILT if row.get("producible") else UNBUILT
+    stored = int(row.get("stored") or 0)
+    chunked = _is_true(row.get("use_chunking"))
+    trained_on_id = row.get("trained_on_id")
+    return {
+        "id": row.get("id"),
+        "label": row.get("label"),
+        "display_name": row.get("display_name"),
+        "model_name": row.get("model_name"),
+        "model_backend": row.get("model_backend"),
+        "family": row.get("family"),
+        "param_count": row.get("param_count"),
+        "layer_indices": row.get("layer_indices"),
+        "layer_agg": row.get("layer_agg"),
+        "pooling": row.get("pooling"),
+        "normalize": _is_true(row.get("normalize")),
+        "normalize_residues": _is_true(row.get("normalize_residues")),
+        "max_length": row.get("max_length"),
+        "use_chunking": chunked,
+        "embeddings_stored": stored,
+        "coverage": _coverage(stored, corpus, chunked),
+        "state": state,
+        # Fitted against a release, or shipped pretrained. Null here is
+        # "not fitted", which is a positive statement about a pretrained
+        # backbone and not a missing value.
+        "trained_on": (
+            {
+                "annotation_set_id": trained_on_id,
+                "source": row.get("trained_on_source"),
+                "version": row.get("trained_on_version"),
+                "published_at": row.get("trained_on_date"),
+            }
+            if trained_on_id
+            else None
+        ),
+        "prediction_sets": sets_by_config.get(row.get("id") or "", 0),
+        "results": results_by_config.get(row.get("id") or "", 0),
+    }
+
+
 def build_representations(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     """Every registered representation, with what was ever done in it.
 
@@ -71,63 +139,10 @@ def build_representations(record: dict[str, list[dict[str, Any]]]) -> dict[str, 
     corpus_rows = record.get("corpus") or []
     corpus = corpus_rows[0].get("sequences") if corpus_rows else None
 
-    # Predictions and scored results per representation, counted off the rows
-    # the rest of the graph already read. A representation that produced neither
-    # is the whole point of the section, so both are reported at zero rather
-    # than omitted.
-    sets_by_config: dict[str, int] = {}
-    for ps in record.get("prediction_sets") or []:
-        key = ps.get("embedding_config_id")
-        if key:
-            sets_by_config[key] = sets_by_config.get(key, 0) + 1
-    results_by_config: dict[str, int] = {}
-    for r in record.get("results") or []:
-        key = r.get("embedding_config_id")
-        if key:
-            results_by_config[key] = results_by_config.get(key, 0) + 1
+    sets_by_config = _count_by_config(record.get("prediction_sets"))
+    results_by_config = _count_by_config(record.get("results"))
 
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        state = RETRIEVED if row.get("in_use") else BUILT if row.get("producible") else UNBUILT
-        stored = int(row.get("stored") or 0)
-        chunked = _is_true(row.get("use_chunking"))
-        trained_on_id = row.get("trained_on_id")
-        out.append(
-            {
-                "id": row.get("id"),
-                "label": row.get("label"),
-                "display_name": row.get("display_name"),
-                "model_name": row.get("model_name"),
-                "model_backend": row.get("model_backend"),
-                "family": row.get("family"),
-                "param_count": row.get("param_count"),
-                "layer_indices": row.get("layer_indices"),
-                "layer_agg": row.get("layer_agg"),
-                "pooling": row.get("pooling"),
-                "normalize": _is_true(row.get("normalize")),
-                "normalize_residues": _is_true(row.get("normalize_residues")),
-                "max_length": row.get("max_length"),
-                "use_chunking": chunked,
-                "embeddings_stored": stored,
-                "coverage": _coverage(stored, corpus, chunked),
-                "state": state,
-                # Fitted against a release, or shipped pretrained. Null here is
-                # "not fitted", which is a positive statement about a pretrained
-                # backbone and not a missing value.
-                "trained_on": (
-                    {
-                        "annotation_set_id": trained_on_id,
-                        "source": row.get("trained_on_source"),
-                        "version": row.get("trained_on_version"),
-                        "published_at": row.get("trained_on_date"),
-                    }
-                    if trained_on_id
-                    else None
-                ),
-                "prediction_sets": sets_by_config.get(row.get("id") or "", 0),
-                "results": results_by_config.get(row.get("id") or "", 0),
-            }
-        )
+    out = [_representation_row(row, corpus, sets_by_config, results_by_config) for row in rows]
 
     # Retrieved first, then built, then unbuilt, alphabetical inside each. Never
     # by parameter count, which is absent for several of them, and never by

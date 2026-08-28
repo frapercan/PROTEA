@@ -21,6 +21,7 @@ import hashlib
 import os
 import uuid
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -55,11 +56,36 @@ def _cache_paths(
     return _PRED_CACHE_DIR / f"{key}.parquet", _PRED_CACHE_DIR / f"{key}.count"
 
 
+@dataclass(frozen=True)
+class BaseFrameKey:
+    """Everything the cached base frame depends on, in one place.
+
+    It exists because the depth was once a filter and not a key: the frame is
+    the candidate set after the cut, so two depths produce two frames, and while
+    the key was assembled from loose arguments one of them could be left out
+    without anything looking wrong. A sweep then read the deepest arm's parquet
+    for every arm and came back flat. Adding a field here forces the filename to
+    change with it, which is the property the loose arguments did not have.
+    """
+
+    pred_set_id: uuid.UUID
+    max_distance: float | None
+    max_k_position: int | None
+    delta_proteins: tuple[str, ...]
+
+    @classmethod
+    def of(
+        cls,
+        pred_set_id: uuid.UUID,
+        max_distance: float | None,
+        max_k_position: int | None,
+        delta_proteins: Iterable[str],
+    ) -> BaseFrameKey:
+        return cls(pred_set_id, max_distance, max_k_position, tuple(delta_proteins))
+
+
 def load_or_build_base(
-    pred_set_id: uuid.UUID,
-    max_distance: float | None,
-    max_k_position: int | None,
-    delta_proteins: Iterable[str],
+    key: BaseFrameKey,
     *,
     count_fn: Callable[[], int],
     build_fn: Callable[[], tuple[Any, int]],
@@ -77,8 +103,9 @@ def load_or_build_base(
     """
     import pandas as pd
 
-    delta = list(delta_proteins)
-    parquet_path, count_path = _cache_paths(pred_set_id, max_distance, max_k_position, delta)
+    parquet_path, count_path = _cache_paths(
+        key.pred_set_id, key.max_distance, key.max_k_position, key.delta_proteins
+    )
     if parquet_path.exists() and count_path.exists():
         cached_count = _read_count(count_path)
         if cached_count is not None and cached_count == count_fn():

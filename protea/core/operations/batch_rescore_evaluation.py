@@ -430,10 +430,9 @@ class BatchRescoreEvaluationOperation:
             path="",  # unused: we fetch the frame, not write a TSV
         )
         base = _artifacts._pred_base_cache.load_or_build_base(
-            ctx.pred_set_id,
-            ctx.max_distance,
-            ctx.max_k_position,
-            ctx.delta_proteins,
+            _artifacts._pred_base_cache.BaseFrameKey.of(
+                ctx.pred_set_id, ctx.max_distance, ctx.max_k_position, ctx.delta_proteins
+            ),
             count_fn=lambda: _artifacts._count_base_rows(session, ctx),
             build_fn=lambda: _artifacts._build_base_frame(session, ctx),
             emit=lambda event, fields: emit(event, None, fields, "info"),
