@@ -118,14 +118,34 @@ class TestTheGuardWiresTheVerdictToTheStore:
                 )
             session.flush()
 
+            # COUNT of a nullable column counts the non-nulls: three rows,
+            # one sequence rank between them, no ledger at all.
             assert ledger_coverage(session, _SET) == (3, 1, 0)
             assert ledger_coverage(session, _OTHER) == (0, 0, 0)
 
+            # No ledger stops the cut before the unit is even considered,
+            # which is the right order: a set that cannot be recounted
+            # cannot be cut in either unit.
+            with pytest.raises(DepthUnitUnavailable, match="donor ledger on 0 of its 3"):
+                assert_depth_unit_is_available(session, _SET, max_sequence_rank=2)
+            with pytest.raises(DepthUnitUnavailable, match="donor ledger on 0 of its 3"):
+                assert_depth_unit_is_available(
+                    session, _SET, max_sequence_rank=None, max_k_position=2
+                )
+            # No depth at all asks nothing of the set, so nothing is refused.
+            assert_depth_unit_is_available(session, _SET, max_sequence_rank=None)
+
+            # With the ledger present the unit check is what remains, and it
+            # sees a set ranked on one row of three.
+            for row in session.query(GOPrediction).all():
+                row.donor_count = 1
+            session.flush()
             with pytest.raises(DepthUnitUnavailable, match="only the ranked part"):
                 assert_depth_unit_is_available(session, _SET, max_sequence_rank=2)
-            # A protein depth has been answerable since the beginning, so the
-            # guard is not its business and must not refuse it.
-            assert_depth_unit_is_available(session, _SET, max_sequence_rank=None)
+            # A protein depth needs no sequence rank, so it passes.
+            assert_depth_unit_is_available(
+                session, _SET, max_sequence_rank=None, max_k_position=2
+            )
 
 
 class TestTwoUnitsAreTwoCandidateSets:

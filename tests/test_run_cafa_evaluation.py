@@ -834,27 +834,40 @@ def _base_row(
     anc2vec_neighbor_cos=None,
     anc2vec_neighbor_maxcos=None,
     go_term_frequency=None,
+    donor_count=None,
 ):
-    """Build a single Core-row tuple in ``_BASE_SCORE_COLS`` order."""
-    return (
-        protein,
-        go_id,
-        distance,
-        identity_nw,
-        identity_sw,
-        evidence_code,
-        taxonomic_distance,
-        neighbor_vote_fraction,
-        alignment_length_nw,
-        gaps_pct_nw,
-        alignment_length_sw,
-        gaps_pct_sw,
-        length_query,
-        ref_annotation_density,
-        anc2vec_neighbor_cos,
-        anc2vec_neighbor_maxcos,
-        go_term_frequency,
-    )
+    """Build a single Core row in ``_BASE_SCORE_COLS`` order.
+
+    Assembled by name and then ordered by the real column tuple, so a
+    column added to that tuple lands in its own slot instead of shifting
+    every value after it by one. The previous version was a bare tuple
+    and did exactly that.
+    """
+    from protea.core.operations._run_cafa_artifacts import _BASE_SCORE_COLS
+
+    named = {
+        "protein_accession": protein,
+        "go_id": go_id,
+        "distance": distance,
+        "identity_nw": identity_nw,
+        "identity_sw": identity_sw,
+        "evidence_code": evidence_code,
+        "taxonomic_distance": taxonomic_distance,
+        "neighbor_vote_fraction": neighbor_vote_fraction,
+        "donor_count": donor_count,
+        "alignment_length_nw": alignment_length_nw,
+        "gaps_pct_nw": gaps_pct_nw,
+        "alignment_length_sw": alignment_length_sw,
+        "gaps_pct_sw": gaps_pct_sw,
+        "length_query": length_query,
+        "ref_annotation_density": ref_annotation_density,
+        "anc2vec_neighbor_cos": anc2vec_neighbor_cos,
+        "anc2vec_neighbor_maxcos": anc2vec_neighbor_maxcos,
+        "go_term_frequency": go_term_frequency,
+    }
+    missing = set(_BASE_SCORE_COLS) - set(named)
+    assert not missing, f"the row builder does not know these columns: {sorted(missing)}"
+    return tuple(named[name] for name in _BASE_SCORE_COLS)
 
 
 def _core_session(rows):
@@ -992,30 +1005,20 @@ class TestVectorizedScoreEquivalence:
 
     def _oracle(self, scoring_config):
         """Replicate the OLD path: dedup (min distance), then _score_unranked_pred."""
-        from protea.core.operations._run_cafa_artifacts import _score_unranked_pred
+        from protea.core.operations._run_cafa_artifacts import (
+            _BASE_SCORE_COLS,
+            _score_unranked_pred,
+        )
 
         winners: dict[tuple[str, str], tuple] = {}
         for row in sorted(self._RAW_ROWS, key=lambda r: (r[0], r[1], r[2])):
             winners.setdefault((row[0], row[1]), row)
         lines = []
         for (_p, _g), row in sorted(winners.items()):
-            pred = SimpleNamespace(
-                distance=row[2],
-                identity_nw=row[3],
-                identity_sw=row[4],
-                evidence_code=row[5],
-                taxonomic_distance=row[6],
-                neighbor_vote_fraction=row[7],
-                alignment_length_nw=row[8],
-                gaps_pct_nw=row[9],
-                alignment_length_sw=row[10],
-                gaps_pct_sw=row[11],
-                length_query=row[12],
-                ref_annotation_density=row[13],
-                anc2vec_neighbor_cos=row[14],
-                anc2vec_neighbor_maxcos=row[15],
-                go_term_frequency=row[16],
-            )
+            # By name, not by index. The positional version silently shifted
+            # every field after the eighth when a column was added to
+            # _BASE_SCORE_COLS, and still produced plausible scores.
+            pred = SimpleNamespace(**dict(zip(_BASE_SCORE_COLS, row, strict=True)))
             score = _score_unranked_pred(pred, scoring_config)
             lines.append(f"{row[0]}\t{row[1]}\t{score:.4f}")
         return sorted(lines)
@@ -1119,30 +1122,18 @@ class TestVectorizedScoreEquivalence:
     ]
 
     def _oracle_rich(self, scoring_config):
-        from protea.core.operations._run_cafa_artifacts import _score_unranked_pred
+        from protea.core.operations._run_cafa_artifacts import (
+            _BASE_SCORE_COLS,
+            _score_unranked_pred,
+        )
 
         winners: dict[tuple[str, str], tuple] = {}
         for row in sorted(self._RICH_ROWS, key=lambda r: (r[0], r[1], r[2])):
             winners.setdefault((row[0], row[1]), row)
         lines = []
         for (_p, _g), row in sorted(winners.items()):
-            pred = SimpleNamespace(
-                distance=row[2],
-                identity_nw=row[3],
-                identity_sw=row[4],
-                evidence_code=row[5],
-                taxonomic_distance=row[6],
-                neighbor_vote_fraction=row[7],
-                alignment_length_nw=row[8],
-                gaps_pct_nw=row[9],
-                alignment_length_sw=row[10],
-                gaps_pct_sw=row[11],
-                length_query=row[12],
-                ref_annotation_density=row[13],
-                anc2vec_neighbor_cos=row[14],
-                anc2vec_neighbor_maxcos=row[15],
-                go_term_frequency=row[16],
-            )
+            # By name, not by index. See the sibling oracle above.
+            pred = SimpleNamespace(**dict(zip(_BASE_SCORE_COLS, row, strict=True)))
             lines.append(f"{row[0]}\t{row[1]}\t{_score_unranked_pred(pred, scoring_config):.4f}")
         return sorted(lines)
 

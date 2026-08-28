@@ -30,67 +30,65 @@ from protea.infrastructure.orm.models.embedding.scoring_config import ScoringCon
 
 
 def _base_frame() -> pd.DataFrame:
-    """A deduped base frame in ``_BASE_SCORE_COLS`` order (None -> NaN floats)."""
+    """A deduped base frame, built by column name rather than by position.
+
+    The previous version listed values as bare tuples in
+    ``_BASE_SCORE_COLS`` order, so adding a column to that tuple silently
+    shifted every value after it into the wrong column. Naming them costs
+    nothing and cannot drift; anything not mentioned is left empty, which
+    is what a producer that did not run leaves too.
+    """
     rows = [
-        (
-            "P1",
-            "GO:0000001",
-            0.40,
-            0.9,
-            0.8,
-            "IDA",
-            0.2,
-            0.7,
-            10,
-            0.1,
-            12,
-            0.0,
-            100,
-            None,
-            None,
-            None,
-            5,
-        ),
-        (
-            "P1",
-            "GO:0000002",
-            0.10,
-            0.5,
-            0.5,
-            "IEA",
-            1.0,
-            0.3,
-            8,
-            0.2,
-            9,
-            0.0,
-            100,
-            None,
-            None,
-            None,
-            200,
-        ),
-        (
-            "P2",
-            "GO:0000003",
-            0.02,
-            0.99,
-            0.99,
-            "EXP",
-            0.0,
-            0.9,
-            20,
-            0.0,
-            20,
-            0.0,
-            80,
-            None,
-            None,
-            None,
-            1,
-        ),
+        {
+            "protein_accession": "P1",
+            "go_id": "GO:0000001",
+            "distance": 0.40,
+            "identity_nw": 0.9,
+            "identity_sw": 0.8,
+            "evidence_code": "IDA",
+            "taxonomic_distance": 0.2,
+            "neighbor_vote_fraction": 0.7,
+            "alignment_length_nw": 10,
+            "gaps_pct_nw": 0.1,
+            "alignment_length_sw": 12,
+            "gaps_pct_sw": 0.0,
+            "length_query": 100,
+            "go_term_frequency": 5,
+        },
+        {
+            "protein_accession": "P1",
+            "go_id": "GO:0000002",
+            "distance": 0.10,
+            "identity_nw": 0.5,
+            "identity_sw": 0.5,
+            "evidence_code": "IEA",
+            "taxonomic_distance": 1.0,
+            "neighbor_vote_fraction": 0.3,
+            "alignment_length_nw": 8,
+            "gaps_pct_nw": 0.2,
+            "alignment_length_sw": 9,
+            "gaps_pct_sw": 0.0,
+            "length_query": 100,
+            "go_term_frequency": 200,
+        },
+        {
+            "protein_accession": "P2",
+            "go_id": "GO:0000003",
+            "distance": 0.02,
+            "identity_nw": 0.99,
+            "identity_sw": 0.99,
+            "evidence_code": "EXP",
+            "taxonomic_distance": 0.0,
+            "neighbor_vote_fraction": 0.9,
+            "alignment_length_nw": 20,
+            "gaps_pct_nw": 0.0,
+            "alignment_length_sw": 20,
+            "gaps_pct_sw": 0.0,
+            "length_query": 80,
+            "go_term_frequency": 1,
+        },
     ]
-    return pd.DataFrame.from_records(rows, columns=list(_artifacts._BASE_SCORE_COLS))
+    return pd.DataFrame(rows).reindex(columns=list(_artifacts._BASE_SCORE_COLS))
 
 
 def _composite_config(params: dict | None = None) -> ScoringConfig:

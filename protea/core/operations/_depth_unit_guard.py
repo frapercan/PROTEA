@@ -49,6 +49,7 @@ __all__ = (
     "assert_depth_unit_is_available",
     "assert_one_depth_unit",
     "ledger_coverage",
+    "why_the_depth_cannot_be_cut",
     "why_the_unit_is_unavailable",
 )
 
@@ -94,6 +95,38 @@ def ledger_coverage(session: Session, pred_set_id: uuid.UUID) -> tuple[int, int,
     return int(row[0]), int(row[1]), int(row[2])
 
 
+def why_the_depth_cannot_be_cut(
+    rows: int, with_ledger: int, depth: int, unit: str, pred_set_id: object
+) -> str | None:
+    """The verdict on cutting at all, given the ledger coverage.
+
+    A cut without a ledger cannot recount: the aggregates on the surviving
+    rows were measured over the whole neighbourhood the retrieval used, and
+    scoring them at a depth reports one candidate set's consensus under
+    another one's label. The run stops rather than producing that.
+
+    Partial coverage stops it too. A run that recounted some rows and
+    inherited others would produce a score built from one set of signals on
+    part of its rows and another set on the rest, which is not comparable
+    with itself and which no label on the result can repair.
+    """
+    if rows == 0:
+        return (
+            f"prediction set {pred_set_id} holds no candidates, so a depth of "
+            f"{depth} {unit} would score an empty set and report it"
+        )
+    if with_ledger == rows:
+        return None
+    return (
+        f"a depth of {depth} {unit} was asked of prediction set {pred_set_id}, "
+        f"which carries a donor ledger on {with_ledger} of its {rows} candidates. "
+        f"Without one the vote and distance aggregates cannot be recounted at the "
+        f"cut, so the run would score depth-{depth} candidates using the whole "
+        f"neighbourhood's consensus and report it as the cut's own. Re-retrieve "
+        f"the set, or score it whole."
+    )
+
+
 def why_the_unit_is_unavailable(
     rows: int, ranked: int, max_sequence_rank: int, pred_set_id: object
 ) -> str | None:
@@ -131,6 +164,7 @@ def assert_depth_unit_is_available(
     pred_set_id: uuid.UUID,
     *,
     max_sequence_rank: int | None,
+    max_k_position: int | None = None,
 ) -> None:
     """Refuse a sequence-depth cut the candidates cannot honour.
 
@@ -147,11 +181,18 @@ def assert_depth_unit_is_available(
             silently drops the unranked half and the surviving half looks
             like a complete answer.
     """
-    if max_sequence_rank is None:
+    if max_sequence_rank is None and max_k_position is None:
         return
-    rows, ranked, _ = ledger_coverage(session, pred_set_id)
-    complaint = why_the_unit_is_unavailable(
-        rows, ranked, max_sequence_rank, pred_set_id
-    )
-    if complaint is not None:
-        raise DepthUnitUnavailable(complaint)
+    rows, ranked, with_ledger = ledger_coverage(session, pred_set_id)
+    depth = max_sequence_rank if max_sequence_rank is not None else max_k_position
+    unit = "sequences" if max_sequence_rank is not None else "proteins"
+    complaints = [
+        why_the_depth_cannot_be_cut(rows, with_ledger, int(depth or 0), unit, pred_set_id)
+    ]
+    if max_sequence_rank is not None:
+        complaints.append(
+            why_the_unit_is_unavailable(rows, ranked, max_sequence_rank, pred_set_id)
+        )
+    for complaint in complaints:
+        if complaint is not None:
+            raise DepthUnitUnavailable(complaint)

@@ -21,6 +21,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from protea.core.operations import _depth_guard, _pred_base_cache
+from protea.core.operations._base_frame_recount import (
+    build_base_frame,
+    ledger_columns,
+)
 from protea.core.operations._run_cafa_helpers import (
     _NS_LABELS,
     _patch_query_known_features,
@@ -48,6 +52,11 @@ _BASE_SCORE_COLS: tuple[str, ...] = (
     "evidence_code",
     "taxonomic_distance",
     "neighbor_vote_fraction",
+    # Voters, as opposed to vote_count's annotation rows. Selected always,
+    # not only under a cut, so the frame's schema does not depend on which
+    # arm built it. Under a cut the recount overwrites it with the count at
+    # that depth; without one it is what the retrieval wrote.
+    "donor_count",
     # --- A-SCORE rich axes (coverage A3 / ref-density F / anc2vec G / IA-prior E) ---
     "alignment_length_nw",
     "gaps_pct_nw",
@@ -289,14 +298,14 @@ def write_predictions(
             getattr(ctx, "max_sequence_rank", None),
         ),
         count_fn=lambda: _count_base_rows(session, ctx),
-        build_fn=lambda: _build_base_frame(session, ctx),
+        build_fn=lambda: build_base_frame(session, ctx, _base_select, _BASE_SCORE_COLS),
     )
     _depth_guard.assert_depth_was_applied(session, ctx, base, _count_base_rows)
     _write_scored_base(base, scoring_config, ctx.path)
 
 
-def _base_select(ctx: WritePredictionsContext) -> Any:
-    """Core columnar SELECT of the baseline scoring inputs for ``ctx``."""
+def _base_select(ctx: WritePredictionsContext, *, with_ledger: bool = False) -> Any:
+    """Core columnar SELECT of the baseline inputs; see ``ledger_columns``."""
     stmt = (
         select(
             GOPrediction.protein_accession,
@@ -307,6 +316,7 @@ def _base_select(ctx: WritePredictionsContext) -> Any:
             GOPrediction.evidence_code,
             GOPrediction.taxonomic_distance,
             GOPrediction.neighbor_vote_fraction,
+            GOPrediction.donor_count,
             GOPrediction.alignment_length_nw,
             GOPrediction.gaps_pct_nw,
             GOPrediction.alignment_length_sw,
@@ -316,6 +326,7 @@ def _base_select(ctx: WritePredictionsContext) -> Any:
             GOPrediction.anc2vec_neighbor_cos,
             GOPrediction.anc2vec_neighbor_maxcos,
             GOPrediction.go_term_frequency,
+            *ledger_columns(with_ledger),
         )
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
         .where(GOPrediction.prediction_set_id == ctx.pred_set_id)
@@ -346,28 +357,6 @@ def _count_base_rows(session: Session, ctx: WritePredictionsContext) -> int:
     if ctx.max_sequence_rank is not None:
         stmt = stmt.where(GOPrediction.sequence_rank <= ctx.max_sequence_rank)
     return int(session.execute(stmt).scalar_one())
-
-
-def _build_base_frame(session: Session, ctx: WritePredictionsContext) -> tuple[Any, int]:
-    """Fetch + dedup the base frame; return ``(deduped_df, raw_row_count)``.
-
-    Dedup keeps the lowest-distance row per ``(protein, go_id)`` (a stable
-    sort by ``protein_accession, go_id, distance`` then first), matching the
-    ORM path's ``order_by(... distance).first()`` winner and leaving the
-    output ordered by ``(protein, go_id)``.
-    """
-    import pandas as pd
-
-    rows = session.execute(_base_select(ctx)).all()
-    df = pd.DataFrame.from_records([tuple(r) for r in rows], columns=list(_BASE_SCORE_COLS))
-    raw_count = int(len(df))
-    if raw_count:
-        df = (
-            df.sort_values(["protein_accession", "go_id", "distance"], kind="mergesort")
-            .drop_duplicates(subset=["protein_accession", "go_id"], keep="first")
-            .reset_index(drop=True)
-        )
-    return df, raw_count
 
 
 def _evidence_weight_array(codes: Any, overrides: dict[str, float] | None) -> np.ndarray:

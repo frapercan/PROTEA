@@ -432,7 +432,10 @@ class RunCafaEvaluationOperation:
         # because NULL <= 2 is null and null is not true, so the run would
         # score an empty set and report success.
         assert_depth_unit_is_available(
-            session, pred_set_id, max_sequence_rank=p.max_sequence_rank
+            session,
+            pred_set_id,
+            max_sequence_rank=p.max_sequence_rank,
+            max_k_position=p.max_k_position,
         )
 
         emit("run_cafa_evaluation.computing_delta", None, {}, "info")
