@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from protea.core._evaluation_leakage import refuse_uncertifiable_encoding
@@ -20,6 +20,11 @@ from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
 from protea.core.operations import _run_cafa_summary as _summary
+from protea.core.operations._depth_unit_guard import (
+    SEQUENCE_DEPTH_DESCRIPTION,
+    assert_depth_unit_is_available,
+    assert_one_depth_unit,
+)
 from protea.core.operations._evaluation_artifacts import (
     resolve_ia_file,
     resolve_obo,
@@ -62,6 +67,9 @@ from protea.infrastructure.storage import ArtifactStore, get_artifact_store
 
 
 class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
+    """The evaluation request. See ``max_sequence_rank`` on counting depth."""
+
+
     evaluation_set_id: str
     prediction_set_id: str
     max_distance: float | None = Field(default=None, ge=0.0, le=2.0)
@@ -75,6 +83,15 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "needs no new retrieval pass. Null scores every stored neighbour."
         ),
     )
+    max_sequence_rank: int | None = Field(
+        default=None, ge=1, description=SEQUENCE_DEPTH_DESCRIPTION
+    )
+    @model_validator(mode="after")
+    def _a_depth_is_counted_in_one_unit(self) -> RunCafaEvaluationPayload:
+        """See ``assert_one_depth_unit``; both null is the whole neighbourhood."""
+        assert_one_depth_unit(self.max_k_position, self.max_sequence_rank)
+        return self
+
     scoring_config_id: str | None = Field(default=None)
     reranker_id_nk: str | None = Field(default=None)
     reranker_id_lk: str | None = Field(default=None)
@@ -410,6 +427,13 @@ class RunCafaEvaluationOperation:
         if pred_set is None:
             raise ValueError(f"PredictionSet {pred_set_id} not found")
         refuse_uncertifiable_encoding(session, pred_set, eval_set)
+        # Before anything is staged or scored: a sequence depth asked of
+        # candidates that carry no sequence rank selects no rows at all,
+        # because NULL <= 2 is null and null is not true, so the run would
+        # score an empty set and report success.
+        assert_depth_unit_is_available(
+            session, pred_set_id, max_sequence_rank=p.max_sequence_rank
+        )
 
         emit("run_cafa_evaluation.computing_delta", None, {}, "info")
         data, pivot_snapshot_id = load_evaluation_data_for_set(session, eval_set)

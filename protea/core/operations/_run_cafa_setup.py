@@ -143,6 +143,7 @@ def bundle_run_context(
         delta_proteins=staged.delta_proteins,
         max_distance=p.max_distance,
         max_k_position=p.max_k_position,
+        max_sequence_rank=p.max_sequence_rank,
         artifacts_root=artifacts_root,
         has_rerankers=staged.has_rerankers,
         reranker_models=ctx.reranker_models,

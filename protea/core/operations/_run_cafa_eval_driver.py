@@ -81,6 +81,10 @@ class CafaEvalRunContext:
     th_step: float = 0.01
     max_terms: int | None = None
     max_k_position: int | None = None
+    #: The same depth counted in distinct sequences. Exactly one of the two
+    #: is set; ``_depth_unit_guard`` refuses a run that names both or that
+    #: names this one against candidates that cannot answer in it.
+    max_sequence_rank: int | None = None
     softprop: bool = False
     interpro_graft: bool = False
     interpro_protein2ipr_file: str | None = None

@@ -79,6 +79,10 @@ class WritePredictionsContext:
     max_distance: float | None
     path: str
     max_k_position: int | None = None
+    #: The same depth counted in distinct sequences. Exactly one of the two
+    #: is set; ``_depth_unit_guard`` refuses a run that names both or that
+    #: names this one against candidates that cannot answer in it.
+    max_sequence_rank: int | None = None
 
 
 def download_obo(url: str, dest: str) -> None:
@@ -278,7 +282,11 @@ def write_predictions(
         return
     base = _pred_base_cache.load_or_build_base(
         _pred_base_cache.BaseFrameKey.of(
-            ctx.pred_set_id, ctx.max_distance, ctx.max_k_position, ctx.delta_proteins
+            ctx.pred_set_id,
+            ctx.max_distance,
+            ctx.max_k_position,
+            ctx.delta_proteins,
+            getattr(ctx, "max_sequence_rank", None),
         ),
         count_fn=lambda: _count_base_rows(session, ctx),
         build_fn=lambda: _build_base_frame(session, ctx),
@@ -317,6 +325,8 @@ def _base_select(ctx: WritePredictionsContext) -> Any:
         stmt = stmt.where(GOPrediction.distance <= ctx.max_distance)
     if ctx.max_k_position is not None:
         stmt = stmt.where(GOPrediction.k_position <= ctx.max_k_position)
+    if ctx.max_sequence_rank is not None:
+        stmt = stmt.where(GOPrediction.sequence_rank <= ctx.max_sequence_rank)
     return stmt
 
 
@@ -333,6 +343,8 @@ def _count_base_rows(session: Session, ctx: WritePredictionsContext) -> int:
         stmt = stmt.where(GOPrediction.distance <= ctx.max_distance)
     if ctx.max_k_position is not None:
         stmt = stmt.where(GOPrediction.k_position <= ctx.max_k_position)
+    if ctx.max_sequence_rank is not None:
+        stmt = stmt.where(GOPrediction.sequence_rank <= ctx.max_sequence_rank)
     return int(session.execute(stmt).scalar_one())
 
 
@@ -579,6 +591,8 @@ def write_predictions_reranked(
         q = q.filter(GOPrediction.distance <= ctx.max_distance)
     if ctx.max_k_position is not None:
         q = q.filter(GOPrediction.k_position <= ctx.max_k_position)
+    if ctx.max_sequence_rank is not None:
+        q = q.filter(GOPrediction.sequence_rank <= ctx.max_sequence_rank)
 
     records: list[dict[str, Any]] = [
         _record_from_pred(pred, go_id, aspect=aspect) for pred, go_id, aspect in q.yield_per(5000)
@@ -618,6 +632,8 @@ def _load_aspect_records(
         q = q.filter(GOPrediction.distance <= ctx.max_distance)
     if ctx.max_k_position is not None:
         q = q.filter(GOPrediction.k_position <= ctx.max_k_position)
+    if ctx.max_sequence_rank is not None:
+        q = q.filter(GOPrediction.sequence_rank <= ctx.max_sequence_rank)
     return [_record_from_pred(pred, go_id, aspect) for pred, go_id, aspect in q.yield_per(5000)]
 
 

@@ -42,17 +42,22 @@ def _cache_paths(
     max_distance: float | None,
     max_k_position: int | None,
     delta_proteins: Iterable[str],
+    max_sequence_rank: int | None = None,
 ) -> tuple[Path, Path]:
     """Return ``(parquet_path, count_path)`` for the deduped base frame.
 
-    ``max_k_position`` belongs in the key, not only in the filter. The base
-    frame is the candidate set after the cut, so two depths produce different
-    frames; sharing one key would serve the deepest arm's parquet to every
-    other arm and a depth sweep would come back flat.
+    Every depth belongs in the key, not only in the filter. The base frame is
+    the candidate set after the cut, so two depths produce different frames;
+    sharing one key would serve the deepest arm's parquet to every other arm
+    and a depth sweep would come back flat. That happened once with
+    ``max_k_position``, and the unit is a second way for two different cuts to
+    collide: depth 3 in proteins and depth 3 in sequences are not the same
+    candidate set, so they cannot be the same filename.
     """
     md = "none" if max_distance is None else f"{max_distance:g}"
     mk = "none" if max_k_position is None else str(max_k_position)
-    key = f"{pred_set_id}__md{md}__k{mk}__{_delta_hash(delta_proteins)}"
+    ms = "none" if max_sequence_rank is None else str(max_sequence_rank)
+    key = f"{pred_set_id}__md{md}__k{mk}__s{ms}__{_delta_hash(delta_proteins)}"
     return _PRED_CACHE_DIR / f"{key}.parquet", _PRED_CACHE_DIR / f"{key}.count"
 
 
@@ -72,6 +77,7 @@ class BaseFrameKey:
     max_distance: float | None
     max_k_position: int | None
     delta_proteins: tuple[str, ...]
+    max_sequence_rank: int | None = None
 
     @classmethod
     def of(
@@ -80,8 +86,15 @@ class BaseFrameKey:
         max_distance: float | None,
         max_k_position: int | None,
         delta_proteins: Iterable[str],
+        max_sequence_rank: int | None = None,
     ) -> BaseFrameKey:
-        return cls(pred_set_id, max_distance, max_k_position, tuple(delta_proteins))
+        return cls(
+            pred_set_id,
+            max_distance,
+            max_k_position,
+            tuple(delta_proteins),
+            max_sequence_rank,
+        )
 
 
 def load_or_build_base(
@@ -104,7 +117,11 @@ def load_or_build_base(
     import pandas as pd
 
     parquet_path, count_path = _cache_paths(
-        key.pred_set_id, key.max_distance, key.max_k_position, key.delta_proteins
+        key.pred_set_id,
+        key.max_distance,
+        key.max_k_position,
+        key.delta_proteins,
+        key.max_sequence_rank,
     )
     if parquet_path.exists() and count_path.exists():
         cached_count = _read_count(count_path)

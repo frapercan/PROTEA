@@ -63,22 +63,33 @@ def _wait_ready(container: str, user: str, db: str, timeout_s: int = 60) -> None
     last_proc: subprocess.CompletedProcess[str] | None = None
 
     def _ready() -> bool:
+        """Ready means the named database answers, not that a server does.
+
+        The postgres entrypoint runs a temporary server on a unix socket
+        while it initialises, and ``pg_isready`` says yes to that one. The
+        requested database does not exist yet, so the caller's first
+        statement fails with "database does not exist" and, further down,
+        with a missing type from every table that needed an extension the
+        caller never got to create. Asking the database itself removes the
+        window.
+        """
         nonlocal last_proc
         last_proc = subprocess.run(
-            ["docker", "exec", container, "pg_isready", "-U", user, "-d", db],
+            ["docker", "exec", container, "psql", "-U", user, "-d", db, "-c", "SELECT 1"],
             text=True,
             capture_output=True,
         )
         return last_proc.returncode == 0
 
     try:
-        wait_until(_ready, timeout=float(timeout_s), interval=0.25, msg=f"pg_isready {container}")
+        wait_until(_ready, timeout=float(timeout_s), interval=0.25, msg=f"psql -d {db} on {container}")
     except AssertionError as err:
         logs = subprocess.run(["docker", "logs", container], text=True, capture_output=True)
         stdout = last_proc.stdout if last_proc else ""
         stderr = last_proc.stderr if last_proc else ""
         raise RuntimeError(
-            f"Postgres not ready after {timeout_s}s.\n\npg_isready:\n{stdout}\n{stderr}\n\nlogs:\n{logs.stdout}\n{logs.stderr}"
+            f"Database {db!r} did not answer after {timeout_s}s.\n\npsql:\n{stdout}\n{stderr}"
+            f"\n\nlogs:\n{logs.stdout}\n{logs.stderr}"
         ) from err
 
 
@@ -416,7 +427,11 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
     try:
         _wait_ready(container, user, db, timeout_s=int(os.getenv("PROTEA_PG_TIMEOUT", "60")))
 
-        subprocess.run(
+        # Not silent. Without the extension every table carrying a vector or
+        # halfvec column fails to create, and the suite then reports
+        # ``type "halfvec" does not exist`` from somewhere forty lines away
+        # while the actual cause scrolled past unread.
+        created = subprocess.run(
             [
                 "docker",
                 "exec",
@@ -432,6 +447,12 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
             text=True,
             capture_output=True,
         )
+        if created.returncode != 0:
+            pytest.fail(
+                "could not create the pgvector extension in the test container, "
+                "so every vector column would fail to create and the failure "
+                f"would surface as a missing type: {created.stderr.strip()}"
+            )
 
         url = f"postgresql+psycopg://{user}:{password}@localhost:{host_port}/{db}"
         yield url
