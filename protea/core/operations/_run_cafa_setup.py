@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,13 @@ from protea.infrastructure.orm.models.annotation.ontology_snapshot import Ontolo
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.storage import ArtifactStore
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # Imported for the annotation alone. run_cafa_evaluation imports this module,
+    # so a runtime import would close a cycle; `from __future__ import
+    # annotations` already makes the annotation a string, which is why nothing
+    # crashed and only the linter noticed the name was never bound.
+    from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 
 
 class _EvalInputs(NamedTuple):
