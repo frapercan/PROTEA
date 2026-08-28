@@ -319,9 +319,7 @@ class TestRealIaPrior:
             is False
         )
         assert (
-            op._uses_ia_source(
-                _composite_config({"ia_prior": {"enabled": True, "source": "ia"}})
-            )
+            op._uses_ia_source(_composite_config({"ia_prior": {"enabled": True, "source": "ia"}}))
             is True
         )
 
@@ -377,12 +375,8 @@ class TestProteinFoldSplit:
         from protea.core.operations import _run_cafa_data_helpers as dh
 
         d = self._data()
-        a = dh.restrict_data_to_protein_fold(
-            d, folds=3, fold=2, seed=5, emit=lambda *a, **k: None
-        )
-        b = dh.restrict_data_to_protein_fold(
-            d, folds=3, fold=2, seed=5, emit=lambda *a, **k: None
-        )
+        a = dh.restrict_data_to_protein_fold(d, folds=3, fold=2, seed=5, emit=lambda *a, **k: None)
+        b = dh.restrict_data_to_protein_fold(d, folds=3, fold=2, seed=5, emit=lambda *a, **k: None)
         assert set(a.nk) == set(b.nk)
 
 
@@ -402,9 +396,7 @@ class TestBaseCacheAtomicWrite:
         df = _base_frame()
 
         out = _pred_base_cache.load_or_build_base(
-            pred_id,
-            None,
-            delta,
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, None, delta),
             count_fn=lambda: 3,
             build_fn=lambda: (df, 3),
         )
@@ -414,9 +406,7 @@ class TestBaseCacheAtomicWrite:
         assert leftovers == []
         # Second call hits the cache (count matches) and returns the frame.
         again = _pred_base_cache.load_or_build_base(
-            pred_id,
-            None,
-            delta,
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, None, delta),
             count_fn=lambda: 3,
             build_fn=lambda: (_ for _ in ()).throw(AssertionError("should not rebuild")),
         )
@@ -428,7 +418,7 @@ class TestBaseCacheAtomicWrite:
         delta = ["P1"]
         df = _base_frame()
         _pred_base_cache.load_or_build_base(
-            pred_id, None, delta, count_fn=lambda: 3, build_fn=lambda: (df, 3)
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, None, delta), count_fn=lambda: 3, build_fn=lambda: (df, 3)
         )
         # A fresh COUNT that diverges from the sidecar forces a rebuild.
         rebuilt = {"called": False}
@@ -438,7 +428,7 @@ class TestBaseCacheAtomicWrite:
             return df, 5
 
         _pred_base_cache.load_or_build_base(
-            pred_id, None, delta, count_fn=lambda: 5, build_fn=build
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, None, delta), count_fn=lambda: 5, build_fn=build
         )
         assert rebuilt["called"] is True
 
@@ -495,3 +485,100 @@ def test_batch_context_builds_no_reranker_run_context():
     assert run_ctx.has_rerankers is False
     assert run_ctx.shared_pred_dir == "/tmp/preds"
     assert run_ctx.th_step == 0.01
+
+
+class TestDepthIsPartOfTheCacheKey:
+    """The base frame is the candidate set after the cut, so K must key it.
+
+    Sharing one key across depths served the deepest arm's parquet to every
+    other arm, and the depth sweep came back flat with no error to show for
+    it. The regression is silent by construction, so it needs its own test.
+    """
+
+    def test_two_depths_do_not_share_a_parquet(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_pred_base_cache, "_PRED_CACHE_DIR", tmp_path)
+        pred_id = uuid.uuid4()
+        delta = ["P1", "P2"]
+        shallow, deep = _pred_base_cache._cache_paths(pred_id, None, 1, delta)
+        wide, _ = _pred_base_cache._cache_paths(pred_id, None, 10, delta)
+        unbounded, _ = _pred_base_cache._cache_paths(pred_id, None, None, delta)
+        assert shallow != wide
+        assert wide != unbounded
+        assert shallow != unbounded
+
+    def test_a_shallow_arm_does_not_read_the_deep_arm_frame(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_pred_base_cache, "_PRED_CACHE_DIR", tmp_path)
+        pred_id = uuid.uuid4()
+        delta = ["P1"]
+        df = _base_frame()
+        _pred_base_cache.load_or_build_base(
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, 10, delta), count_fn=lambda: 3, build_fn=lambda: (df, 3)
+        )
+        built = {"called": False}
+
+        def build():
+            built["called"] = True
+            return df, 3
+
+        _pred_base_cache.load_or_build_base(
+            _pred_base_cache.BaseFrameKey.of(pred_id, None, 1, delta), count_fn=lambda: 3, build_fn=build
+        )
+        assert built["called"] is True
+
+
+class TestADeclaredDepthIsChecked:
+    """A run that cannot honour its depth must fail, not relabel another arm.
+
+    The sweep that motivated this ran across two machines. The one whose code
+    predated the depth filter scored the unrestricted frame and returned
+    success, so sixteen cells carried the deepest arm's number under a shallow
+    arm's label. The failure had no signal of any kind attached to it.
+    """
+
+    def _ctx(self, k):
+        from protea.core.operations._run_cafa_artifacts import WritePredictionsContext
+
+        return WritePredictionsContext(
+            pred_set_id=uuid.uuid4(),
+            delta_proteins={"P1"},
+            max_distance=None,
+            path="",
+            max_k_position=k,
+        )
+
+    def test_a_frame_wider_than_the_declared_depth_is_refused(self, monkeypatch):
+        from protea.core.operations import _depth_guard as A
+
+        counts = iter([100, 500])  # restricted, then unrestricted
+        counter = lambda _s, _c: next(counts)
+        with pytest.raises(A.DepthNotApplied) as err:
+            A.assert_depth_was_applied(object(), self._ctx(3), _base_frame_of(500), counter)
+        assert "max_k_position=3" in str(err.value)
+
+    def test_a_frame_matching_the_declared_depth_passes(self, monkeypatch):
+        from protea.core.operations import _depth_guard as A
+
+        counts = iter([100, 500])
+        counter = lambda _s, _c: next(counts)
+        A.assert_depth_was_applied(object(), self._ctx(3), _base_frame_of(100), counter)
+
+    def test_a_depth_that_admits_everything_is_not_a_cut(self, monkeypatch):
+        """At the deepest level the restricted and full frames coincide."""
+        from protea.core.operations import _depth_guard as A
+
+        counter = lambda _s, _c: 500
+        A.assert_depth_was_applied(object(), self._ctx(10), _base_frame_of(500), counter)
+
+    def test_an_undeclared_depth_is_not_checked(self, monkeypatch):
+        from protea.core.operations import _depth_guard as A
+
+        def boom(*_a, **_k):
+            raise AssertionError("must not count when no depth was declared")
+
+        A.assert_depth_was_applied(object(), self._ctx(None), _base_frame_of(500), boom)
+
+
+def _base_frame_of(n: int):
+    import pandas as pd
+
+    return pd.DataFrame({"protein_accession": ["P1"] * n, "go_id": ["GO:1"] * n})

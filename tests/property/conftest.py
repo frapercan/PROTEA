@@ -13,8 +13,6 @@ Collecting nothing and saying why is the honest outcome. Running with
 
 from __future__ import annotations
 
-import pytest
-
 collect_ignore_glob: list[str] = []
 
 try:  # pragma: no cover - the branch taken depends on the environment

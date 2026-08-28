@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import os
 import tempfile
 import uuid
@@ -45,10 +44,12 @@ from protea.core.operations._run_cafa_reranker_loader import (
     load_reranker_models_for_payload,
 )
 from protea.core.operations._run_cafa_setup import (  # noqa: F401
+    StagedInputs,
     _emit_evaluation_setup_events,
     _EvalInputs,
     _load_terms_of_interest,
     _PipelineCtx,
+    bundle_run_context,
 )
 from protea.core.utils import job_id_from_payload
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
@@ -64,6 +65,16 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
     evaluation_set_id: str
     prediction_set_id: str
     max_distance: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_k_position: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Score only the first N neighbours of each query. Candidates are "
+            "written to a fixed depth and carry the rank they were retrieved at, "
+            "so every smaller depth is a truncation of a list already stored and "
+            "needs no new retrieval pass. Null scores every stored neighbour."
+        ),
+    )
     scoring_config_id: str | None = Field(default=None)
     reranker_id_nk: str | None = Field(default=None)
     reranker_id_lk: str | None = Field(default=None)
@@ -286,6 +297,8 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         if v is not None and v not in ("valid", "test"):
             raise ValueError("window_role must be 'valid', 'test', or None")
         return v
+
+
 
 
 class RunCafaEvaluationOperation:
@@ -522,8 +535,12 @@ class RunCafaEvaluationOperation:
         artifacts_root: Path,
         emit: EmitFn,
     ) -> CafaEvalRunContext:
-        """Download OBO + IA, restrict GT, write GT/TOI/predictions files, and
-        bundle every cafaeval input into a ``CafaEvalRunContext``."""
+        """Download OBO and IA, restrict the ground truth, write its files.
+
+        The bundling is separate. The docstring used to join the two with an
+        "and", which is usually where a method has two jobs: staging touches the
+        filesystem and the store, and bundling only names what was staged.
+        """
         inputs = ctx.inputs
         tmpdir = str(artifacts_root.parent)
         obo_path = resolve_obo(tmpdir, inputs.snapshot, emit)
@@ -546,87 +563,15 @@ class RunCafaEvaluationOperation:
         has_rerankers = bool(ctx.reranker_models)
         if not has_rerankers:
             self._write_shared_prediction_file(session, p, ctx, artifacts_root, delta_proteins)
-        return CafaEvalRunContext(
-            pred_set_id=inputs.pred_set_id,
-            delta_proteins=delta_proteins,
-            max_distance=p.max_distance,
-            artifacts_root=artifacts_root,
-            has_rerankers=has_rerankers,
-            reranker_models=ctx.reranker_models,
-            scoring_config_snapshot=ctx.scoring_snapshot,
-            data=data,
-            obo_path=obo_path,
-            nk_path=gt_paths["nk"],
-            lk_path=gt_paths["lk"],
-            pk_path=gt_paths["pk"],
-            pk_known_path=gt_paths["pk_known"],
-            ia_path=ia_path,
-            toi_path=toi_path,
-            shared_pred_dir=os.path.join(str(artifacts_root), "predictions"),
-            ontology_snapshot_id=str(inputs.snapshot.id),
-            evaluation_set_id=str(inputs.eval_set_id),
-            information_accretion_frame=self._ia_frame(p, ia_path, emit),
-            th_step=p.th_step,
-            max_terms=p.max_terms,
-            softprop=p.softprop,
-            interpro_graft=p.interpro_graft,
-            interpro_protein2ipr_file=p.interpro_protein2ipr_file,
-            interpro_ipr2go_file=p.interpro_ipr2go_file,
-            interpro_graft_weight=p.interpro_graft_weight,
+        return bundle_run_context(
+            p,
+            ctx,
+            artifacts_root,
+            StagedInputs(
+                obo_path, ia_path, gt_paths, toi_path, data, delta_proteins, has_rerankers
+            ),
+            emit,
         )
-
-    @staticmethod
-    def _ia_frame(
-        p: RunCafaEvaluationPayload, ia_path: str | None, emit: EmitFn
-    ) -> str | None:
-        """Name the information-accretion table the weighted numbers were scored against.
-
-        Three cases and they are not interchangeable. A named set has a UUID
-        and that is the honest identity. A bare ``ia_file``, or the snapshot's
-        own ``ia_url`` downloaded to a temporary path, has no id, and the path
-        is a tempdir name that says nothing about the content, so the file's
-        sha256 is stamped instead: two different tables then do not compare
-        equal, which is the whole point of the key. No IA table at all means
-        there is no weighted variant to compare and ``"null"`` is exact rather
-        than lossy.
-
-        Never an empty string, and never a guess. The consumer treats an absent
-        key and an empty one alike, and an unstamped file compares EQUAL to
-        another unstamped file, so the gate would fire on the careful producer
-        and never on the forgetful one.
-
-        Returns ``None`` when the table cannot be read, which makes the grid
-        artefact refuse itself rather than carry an identity nobody verified.
-        The evaluation is NOT failed for it: the aggregate and the legacy
-        artefact are unaffected by a stamp, and a run that scored correctly
-        should not be discarded because an extra file could not be labelled.
-        """
-        if p.information_accretion_set_id:
-            return str(p.information_accretion_set_id)
-        if not ia_path:
-            return "null"
-        digest = hashlib.sha256()
-        try:
-            with open(ia_path, "rb") as handle:
-                for chunk in iter(lambda: handle.read(1 << 20), b""):
-                    digest.update(chunk)
-        except OSError as exc:
-            emit(
-                "run_cafa_evaluation.ia_frame_unidentifiable",
-                None,
-                {
-                    "ia_path": ia_path,
-                    "error": str(exc),
-                    "consequence": (
-                        "the per-protein threshold-grid artefact will not be written for "
-                        "this run: its frame cannot state which information-accretion "
-                        "table the weighted numbers were scored against"
-                    ),
-                },
-                "warning",
-            )
-            return None
-        return f"sha256:{digest.hexdigest()}"
 
     @staticmethod
     def _resolve_toi_file(
@@ -665,6 +610,7 @@ class RunCafaEvaluationOperation:
                 pred_set_id=ctx.inputs.pred_set_id,
                 delta_proteins=delta_proteins,
                 max_distance=p.max_distance,
+                max_k_position=p.max_k_position,
                 path=os.path.join(pred_dir, "predictions.tsv"),
             ),
             scoring_config=ctx.scoring_snapshot,
@@ -681,8 +627,12 @@ class RunCafaEvaluationOperation:
     ) -> str | None:
         """Resolve the IA table and apply the band guard to it, in that order."""
         ia_path = resolve_ia_file(
-            tmpdir, snapshot, p.ia_file, emit,
-            session, p.information_accretion_set_id,
+            tmpdir,
+            snapshot,
+            p.ia_file,
+            emit,
+            session,
+            p.information_accretion_set_id,
         )
         cls._enforce_band(p.band, snapshot, p.ia_file, emit)
         return ia_path

@@ -126,6 +126,7 @@ from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
 )
+from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
 
 # (op_name, payload_class, bad_payload, expected_error_field)
@@ -428,6 +429,16 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         AuditPerProteinArtifactsPayload,
         {"max_results": 0},
         ("max_results",),
+    ),
+    # invariant: a report of zero examples is a report of nothing. The seal is
+    # asked twice on purpose, and the first answer is the list of what the second
+    # would write, so a caller that asks for none has disabled the safeguard
+    # rather than tuned it.
+    (
+        "seal_evaluation_frames",
+        SealEvaluationFramesPayload,
+        {"max_examples": 0},
+        ("max_examples",),
     ),
     # invariant: an empty selection reads as the opposite of itself. Omitting the
     # field means every configuration, and an empty list looks like it means

@@ -10,13 +10,17 @@ Re-exported by ``run_cafa_evaluation`` for backwards compatibility.
 
 from __future__ import annotations
 
+import os
 import uuid
+from pathlib import Path
 from typing import Any, NamedTuple
 
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn
 from protea.core.evaluation import EvaluationData
+from protea.core.operations._run_cafa_eval_driver import CafaEvalRunContext
+from protea.core.operations._run_cafa_ia_frame import ia_frame
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -90,4 +94,69 @@ def _emit_evaluation_setup_events(emit: EmitFn, inputs: _EvalInputs) -> None:
             "pk_proteins": inputs.data.pk_proteins,
         },
         "info",
+    )
+
+
+class StagedInputs(NamedTuple):
+    """What the staging step produced, named.
+
+    It had no name, so the function that consumes it took eleven arguments and
+    the size guard was right to object: a parameter list that long is usually a
+    missing noun. These seven values are exactly what staging writes or resolves,
+    and nothing else in the pipeline produces them.
+    """
+
+    obo_path: str
+    ia_path: str | None
+    gt_paths: dict[str, str]
+    toi_path: str
+    data: Any
+    delta_proteins: set[str]
+    has_rerankers: bool
+
+
+def bundle_run_context(
+    p: RunCafaEvaluationPayload,
+    ctx: _PipelineCtx,
+    artifacts_root: Path,
+    staged: StagedInputs,
+    emit: EmitFn,
+) -> CafaEvalRunContext:
+    """Name what was staged, and nothing else.
+
+    Every field here is a value the staging step already produced, so this
+    is the one place where a caller can see the whole cafaeval input surface
+    at once, including the three frame markers that have to travel with the
+    grid artefact or two runs under different frames publish as a method
+    difference.
+    """
+    inputs = ctx.inputs
+    return CafaEvalRunContext(
+        pred_set_id=inputs.pred_set_id,
+        delta_proteins=staged.delta_proteins,
+        max_distance=p.max_distance,
+        max_k_position=p.max_k_position,
+        artifacts_root=artifacts_root,
+        has_rerankers=staged.has_rerankers,
+        reranker_models=ctx.reranker_models,
+        scoring_config_snapshot=ctx.scoring_snapshot,
+        data=staged.data,
+        obo_path=staged.obo_path,
+        nk_path=staged.gt_paths["nk"],
+        lk_path=staged.gt_paths["lk"],
+        pk_path=staged.gt_paths["pk"],
+        pk_known_path=staged.gt_paths["pk_known"],
+        ia_path=staged.ia_path,
+        toi_path=staged.toi_path,
+        shared_pred_dir=os.path.join(str(artifacts_root), "predictions"),
+        ontology_snapshot_id=str(inputs.snapshot.id),
+        evaluation_set_id=str(inputs.eval_set_id),
+        information_accretion_frame=ia_frame(p, staged.ia_path, emit),
+        th_step=p.th_step,
+        max_terms=p.max_terms,
+        softprop=p.softprop,
+        interpro_graft=p.interpro_graft,
+        interpro_protein2ipr_file=p.interpro_protein2ipr_file,
+        interpro_ipr2go_file=p.interpro_ipr2go_file,
+        interpro_graft_weight=p.interpro_graft_weight,
     )

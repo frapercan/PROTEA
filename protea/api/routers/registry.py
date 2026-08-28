@@ -53,10 +53,7 @@ class PluginInfo(BaseModel):
     )
     module: str = Field(
         ...,
-        description=(
-            "Fully-qualified entry-point value "
-            "(e.g. ``protea_backends.esm:plugin``)."
-        ),
+        description=("Fully-qualified entry-point value (e.g. ``protea_backends.esm:plugin``)."),
     )
     extra: dict[str, Any] = Field(
         default_factory=dict,
@@ -73,10 +70,7 @@ class PluginListResponse(BaseModel):
 
     group: str = Field(
         ...,
-        description=(
-            "The ``entry_points`` group queried "
-            "(e.g. ``protea.backends``)."
-        ),
+        description=("The ``entry_points`` group queried (e.g. ``protea.backends``)."),
     )
     plugins: list[PluginInfo] = Field(
         ...,

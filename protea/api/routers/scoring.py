@@ -77,7 +77,12 @@ def list_scoring_configs(factory=Depends(get_session_factory)):
         return list_scoring_configs_data(session)
 
 
-@router.post("/configs", response_model=ScoringConfigResponse, status_code=201, dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.post(
+    "/configs",
+    response_model=ScoringConfigResponse,
+    status_code=201,
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def create_scoring_config(
     body: ScoringConfigCreate,
     factory=Depends(get_session_factory),
@@ -88,7 +93,9 @@ def create_scoring_config(
         return create_scoring_config_data(session, body)
 
 
-@router.post("/configs/presets", status_code=201, dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.post(
+    "/configs/presets", status_code=201, dependencies=[Depends(require_role(ROLE_OPERATOR))]
+)
 def create_preset_configs(factory=Depends(get_session_factory)):
     """Seed the database with the four built-in preset ScoringConfigs.
 
@@ -112,7 +119,9 @@ def get_scoring_config(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.delete("/configs/{config_id}", status_code=204, dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.delete(
+    "/configs/{config_id}", status_code=204, dependencies=[Depends(require_role(ROLE_OPERATOR))]
+)
 def delete_scoring_config(
     config_id: uuid.UUID,
     factory=Depends(get_session_factory),
@@ -126,6 +135,7 @@ def delete_scoring_config(
 
 
 # Scored TSV endpoint ----------------------------------------
+
 
 @router.get("/prediction-sets/{set_id}/score.tsv")
 def download_scored_predictions(
@@ -190,6 +200,7 @@ def download_scored_predictions(
 
 
 # CAFA metrics endpoint ----------------------------------------
+
 
 def _eval_context_dep(
     old_annotation_set_id: uuid.UUID = Query(
@@ -363,7 +374,9 @@ def get_reranker(reranker_id: uuid.UUID, factory=Depends(get_session_factory)):
         return to_reranker_response(model, dataset)
 
 
-@router.delete("/rerankers/{reranker_id}", status_code=204, dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.delete(
+    "/rerankers/{reranker_id}", status_code=204, dependencies=[Depends(require_role(ROLE_OPERATOR))]
+)
 def delete_reranker(reranker_id: uuid.UUID, factory=Depends(get_session_factory)):
     """Delete a re-ranker model by UUID."""
     with session_scope(factory) as session:
