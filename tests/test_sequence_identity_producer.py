@@ -56,14 +56,24 @@ def test_it_maps_every_accession_it_was_asked_about(session: Session) -> None:
 def test_an_accession_that_is_not_a_protein_here_is_simply_absent(
     session: Session,
 ) -> None:
-    """Absent, not invented. The method decides what an absence means."""
+    """Absent, not invented. A partial map is what the method refuses."""
     identities = load_sequence_identities(session, {"P1", "NOPE"})
+    assert identities is not None
     assert "NOPE" not in identities
     assert identities["P1"]
 
 
+def test_a_bank_with_no_proteins_here_reads_as_absent_not_as_partial(
+    session: Session,
+) -> None:
+    """Nothing mapped is "this bank cannot be counted in sequences", said
+    once for the whole run. A partial map is a different statement and the
+    method raises on it; an empty dict would be read as the second."""
+    assert load_sequence_identities(session, {"NOPE", "ALSO_NOPE"}) is None
+
+
 def test_asking_about_nothing_returns_nothing(session: Session) -> None:
-    assert load_sequence_identities(session, set()) == {}
+    assert load_sequence_identities(session, set()) is None
 
 
 def test_the_identity_is_a_string_so_the_method_stays_free_of_our_types(

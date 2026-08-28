@@ -33,7 +33,9 @@ if TYPE_CHECKING:
 __all__ = ("load_sequence_identities",)
 
 
-def load_sequence_identities(session: Session, accessions: set[str]) -> dict[str, str]:
+def load_sequence_identities(
+    session: Session, accessions: set[str]
+) -> dict[str, str] | None:
     """Read one sequence identity per accession, in chunks.
 
     Args:
@@ -45,8 +47,17 @@ def load_sequence_identities(session: Session, accessions: set[str]) -> dict[str
         Accession to sequence identity, as a string so the method side
         stays free of PROTEA's key types. Every protein in this corpus
         has a sequence row (measured: 0 of 616,846 are null), so a
-        missing entry means the accession is not a protein here, not
-        that a protein has no sequence.
+        missing entry means the accession is not a protein here, not that
+        a protein has no sequence.
+
+        None when nothing mapped at all, which is a different statement
+        from a partial map and has to be made differently. Nothing mapped
+        means this bank cannot be counted in sequences, uniformly, and
+        the method leaves the rank empty on every row. A partial map
+        means some neighbours can be ranked and others cannot, and the
+        method raises rather than ranking half a list, because a rank
+        that skips its unmappable neighbours is a rank counted over a
+        bank the caller does not think it has.
     """
     from protea.config.tuning import get_tuning
 
@@ -62,4 +73,4 @@ def load_sequence_identities(session: Session, accessions: set[str]) -> dict[str
         )
         for accession, sequence_id in rows:
             identities[accession] = str(sequence_id)
-    return identities
+    return identities or None
