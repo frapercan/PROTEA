@@ -20,7 +20,11 @@ from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
 from protea.core.operations import _run_cafa_summary as _summary
-from protea.core.operations._depth_unit_guard import assert_depth_unit_is_available
+from protea.core.operations._depth_unit_guard import (
+    SEQUENCE_DEPTH_DESCRIPTION,
+    assert_depth_unit_is_available,
+    assert_one_depth_unit,
+)
 from protea.core.operations._evaluation_artifacts import (
     resolve_ia_file,
     resolve_obo,
@@ -80,36 +84,12 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         ),
     )
     max_sequence_rank: int | None = Field(
-        default=None,
-        ge=1,
-        description=(
-            "Score only the first N distinct SEQUENCES of each query. The bank "
-            "holds 616,846 proteins over 528,294 sequences, 38,694 of them "
-            "shared and one by 114 proteins, so a depth counted in proteins "
-            "admits a number of distinct points of the embedding space that "
-            "varies per query and makes the arms of a sweep incomparable. "
-            "Mutually exclusive with max_k_position: a depth is counted in one "
-            "unit or the other, and a run that named both would have no reading. "
-            "Refused up front when the candidates carry no sequence rank, since "
-            "SQL would drop those rows and the run would score nothing and "
-            "report success."
-        ),
+        default=None, ge=1, description=SEQUENCE_DEPTH_DESCRIPTION
     )
     @model_validator(mode="after")
     def _a_depth_is_counted_in_one_unit(self) -> RunCafaEvaluationPayload:
-        """Refuse a run that names both depths, rather than picking one.
-
-        The two are different candidate sets, so a run naming both has no
-        reading and any resolution here would be this operation quietly
-        choosing what the experiment measured. Both null is fine and means
-        every stored neighbour.
-        """
-        if self.max_k_position is not None and self.max_sequence_rank is not None:
-            raise ValueError(
-                "a depth is counted in proteins or in sequences, not both; got "
-                f"max_k_position={self.max_k_position} and "
-                f"max_sequence_rank={self.max_sequence_rank}"
-            )
+        """See ``assert_one_depth_unit``; both null is the whole neighbourhood."""
+        assert_one_depth_unit(self.max_k_position, self.max_sequence_rank)
         return self
 
     scoring_config_id: str | None = Field(default=None)

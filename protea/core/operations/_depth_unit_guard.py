@@ -28,12 +28,47 @@ from protea.infrastructure.orm.models.embedding.go_prediction import GOPredictio
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+#: What ``max_sequence_rank`` means on a payload. Kept here rather than
+#: inline so the operation module stays under its size ceiling and so the
+#: explanation sits beside the guard that enforces it.
+SEQUENCE_DEPTH_DESCRIPTION = (
+    "Score only the first N distinct SEQUENCES of each query. The bank holds "
+    "616,846 proteins over 528,294 sequences, 38,694 of them shared and one by "
+    "114 proteins, so a depth counted in proteins admits a number of distinct "
+    "points of the embedding space that varies per query and makes the arms of "
+    "a sweep incomparable. Mutually exclusive with max_k_position: a depth is "
+    "counted in one unit or the other, and a run that named both would have no "
+    "reading. Refused up front when the candidates carry no sequence rank, "
+    "since SQL would drop those rows and the run would score nothing and "
+    "report success."
+)
+
 __all__ = (
+    "SEQUENCE_DEPTH_DESCRIPTION",
     "DepthUnitUnavailable",
     "assert_depth_unit_is_available",
+    "assert_one_depth_unit",
     "ledger_coverage",
     "why_the_unit_is_unavailable",
 )
+
+
+def assert_one_depth_unit(
+    max_k_position: int | None, max_sequence_rank: int | None
+) -> None:
+    """Refuse a request that names both depths, rather than picking one.
+
+    The two are different candidate sets, so a request naming both has no
+    reading, and resolving it here would be the operation quietly choosing
+    what the experiment measured. Both null is fine and means every stored
+    neighbour.
+    """
+    if max_k_position is not None and max_sequence_rank is not None:
+        raise ValueError(
+            "a depth is counted in proteins or in sequences, not both; got "
+            f"max_k_position={max_k_position} and "
+            f"max_sequence_rank={max_sequence_rank}"
+        )
 
 
 class DepthUnitUnavailable(RuntimeError):
