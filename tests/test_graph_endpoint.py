@@ -33,8 +33,13 @@ from protea.api.routers._graph_panels import (
     build_panels,
     panel_units_from_groundtruth,
 )
-from protea.api.routers._graph_reads import _PIVOT_ASPECTS, QUERIES, read_record
-from protea.api.routers.graph import (
+from protea.api.routers._graph_reads import (
+    _PIVOT_ASPECTS,
+    PARAM_QUERIES,
+    QUERIES,
+    read_record,
+)
+from protea.api.routers._graph_edges import (
     BLOCKED,
     CHOSEN,
     INHERITED,
@@ -42,10 +47,9 @@ from protea.api.routers.graph import (
     SPECS,
     UNPOWERED,
     Edge,
-    build_graph,
-    router,
     strength_of,
 )
+from protea.api.routers.graph import build_graph, router
 from protea.infrastructure.settings import load_settings
 
 _STRENGTHS = {MEASURED, CHOSEN, INHERITED, UNPOWERED, BLOCKED}
