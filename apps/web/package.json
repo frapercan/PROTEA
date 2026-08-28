@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "postbuild": "node scripts/copy-standalone-assets.mjs"
   },
   "dependencies": {
     "@types/cytoscape": "^3.31.0",

@@ -55,8 +55,10 @@ class CafaEvalRunContext:
     ia_path: str | None
     toi_path: str
     shared_pred_dir: str
+    max_k_position: int | None = None
     th_step: float = 0.01
     max_terms: int | None = None
+    max_k_position: int | None = None
     softprop: bool = False
     interpro_graft: bool = False
     interpro_protein2ipr_file: str | None = None
@@ -89,6 +91,7 @@ def _write_setting_predictions(
         pred_set_id=ctx.pred_set_id,
         delta_proteins=ctx.delta_proteins,
         max_distance=ctx.max_distance,
+        max_k_position=ctx.max_k_position,
         path=pred_path,
     )
     if "" in rr_aspect_map:
@@ -108,8 +111,6 @@ def _write_setting_predictions(
             known_gos=setting_known,
         )
     return pred_dir
-
-
 
 
 def _new_per_protein_sink() -> Any:
@@ -193,8 +194,6 @@ def _persist_setting_artifacts(
     setting_dir = ctx.artifacts_root / setting
     setting_dir.mkdir(exist_ok=True)
     _write_results(df, dfs_best, str(setting_dir))
-
-
 
 
 def _persist_per_protein(

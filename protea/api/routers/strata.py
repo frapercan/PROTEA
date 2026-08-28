@@ -90,7 +90,9 @@ def get_strata(
             ),
         )
 
-    axes = [k for k in next(iter(out.values()))[0] if k not in _MEASURES] if any(out.values()) else []
+    axes = (
+        [k for k in next(iter(out.values()))[0] if k not in _MEASURES] if any(out.values()) else []
+    )
     return {
         "evaluation_result_id": str(evaluation_result_id),
         "axes": axes,
@@ -106,19 +108,38 @@ _COMPARE_TTL = 300.0
 #: The arms of an evaluation set, with the identity a reader compares by.
 #: prediction_set.meta carries the receipt, so the model and K come from
 #: the row that produced the score rather than from a label.
+#:
+#: The scoring configuration and the donor policy travel with them. Eight arms
+#: of this campaign share a prediction set and differ only downstream of it, so
+#: a table naming an arm by its model alone prints eight rows reading
+#: ``esm2_650m`` at eight different scores. A reader comparing two of those rows
+#: believes they differ in the field the column names, which is the defect this
+#: project has already hit and named: a single-field comparison that was not.
 _ARMS = text(
     """
     SELECT er.id            AS evaluation_result_id,
            ec.id            AS embedding_config_id,
            ec.model_name    AS model,
            ec.display_name  AS display_name,
+           -- Both sides of this merge added identity to the arm, and both are
+           -- needed: an arm is told apart by every field that varied, and a
+           -- comparison whose rows cannot be told apart is the defect this
+           -- endpoint exists to avoid.
            ec.layer_indices AS layer_indices,
-           ps.limit_per_entry AS k
+           ps.limit_per_entry AS k,
+           sc.name          AS scoring_name,
+           CASE
+               WHEN ps.meta -> 'donor_policy' ->> 'evidence_codes' IS NULL
+                   THEN 'permissive'
+               ELSE 'evidence-gated'
+           END              AS donor_policy,
+           ps.meta ->> 'metric' AS metric
     FROM evaluation_result er
     JOIN prediction_set ps ON ps.id = er.prediction_set_id
     JOIN embedding_config ec ON ec.id = ps.embedding_config_id
+    LEFT JOIN scoring_config sc ON sc.id = er.scoring_config_id
     WHERE er.evaluation_set_id = :esid
-    ORDER BY ec.model_name, ec.layer_indices, ps.limit_per_entry
+    ORDER BY ec.model_name, ec.layer_indices, ps.limit_per_entry, sc.name
     """
 )
 
@@ -134,6 +155,13 @@ def _load_arms(session: Any, evaluation_set_id: str) -> list[dict[str, Any]]:
                 "display_name": r["display_name"] or r["model"],
                 "layer_indices": r["layer_indices"],
                 "k": r["k"],
+                # Added on the other side of this merge, and kept: two arms that
+                # differ only in scoring or in donor policy render under one
+                # label without them, and a comparison whose rows cannot be told
+                # apart is the defect this endpoint exists to avoid.
+                "scoring_name": r["scoring_name"],
+                "donor_policy": r["donor_policy"],
+                "metric": r["metric"],
             }
             for r in session.execute(_ARMS, {"esid": evaluation_set_id}).mappings().all()
         ]
@@ -219,10 +247,14 @@ class _Coordinates:
             "not comparable down a column."
         ),
     )
-    category: str | None = Query(default=None, description="Stratum coordinate on the category axis.")
+    category: str | None = Query(
+        default=None, description="Stratum coordinate on the category axis."
+    )
     aspect: str | None = Query(default=None, description="Stratum coordinate on the aspect axis.")
     length: str | None = Query(default=None, description="Stratum coordinate on the length axis.")
-    homology: str | None = Query(default=None, description="Stratum coordinate on the homology axis.")
+    homology: str | None = Query(
+        default=None, description="Stratum coordinate on the homology axis."
+    )
 
     def where(self) -> dict[str, str]:
         """Only the axes actually pinned; an unset axis is not a filter."""

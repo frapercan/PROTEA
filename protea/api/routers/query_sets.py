@@ -258,7 +258,11 @@ def get_query_set(
         return result
 
 
-@router.delete("/{query_set_id}", summary="Delete a query set", dependencies=[Depends(require_role(ROLE_VIEWER))])
+@router.delete(
+    "/{query_set_id}",
+    summary="Delete a query set",
+    dependencies=[Depends(require_role(ROLE_VIEWER))],
+)
 def delete_query_set(
     query_set_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),

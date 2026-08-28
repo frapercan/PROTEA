@@ -53,10 +53,7 @@ class RepoEntry(BaseModel):
     )
     role: str = Field(
         ...,
-        description=(
-            "Architectural slot key: ``core``, ``contracts``, "
-            "``plugin``, ``lab``."
-        ),
+        description=("Architectural slot key: ``core``, ``contracts``, ``plugin``, ``lab``."),
     )
     role_label: str = Field(
         ...,

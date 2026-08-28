@@ -1,0 +1,39 @@
+[Unit]
+# PROTEA queue worker, one instance per queue.
+#   systemctl --user enable protea-worker@protea.embeddings.batch.service
+#
+# SINGLE-INSTANCE IS STRUCTURAL, NOT ADVISORY. systemd refuses to run two
+# copies of the same instance name, so the GPU worker
+# (protea.embeddings.batch -- pid 124792 today, the only process holding the
+# GPU at 2684 MiB) can never be doubled by this mechanism. That is a strictly
+# stronger guarantee than manage.sh, which achieves "one worker" by
+# `pkill -TERM -f "scripts/worker[.]py"` at manage.sh:110-118 -- i.e. by killing
+# the running GPU job first. This unit never pkills anything.
+Description=PROTEA worker (queue %I)
+PartOf=protea.target
+After=protea-wait-infra.service
+Requires=protea-wait-infra.service
+
+[Service]
+Type=exec
+WorkingDirectory=/home/bioxaxi2/Thesis-laptop/PROTEA
+EnvironmentFile=/home/bioxaxi2/Thesis-laptop/PROTEA/.env
+
+# HUMAN-JOB GUARD. Refuse to start if a worker for this queue is already alive
+# outside systemd (e.g. the fleet the researcher launched by hand, still
+# draining a multi-hour job). Non-zero ExecStartPre fails the unit cleanly and
+# leaves the running process untouched -- fail-safe, not fail-open.
+ExecStartPre=/home/bioxaxi2/Thesis-laptop/PROTEA/deploy/systemd/protea-guard-queue.sh %I
+
+ExecStart=/home/bioxaxi2/Thesis-laptop/PROTEA/.venv/bin/python scripts/worker.py --queue %I
+
+Restart=on-failure
+RestartSec=10
+# Generous drain: an embedding batch mid-flight should finish or checkpoint
+# rather than be SIGKILLed at the 90s default.
+TimeoutStopSec=300
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=protea.target

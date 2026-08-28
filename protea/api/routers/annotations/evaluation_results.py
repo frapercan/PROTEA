@@ -47,9 +47,7 @@ def download_evaluation_metrics(
             return StreamingResponse(
                 render_evaluation_metrics_tsv(result, ASPECT_CAFA_CODES),
                 media_type="text/tab-separated-values",
-                headers={
-                    "Content-Disposition": f'attachment; filename="metrics_{result_id}.tsv"'
-                },
+                headers={"Content-Disposition": f'attachment; filename="metrics_{result_id}.tsv"'},
             )
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

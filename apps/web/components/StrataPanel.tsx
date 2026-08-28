@@ -19,11 +19,13 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import Link from "next/link";
 
 import { baseUrl } from "@/lib/api";
 import StrataChart from "@/components/StrataChart";
 import { StratumMembers } from "@/components/StratumMembers";
 import { CATEGORY_NAME, coverage } from "@/lib/strataView";
+import { stratumHref } from "@/lib/stratumProteins";
 import {
   axisLabel,
   cellKey,
@@ -42,6 +44,10 @@ type Props = {
    *  not every caller has it; without it the panel reads as before and the
    *  open control is not offered. */
   predictionSetId?: string;
+  /** The evaluation set this result belongs to. Optional for the same reason,
+   *  and it buys the other descent: the full cell view needs it to offer the
+   *  other arms scored at the same coordinates. */
+  evaluationSetId?: string;
   locale: string;
 };
 
@@ -52,12 +58,17 @@ function SettingTable({
   setting,
   cells,
   axes,
+  evaluationResultId,
+  evaluationSetId,
   predictionSetId,
   locale,
 }: {
   setting: string;
   cells: StratumCell[];
   axes: string[];
+  /** The arm these cells belong to, which is the arm the cell view opens on. */
+  evaluationResultId: string;
+  evaluationSetId?: string;
   /** Absent on an evaluation whose row does not carry it; the open control
    *  is then not offered rather than offered and broken. */
   predictionSetId?: string;
@@ -123,21 +134,46 @@ function SettingTable({
                 >
                   {formatScore(cell.f_micro_w)}
                 </td>
-                <td className={TD}>
+                <td className={`${TD} whitespace-nowrap`}>
                   {cell.reportable ? null : (
                     <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
                       withheld
                     </span>
                   )}
+                  {/* Two descents, named for the two different questions they
+                      answer. "band" expands the queries the length and
+                      homology bands hold, which is a fact about the retrieval
+                      and counts more proteins than this cell does, because
+                      category and aspect are asserted there rather than
+                      filtered. "proteins" opens the cell itself, whose
+                      population is the one printed on this row. Naming both
+                      "open" invited reading the larger count as this cell's. */}
                   {predictionSetId ? (
                     <button
                       type="button"
                       onClick={() => setOpen(isOpen ? null : key)}
                       aria-expanded={isOpen}
+                      title="The queries in this length and homology band, which is a larger population than this cell"
                       className="ml-1 rounded px-1.5 py-0.5 text-[10px] text-sky-700 hover:bg-sky-50 hover:underline"
                     >
-                      {isOpen ? "close" : "open"}
+                      {isOpen ? "close band" : "band"}
                     </button>
+                  ) : null}
+                  {evaluationSetId ? (
+                    <Link
+                      href={stratumHref({
+                        evaluationSetId,
+                        category: setting,
+                        aspect: String(cell.aspect ?? ""),
+                        length: cell.length ? String(cell.length) : null,
+                        homology: cell.homology ? String(cell.homology) : null,
+                        arm: evaluationResultId,
+                      })}
+                      title="This cell's own proteins, each with what it scored"
+                      className="ml-1 rounded px-1.5 py-0.5 text-[10px] text-sky-700 hover:bg-sky-50 hover:underline"
+                    >
+                      proteins
+                    </Link>
                   ) : null}
                 </td>
               </tr>
@@ -172,6 +208,7 @@ function SettingTable({
 export default function StrataPanel({
   evaluationResultId,
   predictionSetId,
+  evaluationSetId,
   locale,
 }: Props) {
   const [data, setData] = useState<StrataResponse | null>(null);
@@ -241,6 +278,8 @@ export default function StrataPanel({
           setting={setting}
           cells={cells}
           axes={data.axes}
+          evaluationResultId={evaluationResultId}
+          evaluationSetId={evaluationSetId}
           predictionSetId={predictionSetId}
           locale={locale}
         />

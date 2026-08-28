@@ -1,0 +1,13 @@
+[Unit]
+# Readiness gate only. Ordering-after for the app units.
+Description=PROTEA infra readiness gate (postgres/rabbitmq TCP)
+PartOf=protea.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/bioxaxi2/Thesis-laptop/PROTEA/deploy/systemd/protea-wait-infra.sh
+TimeoutStartSec=200
+
+[Install]
+WantedBy=protea.target

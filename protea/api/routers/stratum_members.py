@@ -72,11 +72,11 @@ def _aspect_code(raw: str) -> str:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"aspect {raw!r} is not a GO aspect. Accepted: "
-                + ", ".join(sorted(_ASPECT_CODES))
+                f"aspect {raw!r} is not a GO aspect. Accepted: " + ", ".join(sorted(_ASPECT_CODES))
             ),
         )
     return code
+
 
 #: Sequence length per query, which the band needs and the neighbourhood
 #: does not carry.
@@ -142,7 +142,7 @@ def _walk(
             )
     # Weakest identity first: the reason to open a cell is usually to see
     # what makes it hard, and the hardest cases are the ones to show.
-    return sorted(members, key=lambda m: (m["best_identity"] or -1.0)), population
+    return sorted(members, key=lambda m: m["best_identity"] or -1.0), population
 
 
 @router.get("/{prediction_set_id}/members", summary="Proteins in one stratum")
@@ -177,9 +177,7 @@ def stratum_members(
             )
         lengths = {
             r["accession"]: r["residues"]
-            for r in session.execute(
-                _LENGTHS, {"accessions": list(hoods)}
-            ).mappings()
+            for r in session.execute(_LENGTHS, {"accessions": list(hoods)}).mappings()
         }
 
     members, population = _walk(hoods, lengths, at, _aspect_code(at.aspect), limit)

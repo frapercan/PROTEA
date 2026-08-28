@@ -16,30 +16,39 @@
       "threshold": 500
     },
     {
-      "key": "class::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation",
-      "kind": "class",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "RunCafaEvaluationOperation",
-      "line": 283,
-      "metric": 619,
-      "threshold": 500
+      "key": "method::protea/api/routers/benchmark.py::_aggregate_benchmark_matrix",
+      "kind": "method",
+      "path": "protea/api/routers/benchmark.py",
+      "name": "_aggregate_benchmark_matrix",
+      "line": 507,
+      "metric": 69,
+      "threshold": 60
     },
     {
-      "key": "file::protea/core/operations/run_cafa_evaluation.py::",
-      "kind": "file",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "",
-      "line": 0,
-      "metric": 901,
-      "threshold": 800
+      "key": "method::protea/api/routers/stratum_proteins.py::_join",
+      "kind": "method",
+      "path": "protea/api/routers/stratum_proteins.py",
+      "name": "_join",
+      "line": 189,
+      "metric": 72,
+      "threshold": 60
+    },
+    {
+      "key": "method::protea/api/routers/stratum_proteins.py::stratum_proteins",
+      "kind": "method",
+      "path": "protea/api/routers/stratum_proteins.py",
+      "name": "stratum_proteins",
+      "line": 324,
+      "metric": 134,
+      "threshold": 60
     },
     {
       "key": "method::protea/core/operations/predict_go_terms/_batch_op_reference.py::_ReferenceMixin._load_reference_data_per_aspect",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms/_batch_op_reference.py",
       "name": "_ReferenceMixin._load_reference_data_per_aspect",
-      "line": 331,
-      "metric": 68,
+      "line": 446,
+      "metric": 66,
       "threshold": 60
     },
     {
@@ -52,12 +61,21 @@
       "threshold": 60
     },
     {
+      "key": "params::protea/api/routers/stratum_proteins.py::stratum_proteins",
+      "kind": "params",
+      "path": "protea/api/routers/stratum_proteins.py",
+      "name": "stratum_proteins",
+      "line": 324,
+      "metric": 7,
+      "threshold": 6
+    },
+    {
       "key": "params::protea/core/operations/predict_go_terms/_batch_op_reference.py::_ReferenceMixin._assemble_all_aspect_views",
       "kind": "params",
       "path": "protea/core/operations/predict_go_terms/_batch_op_reference.py",
       "name": "_ReferenceMixin._assemble_all_aspect_views",
-      "line": 400,
-      "metric": 8,
+      "line": 513,
+      "metric": 7,
       "threshold": 6
     }
   ]

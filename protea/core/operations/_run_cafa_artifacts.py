@@ -20,7 +20,7 @@ import requests
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from protea.core.operations import _pred_base_cache
+from protea.core.operations import _depth_guard, _pred_base_cache
 from protea.core.operations._run_cafa_helpers import (
     _NS_LABELS,
     _patch_query_known_features,
@@ -65,8 +65,8 @@ _BASE_SCORE_COLS: tuple[str, ...] = (
 class WritePredictionsContext:
     """Shared inputs for the per-setting prediction TSV writers.
 
-    Bundles the four query-shaped fields (``pred_set_id``,
-    ``delta_proteins``, ``max_distance``) plus the destination
+    Bundles the query-shaped fields (``pred_set_id``,
+    ``delta_proteins``, ``max_distance``, ``max_k_position``) plus the destination
     ``path`` consumed by all three artifact writers
     (``write_predictions``, ``write_predictions_reranked``,
     ``write_predictions_per_aspect``). The session, scoring
@@ -78,6 +78,7 @@ class WritePredictionsContext:
     delta_proteins: set[str]
     max_distance: float | None
     path: str
+    max_k_position: int | None = None
 
 
 def download_obo(url: str, dest: str) -> None:
@@ -276,12 +277,13 @@ def write_predictions(
         )
         return
     base = _pred_base_cache.load_or_build_base(
-        ctx.pred_set_id,
-        ctx.max_distance,
-        ctx.delta_proteins,
+        _pred_base_cache.BaseFrameKey.of(
+            ctx.pred_set_id, ctx.max_distance, ctx.max_k_position, ctx.delta_proteins
+        ),
         count_fn=lambda: _count_base_rows(session, ctx),
         build_fn=lambda: _build_base_frame(session, ctx),
     )
+    _depth_guard.assert_depth_was_applied(session, ctx, base, _count_base_rows)
     _write_scored_base(base, scoring_config, ctx.path)
 
 
@@ -313,6 +315,8 @@ def _base_select(ctx: WritePredictionsContext) -> Any:
     )
     if ctx.max_distance is not None:
         stmt = stmt.where(GOPrediction.distance <= ctx.max_distance)
+    if ctx.max_k_position is not None:
+        stmt = stmt.where(GOPrediction.k_position <= ctx.max_k_position)
     return stmt
 
 
@@ -327,6 +331,8 @@ def _count_base_rows(session: Session, ctx: WritePredictionsContext) -> int:
     )
     if ctx.max_distance is not None:
         stmt = stmt.where(GOPrediction.distance <= ctx.max_distance)
+    if ctx.max_k_position is not None:
+        stmt = stmt.where(GOPrediction.k_position <= ctx.max_k_position)
     return int(session.execute(stmt).scalar_one())
 
 
@@ -571,6 +577,8 @@ def write_predictions_reranked(
     )
     if ctx.max_distance is not None:
         q = q.filter(GOPrediction.distance <= ctx.max_distance)
+    if ctx.max_k_position is not None:
+        q = q.filter(GOPrediction.k_position <= ctx.max_k_position)
 
     records: list[dict[str, Any]] = [
         _record_from_pred(pred, go_id, aspect=aspect) for pred, go_id, aspect in q.yield_per(5000)
@@ -608,6 +616,8 @@ def _load_aspect_records(
     )
     if ctx.max_distance is not None:
         q = q.filter(GOPrediction.distance <= ctx.max_distance)
+    if ctx.max_k_position is not None:
+        q = q.filter(GOPrediction.k_position <= ctx.max_k_position)
     return [_record_from_pred(pred, go_id, aspect) for pred, go_id, aspect in q.yield_per(5000)]
 
 

@@ -1,0 +1,27 @@
+[Unit]
+# Public tunnel. Reproduces the command the researcher started by hand:
+#   ngrok http 3000 --domain protea.ngrok.app
+#
+# NOT `ngrok start --all` (which is what agent-farm/scripts/cold-boot.sh:224
+# runs): ~/.config/ngrok/ngrok.yml on this host declares only `version` and an
+# `agent:` block -- there are NO named tunnels, so `--all` would start nothing
+# and the tunnel would silently stay down.
+Description=PROTEA public tunnel (ngrok -> protea.ngrok.app)
+PartOf=protea.target
+After=protea-frontend.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=/home/bioxaxi2/Thesis-laptop/PROTEA
+ExecStart=/usr/local/bin/ngrok http 3000 --domain protea.ngrok.app --log stdout --log-format logfmt
+
+# One agent only: a second ngrok on the same reserved domain is rejected
+# upstream. Unit identity prevents a local duplicate in the first place.
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=20
+
+[Install]
+WantedBy=protea.target
