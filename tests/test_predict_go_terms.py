@@ -1263,7 +1263,9 @@ class TestAspectSeparatedDelegation:
         go_id_map = fixture["go_id_map"]
         go_aspect_map = fixture["go_aspect_map"]
 
-        def fake_load_annotations_for(_session, _ann_set_id, accessions, aspect=None):
+        def fake_load_annotations_for(
+            _session, _ann_set_id, accessions, aspect=None, donor_policy=None
+        ):
             out: dict[str, list[dict[str, object]]] = {}
             for acc in accessions:
                 for ann in annotations.get(acc, []):

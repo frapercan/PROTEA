@@ -123,7 +123,13 @@ def unified_predict_via_pipeline(
             ref_tax_ids=ref_tax_ids,
             query_tax_ids=query_tax_ids,
             alignment_cache=SessionAlignmentCache(session),
-            ref_sequence_identities=load_sequence_identities(session, unique_neighbors),
+            # The QUERIES go in too, not only the bank. The method excludes a
+            # query from its own neighbourhood by SEQUENCE, so it has to be
+            # able to recognise the query's own; with only the bank mapped it
+            # refuses, which is correct and useless.
+            ref_sequence_identities=load_sequence_identities(
+                session, set(ctx.valid_accessions) | set(unique_neighbors)
+            ),
         )
     )
 
@@ -169,7 +175,14 @@ def unified_load_annotations(
         neighbors, list(ctx.valid_accessions), p.limit_per_entry, exclude_self
     )
     unique_neighbors: set[str] = {ref_acc for top_refs in neighbors for ref_acc, _ in top_refs}
-    annotations = op._load_annotations_for(session, ctx.annotation_set_id, unique_neighbors)
+    # The neighbours' annotations are what gets TRANSFERRED, so the donor
+    # policy applies here. It used to gate only which proteins entered the
+    # pool, which let a protein admitted on one experimental annotation
+    # donate every annotation it had.
+    annotations = op._load_annotations_for(
+        session, ctx.annotation_set_id, unique_neighbors,
+        donor_policy=getattr(ctx.p, "donor_policy", None),
+    )
     return annotations, unique_neighbors
 
 

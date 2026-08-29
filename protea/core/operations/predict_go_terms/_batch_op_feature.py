@@ -17,6 +17,9 @@ from sqlalchemy.orm import Session
 
 from protea.core.annotation_intern import intern_string
 from protea.core.contracts.operation import EmitFn
+from protea.core.operations.predict_go_terms._batch_op_reference import (
+    _restrict_annotations,
+)
 from protea.core.operations.predict_go_terms._common import (
     PredictGOTermsBatchPayload,
 )
@@ -76,6 +79,7 @@ class _FeatureLoadingMixin:
         annotation_set_id: uuid.UUID,
         accessions: set[str],
         aspect: str | None = None,
+        donor_policy: Any = None,
     ) -> dict[str, list[dict[str, Any]]]:
         """Load GO annotations for the given accessions, chunked to avoid param limits.
 
@@ -93,7 +97,9 @@ class _FeatureLoadingMixin:
         accessions_list = list(accessions)
         for i in range(0, len(accessions_list), chunk_size):
             chunk = accessions_list[i : i + chunk_size]
-            rows = self._fetch_annotation_chunk(session, annotation_set_id, chunk, aspect)
+            rows = self._fetch_annotation_chunk(
+                session, annotation_set_id, chunk, aspect, donor_policy
+            )
             for acc, go_term_id, qualifier, evidence_code in rows:
                 go_map.setdefault(acc, []).append(
                     {
@@ -113,8 +119,9 @@ class _FeatureLoadingMixin:
         annotation_set_id: uuid.UUID,
         chunk: list[str],
         aspect: str | None,
+        donor_policy: Any = None,
     ) -> list[Any]:
-        """Query one accession chunk for non-negated annotations.
+        """Query one accession chunk for the annotations the policy admits.
 
         Returns the raw rows; the join to ``go_term`` is added only when
         aspect filtering is requested so the common (non-aspect-separated)
@@ -137,7 +144,14 @@ class _FeatureLoadingMixin:
         )
         if aspect is not None:
             q = q.join(ProteinGOAnnotation.go_term).filter(GOTerm.aspect == aspect)
-        return q.all()
+        # The policy restricts what may be DONATED, so it belongs here and not
+        # only on the query that admits proteins to the pool. Admitting a
+        # protein on the strength of one experimental annotation and then
+        # letting it donate every annotation it has is how 1,523,939 of
+        # 2,801,404 stored rows came to carry an evidence code the policy
+        # excludes, and how 1,300 cells with no experimental prior were
+        # predicted from the protein's own IEA row.
+        return _restrict_annotations(q, donor_policy).all()
 
     def _load_query_embeddings(
         self,

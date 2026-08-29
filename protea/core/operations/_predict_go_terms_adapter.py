@@ -131,6 +131,11 @@ def _build_predict_config(
         pre_normalized=use_cos,
         prediction_set_id=str(prediction_set_id),
         sequence_keys=sequence_keys,
+        # The flag has to reach the search that produces rows. PROTEA's own
+        # pre-search feeds only the pair features, so applying it there and
+        # not here is how a run dispatched with the flag came back with
+        # 133,866 self-donated rows.
+        exclude_self_neighbour=bool(getattr(p, "exclude_self_neighbour", False)),
     )
 
 

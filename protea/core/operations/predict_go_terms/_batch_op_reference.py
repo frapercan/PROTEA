@@ -575,8 +575,15 @@ class _ReferenceMixin:
             request.annotation_set_id,
             request.discriminator,
         )
+        # The policy travels into the CSR because the CSR is what the hot path
+        # reads. Filtering only the fallback query would leave the cache, and
+        # therefore almost every real run, unfiltered. The disk key already
+        # carries the policy's discriminator, so a filtered and an unfiltered
+        # pool cannot be confused for one another.
         aspect_to_accset, aspect_to_go_map = (
-            PredictGOTermsBatchOperation._collect_aspect_annotations(session, missing_aspects, asid)
+            PredictGOTermsBatchOperation._collect_aspect_annotations(
+                session, missing_aspects, asid, request.donor_policy
+            )
         )
         for asp in missing_aspects:
             idx_path = _aspect_index_path(ecid, asid, asp, d)
@@ -598,6 +605,7 @@ class _ReferenceMixin:
         session: Session,
         missing_aspects: list[str],
         annotation_set_id: uuid.UUID,
+        donor_policy: Any = None,
     ) -> tuple[
         dict[str, set[str]],
         dict[str, dict[str, list[dict[str, Any]]]],
@@ -626,8 +634,8 @@ class _ReferenceMixin:
                     | ~ProteinGOAnnotation.qualifier.like("%NOT%")
                 ),
             )
-            .yield_per(50_000)
         )
+        rows = _restrict_annotations(rows, donor_policy).yield_per(50_000)
         for acc, asp, go_term_id, qualifier, evidence_code in rows:
             if asp not in aspect_to_accset:
                 continue

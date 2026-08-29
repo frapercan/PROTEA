@@ -7,6 +7,7 @@ Behaviour is unchanged.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -132,11 +133,26 @@ class _AspectKnnPreSearch:
         return neighbors_by_aspect, all_unique_neighbors
 
 
+@dataclass(frozen=True)
+class DonorSource:
+    """Where donations come from, and which of them the policy admits.
+
+    The two travel together everywhere a donation is read: the loader, the
+    CSR builder and the on-disk cache key. Passing them as one says that a
+    set without its policy is not a source, which is the mistake that let a
+    protein admitted on one experimental annotation donate every annotation
+    it had.
+    """
+
+    annotation_set_id: Any
+    policy: Any = None
+
+
 def _load_aspect_go_map_for_hits(
     op: PredictGOTermsBatchOperation,
     session: Session,
     aspect_ref: dict[str, Any],
-    annotation_set_id: Any,
+    source: DonorSource,
     hits_in_aspect: set[str],
     aspect: str,
 ) -> dict[str, list[dict[str, Any]]]:
@@ -158,7 +174,8 @@ def _load_aspect_go_map_for_hits(
             ),
         )
     return op._load_annotations_for(
-        session, annotation_set_id, hits_in_aspect, aspect=aspect
+        session, source.annotation_set_id, hits_in_aspect, aspect=aspect,
+        donor_policy=source.policy,
     )
 
 
@@ -168,6 +185,7 @@ def _load_aspect_separated_annotations(
     ref_data_by_aspect: dict[str, dict[str, Any]],
     annotation_set_id: Any,
     all_unique_neighbors: set[str],
+    donor_policy: Any = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Union per-aspect annotations into a single ``ref_acc -> [anns]`` dict.
 
@@ -185,7 +203,8 @@ def _load_aspect_separated_annotations(
         if not hits_in_aspect:
             continue
         asp_go_map = _load_aspect_go_map_for_hits(
-            op, session, aspect_ref, annotation_set_id, hits_in_aspect, aspect,
+            op, session, aspect_ref,
+            DonorSource(annotation_set_id, donor_policy), hits_in_aspect, aspect,
         )
         for ref_acc, anns in asp_go_map.items():
             annotations.setdefault(ref_acc, []).extend(anns)
@@ -211,6 +230,7 @@ def _build_aspect_adapter_inputs(
     )
     annotations = _load_aspect_separated_annotations(
         op, session, ctx.ref_data_by_aspect, ctx.annotation_set_id, all_unique_neighbors,
+        getattr(p, "donor_policy", None),
     )
     ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = (
         op._load_feature_engineering_data(
@@ -232,7 +252,13 @@ def _build_aspect_adapter_inputs(
         ref_tax_ids=ref_tax_ids,
         query_tax_ids=query_tax_ids,
         alignment_cache=SessionAlignmentCache(session),
-        ref_sequence_identities=load_sequence_identities(session, all_unique_neighbors),
+        # The QUERIES go in too, not only the bank. The method excludes a
+            # query from its own neighbourhood by SEQUENCE, so it has to be
+            # able to recognise the query's own; with only the bank mapped it
+            # refuses, which is correct and useless.
+            ref_sequence_identities=load_sequence_identities(
+                session, set(ctx.valid_accessions) | set(all_unique_neighbors)
+            ),
     )
 
 
