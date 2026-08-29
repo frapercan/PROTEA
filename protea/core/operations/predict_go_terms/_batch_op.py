@@ -30,6 +30,8 @@ from sqlalchemy.orm import Session
 from protea.core.code_revision import (
     ForeignRevisionError,
     code_revision,
+    dependency_conflicts,
+    dependency_revisions,
     is_identifying,
     revisions_conflict,
 )
@@ -268,37 +270,63 @@ class PredictGOTermsBatchOperation(
 
     @staticmethod
     def _refuse_foreign_revision(session: Session, ctx: _BatchExecCtx, emit: EmitFn) -> None:
-        """Refuse to write into a set that was opened by different code.
+        """Refuse to write into a set that different code opened.
 
-        The comparison is one-sided on purpose. A conflict is only declared
-        when both revisions name a commit that can be checked out again, so a
-        dirty tree or a checkout without git never fails a batch. It emits a
-        warning instead, because "cannot be verified" and "verified equal" have
-        to be different words in the job stream: the run this guard exists for
-        reported success, and a guard that quietly passed when it could not
-        look would have reported success too.
+        Two comparisons, because the repository commit does not identify the
+        code: PROTEA pins six sibling packages by git commit, and a node can
+        hold the right tree with a stale sibling whose version string did not
+        move, which is exactly what happened on 2026-08-29.
+
+        Each comparison is one-sided on purpose. A conflict is only declared
+        when both sides name something that can be checked out again, so a
+        dirty tree, a checkout without git, or an installer that left no
+        witness never fails a batch. It emits a warning instead, because
+        "cannot be verified" and "verified equal" have to be different words in
+        the job stream: the run this guard exists for reported success, and a
+        guard that quietly passed when it could not look would have reported
+        success too.
         """
-        recorded = session.execute(
-            text("SELECT meta ->> 'code_revision' FROM prediction_set WHERE id = :sid"),
+        stored = session.execute(
+            text("SELECT meta FROM prediction_set WHERE id = :sid"),
             {"sid": ctx.prediction_set_id},
         ).scalar()
-        running = code_revision()
-        if revisions_conflict(recorded, running):
-            emit(
-                "predict_go_terms_batch.foreign_revision",
-                None,
-                {"recorded": recorded, "running": running},
-                "error",
-            )
+        # Anything that is not an object carries no revision, which includes a
+        # set that is not there. Reading the keys here rather than in SQL keeps
+        # the two questions this asks in one place.
+        meta = stored if isinstance(stored, dict) else {}
+        recorded_revision = meta.get("code_revision")
+        recorded_deps = meta.get("dependency_revisions")
+        running_revision = code_revision()
+        differing = dependency_conflicts(recorded_deps, dependency_revisions())
+
+        if revisions_conflict(recorded_revision, running_revision) or differing:
+            fields = {
+                "recorded": recorded_revision,
+                "running": running_revision,
+                "dependencies": {k: list(v) for k, v in differing.items()},
+            }
+            emit("predict_go_terms_batch.foreign_revision", None, fields, "error")
             raise ForeignRevisionError(
-                f"prediction set {ctx.prediction_set_id} was opened by "
-                f"{recorded}, this worker runs {running}"
+                _foreign_revision_message(
+                    ctx.prediction_set_id, recorded_revision, running_revision, differing
+                )
             )
-        if not (is_identifying(recorded) and is_identifying(running)):
+
+        if not (is_identifying(recorded_revision) and is_identifying(running_revision)):
             emit(
                 "predict_go_terms_batch.revision_unverifiable",
                 None,
-                {"recorded": recorded, "running": running},
+                {"recorded": recorded_revision, "running": running_revision},
+                "warning",
+            )
+        elif not recorded_deps:
+            # The repository matched, so the set is not foreign, but it was
+            # opened before dependency commits were recorded and a stale
+            # sibling here would be invisible.
+            emit(
+                "predict_go_terms_batch.dependencies_unverifiable",
+                None,
+                {"recorded": recorded_revision},
                 "warning",
             )
 
@@ -473,3 +501,22 @@ class PredictGOTermsBatchOperation(
             prediction_set_id=prediction_set_id,
             prediction_dicts=prediction_dicts,
         )
+
+
+def _foreign_revision_message(
+    prediction_set_id: uuid.UUID,
+    recorded: str | None,
+    running: str | None,
+    differing: dict[str, tuple[str, str]],
+) -> str:
+    """Name every difference, because the operator has to fix all of them.
+
+    A message that stopped at the repository would send someone to check out a
+    commit they already have.
+    """
+    parts = [f"prediction set {prediction_set_id} was opened by other code"]
+    if recorded != running:
+        parts.append(f"protea: opened by {recorded}, this worker runs {running}")
+    for name, (was, now) in sorted(differing.items()):
+        parts.append(f"{name}: opened by {was}, this worker runs {now}")
+    return "; ".join(parts)
