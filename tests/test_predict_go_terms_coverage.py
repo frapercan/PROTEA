@@ -854,7 +854,7 @@ class TestLoadAnnotationsFor:
         op = PredictGOTermsBatchOperation()
 
         # Two chunks of size 2 over 3 accessions ⇒ 2 round-trips.
-        def fake_fetch(_self, _session, _ann_id, chunk, aspect):
+        def fake_fetch(_self, _session, _ann_id, chunk, aspect, donor_policy=None):
             # Return one row per accession in the chunk.
             return [(acc, 10 + i, None, "IEA") for i, acc in enumerate(chunk)]
 
