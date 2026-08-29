@@ -3,6 +3,32 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     shm_size: 2gb
+    # WHY THESE NUMBERS. Measured 2026-08-29 with the container capped at 2G:
+    # memory.current sat at 2026 MiB of 2048, the cgroup had hit its ceiling
+    # 344,812,307 times, and the kernel had OOM-killed a backend twice, once
+    # in the middle of a COMMIT. Only 238 MiB of that was process memory; the
+    # rest was page cache being evicted as fast as it was read. A 35 GB
+    # database was running with no usable cache on a host with 15 GB free.
+    #
+    # The settings also disagreed with the cap: effective_cache_size claimed
+    # 4 GiB of OS cache inside a 2 GiB box, so the planner chose against a
+    # number that did not exist.
+    #
+    # The arithmetic that has to hold: shared_buffers is taken once, work_mem
+    # is taken per sort or hash node per connection. max_connections is 100
+    # and the observed concurrency is 16, so 2G + (16 x 16M x a few nodes)
+    # leaves room, and even the 100-connection case stays inside 8G. Raising
+    # work_mem further without raising the cap is what produced the kill.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=5GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=512MB
     environment:
       POSTGRES_USER: protea
       POSTGRES_PASSWORD: protea
@@ -21,7 +47,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 8G
 
   minio:
     image: minio/minio:latest
@@ -47,6 +73,23 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management
+    # WHY hostname AND a named volume, together. The broker kept /var/lib
+    # /rabbitmq on an ANONYMOUS volume that this file never mentioned, and
+    # named its node rabbit@<container id>. Either one alone loses the
+    # broker's state on a recreate: without the volume there is no directory,
+    # and without a fixed hostname a new container does not recognise the
+    # directory it is handed. Nothing said so, and nobody would have found out
+    # until a queue came back empty.
+    #
+    # ADOPTING THIS STARTS A FRESH BROKER. The anonymous volume is not
+    # migrated: mnesia is keyed by node name, so the old directory would not
+    # be readable under the new one anyway. What is discarded is the 277
+    # dead-lettered encode_residue_sparse_batch messages from 2026-08-20 and
+    # 21, which are inert (0 consumers, replaying them writes no new rows) and
+    # whose damage is independently recorded in job_event as 60
+    # child.encode.too_large events. Nothing else in the broker is durable
+    # state: the work queues are empty between runs by design.
+    hostname: protea-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -58,6 +101,7 @@ services:
       # explicit so a plain rabbitmq:3 image also works).
       - "15692:15692"
     volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
       - ./docker/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
@@ -226,3 +270,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  rabbitmq_data:
