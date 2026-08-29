@@ -30,11 +30,22 @@ _SNAPSHOT_ID = str(uuid.uuid4())
 _ANN_SET_ID = str(uuid.uuid4())
 
 
-def make_session_get(missing_class=None):
+def make_session_get(missing_class=None, snapshot_id: str = _SNAPSHOT_ID):
+    """A stand-in ``session.get`` whose rows agree with the payload.
+
+    The AnnotationSet has to report the snapshot the payload declares.
+    A bare MagicMock reports an attribute that equals nothing, which is not a
+    neutral stand-in for an id: it is a world in which the run's terms come
+    from a release nobody named, and the coordinator now refuses that.
+    """
+
     def _get(cls, id_):
         if cls is missing_class:
             return None
-        return MagicMock()
+        row = MagicMock()
+        if cls is AnnotationSet:
+            row.ontology_snapshot_id = uuid.UUID(snapshot_id)
+        return row
 
     return _get
 
@@ -892,8 +903,10 @@ class TestPredictGOTermsCoordinatorReranker:
         op = self._op()
         reranker_id = str(uuid.uuid4())
 
-        def _get(cls, _):
-            return None if cls is RerankerModel else MagicMock()
+        _base = make_session_get()
+
+        def _get(cls, id_):
+            return None if cls is RerankerModel else _base(cls, id_)
 
         session = MagicMock()
         session.get.side_effect = _get
@@ -915,8 +928,10 @@ class TestPredictGOTermsCoordinatorReranker:
         reranker_row.feature_schema_sha = "abcd1234"
         reranker_row.name = "broken"
 
-        def _get(cls, _):
-            return reranker_row if cls is RerankerModel else MagicMock()
+        _base = make_session_get()
+
+        def _get(cls, id_):
+            return reranker_row if cls is RerankerModel else _base(cls, id_)
 
         session = MagicMock()
         session.get.side_effect = _get
@@ -938,8 +953,10 @@ class TestPredictGOTermsCoordinatorReranker:
         reranker_row.feature_schema_sha = "deadbeef0000"
         reranker_row.name = "smoke"
 
-        def _get(cls, _):
-            return reranker_row if cls is RerankerModel else MagicMock()
+        _base = make_session_get()
+
+        def _get(cls, id_):
+            return reranker_row if cls is RerankerModel else _base(cls, id_)
 
         session = MagicMock()
         session.get.side_effect = _get

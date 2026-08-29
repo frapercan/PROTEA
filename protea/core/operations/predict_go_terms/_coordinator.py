@@ -260,6 +260,9 @@ class PredictGOTermsOperation:
             raise ValueError(f"AnnotationSet {p.annotation_set_id} not found")
         if session.get(OntologySnapshot, ontology_snapshot_id) is None:
             raise ValueError(f"OntologySnapshot {p.ontology_snapshot_id} not found")
+        _refuse_a_snapshot_the_terms_do_not_come_from(
+            session, annotation_set_id, ontology_snapshot_id
+        )
         return embedding_config_id, annotation_set_id, ontology_snapshot_id, config
 
     @staticmethod
@@ -461,3 +464,36 @@ class PredictGOTermsOperation:
         if implicit:
             _refuse_an_undeclared_corpus(len(accessions))
         return accessions
+
+
+def _refuse_a_snapshot_the_terms_do_not_come_from(
+    session: Session,
+    annotation_set_id: uuid.UUID,
+    ontology_snapshot_id: uuid.UUID,
+) -> None:
+    """A run's ontology snapshot has to be the one its terms belong to.
+
+    WHY. Every predicted term arrives from a donor's annotation, so its
+    snapshot is the annotation set's, whatever the payload says. The payload's
+    value was validated for existence and then recorded, and nothing checked
+    the two agreed. All three sets in the store declare a snapshot none of
+    their terms belongs to: a consumer that filters by the declared value gets
+    zero rows, silently.
+
+    It is not only a label. ``_lineage_feature`` builds its parent map and
+    ``_ia_feature`` its information-accretion map from the declared snapshot,
+    so a mismatch does not fail, it looks up terms of one release in a map
+    built from another and quietly misses. Those two features happened to be
+    off in the runs that carry the mismatch, which is why nothing showed.
+    """
+    declared = session.get(AnnotationSet, annotation_set_id)
+    if declared is None or declared.ontology_snapshot_id == ontology_snapshot_id:
+        return
+    raise ValueError(
+        f"OntologySnapshot {ontology_snapshot_id} is not the snapshot "
+        f"AnnotationSet {annotation_set_id} draws its terms from "
+        f"({declared.ontology_snapshot_id}). Every predicted term comes from a "
+        "donor annotation, so the two cannot differ without the recorded "
+        "snapshot being false and the lineage and IA maps being built from "
+        "the wrong release."
+    )
