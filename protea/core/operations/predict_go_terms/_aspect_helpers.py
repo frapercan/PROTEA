@@ -11,6 +11,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from protea_method._self_by_sequence import (
+    Queries,
+    extra_neighbours_for,
+    without_own_sequence,
+)
 from sqlalchemy.orm import Session
 
 from protea.core.alignment_cache import SessionAlignmentCache
@@ -25,10 +30,6 @@ from protea.core.operations.predict_go_terms._common import (
     _UNIFIED_REF_KEY,
     AspectSeparatedKnnContext,
     PredictGOTermsBatchPayload,
-)
-from protea.core.operations.predict_go_terms._self_neighbour import (
-    search_k_for,
-    without_self,
 )
 from protea.core.operations.predict_go_terms._sequence_identity import (
     load_sequence_identities,
@@ -55,16 +56,16 @@ class _AspectKnnPreSearch:
     @staticmethod
     def _knn_one_aspect(
         aspect: str,
-        valid_accessions: list[str],
-        query_embeddings: np.ndarray,
+        queries: Queries,
         ref_data_by_aspect: dict[str, dict[str, Any]],
         p: PredictGOTermsBatchPayload,
         use_cos: bool,
+        sequence_keys: dict[str, str] | None = None,
     ) -> tuple[str, list[list[tuple[str, float]]]]:
         """Run KNN for one GO aspect and return ``(aspect, neighbors_list)``."""
         aspect_refs = ref_data_by_aspect[aspect]
         if not aspect_refs["accessions"]:
-            return aspect, [[] for _ in valid_accessions]
+            return aspect, [[] for _ in queries.accessions]
         ref_f32 = (
             aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
         )
@@ -72,12 +73,26 @@ class _AspectKnnPreSearch:
         # the query may not be its own neighbour, then drop it. Aspect-separated
         # retrieval hits this harder, because a protein present in all three
         # aspect corpora retrieves itself three times.
-        exclude_self = bool(getattr(p, "exclude_self_neighbour", False))
+        # The SAME horizon the method will use, or it reaches past what this
+        # delivered. The method asks for k plus a margin measured from the
+        # bank and drops by sequence; a pre-search asking k+1 and dropping by
+        # accession hands back a shorter list, and the method then fills the
+        # difference from whatever else is in its bank, which is the union of
+        # this chunk's hits. The stored neighbourhood stops being a function
+        # of the query and the bank and becomes a function of who shared the
+        # batch: 264 of 14,032 queries, 887 donor slots, measured.
+        keys = sequence_keys if bool(
+            getattr(p, "exclude_self_neighbour", False)
+        ) else None
+        accs = list(aspect_refs["accessions"])
+        margin = (
+            extra_neighbours_for(queries.accessions, accs, keys) if keys else 0
+        )
         result = search_knn(
-            query_embeddings,
+            queries.embeddings,
             ref_f32,
-            aspect_refs["accessions"],
-            k=search_k_for(p.limit_per_entry, exclude_self),
+            accs,
+            k=p.limit_per_entry + margin,
             distance_threshold=p.distance_threshold,
             backend=p.search_backend,
             metric=p.metric,
@@ -88,8 +103,10 @@ class _AspectKnnPreSearch:
             faiss_hnsw_m=p.faiss_hnsw_m,
             faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
         )
-        return aspect, without_self(
-            result, list(valid_accessions), p.limit_per_entry, exclude_self
+        if keys is None:
+            return aspect, result
+        return aspect, without_own_sequence(
+            result, queries.accessions, p.limit_per_entry, keys
         )
 
     @staticmethod
@@ -98,6 +115,7 @@ class _AspectKnnPreSearch:
         query_embeddings: np.ndarray,
         ref_data_by_aspect: dict[str, dict[str, Any]],
         p: PredictGOTermsBatchPayload,
+        sequence_keys: dict[str, str] | None = None,
     ) -> tuple[dict[str, list[list[tuple[str, float]]]], set[str]]:
         """Return ``(neighbors_by_aspect, all_unique_neighbors)``.
 
@@ -112,7 +130,8 @@ class _AspectKnnPreSearch:
 
         def _run_one(asp: str) -> tuple[str, list[list[tuple[str, float]]]]:
             return _AspectKnnPreSearch._knn_one_aspect(
-                asp, valid_accessions, query_embeddings, ref_data_by_aspect, p, use_cos
+                asp, Queries(list(valid_accessions), query_embeddings),
+                ref_data_by_aspect, p, use_cos, sequence_keys,
             )
 
         neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
@@ -211,6 +230,28 @@ def _load_aspect_separated_annotations(
     return annotations
 
 
+def _sequence_keys_for(
+    session: Session, ctx: Any, p: PredictGOTermsBatchPayload
+) -> dict[str, str] | None:
+    """The accession-to-sequence map, read BEFORE the pre-search.
+
+    The exclusion is by sequence, so the pre-search needs the map to know how
+    deep to ask, and building the map from the pre-search's own hits would be
+    circular. One read covering the queries and the whole pool, reused by the
+    pre-search, by the method and by the donor ledger, so all three agree by
+    construction rather than by inspection.
+
+    None when the run did not ask for the exclusion, which skips the read.
+    """
+    if not getattr(p, "exclude_self_neighbour", False):
+        return None
+    return load_sequence_identities(
+        session,
+        set(ctx.valid_accessions)
+        | {a for d in ctx.ref_data_by_aspect.values() for a in d["accessions"]},
+    )
+
+
 def _build_aspect_adapter_inputs(
     op: PredictGOTermsBatchOperation,
     session: Session,
@@ -225,8 +266,10 @@ def _build_aspect_adapter_inputs(
     once) and the ``AdapterInputs`` tuple the adapter consumes.
     """
     p = ctx.payload
+    sequence_keys = _sequence_keys_for(session, ctx, p)
     neighbors_by_aspect, all_unique_neighbors = _AspectKnnPreSearch.run(
         ctx.valid_accessions, ctx.query_embeddings, ctx.ref_data_by_aspect, p,
+        sequence_keys,
     )
     annotations = _load_aspect_separated_annotations(
         op, session, ctx.ref_data_by_aspect, ctx.annotation_set_id, all_unique_neighbors,
