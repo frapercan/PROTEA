@@ -253,12 +253,12 @@ def _build_aspect_adapter_inputs(
         query_tax_ids=query_tax_ids,
         alignment_cache=SessionAlignmentCache(session),
         # The QUERIES go in too, not only the bank. The method excludes a
-            # query from its own neighbourhood by SEQUENCE, so it has to be
-            # able to recognise the query's own; with only the bank mapped it
-            # refuses, which is correct and useless.
-            ref_sequence_identities=load_sequence_identities(
-                session, set(ctx.valid_accessions) | set(all_unique_neighbors)
-            ),
+        # query from its own neighbourhood by SEQUENCE, so it has to be
+        # able to recognise the query's own; with only the bank mapped it
+        # refuses, which is correct and useless.
+        ref_sequence_identities=load_sequence_identities(
+            session, set(ctx.valid_accessions) | set(all_unique_neighbors)
+        ),
     )
 
 

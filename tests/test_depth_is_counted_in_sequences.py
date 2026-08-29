@@ -150,3 +150,96 @@ def test_the_dispatched_flag_reaches_the_row_through_every_layer() -> None:
         "the flag changed nothing, which is exactly the failure it is meant "
         "to have stopped being able to have"
     )
+
+
+def _run_distinct_terms(identities: dict[str, str]) -> list[dict[str, Any]]:
+    """The same run, but every reference donates a different term."""
+    refs = np.array(
+        [[1.0, 0.0], [1.0, 0.0], [0.9, 0.1], [0.0, 1.0]], dtype=np.float32
+    )
+    accs = ["Q1", "R1", "R2", "R3"]
+    return call_pipeline_predict(
+        AdapterInputs(
+            p=_payload(True),
+            valid_accessions=["Q1"],
+            query_embeddings=np.array([[1.0, 0.0]], dtype=np.float32),
+            ref_data={
+                "accessions": accs,
+                "embeddings_f32": refs,
+                "embeddings_f32_cos": refs,
+            },
+            annotations={
+                a: [{"go_term_id": 10 + i, "qualifier": "enables",
+                     "evidence_code": "EXP"}]
+                for i, a in enumerate(accs)
+            },
+            go_id_map={10 + i: f"GO:00000{10 + i}" for i in range(4)},
+            go_aspect_map={10 + i: "F" for i in range(4)},
+            prediction_set_id=None,
+            ref_sequences={},
+            query_sequences={},
+            ref_tax_ids={},
+            query_tax_ids={},
+            ref_sequence_identities=identities,
+        )
+    ).predictions
+
+
+def test_the_pair_features_reach_every_donor_the_method_keeps() -> None:
+    """The two searches have to agree, or a donor comes back bare.
+
+    PROTEA pre-searches to build the pair features; the method searches
+    again to produce the rows those features attach to. The method's
+    exclusion asks for extra neighbours and drops by sequence, so a
+    pre-search that asks for plain k reaches less deep, and a donor the
+    method keeps and the pre-search missed gets nothing at all.
+
+    Silently: the lookup is ``pair_features.get((q, donor), {})``. Nothing
+    raises, no column is null in a way that says why, and the row simply
+    has no alignment or taxonomy. Measured on a query with two twins at
+    k=3, two of the three donors came back bare.
+    """
+    from protea.core.operations._predict_go_terms_adapter import _pre_search_neighbors
+
+    keys = {"Q1": "s1", "R1": "s1", "R2": "s2", "R3": "s3"}
+    refs = np.array(
+        [[1.0, 0.0], [1.0, 0.0], [0.9, 0.1], [0.0, 1.0]], dtype=np.float32
+    )
+    inputs = AdapterInputs(
+        p=_payload(exclude_self=True),
+        valid_accessions=["Q1"],
+        query_embeddings=np.array([[1.0, 0.0]], dtype=np.float32),
+        ref_data={
+            "accessions": ["Q1", "R1", "R2", "R3"],
+            "embeddings_f32": refs,
+            "embeddings_f32_cos": refs,
+        },
+        annotations={},
+        go_id_map={},
+        go_aspect_map={},
+        prediction_set_id=None,
+        ref_sequences={},
+        query_sequences={},
+        ref_tax_ids={},
+        query_tax_ids={},
+        ref_sequence_identities=keys,
+    )
+    pre = _pre_search_neighbors(inputs, use_cos=True)
+    donors_pre = {acc for top in pre for acc, _ in top}
+
+    # Each reference carries its OWN term, so every surviving donor produces
+    # a row of its own. With one shared term there is a single row and a
+    # single donor, and the test cannot see a donor that was missed.
+    rows = _run_distinct_terms(keys)
+    donors_rows = {row["ref_protein_accession"] for row in rows}
+
+    assert donors_rows, "the run produced no rows to compare against"
+    bare = donors_rows - donors_pre
+    assert not bare, (
+        f"{len(bare)} donor(s) the method kept were never pre-searched, so "
+        f"their rows carry no pair features and nothing says so: {bare}"
+    )
+    assert "Q1" not in donors_pre and "R1" not in donors_pre, (
+        "the pre-search kept the query or its twin, so it is still excluding "
+        "by accession while the method excludes by sequence"
+    )

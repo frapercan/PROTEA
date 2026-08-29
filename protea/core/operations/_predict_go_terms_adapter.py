@@ -46,6 +46,10 @@ import uuid
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
+from protea_method._self_by_sequence import (
+    extra_neighbours_for,
+    without_own_sequence,
+)
 from protea_method.pipeline import PredictConfig, PredictDiagnostics
 from protea_method.pipeline import predict as pipeline_predict
 
@@ -159,11 +163,22 @@ def _pre_search_neighbors(
     saves.
     """
     p = inputs.p
-    return search_knn(
-        inputs.query_embeddings,
-        _select_ref_embeddings(inputs.ref_data, use_cos=use_cos),
-        inputs.ref_data["accessions"],
-        k=p.limit_per_entry,
+    # This pre-search feeds the pair features, and the method's own search
+    # produces the rows those features are attached to. They therefore have to
+    # agree, and the only way to be sure is to run the same code: the method's
+    # exclusion asks for extra neighbours and drops by SEQUENCE, so a
+    # pre-search that asks for plain k and drops nothing reaches less deep. A
+    # donor the method keeps and this misses gets no pair features at all, and
+    # silently, because the lookup falls back to an empty dict. Measured on a
+    # query with two twins at k=3: two of the three donors came back bare.
+    accessions = list(inputs.ref_data["accessions"])
+    return _drop_self(
+        inputs,
+        search_knn(
+            inputs.query_embeddings,
+            _select_ref_embeddings(inputs.ref_data, use_cos=use_cos),
+            accessions,
+            k=p.limit_per_entry + _self_margin_for(inputs, accessions),
         distance_threshold=p.distance_threshold,
         backend=p.search_backend,
         metric=p.metric,
@@ -172,7 +187,31 @@ def _pre_search_neighbors(
         faiss_nlist=p.faiss_nlist,
         faiss_nprobe=p.faiss_nprobe,
         faiss_hnsw_m=p.faiss_hnsw_m,
-        faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+            faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+        ),
+    )
+
+
+def _self_exclusion_map(inputs: AdapterInputs) -> dict[str, str] | None:
+    """The sequence map, only when the run actually asked for the exclusion."""
+    if not getattr(inputs.p, "exclude_self_neighbour", False):
+        return None
+    return inputs.ref_sequence_identities or None
+
+
+def _self_margin_for(inputs: AdapterInputs, accessions: list[str]) -> int:
+    keys = _self_exclusion_map(inputs)
+    if keys is None:
+        return 0
+    return extra_neighbours_for(inputs.valid_accessions, accessions, keys)
+
+
+def _drop_self(inputs: AdapterInputs, hits: Any) -> Any:
+    keys = _self_exclusion_map(inputs)
+    if keys is None:
+        return hits
+    return without_own_sequence(
+        hits, inputs.valid_accessions, inputs.p.limit_per_entry, keys
     )
 
 
