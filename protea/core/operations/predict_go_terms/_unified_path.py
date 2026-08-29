@@ -169,7 +169,14 @@ def unified_load_annotations(
         neighbors, list(ctx.valid_accessions), p.limit_per_entry, exclude_self
     )
     unique_neighbors: set[str] = {ref_acc for top_refs in neighbors for ref_acc, _ in top_refs}
-    annotations = op._load_annotations_for(session, ctx.annotation_set_id, unique_neighbors)
+    # The neighbours' annotations are what gets TRANSFERRED, so the donor
+    # policy applies here. It used to gate only which proteins entered the
+    # pool, which let a protein admitted on one experimental annotation
+    # donate every annotation it had.
+    annotations = op._load_annotations_for(
+        session, ctx.annotation_set_id, unique_neighbors,
+        donor_policy=getattr(ctx.p, "donor_policy", None),
+    )
     return annotations, unique_neighbors
 
 
