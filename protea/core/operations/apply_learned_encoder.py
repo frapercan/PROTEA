@@ -39,6 +39,7 @@ from protea.core.operations._encoder_artifact import (
     resolve_training_cut,
 )
 from protea.core.operations.encode_residue_sparse import ORDERS
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 
@@ -409,7 +410,7 @@ class ApplyLearnedEncoderOperation:
         return " ".join(bits)
 
     def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
-        p = ApplyLearnedEncoderPayload.model_validate(payload)
+        p = ApplyLearnedEncoderPayload.model_validate(contract_payload(payload))
         src_id = uuid.UUID(p.source_embedding_config_id)
         artifact = resolve_encoder_artifact(p.encoder_artifact_path, p.encoder_artifact_uri)
         apply, meta = _load_encoder(artifact)

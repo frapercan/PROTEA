@@ -47,6 +47,7 @@ from protea.core.training_dump._resume import (
 )
 from protea.core.training_dump._test_split import _run_test_split
 from protea.core.training_dump._train_split import _run_train_split
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 
 if TYPE_CHECKING:
@@ -68,7 +69,7 @@ class _DumpRunner:
         dump_fn: Any,
     ) -> None:
         self.session = session
-        self.p = TrainRerankerAutoPayload.model_validate(payload)
+        self.p = TrainRerankerAutoPayload.model_validate(contract_payload(payload))
         self.emit = emit
         self._dump_fn = dump_fn
         self.t0 = time.perf_counter()

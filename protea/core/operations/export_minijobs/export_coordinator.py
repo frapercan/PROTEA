@@ -44,6 +44,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.utils import contract_payload
 
 _KNN_BATCH_QUEUE = "protea.training.knn-batch"
 _FEATURES_QUEUE = "protea.training.features"
@@ -128,7 +129,7 @@ class ExportCoordinatorOperation:
     def _dispatch_minijobs(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = ExportCoordinatorPayload.model_validate(payload)
+        p = ExportCoordinatorPayload.model_validate(contract_payload(payload))
         coordinator_job_id = payload.get("_job_id") or str(uuid.uuid4())
         n_total = len(p.train_versions) + len(p.test_versions)
 

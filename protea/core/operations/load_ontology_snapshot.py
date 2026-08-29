@@ -13,6 +13,7 @@ from protea.core.operations._load_ontology_helpers import (
     handle_existing_snapshot,
     insert_new_snapshot,
 )
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 
 
@@ -87,7 +88,7 @@ class LoadOntologySnapshotOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = LoadOntologySnapshotPayload.model_validate(payload)
+        p = LoadOntologySnapshotPayload.model_validate(contract_payload(payload))
 
         emit("load_ontology_snapshot.start", None, {"obo_url": p.obo_url}, "info")
         t0 = time.perf_counter()

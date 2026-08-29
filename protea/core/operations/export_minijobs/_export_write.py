@@ -47,7 +47,7 @@ from protea.core.operations.export_minijobs._export_features_batch import (
 )
 from protea.core.parquet_export import resolve_protea_git_sha
 from protea.core.schema_sha_v2 import maybe_v2
-from protea.core.utils import utcnow
+from protea.core.utils import contract_payload, utcnow
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.settings import load_settings
@@ -139,7 +139,7 @@ class ExportWriteOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = ExportWritePayload.model_validate(payload)
+        p = ExportWritePayload.model_validate(contract_payload(payload))
         parent_id = uuid.UUID(p.coordinator_job_id)
 
         _record_pair_received(session, parent_id, p)

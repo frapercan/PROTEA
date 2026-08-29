@@ -46,6 +46,7 @@ from protea.core.contracts.operation import (
     ProteaPayload,
 )
 from protea.core.plugins import discover_plugins
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 
 BACKEND_PLUGIN_GROUP = "protea.backends"
@@ -230,7 +231,7 @@ class CountBackendParametersOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = CountBackendParametersPayload.model_validate(payload)
+        p = CountBackendParametersPayload.model_validate(contract_payload(payload))
         configs = _select_configs(session, p)
         checkpoints = group_by_checkpoint(configs)
 

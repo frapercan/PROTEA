@@ -43,6 +43,7 @@ from protea.core.contracts.operation import (
     OperationResult,
     ProteaPayload,
 )
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
@@ -257,7 +258,7 @@ class MeasureEmbeddingMagnitudeOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = MeasureEmbeddingMagnitudePayload.model_validate(payload)
+        p = MeasureEmbeddingMagnitudePayload.model_validate(contract_payload(payload))
         config_id, per_band, seed = p.embedding_config_id, p.per_band, p.seed
         device, batch_size = p.device, p.batch_size
 

@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.term_cooccurrence import (
     TermCooccurrence,
@@ -182,7 +183,7 @@ class BuildGoCooccurrenceOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = BuildGoCooccurrencePayload.model_validate(payload or {})
+        p = BuildGoCooccurrencePayload.model_validate(contract_payload(payload) or {})
         set_id = uuid.UUID(p.annotation_set_id)
         t0 = time.perf_counter()
 

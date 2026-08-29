@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.schema_sha_v2 import maybe_v2
 from protea.core.training_dump_helpers import TrainRerankerAutoOperation
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.session import build_session_factory, session_scope
 from protea.infrastructure.settings import load_settings
@@ -177,7 +178,7 @@ class ExportResearchDatasetOperation:
         BaseWorker handles the residual detachment risk for the Job
         ORM itself).
         """
-        p = ExportResearchDatasetPayload.model_validate(payload)
+        p = ExportResearchDatasetPayload.model_validate(contract_payload(payload))
         raw_job_id = payload.get("_job_id") if isinstance(payload, dict) else None
         job_uuid = uuid.UUID(raw_job_id) if raw_job_id else None
 

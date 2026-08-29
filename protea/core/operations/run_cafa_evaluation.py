@@ -56,7 +56,7 @@ from protea.core.operations._run_cafa_setup import (  # noqa: F401
     _PipelineCtx,
     bundle_run_context,
 )
-from protea.core.utils import job_id_from_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -353,7 +353,7 @@ class RunCafaEvaluationOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = RunCafaEvaluationPayload.model_validate(payload)
+        p = RunCafaEvaluationPayload.model_validate(contract_payload(payload))
         inputs = self._load_evaluation_inputs(session, p, emit)
         self._stamp_window_role(inputs.eval_set, p.window_role, emit)
         scoring_snapshot = self._resolve_scoring_snapshot(session, p.scoring_config_id)

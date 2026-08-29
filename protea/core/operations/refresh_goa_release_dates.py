@@ -22,6 +22,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 
 DEFAULT_LISTING_URL = (
@@ -105,7 +106,7 @@ class RefreshGoaReleaseDatesOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = RefreshGoaReleaseDatesPayload.model_validate(payload or {})
+        p = RefreshGoaReleaseDatesPayload.model_validate(contract_payload(payload) or {})
         t0 = time.perf_counter()
 
         emit(

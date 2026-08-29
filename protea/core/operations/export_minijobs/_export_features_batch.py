@@ -36,6 +36,7 @@ from protea.core.training_dump._data_loaders import (
     _load_taxonomy_ids,
     _preload_all_embeddings,
 )
+from protea.core.utils import contract_payload
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
 
@@ -113,7 +114,7 @@ class ExportFeaturesBatchOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = ExportFeaturesBatchPayload.model_validate(payload)
+        p = ExportFeaturesBatchPayload.model_validate(contract_payload(payload))
         emit(
             "export_features_batch.start",
             None,

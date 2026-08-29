@@ -36,6 +36,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.interpro_annotation import (
     InterProAnnotation,
 )
@@ -282,7 +283,7 @@ class RunInterProScanBatchOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = RunInterProScanBatchPayload.model_validate(payload)
+        p = RunInterProScanBatchPayload.model_validate(contract_payload(payload))
         t0 = time.perf_counter()
 
         emit(

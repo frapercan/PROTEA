@@ -30,6 +30,7 @@ from protea.core.operations._compute_embeddings_helpers import (
     build_store_message,
     serialize_inferred_chunks,
 )
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.job import Job, JobStatus
@@ -218,7 +219,7 @@ class ComputeEmbeddingsOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         """Coordinator: partition sequences into child jobs and dispatch them."""
-        p = ComputeEmbeddingsPayload.model_validate(payload)
+        p = ComputeEmbeddingsPayload.model_validate(contract_payload(payload))
         parent_job_id = UUID(payload["_job_id"])
         config_id = uuid.UUID(p.embedding_config_id)
 
@@ -363,7 +364,7 @@ class ComputeEmbeddingsBatchOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = ComputeEmbeddingsBatchPayload.model_validate(payload)
+        p = ComputeEmbeddingsBatchPayload.model_validate(contract_payload(payload))
         config_id = uuid.UUID(p.embedding_config_id)
         parent_job_id = UUID(p.parent_job_id)
 
@@ -542,7 +543,7 @@ class StoreEmbeddingsOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = StoreEmbeddingsPayload.model_validate(payload)
+        p = StoreEmbeddingsPayload.model_validate(contract_payload(payload))
         config_id = uuid.UUID(p.embedding_config_id)
         parent_job_id = UUID(p.parent_job_id)
 

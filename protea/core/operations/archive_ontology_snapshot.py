@@ -33,6 +33,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
@@ -231,7 +232,7 @@ class ArchiveOntologySnapshotOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = ArchiveOntologySnapshotPayload.model_validate(payload)
+        p = ArchiveOntologySnapshotPayload.model_validate(contract_payload(payload))
         snapshot = session.get(OntologySnapshot, uuid.UUID(p.ontology_snapshot_id))
         if snapshot is None:
             raise ValueError(f"OntologySnapshot {p.ontology_snapshot_id} not found")

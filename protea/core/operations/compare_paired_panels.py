@@ -83,6 +83,7 @@ from protea.core.operations._paired_panels_panel import (
     tally,
 )
 from protea.core.operations._run_cafa_helpers import eval_artifact_key
+from protea.core.utils import contract_payload
 
 #: The nine panels, category by aspect, in canonical report order. There is no
 #: tenth entry and there is no aggregate over them.
@@ -578,7 +579,7 @@ class ComparePairedPanelsOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = ComparePairedPanelsPayload.model_validate(payload)
+        p = ComparePairedPanelsPayload.model_validate(contract_payload(payload))
         self._emit_start(p, emit)
         prov_a, prov_b, mismatch = _frame_gate(session, p, emit)
         wanted = {key.split(":")[0] for key in p.panels}

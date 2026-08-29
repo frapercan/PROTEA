@@ -54,7 +54,7 @@ from protea.core.operations.run_cafa_evaluation import (
     RunCafaEvaluationOperation,
     RunCafaEvaluationPayload,
 )
-from protea.core.utils import job_id_from_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.settings import load_settings
@@ -218,7 +218,7 @@ class BatchRescoreEvaluationOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = BatchRescoreEvaluationPayload.model_validate(payload)
+        p = BatchRescoreEvaluationPayload.model_validate(contract_payload(payload))
         # Build the equivalent single-eval payload (sans scoring_config_id) so the
         # shared input loader + stager run exactly as in run_cafa_evaluation.
         base_payload = self._single_payload(p)

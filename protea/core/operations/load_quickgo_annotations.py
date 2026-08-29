@@ -16,6 +16,7 @@ from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -111,7 +112,7 @@ class LoadQuickGOAnnotationsOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = LoadQuickGOAnnotationsPayload.model_validate(payload)
+        p = LoadQuickGOAnnotationsPayload.model_validate(contract_payload(payload))
 
         snapshot_id = uuid.UUID(p.ontology_snapshot_id)
         if session.get(OntologySnapshot, snapshot_id) is None:
