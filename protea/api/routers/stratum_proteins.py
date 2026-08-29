@@ -53,6 +53,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached
 from protea.api.deps import get_session_factory, get_settings
+from protea.api.routers._arm_identity import with_arm_identity
 from protea.core.domain.category import Category
 from protea.core.operations._run_cafa_helpers import eval_artifact_key
 from protea.core.operations._run_cafa_strata import neighbourhoods_for
@@ -99,16 +100,13 @@ _LENGTHS = text(
 #: would offer eight rows reading ``esm2_650m`` and a reader choosing between
 #: them would be choosing blind.
 _ARM = text(
+    with_arm_identity(
     """
     SELECT er.prediction_set_id::text          AS prediction_set_id,
            sc.name                             AS scoring_name,
            COALESCE(ec.display_name, ec.model_name) AS embedding_name,
            ps.limit_per_entry                  AS depth,
-           CASE
-               WHEN ps.meta -> 'donor_policy' ->> 'evidence_codes' IS NULL
-                   THEN 'permissive'
-               ELSE 'evidence-gated'
-           END                                 AS donor_policy,
+{ARM_IDENTITY_COLUMNS},
            ps.meta ->> 'metric'                AS metric
     FROM evaluation_result er
     LEFT JOIN scoring_config sc ON sc.id = er.scoring_config_id
@@ -116,6 +114,7 @@ _ARM = text(
     LEFT JOIN embedding_config ec ON ec.id = ps.embedding_config_id
     WHERE er.id = :rid
     """
+    )
 )
 
 #: Five minutes, matching the stratum comparison. The join behind a page is one

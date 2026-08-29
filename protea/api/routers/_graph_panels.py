@@ -58,6 +58,14 @@ _LEVEL_FIELDS: tuple[str, ...] = (
     "embedding_name",
     "depth",
     "donor_policy",
+    # A stored donor policy is byte-identical either side of the 2026-08-29
+    # change that moved its evidence codes from gating pool admission to gating
+    # donation, so the policy alone names two incompatible experiments with one
+    # string. The revision separates them, and separates the next change of the
+    # same kind without anyone having to see it coming.
+    "self_exclusion",
+    "features",
+    "code_revision",
     "metric",
 )
 

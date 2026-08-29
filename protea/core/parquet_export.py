@@ -21,7 +21,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -31,6 +30,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from protea_contracts import compute_schema_sha as _canonical_schema_sha
 
+from protea.core.code_revision import resolve_protea_git_sha  # noqa: F401
 from protea.core.features import REGISTRY as _FEATURE_REGISTRY
 from protea.core.features._bindings import _POOL_INJECTED_FEATURES
 from protea.core.reranker import LABEL_COLUMN
@@ -178,24 +178,6 @@ class ParquetExportContext:
     # NaN). Both are recorded in the manifest. Empty () keeps the legacy
     # behaviour: no family is degeneracy-checked and no provenance is written.
     feature_family_provenance: tuple[FamilyProvenance, ...] = ()
-
-
-def resolve_protea_git_sha() -> str | None:
-    """Best-effort current HEAD sha of the PROTEA repo. Returns None when
-    the code is not running inside a git checkout or git is unavailable.
-    """
-    try:
-        repo_root = Path(__file__).resolve().parents[2]
-        out = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repo_root,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=5,
-        ).strip()
-        return out or None
-    except Exception:
-        return None
 
 
 def _reorder(df: pd.DataFrame, reserved: list[str]) -> pd.DataFrame:
