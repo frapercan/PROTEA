@@ -42,16 +42,23 @@ Smell budget: kept under file 800 / class 500 / method 60 ceilings.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
-from protea_method.pipeline import PredictConfig, PredictDiagnostics
+from protea_method.pipeline import (
+    PredictConfig,
+    PredictDiagnostics,
+    propagate_pair_features,
+)
 from protea_method.pipeline import predict as pipeline_predict
 
 from protea.core import alignment_cache
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.knn_search import search_knn
+
+_LOG = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from protea.core.operations.predict_go_terms import PredictGOTermsBatchPayload
@@ -105,6 +112,11 @@ class AdapterResult(NamedTuple):
     pair_features: dict[tuple[str, str], dict[str, Any]]
     neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]]
     go_map_by_aspect: dict[str, dict[str, list[dict[str, Any]]]]
+    #: How many ``(query, donor)`` pairs the pre-search did not anticipate and
+    #: this call had to compute after the fact. Expected to be 0. A non-zero
+    #: value is not damage, the rows are repaired before they are returned, but
+    #: it says the two searches disagreed and by how much.
+    repaired_pair_features: int = 0
 
 
 def _build_predict_config(
@@ -210,6 +222,71 @@ def _build_pair_features_from_neighbors(
             inputs, q_acc, ref_acc, alignments
         )
     return pair_features
+
+
+def _repair_pair_features(
+    inputs: AdapterInputs,
+    predictions: list[dict[str, Any]],
+    pair_features: dict[tuple[str, str], dict[str, Any]],
+) -> int:
+    """Give every emitted row the features of the donor it actually names.
+
+    ``pair_features`` is keyed from OUR neighbour search and the rows come from
+    THEIRS. The two see the same bank members and do not compute identical
+    distances: same values, different array layout, summed in a different
+    order, differing at the 1e-7 level. That is harmless for ranking except
+    where the k-th distance is a tie, and ties are common here because 38,694
+    sequences are shared by more than one protein and a shared sequence is an
+    identical embedding. Where a tie straddles the cut the two searches keep
+    different donors, and the donor theirs kept has no key in ours.
+
+    The row was then emitted with all fifteen pair-feature columns NULL, which
+    is what an uncomputable pair looks like, so nothing distinguished them: 76
+    rows of a 2,441,584 row campaign, 64 of them at the deepest slot, when 33
+    of the 37 pairs already had their alignment sitting in the cache.
+
+    Repairing after the fact rather than widening the pre-search margin is
+    deliberate. A wider margin makes the window smaller and leaves the
+    mechanism, because no margin is provably wider than every tie block. This
+    is keyed on what was emitted, so there is nothing left for a tie to fall
+    through.
+
+    Returns the number of pairs repaired, which is expected to be 0.
+    """
+    if not inputs.p.compute_alignments and not inputs.p.compute_taxonomy:
+        return 0
+    missing = sorted(
+        {
+            (row["protein_accession"], row["ref_protein_accession"])
+            for row in predictions
+            if (row["protein_accession"], row["ref_protein_accession"])
+            not in pair_features
+        }
+    )
+    if not missing:
+        return 0
+
+    alignments = _alignments_for_pairs(inputs, missing)
+    repaired = {
+        pair: _pair_features_for(inputs, pair[0], pair[1], alignments)
+        for pair in missing
+    }
+    pair_features.update(repaired)
+    for row in predictions:
+        pf = repaired.get(
+            (row["protein_accession"], row["ref_protein_accession"])
+        )
+        if pf:
+            propagate_pair_features(row, pf)
+
+    _LOG.warning(
+        "pair features repaired for %d pair(s) the pre-search did not "
+        "anticipate; the two KNN searches disagreed at the depth cut. "
+        "First: %s",
+        len(missing),
+        missing[:3],
+    )
+    return len(missing)
 
 
 def _alignments_for_pairs(
@@ -362,11 +439,13 @@ def call_pipeline_predict(inputs: AdapterInputs) -> AdapterResult:
         config=cfg,
         return_diagnostics=True,
     )
+    repaired = _repair_pair_features(inputs, predictions, pair_features)
     return AdapterResult(
         predictions=predictions,
         pair_features=pair_features,
         neighbors_by_aspect=_diagnostics_to_neighbors(diagnostics),
         go_map_by_aspect=diagnostics.go_map_by_aspect,
+        repaired_pair_features=repaired,
     )
 
 
@@ -378,15 +457,32 @@ def call_pipeline_predict_aspect_separated(
 
     The caller has already KNN-searched each aspect's pre-filtered
     reference pool and loaded the union of hit-ref annotations (across
-    aspects). ``protea-method`` re-runs the partitioned KNN against
-    the unified pool we pass — bit-exact with PROTEA's per-aspect
-    slicing because both put a ref in aspect ``a``'s bank iff at
-    least one of its annotations resolves to aspect ``a``.
+    aspects). ``protea-method`` re-runs the partitioned KNN against the
+    unified pool we pass. Both put a ref in aspect ``a``'s bank iff at least
+    one of its annotations resolves to aspect ``a``, so the two searches see
+    the same members.
 
-    The redundant KNN inside ``pipeline.predict()`` keeps the
-    delegation pure (no neighbour injection): in practice the numpy
-    arrays are warm in L3 by then, so the cost is dwarfed by the
-    annotation / sequence loads the pre-search already saved.
+    THEY DO NOT PRODUCE THE SAME NUMBERS. This docstring used to say the two
+    were bit-exact. Measured against the run's own cached reference arrays,
+    the stored distances differ from the pre-search ordering on 736 of 861
+    control rows, median 1.19e-07, maximum 5.96e-07: the same members in a
+    different array layout, summed in a different order. That is harmless for
+    ranking except where the k-th distance is a tie, and ties are not rare
+    here because 38,694 sequences are shared by more than one protein and a
+    shared sequence is an identical embedding. Where a tie straddles the cut,
+    the two searches keep different donors.
+
+    So ``pair_features`` computed from OUR search can be missing a donor THEIR
+    search kept. That produced 76 rows of a 2,441,584 row campaign with all
+    fifteen pair-feature columns NULL, indistinguishable from a pair that
+    could not be aligned, when 33 of the 37 pairs already had their alignment
+    sitting in the cache. ``_repair_pair_features`` closes it after the fact,
+    against the donors that actually voted, and reports what it did.
+
+    The redundant KNN inside ``pipeline.predict()`` keeps the delegation pure
+    (no neighbour injection): the numpy arrays are warm in L3 by then, so the
+    cost is dwarfed by the annotation and sequence loads the pre-search saved.
+    Believing it was also exact is what made this class of defect invisible.
     """
     p = inputs.p
     use_cos = p.metric == "cosine"
@@ -410,9 +506,11 @@ def call_pipeline_predict_aspect_separated(
         config=cfg,
         return_diagnostics=True,
     )
+    repaired = _repair_pair_features(inputs, predictions, pair_features)
     return AdapterResult(
         predictions=predictions,
         pair_features=pair_features,
         neighbors_by_aspect=_diagnostics_to_neighbors(diagnostics),
         go_map_by_aspect=diagnostics.go_map_by_aspect,
+        repaired_pair_features=repaired,
     )
