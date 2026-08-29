@@ -27,6 +27,12 @@ import numpy as np
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core.code_revision import (
+    ForeignRevisionError,
+    code_revision,
+    is_identifying,
+    revisions_conflict,
+)
 from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.feature_enricher import enrich_v6_features
 from protea.core.operations._predict_go_terms_adapter import (
@@ -164,6 +170,7 @@ class PredictGOTermsBatchOperation(
         )
         if self._should_skip_for_parent(session, ctx.parent_job_id, emit):
             return OperationResult(result={"skipped": True})
+        self._refuse_foreign_revision(session, ctx, emit)
 
         ref_data = self._ensure_reference_cache(session, ctx, emit)
         query_embeddings, valid_accessions = self._load_query_embeddings(
@@ -257,6 +264,42 @@ class PredictGOTermsBatchOperation(
                 None,
                 {"batches_completed": row.done, "expected_batches": row.expected},
                 "info",
+            )
+
+    @staticmethod
+    def _refuse_foreign_revision(session: Session, ctx: _BatchExecCtx, emit: EmitFn) -> None:
+        """Refuse to write into a set that was opened by different code.
+
+        The comparison is one-sided on purpose. A conflict is only declared
+        when both revisions name a commit that can be checked out again, so a
+        dirty tree or a checkout without git never fails a batch. It emits a
+        warning instead, because "cannot be verified" and "verified equal" have
+        to be different words in the job stream: the run this guard exists for
+        reported success, and a guard that quietly passed when it could not
+        look would have reported success too.
+        """
+        recorded = session.execute(
+            text("SELECT meta ->> 'code_revision' FROM prediction_set WHERE id = :sid"),
+            {"sid": ctx.prediction_set_id},
+        ).scalar()
+        running = code_revision()
+        if revisions_conflict(recorded, running):
+            emit(
+                "predict_go_terms_batch.foreign_revision",
+                None,
+                {"recorded": recorded, "running": running},
+                "error",
+            )
+            raise ForeignRevisionError(
+                f"prediction set {ctx.prediction_set_id} was opened by "
+                f"{recorded}, this worker runs {running}"
+            )
+        if not (is_identifying(recorded) and is_identifying(running)):
+            emit(
+                "predict_go_terms_batch.revision_unverifiable",
+                None,
+                {"recorded": recorded, "running": running},
+                "warning",
             )
 
     @staticmethod

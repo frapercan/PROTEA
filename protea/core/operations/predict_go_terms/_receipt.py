@@ -26,6 +26,8 @@ from uuid import UUID
 
 from protea_contracts import PredictGOTermsPayload
 
+from protea.core.code_revision import code_revision
+
 #: Payload flags that turn on an extra feature block during prediction.
 #: Recorded by name so a set can say what it computed without this module
 #: having to grow a field per feature.
@@ -52,6 +54,11 @@ def run_receipt(p: PredictGOTermsPayload, job_id: UUID) -> dict[str, Any]:
     """
     receipt: dict[str, Any] = {
         "job_id": str(job_id),
+        # The revision the coordinator was running. Every batch reads it back
+        # and refuses to write under a different one, which is the half that
+        # matters: a revision recorded and never compared is how one node wrote
+        # 193,303 rows of a foreign format into a set that reported success.
+        "code_revision": code_revision(),
         "search_backend": p.search_backend,
         "metric": p.metric,
         "donor_policy": p.donor_policy.model_dump(),

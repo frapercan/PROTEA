@@ -24,6 +24,8 @@ from typing import Any
 from sqlalchemy import TextClause, text
 from sqlalchemy.orm import Session
 
+from protea.api.routers._arm_identity import with_arm_identity
+
 _Q_EVALUATION_SETS = text(
     """
     SELECT es.id::text                               AS id,
@@ -255,6 +257,7 @@ _Q_RESULTS = text(
 #: key whose value is an object of lists, and an unguarded ``jsonb_each`` over a
 #: non-object raises rather than skipping.
 _Q_PANELS = text(
+    with_arm_identity(
     """
     SELECT er.id::text                              AS result_id,
            sc.name                                  AS scoring_name,
@@ -265,11 +268,7 @@ _Q_PANELS = text(
            -- level is named by rendered both under one name, which made the
            -- head of a panel ambiguous and folded the bank effect into what
            -- reads as scoring spread.
-           CASE
-               WHEN ps.meta -> 'donor_policy' ->> 'evidence_codes' IS NULL
-                   THEN 'permissive'
-               ELSE 'evidence-gated'
-           END                                      AS donor_policy,
+{ARM_IDENTITY_COLUMNS},
            ps.meta ->> 'metric'                     AS metric,
            cat.k                                    AS category,
            asp.k                                    AS aspect,
@@ -290,6 +289,7 @@ _Q_PANELS = text(
     WHERE asp.v ? 'f_micro_w'
     ORDER BY er.created_at
     """
+    )
 )
 
 _Q_CANDIDATES = text(

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached
 from protea.api.deps import get_session_factory, get_settings
+from protea.api.routers._arm_identity import with_arm_identity
 from protea.core.operations._run_cafa_helpers import eval_artifact_key
 from protea.infrastructure.storage.factory import ArtifactStoreUnavailable, get_artifact_store
 
@@ -116,6 +117,7 @@ _COMPARE_TTL = 300.0
 #: believes they differ in the field the column names, which is the defect this
 #: project has already hit and named: a single-field comparison that was not.
 _ARMS = text(
+    with_arm_identity(
     """
     SELECT er.id            AS evaluation_result_id,
            ec.id            AS embedding_config_id,
@@ -128,11 +130,7 @@ _ARMS = text(
            ec.layer_indices AS layer_indices,
            ps.limit_per_entry AS k,
            sc.name          AS scoring_name,
-           CASE
-               WHEN ps.meta -> 'donor_policy' ->> 'evidence_codes' IS NULL
-                   THEN 'permissive'
-               ELSE 'evidence-gated'
-           END              AS donor_policy,
+{ARM_IDENTITY_COLUMNS},
            ps.meta ->> 'metric' AS metric
     FROM evaluation_result er
     JOIN prediction_set ps ON ps.id = er.prediction_set_id
@@ -141,6 +139,7 @@ _ARMS = text(
     WHERE er.evaluation_set_id = :esid
     ORDER BY ec.model_name, ec.layer_indices, ps.limit_per_entry, sc.name
     """
+    )
 )
 
 
