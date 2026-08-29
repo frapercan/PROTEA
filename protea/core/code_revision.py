@@ -12,6 +12,19 @@ A revision recorded and never compared would repeat that. So this module gives
 two things, and the second is the point: a value to record, and a rule for
 deciding when two recorded values are in conflict.
 
+THE REPOSITORY IS NOT THE CODE. PROTEA pins six sibling packages by git commit, and a
+node can hold the right PROTEA tree with a stale sibling installed. It happened
+on 2026-08-29: a node checked out the correct commit, and its worker died
+importing a module that its installed ``protea-method`` did not have. Both the
+pinned and the installed build called themselves ``0.3.1``, so no version check
+anywhere could have seen it. The only witness is the ``direct_url.json`` the
+installer leaves in the dist-info, which nothing reads.
+
+That failure was the kind one. The unkind one is a sibling that differs in a way
+that matters and still imports, which passes a check on the repository commit
+alone and quietly computes something else. So the revision of a run is the
+repository AND the resolved commit of every sibling.
+
 DIRTY TREES ARE NOT IDENTITIES. The laptop runs the fleet directly out of its
 working tree, which is edited between runs. A sha read from a dirty tree names
 a commit the running code is not. Two such trees can carry the same sha and
@@ -23,8 +36,10 @@ refusal and honest, rather than a comparison that passes for the wrong reason.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+from importlib import metadata
 from pathlib import Path
 
 #: Lets a deployment that carries no ``.git`` declare its own revision, for
@@ -120,3 +135,61 @@ def revisions_conflict(recorded: str | None, running: str | None) -> bool:
     if not is_identifying(recorded) or not is_identifying(running):
         return False
     return recorded != running
+
+
+#: Sibling distributions are named ``protea-something``. The hyphen excludes
+#: PROTEA itself, which is installed from a path and whose commit is the one
+#: ``code_revision`` already reports.
+_SIBLING_PREFIX = "protea-"
+
+
+def dependency_revisions() -> dict[str, str]:
+    """The resolved commit of each sibling package that is installed from git.
+
+    A sibling installed from anything else (a path, a release) has no commit to
+    report and is left out rather than given a placeholder, because a
+    placeholder would compare equal to another placeholder and that is the
+    failure this exists to prevent.
+    """
+    found: dict[str, str] = {}
+    for dist in metadata.distributions():
+        name = (dist.metadata["Name"] or "").lower()
+        if not name.startswith(_SIBLING_PREFIX):
+            continue
+        commit = _commit_of(dist)
+        if commit:
+            found[name] = commit
+    return found
+
+
+def _commit_of(dist: metadata.Distribution) -> str | None:
+    try:
+        raw = dist.read_text("direct_url.json")
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        return (json.loads(raw).get("vcs_info") or {}).get("commit_id")
+    except (ValueError, AttributeError):
+        return None
+
+
+def dependency_conflicts(
+    recorded: dict[str, str] | None, running: dict[str, str] | None
+) -> dict[str, tuple[str, str]]:
+    """The siblings both sides name, and name differently.
+
+    Only packages present on both sides are compared. One side knowing about a
+    package the other does not is a different question (a dependency added or
+    an installer that leaves no witness) and answering it here would make a
+    missing ``direct_url.json`` fatal, which would take the guard off within a
+    week.
+    """
+    if not recorded or not running:
+        return {}
+    return {
+        name: (recorded[name], running[name])
+        for name in recorded.keys() & running.keys()
+        if recorded[name] != running[name]
+    }

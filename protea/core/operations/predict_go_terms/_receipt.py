@@ -26,7 +26,7 @@ from uuid import UUID
 
 from protea_contracts import PredictGOTermsPayload
 
-from protea.core.code_revision import code_revision
+from protea.core.code_revision import code_revision, dependency_revisions
 
 #: Payload flags that turn on an extra feature block during prediction.
 #: Recorded by name so a set can say what it computed without this module
@@ -59,6 +59,10 @@ def run_receipt(p: PredictGOTermsPayload, job_id: UUID) -> dict[str, Any]:
         # matters: a revision recorded and never compared is how one node wrote
         # 193,303 rows of a foreign format into a set that reported success.
         "code_revision": code_revision(),
+        # The repository commit does not identify the code. PROTEA pins six
+        # sibling packages by git commit, and a node can hold the right tree
+        # with a stale sibling whose version string did not move.
+        "dependency_revisions": dependency_revisions(),
         "search_backend": p.search_backend,
         "metric": p.metric,
         "donor_policy": p.donor_policy.model_dump(),

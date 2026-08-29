@@ -24,6 +24,7 @@ from protea.core.code_revision import (
     DIRTY_SUFFIX,
     UNKNOWN,
     ForeignRevisionError,
+    dependency_conflicts,
     is_identifying,
     revisions_conflict,
 )
@@ -84,9 +85,12 @@ def test_a_batch_refuses_a_set_another_revision_opened(postgres_url: str, monkey
         # question, and it cannot be answered from one of them.
         assert _OPENED_BY in str(caught.value) and _RUNNING in str(caught.value)
 
-        # Same code on both sides: no event at all. A guard that narrates every
-        # agreement buries the one message that matters.
-        assert _run_guard(session, agreeing, _RUNNING, monkeypatch) == []
+        # Same repository on both sides, but this set records no sibling
+        # commits, so the second half of the comparison cannot be made. It says
+        # so and runs. The silent case, where both halves agree, is asserted in
+        # test_a_stale_sibling_is_refused_even_when_the_repository_matches.
+        events = _run_guard(session, agreeing, _RUNNING, monkeypatch)
+        assert _emitted(events) == {"predict_go_terms_batch.dependencies_unverifiable"}
 
         # Cannot be established either way. Says so, and lets the batch run.
         for unverifiable in (dirty, silent):
@@ -164,3 +168,93 @@ def test_the_receipt_carries_the_revision() -> None:
     assert receipt["code_revision"] == __import__(
         "protea.core.code_revision", fromlist=["code_revision"]
     ).code_revision()
+
+
+def test_a_stale_sibling_is_refused_even_when_the_repository_matches(
+    postgres_url: str, monkeypatch
+) -> None:
+    """The repository commit does not identify the code.
+
+    On 2026-08-29 a node held the correct PROTEA tree with a stale
+    ``protea-method`` installed, and both builds called themselves 0.3.1, so no
+    version check anywhere could see it. The witness is the resolved commit,
+    and this asserts the guard reads it.
+    """
+    from protea.infrastructure.orm.base import Base
+
+    engine = create_engine(postgres_url, future=True)
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+
+    pinned = {"protea-method": "c" * 40, "protea-sources": "d" * 40}
+    stale = {"protea-method": "e" * 40, "protea-sources": "d" * 40}
+
+    with Session(engine) as session:
+        parents = make_parents(session)
+        opened = make_prediction_set(
+            session,
+            parents,
+            {"code_revision": _RUNNING, "dependency_revisions": pinned},
+        )
+        no_deps = make_prediction_set(session, parents, {"code_revision": _RUNNING})
+
+        monkeypatch.setattr(
+            "protea.core.operations.predict_go_terms._batch_op.dependency_revisions",
+            lambda: stale,
+        )
+        with pytest.raises(ForeignRevisionError) as caught:
+            _run_guard(session, opened, _RUNNING, monkeypatch)
+        message = str(caught.value)
+        # The sibling is named, and the one that agrees is not, because the
+        # operator has to know which to reinstall.
+        assert "protea-method" in message
+        assert "protea-sources" not in message
+
+        # The same repository and the same siblings: silent.
+        monkeypatch.setattr(
+            "protea.core.operations.predict_go_terms._batch_op.dependency_revisions",
+            lambda: pinned,
+        )
+        assert _run_guard(session, opened, _RUNNING, monkeypatch) == []
+
+        # A set opened before dependencies were recorded says so and runs.
+        events = _run_guard(session, no_deps, _RUNNING, monkeypatch)
+        assert _emitted(events) == {
+            "predict_go_terms_batch.dependencies_unverifiable"
+        }
+
+        session.rollback()
+
+
+def test_only_siblings_both_sides_name_can_disagree() -> None:
+    """A sibling missing on one side is a different question.
+
+    Answering it here would make an installer that leaves no direct_url.json
+    fatal, and a guard that fails for a reason nobody can act on is a guard
+    that gets switched off.
+    """
+    pinned = {"protea-method": "c" * 40}
+    assert dependency_conflicts(pinned, {"protea-method": "e" * 40})
+    assert dependency_conflicts(pinned, pinned) == {}
+    assert dependency_conflicts(pinned, {"protea-sources": "d" * 40}) == {}
+    assert dependency_conflicts(None, pinned) == {}
+    assert dependency_conflicts(pinned, None) == {}
+
+
+def test_the_receipt_carries_the_sibling_commits() -> None:
+    """Recorded, and it is the recording the guard reads back."""
+    from protea_contracts import PredictGOTermsPayload
+
+    from protea.core.code_revision import dependency_revisions
+    from protea.core.operations.predict_go_terms._receipt import run_receipt
+
+    payload = PredictGOTermsPayload(
+        embedding_config_id=str(uuid.uuid4()),
+        annotation_set_id=str(uuid.uuid4()),
+        ontology_snapshot_id=str(uuid.uuid4()),
+    )
+    receipt = run_receipt(payload, uuid.uuid4())
+    assert receipt["dependency_revisions"] == dependency_revisions()
+    # This checkout installs its siblings from git, so the map is not empty.
+    # An empty map would make the assertion above pass while proving nothing.
+    assert receipt["dependency_revisions"]
