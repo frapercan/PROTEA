@@ -15,7 +15,7 @@ from protea.core.evaluation import (
     groundtruth_key_for,
     serialize_evaluation_data_to_parquet,
 )
-from protea.core.utils import job_id_from_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -112,7 +112,7 @@ class GenerateEvaluationSetOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = GenerateEvaluationSetPayload.model_validate(payload)
+        p = GenerateEvaluationSetPayload.model_validate(contract_payload(payload))
         old_set_id = uuid.UUID(p.old_annotation_set_id)
         new_set_id = uuid.UUID(p.new_annotation_set_id)
         old_set, new_set, old_native, new_native, pivot_id = self._resolve_eval_inputs(

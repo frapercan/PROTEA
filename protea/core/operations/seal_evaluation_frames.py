@@ -42,6 +42,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
 from protea.core.provenance import capture_provenance
+from protea.core.utils import contract_payload
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
@@ -244,7 +245,7 @@ class SealEvaluationFramesOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = SealEvaluationFramesPayload.model_validate(payload)
+        p = SealEvaluationFramesPayload.model_validate(contract_payload(payload))
         rows = [dict(r) for r in session.execute(_ROWS).mappings().all()]
         emit(
             "seal.start",

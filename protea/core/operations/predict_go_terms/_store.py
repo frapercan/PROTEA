@@ -19,6 +19,7 @@ from protea.core.operations.predict_go_terms._common import (
     StorePredictionsPayload,
     _row_from_prediction,
 )
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.job import Job, JobStatus
 
@@ -85,7 +86,7 @@ class StorePredictionsOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = StorePredictionsPayload.model_validate(payload)
+        p = StorePredictionsPayload.model_validate(contract_payload(payload))
         parent_job_id = UUID(p.parent_job_id)
         prediction_set_id = uuid.UUID(p.prediction_set_id)
 

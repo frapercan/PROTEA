@@ -53,6 +53,7 @@ from protea.core.contracts.operation import (
     ProteaPayload,
 )
 from protea.core.evaluation import load_evaluation_data_for_set
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -209,7 +210,7 @@ class ExportEvaluationTargetsOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = ExportEvaluationTargetsPayload.model_validate(payload)
+        p = ExportEvaluationTargetsPayload.model_validate(contract_payload(payload))
         eval_set = session.get(EvaluationSet, uuid.UUID(p.evaluation_set_id))
         if eval_set is None:
             raise ValueError(f"EvaluationSet {p.evaluation_set_id} not found")

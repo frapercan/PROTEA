@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.ia import PROPAGATE_RELATIONS, build_ancestors, term_ia
 from protea.core.ia_regimes import DEFAULT_REGIME, EVIDENCE_REGIMES, resolve_regime
-from protea.core.utils import job_id_from_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.information_accretion_set import (
     InformationAccretionSet,
@@ -524,7 +524,7 @@ class ComputeInformationAccretionOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = ComputeInformationAccretionPayload.model_validate(payload)
+        p = ComputeInformationAccretionPayload.model_validate(contract_payload(payload))
         started = time.time()
 
         inp = self._resolve(session, p, payload)

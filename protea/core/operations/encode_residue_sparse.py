@@ -64,6 +64,7 @@ from protea.core.operations._encoder_artifact import (
     resolve_encoder_artifact,
     resolve_training_cut,
 )
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -571,7 +572,7 @@ class EncodeResidueSparseOperation(Operation):
         state, which has no card, so every decision that needs the database is made
         here and every decision that needs the model is made in a batch.
         """
-        p = EncodeResidueSparsePayload.model_validate(payload)
+        p = EncodeResidueSparsePayload.model_validate(contract_payload(payload))
         parent_job_id = uuid.UUID(payload["_job_id"])
         source = session.get(EmbeddingConfig, uuid.UUID(p.source_embedding_config_id))
         if source is None:
@@ -673,7 +674,7 @@ class EncodeResidueSparseBatchOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = EncodeResidueSparseBatchPayload.model_validate(payload)
+        p = EncodeResidueSparseBatchPayload.model_validate(contract_payload(payload))
         source = session.get(EmbeddingConfig, uuid.UUID(p.source_embedding_config_id))
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")

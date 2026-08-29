@@ -20,6 +20,7 @@ from protea.core.operations.predict_go_terms._common import (
     _RerankerDispatch,
 )
 from protea.core.operations.predict_go_terms._receipt import run_receipt
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
@@ -154,7 +155,7 @@ class PredictGOTermsOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = PredictGOTermsPayload.model_validate(payload)
+        p = PredictGOTermsPayload.model_validate(contract_payload(payload))
         parent_job_id = UUID(payload["_job_id"])
         embedding_config_id, annotation_set_id, ontology_snapshot_id, config = (
             self._validate_inputs(session, p)

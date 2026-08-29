@@ -356,7 +356,13 @@ class TestRegisterDataset:
             ExportResearchDatasetPayload,
         )
 
-        p = ExportResearchDatasetPayload.model_validate(valid_payload)
+        # Through the same door production uses. The fixture carries the
+        # _job_id base_worker injects, and the contract forbids undeclared
+        # keys, so validating the delivered dict raw is not what any
+        # operation does.
+        from protea.core.utils import contract_payload
+
+        p = ExportResearchDatasetPayload.model_validate(contract_payload(valid_payload))
         outcome = _DumpOutcome(
             settings=_stub_settings(),
             key_prefix="datasets/test_export_v226/",

@@ -28,6 +28,7 @@ from protea.core.training_dump._data_loaders import (
     _build_reference_from_cache,
     _preload_all_embeddings,
 )
+from protea.core.utils import contract_payload
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
 
@@ -89,7 +90,7 @@ class ExportKnnBatchOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = ExportKnnBatchPayload.model_validate(payload)
+        p = ExportKnnBatchPayload.model_validate(contract_payload(payload))
         emb_config_id = uuid.UUID(p.embedding_config_id)
         annotation_set_id = uuid.UUID(p.annotation_set_id)
 

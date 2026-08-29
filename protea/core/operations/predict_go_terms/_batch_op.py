@@ -46,6 +46,7 @@ from protea.core.operations.predict_go_terms import (
     _unified_path as _unified,
 )
 from protea.core.pca_cache import _load_or_fit_pca_state
+from protea.core.utils import contract_payload
 
 # The unified-pool and post-KNN paths delegate to ``call_pipeline_predict``,
 # ``_load_or_fit_pca_state``, and ``enrich_v6_features``. Re-export those
@@ -153,7 +154,7 @@ class PredictGOTermsBatchOperation(
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = PredictGOTermsBatchPayload.model_validate(payload)
+        p = PredictGOTermsBatchPayload.model_validate(contract_payload(payload))
         ctx = _BatchExecCtx(
             p=p,
             parent_job_id=UUID(p.parent_job_id),
