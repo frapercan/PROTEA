@@ -45,11 +45,11 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn
-from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 
 _MAX_TOP_ERRORS = 3
@@ -115,7 +115,7 @@ def _close_parent(
         .where(Job.id == parent_job_id, Job.status == JobStatus.RUNNING)
         .values(
             status=JobStatus.FAILED,
-            finished_at=utcnow(),
+            finished_at=func.now(),
             error_code=error_code or "AllChildrenFailed",
             error_message=error_message,
         )
