@@ -31,6 +31,7 @@ from protea.core.strata import (
     Stratum,
     stratum_for,
 )
+from protea.core.utils import contract_payload
 
 #: cafaeval reports the long namespace; the strata vocabulary speaks CAFA codes.
 _ASPECT_FOR_NAMESPACE: dict[str, Aspect] = {
@@ -187,7 +188,7 @@ class StratifyEvaluationOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = StratifyEvaluationPayload.model_validate(payload)
+        p = StratifyEvaluationPayload.model_validate(contract_payload(payload))
         root, store, tmp = _resolve_source(p, emit)
         neighbourhoods = neighbourhoods_for(session, p.prediction_set_id)
         lengths = _protein_lengths(session)

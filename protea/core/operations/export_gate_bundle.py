@@ -45,6 +45,7 @@ from protea.core.contracts.operation import (
     OperationResult,
     ProteaPayload,
 )
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.storage import get_artifact_store
 
@@ -244,7 +245,7 @@ class ExportGateBundleOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = ExportGateBundlePayload.model_validate(payload)
+        p = ExportGateBundlePayload.model_validate(contract_payload(payload))
         emit("bundle.start", f"freezing {p.embedding_config_id}",
              {"queries": len(p.queries), "ref_n": p.ref_n}, "info")
 

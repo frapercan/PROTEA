@@ -73,6 +73,7 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
 from protea.core.operations._run_cafa_helpers import eval_artifact_key
 from protea.core.operations._run_cafa_per_protein import GRID_FILENAME
+from protea.core.utils import contract_payload
 
 #: What exists today and cannot support a re-selected operating point.
 LEGACY_FILENAME = "per_protein.parquet"
@@ -338,7 +339,7 @@ class AuditPerProteinArtifactsOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = AuditPerProteinArtifactsPayload.model_validate(payload)
+        p = AuditPerProteinArtifactsPayload.model_validate(contract_payload(payload))
         settings = p.validated_settings()
         # Resolve the configuration root explicitly and SAY WHERE IT CAME FROM.
         # The root is derived from this module's own path, so running from a tree

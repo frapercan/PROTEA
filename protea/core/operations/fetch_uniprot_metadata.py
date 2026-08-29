@@ -14,7 +14,7 @@ from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.utils import chunks
+from protea.core.utils import chunks, contract_payload
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUniProtMetadata
 
@@ -146,7 +146,7 @@ class FetchUniProtMetadataOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = FetchUniProtMetadataPayload.model_validate(payload)
+        p = FetchUniProtMetadataPayload.model_validate(contract_payload(payload))
         t0 = time.perf_counter()
         emit(
             "fetch_uniprot_metadata.start",

@@ -11,7 +11,7 @@ from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
-from protea.core.utils import chunks
+from protea.core.utils import chunks, contract_payload
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence as SequenceModel
 
@@ -92,7 +92,7 @@ class InsertProteinsOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = InsertProteinsPayload.model_validate(payload)
+        p = InsertProteinsPayload.model_validate(contract_payload(payload))
         t0 = time.perf_counter()
         emit(
             "insert_proteins.start",

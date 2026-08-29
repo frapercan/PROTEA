@@ -30,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
+from protea.core.utils import contract_payload
 
 _TOTALS = (
     "SELECT count(*) AS n_rows,"
@@ -121,7 +122,7 @@ class AuditEvaluationFramesOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = AuditEvaluationFramesPayload.model_validate(payload)
+        p = AuditEvaluationFramesPayload.model_validate(contract_payload(payload))
         emit("audit.start", "Counting the evaluation layer", {}, "info")
 
         totals = _read_totals(session)

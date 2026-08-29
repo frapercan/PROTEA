@@ -37,6 +37,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.interpro_go_mapping import (
     InterProGoMapping,
 )
@@ -97,7 +98,7 @@ class LoadInterProGoMappingOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = LoadInterProGoMappingPayload.model_validate(payload)
+        p = LoadInterProGoMappingPayload.model_validate(contract_payload(payload))
 
         t0 = time.perf_counter()
         emit(
