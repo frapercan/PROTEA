@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn
-from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 
 
@@ -49,7 +49,7 @@ def update_parent_progress(
     closed = session.execute(
         sa_update(Job)
         .where(Job.id == parent_job_id, Job.status == JobStatus.RUNNING)
-        .values(status=JobStatus.SUCCEEDED, finished_at=utcnow())
+        .values(status=JobStatus.SUCCEEDED, finished_at=func.now())
         .returning(Job.id)
     ).fetchone()
 

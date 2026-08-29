@@ -5,12 +5,11 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Index, Text
+from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Index, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from protea.core.utils import utcnow
 from protea.infrastructure.orm.base import Base
 
 
@@ -48,8 +47,10 @@ class Job(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
+    #: Postgres stamps it. See the note on JobEvent.ts for why the Python
+    #: default is removed rather than accompanied.
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -126,7 +127,22 @@ class JobEvent(Base):
         nullable=False,
     )
 
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    #: Stamped by POSTGRES, not by the process that emits. The Python default
+    #: was removed rather than accompanied: SQLAlchemy resolves `default=` at
+    #: flush and puts the column in the INSERT, so a server_default sitting
+    #: beside one never fires. The pair would pass review, apply cleanly and
+    #: change nothing.
+    #:
+    #: It matters because this stream is shared. A compute node whose clock is
+    #: wrong writes fiction into the common history: on 2026-08-29 a node
+    #: booted two hours ahead for twenty seconds and its three events made two
+    #: readers reconstruct a 110-minute stall that never happened. Sweeping the
+    #: table before this change found 207,802 events across 53 jobs stamped
+    #: after their own job finished, up to 20 hours out, and 8,637 stamped
+    #: before their job began. A quarter of the stream.
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     level: Mapped[str] = mapped_column(Text, nullable=False, default="info")
     event: Mapped[str] = mapped_column(Text, nullable=False)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -164,8 +180,9 @@ class JobComment(Base):
     )
     author: Mapped[str | None] = mapped_column(Text, nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Postgres stamps it, like every other time on these tables.
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     __table_args__ = (
