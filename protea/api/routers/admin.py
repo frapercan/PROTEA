@@ -135,7 +135,18 @@ def get_dlq_summary(
 
 
 class DlqReplayRequest(BaseModel):
-    """Filter for DLQ messages to re-enqueue back onto their source queue."""
+    """Filter for DLQ messages to re-enqueue back onto their source queue.
+
+    WHY dry_run DEFAULTS TO TRUE. Every field here is optional, so ``{}`` is a
+    valid body, and it used to mean "replay up to a thousand messages onto
+    whatever queues they came from". The authentication gate is off in this
+    deployment (``PROTEA_AUTHN_REQUIRED=false``, and ``role_of(None)`` returns
+    admin), so one unauthenticated request with an empty body moved real work
+    back onto live queues. The default is now the reading, and acting takes
+    saying ``{"dry_run": false}`` on purpose. The response reports the same
+    counts either way, so a caller that relied on the old default now learns
+    what it would have done instead of doing it.
+    """
 
     operation: str | None = Field(
         default=None, description="Restrict to messages whose payload `operation` matches."
@@ -149,8 +160,11 @@ class DlqReplayRequest(BaseModel):
         description="Override the destination queue. Defaults to the original source queue.",
     )
     dry_run: bool = Field(
-        default=False,
-        description="If true, count matches without re-enqueueing or acknowledging.",
+        default=True,
+        description=(
+            "Count matches without re-enqueueing or acknowledging. Defaults to "
+            "true: a request that says nothing gets an answer, not an action."
+        ),
     )
     max_messages: int = Field(
         default=1000, description="Upper bound on messages processed in one call."
@@ -186,7 +200,13 @@ def replay_dlq(
 
 
 class DlqPurgeRequest(BaseModel):
-    """Filter for DLQ messages to permanently discard."""
+    """Filter for DLQ messages to permanently discard.
+
+    Defaults to a dry run for the reason in :class:`DlqReplayRequest`, and more
+    so: an empty body used to discard up to ten thousand messages with no
+    filter and no undo. A dead letter is often the only surviving copy of the
+    payload that produced it.
+    """
 
     operation: str | None = Field(
         default=None, description="Restrict to messages whose payload `operation` matches."
@@ -196,8 +216,11 @@ class DlqPurgeRequest(BaseModel):
         description="Restrict to messages originally dead-lettered from this queue.",
     )
     dry_run: bool = Field(
-        default=False,
-        description="If true, count matches without removing anything from the DLQ.",
+        default=True,
+        description=(
+            "Count matches without removing anything. Defaults to true: this "
+            "endpoint discards messages permanently and there is no undo."
+        ),
     )
     max_messages: int = Field(
         default=10000, description="Upper bound on messages processed in one call."

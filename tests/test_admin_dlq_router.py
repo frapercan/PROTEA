@@ -215,3 +215,36 @@ class TestDlqPurgeEndpoint:
             headers={"Authorization": f"Bearer {_mint('admin')}"},
         )
         assert resp.status_code == 503
+
+
+class TestSayingNothingAsksAndDoesNotAct:
+    """An empty body is a question, not an instruction.
+
+    Every field on both requests is optional, so ``{}`` is valid, and it used
+    to mean "replay up to a thousand messages" and "discard up to ten
+    thousand". This deployment runs with ``PROTEA_AUTHN_REQUIRED=false`` and
+    ``role_of(None)`` returning admin, so one unauthenticated request with an
+    empty body was enough. A dead letter is often the only surviving copy of
+    the payload that produced it, and there is no undo for the purge.
+
+    These assert the default itself rather than the endpoint, because the
+    default is the whole change and a test that posts ``{"dry_run": true}``
+    would pass whatever the default said.
+    """
+
+    def test_replay_defaults_to_asking(self) -> None:
+        from protea.api.routers.admin import DlqReplayRequest
+
+        assert DlqReplayRequest().dry_run is True
+
+    def test_purge_defaults_to_asking(self) -> None:
+        from protea.api.routers.admin import DlqPurgeRequest
+
+        assert DlqPurgeRequest().dry_run is True
+
+    def test_acting_still_takes_saying_so(self) -> None:
+        """The safe default must not become an inability to act."""
+        from protea.api.routers.admin import DlqPurgeRequest, DlqReplayRequest
+
+        assert DlqReplayRequest(dry_run=False).dry_run is False
+        assert DlqPurgeRequest(dry_run=False).dry_run is False
