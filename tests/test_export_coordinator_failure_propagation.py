@@ -24,6 +24,7 @@ This module pins the two fixes:
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Any
 from unittest.mock import MagicMock
@@ -149,6 +150,11 @@ class _FakeQuery:
         self.added_events: list[Any] = []
 
 
+#: Marks a column whose value the server computes, so the fake has to stand in
+#: for Postgres instead of reading a literal that is not there.
+_SERVER_SIDE = object()
+
+
 class _FakeSession:
     """Minimal stand-in for the slice of ``Session`` ``report_child_failure``
     actually touches.
@@ -183,17 +189,27 @@ class _FakeSession:
         if self._parent.status == JobStatus.RUNNING:
             # Mutate ``parent`` in place to mirror what the DB would do.
             params = getattr(stmt, "_values", None) or {}
-            # ``Update._values`` is a frozendict of Column -> BindParameter.
+            # ``Update._values`` maps Column -> BindParameter for a literal, or
+            # -> a SQL expression for something the SERVER computes. finished_at
+            # is now func.now(), which has no .value because the value does not
+            # exist until Postgres evaluates it. Standing in for the database
+            # means evaluating it here rather than reaching for an attribute a
+            # SQL function was never going to have.
             for col, bind in dict(params).items():
                 col_name = getattr(col, "key", None) or getattr(col, "name", None)
+                literal = getattr(bind, "value", _SERVER_SIDE)
                 if col_name == "status":
-                    self._parent.status = bind.value
+                    self._parent.status = literal
                 elif col_name == "error_code":
-                    self._parent.error_code = bind.value
+                    self._parent.error_code = literal
                 elif col_name == "error_message":
-                    self._parent.error_message = bind.value
+                    self._parent.error_message = literal
                 elif col_name == "finished_at":
-                    self._parent.finished_at = bind.value
+                    self._parent.finished_at = (
+                        datetime.datetime.now(datetime.UTC)
+                        if literal is _SERVER_SIDE
+                        else literal
+                    )
             result.fetchone = MagicMock(return_value=MagicMock(id=self._parent.id))
         else:
             result.fetchone = MagicMock(return_value=None)
