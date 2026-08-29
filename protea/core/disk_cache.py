@@ -78,6 +78,25 @@ class RefPoolKey(NamedTuple):
     donor_discriminator: str = ""
 
 
+#: Bumped when the MEANING of what is cached changes, as opposed to the
+#: parameters it is keyed by. The two are not the same thing and the difference
+#: has already cost this project a run.
+#:
+#: On 2026-08-19 the reference pools were built with a donor policy that gated
+#: which PROTEINS entered the pool and not which annotations they could donate.
+#: On 2026-08-29 that was fixed, so a pool now contains strictly fewer
+#: annotations for the same policy. The policy object did not change, so the
+#: discriminator did not change, so the key did not change: 240 files sat on
+#: disk under exactly the name the corrected run would look for, holding 87,709
+#: IEA, 26,044 IBA, 10,767 ISO and 9,691 ISS annotations the fix exists to
+#: exclude. The retrieval would have found them, reported success, and produced
+#: the rows the change was written to prevent.
+#:
+#: This constant is the thing to change when that happens again. Nothing
+#: derives it, so it cannot be forgotten quietly: a semantic change with the
+#: epoch left alone is a semantic change that silently reuses the old meaning.
+_CACHE_EPOCH = 2
+
 def _cache_key(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
@@ -93,11 +112,15 @@ def _cache_key(
     already been measured on this cache once.
 
     ``donor_discriminator`` identifies the donor policy the pool was built
-    under. The permissive policy discriminates to the empty string, so keys
-    for pools built before policies existed are unchanged and their cache
-    entries stay valid.
+    under. The permissive policy discriminates to the empty string.
+
+    The epoch is in front of everything and applies to every key, including
+    permissive ones whose contents did not change. That is deliberate. An
+    epoch that applies only to the entries somebody judged affected needs that
+    judgement to be right every time, and the judgement is exactly what was
+    wrong the day this was added.
     """
-    key = f"{embedding_config_id}__{annotation_set_id}"
+    key = f"e{_CACHE_EPOCH}__{embedding_config_id}__{annotation_set_id}"
     if donor_discriminator:
         # Hashed rather than interpolated: the discriminator carries
         # separators that are not safe in a filename, and hashing keeps the
