@@ -468,11 +468,11 @@
         "type": "object"
       },
       "DlqPurgeRequest": {
-        "description": "Filter for DLQ messages to permanently discard.",
+        "description": "Filter for DLQ messages to permanently discard.\n\nDefaults to a dry run for the reason in :class:`DlqReplayRequest`, and more\nso: an empty body used to discard up to ten thousand messages with no\nfilter and no undo. A dead letter is often the only surviving copy of the\npayload that produced it.",
         "properties": {
           "dry_run": {
-            "default": false,
-            "description": "If true, count matches without removing anything from the DLQ.",
+            "default": true,
+            "description": "Count matches without removing anything. Defaults to true: this endpoint discards messages permanently and there is no undo.",
             "title": "Dry Run",
             "type": "boolean"
           },
@@ -511,11 +511,11 @@
         "type": "object"
       },
       "DlqReplayRequest": {
-        "description": "Filter for DLQ messages to re-enqueue back onto their source queue.",
+        "description": "Filter for DLQ messages to re-enqueue back onto their source queue.\n\nWHY dry_run DEFAULTS TO TRUE. Every field here is optional, so ``{}`` is a\nvalid body, and it used to mean \"replay up to a thousand messages onto\nwhatever queues they came from\". The authentication gate is off in this\ndeployment (``PROTEA_AUTHN_REQUIRED=false``, and ``role_of(None)`` returns\nadmin), so one unauthenticated request with an empty body moved real work\nback onto live queues. The default is now the reading, and acting takes\nsaying ``{\"dry_run\": false}`` on purpose. The response reports the same\ncounts either way, so a caller that relied on the old default now learns\nwhat it would have done instead of doing it.",
         "properties": {
           "dry_run": {
-            "default": false,
-            "description": "If true, count matches without re-enqueueing or acknowledging.",
+            "default": true,
+            "description": "Count matches without re-enqueueing or acknowledging. Defaults to true: a request that says nothing gets an answer, not an action.",
             "title": "Dry Run",
             "type": "boolean"
           },
