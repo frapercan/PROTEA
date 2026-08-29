@@ -20,6 +20,7 @@ import uuid
 import numpy as np
 import pytest
 
+from protea.core import disk_cache
 from protea.core.disk_cache import (
     RefPoolKey,
     _anno_disk_cache_paths,
@@ -37,14 +38,30 @@ REVIEWED = "reviewed_only=True|evidence_codes=EXP,IDA|exclude=GO_REF"
 EVIDENCE = "reviewed_only=False|evidence_codes=EXP|exclude="
 
 
-class TestTheEmptyDiscriminatorChangesNothing:
-    """Pools cached before restrictions existed have to stay valid."""
+class TestTheEmptyDiscriminatorAddsNothingOfItsOwn:
+    """An empty discriminator contributes no segment. It no longer means the
+    key is the historical one.
 
-    def test_it_keeps_the_historical_key(self) -> None:
-        assert _cache_key(CFG, ANN, "") == f"{CFG}__{ANN}"
+    This class used to assert that pools cached before restrictions existed
+    stayed valid, on the reasoning that an unchanged policy means unchanged
+    contents. That reasoning is what failed: on 2026-08-29 the policy stopped
+    admitting annotations it had been admitting, without the policy object
+    changing, so 240 files sat on disk under exactly the name the corrected
+    run would look for. The key now carries an epoch precisely so that a
+    change in MEANING can move it when a change in parameters cannot.
+    """
+
+    def test_it_adds_no_segment_of_its_own(self) -> None:
+        assert _cache_key(CFG, ANN, "") == f"e{disk_cache._CACHE_EPOCH}__{CFG}__{ANN}"
 
     def test_it_keeps_the_historical_paths(self) -> None:
         assert _disk_cache_paths(CFG, ANN, "") == _disk_cache_paths(CFG, ANN)
+
+    def test_it_is_no_longer_the_pre_epoch_key(self) -> None:
+        """The break is deliberate: every pre-epoch file is now unreachable,
+        which is what makes this a clean cut rather than an invalidation
+        somebody has to apply to the right subset by hand."""
+        assert _cache_key(CFG, ANN, "") != f"{CFG}__{ANN}"
 
 
 class TestARestrictionMovesTheKey:
