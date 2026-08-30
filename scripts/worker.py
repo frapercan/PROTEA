@@ -163,7 +163,20 @@ def main() -> None:
         except Exception as exc:
             logging.warning("Taxonomy DB warmup skipped: %s", exc)
 
-    logging.info("Worker started. queue=%s", args.queue)
+    # The revision goes on the startup line beside the queue, so grep over the
+    # logs answers "what was this process actually running" with no database
+    # round trip. Its absence is why a tree that moved under two live arms on
+    # 2026-08-30 went unnoticed until the labels were read back out of the
+    # database hours later.
+    from protea.core.code_revision import code_revision, tree_revision_now
+
+    stamped, tree = code_revision(), tree_revision_now()
+    logging.info(
+        "Worker started. queue=%s revision=%s%s",
+        args.queue,
+        stamped,
+        "" if stamped == tree else f" TREE_HAS_MOVED_TO={tree}",
+    )
     while True:
         try:
             consumer.run()

@@ -99,12 +99,8 @@ def _working_tree_is_dirty() -> bool | None:
     return bool(out.strip())
 
 
-def code_revision() -> str:
-    """The revision the running process was built from.
-
-    Returns a bare sha only when it is genuinely identifying: a clean checkout,
-    or an explicit declaration through the environment.
-    """
+def _read_revision() -> str:
+    """Ask git what the tree says, right now."""
     declared = os.environ.get(ENV_VAR, "").strip()
     if declared:
         return declared
@@ -115,6 +111,50 @@ def code_revision() -> str:
     if dirty is None:
         return UNKNOWN
     return f"{sha}{DIRTY_SUFFIX}" if dirty else sha
+
+
+#: Stamped once, at import, and never re-read.
+#:
+#: WHY NOT AT CALL TIME. This used to ask git on every call, which answers a
+#: different question: it reports what the WORKING TREE says now, not what the
+#: process loaded. Those are the same thing only while nobody touches the tree.
+#:
+#: On 2026-08-30 they were not. A branch was checked out in the deploy tree
+#: while a twelve arm sweep was running. The workers had loaded their code at
+#: 06:04 and never reloaded, so every arm computed identically, but arms 7 and
+#: 8 recorded a revision the running processes had never held. Six arms carry a
+#: true label and two carry a false one, produced by the reporting path of the
+#: guard that exists to prevent exactly that.
+#:
+#: A process cannot reload its own modules by having a file change underneath
+#: it, so the revision at import IS the revision of the code that will run. The
+#: two answers now differ precisely when something is wrong, which is when the
+#: difference is worth seeing.
+#:
+#: The deployment layout decides how easy this is to trip. The compute node
+#: serves from a dedicated deploy worktree and its developer workspace is 89
+#: commits behind without consequence. This machine sets DEPLOY to the
+#: repository itself, so an ordinary checkout moves what a live run declares.
+_REVISION_AT_IMPORT: str = _read_revision()
+
+
+def code_revision() -> str:
+    """The revision this process loaded, stamped at import.
+
+    Returns a bare sha only when it is genuinely identifying: a clean checkout,
+    or an explicit declaration through the environment.
+    """
+    return _REVISION_AT_IMPORT
+
+
+def tree_revision_now() -> str:
+    """What the working tree says at this moment, which may differ.
+
+    Only for a caller that genuinely wants the tree, such as a check reporting
+    that a deploy slot has moved under a running worker. Never use it to label
+    output: that is the mistake this module records.
+    """
+    return _read_revision()
 
 
 def is_identifying(revision: str | None) -> bool:
