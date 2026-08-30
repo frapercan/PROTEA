@@ -160,15 +160,37 @@ def detectable_effect(units: int | None) -> float | None:
 
 #: The paired standard deviation of the contrast a ROUTING decision makes: two
 #: arms that retrieve different neighbours, rather than two arms that share a
-#: retrieval and differ in one downstream knob. Retrieval is the noisiest thing
-#: an arm can vary, so this class sits well above the configuration class, and
-#: it is the class that matters here because sending a protein to one arm
-#: instead of another IS a contrast between arms that retrieve differently.
-#: The value is the one that reproduces the population floor of 332 declared in
-#: ``SURVIVOR-CASCADE.md`` section 2. That file is also on no trunk: it is in
-#: agent-farm PR #257, unmerged, whose own vote-fraction claim was measured
-#: false on this campaign. Same standing as _SIGMA_PAIRED above, same remedy,
-#: and the two should be re-derived together so their ratio stays meaningful.
+#: retrieval and differ in one downstream knob.
+#:
+#: MEASURED 2026-08-30, and the measurement says this class is not one number.
+#: Five pairs from the depth series on 9995651a, same scoring, same evaluation,
+#: differing only in retrieval depth, compared per protein across nine panels:
+#:
+#:     arms      min      median     max
+#:     30 v 20   0.0638   0.1215    0.1836
+#:     20 v 10   0.0770   0.1510    0.2385
+#:     10 v  5   0.1029   0.1810    0.2619
+#:      5 v  2   0.1357   0.2304    0.3141
+#:     30 v  2   0.1521   0.2726    0.3983
+#:
+#: Both the minimum and the median rise monotonically with how far apart the
+#: two retrievals are, so a single constant models something that varies by a
+#: factor of six across the pairs this campaign actually contains. Part of that
+#: rise is real effect rather than spread: depth is monotone, so arms further
+#: apart genuinely differ more, and the wide pairs measure signal as much as
+#: scatter. The narrow pairs are the ones that behave like a floor.
+#:
+#: THE VALUE IS KEPT AT 0.13. It sits inside the measured range and within nine
+#: per cent of the adjacent-arm median of 0.1215, which is the conservative use
+#: of it. Its stated derivation, reproducing a population floor of 332 declared
+#: in SURVIVOR-CASCADE.md, is still unverifiable: that file is on no trunk and
+#: lives only in agent-farm PR #257.
+#:
+#: A PRIOR HELD HERE WAS WRONG AND IS RECORDED SO IT IS NOT REPEATED. Retrieval
+#: was assumed to be uniformly noisier than configuration, which would have put
+#: this well above _SIGMA_PAIRED's 0.1157. Adjacent retrieval arms are QUIETER
+#: than two scoring configurations, not louder. Changing one knob downstream
+#: can move more per protein than shortening the neighbour list by ten.
 _SIGMA_ROUTING = 0.13
 
 #: The difference a floor is asked to resolve, in weighted micro F. Two points
