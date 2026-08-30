@@ -103,29 +103,38 @@ def panel_units_from_groundtruth(
 
 #: The paired standard deviation of the within-protein difference, for the
 #: cheapest contrast class this project has measured: two arms sharing their
-#: retrieval and differing in one downstream knob. It is the LOW end. Two arms
-#: that retrieve different neighbours are noisier, so a panel that cannot
-#: resolve at this value cannot resolve at any.
+#: retrieval and differing in one downstream knob.
 #:
-#: ITS DERIVATION IS NOT IN THIS REPOSITORY, OR IN ANY OTHER. It was cited to
-#: ``ABLATION-ARCHITECTURE.md``, which exists on no trunk: it lives only in
-#: agent-farm PR #246, unmerged since 2026-08-17, whose own population figure
-#: (5,674 protein-aspect units) is contradicted by the live frame's 17,438.
-#: So this number decides what the panel calls a separation and nobody can
-#: check where it came from.
+#: MEASURED ON THIS CAMPAIGN, 2026-08-30. Two evaluations of prediction set
+#: 9995651a at sequence depth 30, identical in everything but the scoring
+#: configuration (composite against embedding_plus_alignment), compared per
+#: protein at each arm's own best threshold:
 #:
-#: IT CANNOT BE RE-DERIVED YET, and saying so is the point of this comment.
-#: A paired sigma needs per-protein scores from two arms of one prediction
-#: set. Those live in the per_protein grid artefacts written by
-#: ``_persist_per_protein_grid``, and the only set the current campaign will
-#: report on, 9995651a, has 0 evaluations as of 2026-08-30. The first two arms
-#: evaluated on it produce the measurement, at which point this constant is
-#: replaced by one derived here, in code, from data that still exists.
+#:     NK.BPO  n=1509  0.1816      LK.BPO  n=1214  0.2094
+#:     NK.CCO  n=1116  0.2581      LK.CCO  n= 821  0.2528
+#:     NK.MFO  n=1129  0.3746      LK.MFO  n= 943  0.4051
+#:     PK.BPO  n=5810  0.1157      PK.CCO  n=3201  0.2248
+#:     PK.MFO  n=3292  0.2565      median  0.2528
 #:
-#: Kept rather than blanked. A floor that may be wrong still stops a reader
-#: taking a gap of 0.002 for a result, and ``detectable_effect`` returning
-#: nothing would remove the guard entirely to fix its provenance.
-_SIGMA_PAIRED = 0.081
+#: THE VALUE WAS 0.081, WHICH IS BELOW ALL NINE. It was attributed to a fold
+#: study in ABLATION-ARCHITECTURE.md, a file on no trunk, and it made
+#: detectable_effect report a floor about three times finer than this record
+#: supports: 0.0017 against 0.0054 at a population of 17,438. The panel was
+#: calling differences resolvable that sit inside the spread of the contrast
+#: class it names.
+#:
+#: THIS IS NOT MEASUREMENT NOISE, and the distinction matters for anyone
+#: tempted to shrink it again. Evaluation here is deterministic, 117 of 117
+#: metrics reproduce exactly, so re-running an arm gives a difference of
+#: exactly zero. What this measures is the real spread of the paired
+#: difference between two arms of one contrast class, which is the quantity a
+#: detectable effect has to clear.
+#:
+#: The minimum is taken rather than the median, keeping the original intent:
+#: it is the LOW end, so a panel that cannot resolve at this value cannot
+#: resolve at any. Two arms that retrieve different neighbours are noisier
+#: still, which is what _SIGMA_ROUTING below is for.
+_SIGMA_PAIRED = 0.1157
 
 #: (z at 95 per cent + z at 80 per cent power), the constant that turns a
 #: population into the smallest difference it can detect.

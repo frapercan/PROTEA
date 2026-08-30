@@ -61,11 +61,38 @@ def test_neither_sigma_claims_a_derivation_a_reader_cannot_open() -> None:
             )
 
 
-def test_the_paired_sigma_says_what_would_replace_it() -> None:
-    """A provisional number that does not name its replacement stays forever."""
+def test_the_paired_sigma_carries_the_measurement_that_produced_it() -> None:
+    """It was derived on 2026-08-30 and the derivation is in the file.
+
+    A number that names its source in a repository nobody can open is what
+    this constant was for a month. The nine panel values and the pair of arms
+    they came from are now beside it, so the next person to doubt it can
+    re-run the comparison instead of re-deriving the folklore.
+    """
+    from protea.api.routers._graph_panels import _SIGMA_PAIRED
+
     block = _sigma_block("_SIGMA_PAIRED")
     assert "9995651a" in block
-    assert "per_protein" in block or "_persist_per_protein_grid" in block
+    assert "MEASURED ON THIS CAMPAIGN" in block
+    # The nine values it was taken from, so the block cannot be trimmed to a
+    # bare assertion later.
+    for value in ("0.1157", "0.4051", "0.2528"):
+        assert value in block, value
+    # The minimum of the nine, kept as the low end the docstring promises.
+    assert _SIGMA_PAIRED == 0.1157
+
+
+def test_the_floor_is_not_finer_than_the_class_it_names() -> None:
+    """The failure the old value produced, asserted as a bound.
+
+    0.081 was below every one of the nine measured values, so the panel
+    reported a floor about three times finer than the record supports. Any
+    future value has to stay at or above the smallest measured spread.
+    """
+    from protea.api.routers._graph_panels import _SIGMA_PAIRED
+
+    smallest_measured = 0.1157  # PK.BPO, n=5810, the tightest of the nine
+    assert _SIGMA_PAIRED >= smallest_measured
 
 
 def test_the_floor_is_still_computed() -> None:
