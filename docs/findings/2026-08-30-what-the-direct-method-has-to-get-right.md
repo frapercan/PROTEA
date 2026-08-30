@@ -26,33 +26,48 @@ Inside the UniProt metadata, with real content rather than an empty field:
 keywords 569,726, EC number 280,036, catalytic activity 260,924, binding site
 225,241, features 575,503.
 
+## The factors, worst first
+
+### 1. The corpus contains the answer, and "everything we know" has a date
+
+The store holds 21,876,159 GO annotations across all sets, and the truth set is
+one of them. "Train on every annotation we have" therefore means training on
+the answer. What we know **at prediction time** is the bank: 5,317,051
+annotations, dated to 2024-04-10, over 528,294 proteins. That is the perimeter,
+and it is not a small one.
+
+The restriction is not only about the 14,032 query proteins. A homologue
+acquiring a new annotation inside the window is exactly the signal the
+evaluation measures, so a post-cutoff annotation on any protein leaks by the
+route the method itself travels.
+
+The same date question applies to the UniProt metadata, all 575,503 rows of
+which were loaded on 2026-07-30, after both the bank (2024-04-10) and the truth
+(2025-09-03). Of what is in there:
+
+- **EC number (280,036) and catalytic activity (260,924) are excluded.** An EC
+  number is a molecular function statement, curated together with the MFO
+  annotation, from the same evidence, by the same people. So are keywords,
+  which carry GO-derived vocabulary.
+- **`features` is a count per feature type**, not positions or identities.
+  Chain 567,657, compositional bias 93,454, transmembrane 80,910, modified
+  residue 75,418, signal 45,458, disulfide bond 37,640, helix 35,254, beta
+  strand 32,736, glycosylation 32,328, motif 31,943, topological domain 31,183.
+  These are properties of the molecule and are usable. Transmembrane and signal
+  in particular are close to what CCO is about.
+- **`Binding site` (225,241) and `Site` (37,313) are excluded** with the EC
+  number. A binding site and the corresponding MFO binding term are curated
+  together. Holding only a count makes this weaker than an EC number, not
+  different in kind.
+
+`taxonomy_id`, `length` and the sequence are properties of the protein rather
+than conclusions about it, and carry no date problem at all.
+
 **`interpro_go_mapping` is empty.** The feature code in
 `protea/core/_interpro_features.py` exists and has nothing to read. Domain
 architecture is not currently available, and it is the most obvious source of
 signal that does not derive from the same geometry the ceiling measurement
 showed to be uninformative on the pairs we miss.
-
-## The factors, worst first
-
-### 1. The UniProt metadata is dated after the cutoff, and part of it is the answer
-
-Every one of the 575,503 metadata rows was loaded on 2026-07-30. The bank is
-dated 2024-04-10 and the truth 2025-09-03. The metadata therefore describes
-proteins as they are known **now**, which is after both.
-
-This is not a mild concern about one column. An EC number is a molecular
-function statement: it and the MFO annotation are curated together, from the
-same evidence, by the same people. 280,036 proteins have one.
-`catalytic_activity` is the same statement in prose. `keywords` includes
-GO-derived vocabulary.
-
-Feeding any of these to a model that predicts 2025 annotations would produce
-excellent MFO numbers that mean nothing. The options are to exclude them, or to
-rebuild a t0-dated version from a UniProt release archive, which is real work
-and has to be planned rather than assumed.
-
-`taxonomy_id`, `length` and the sequence itself are safe: they are properties of
-the protein, not of what anyone has concluded about it.
 
 ### 2. Absence of an annotation is not a negative
 
@@ -181,6 +196,9 @@ negative's is large. The ontology encoder is the target and does not move, which
 is what keeps a term with one example placed by the ontology rather than by its
 single observation.
 
+The inputs are the sequence embedding, the structural feature counts, the
+ontology embedding and the t0 annotations. Nothing curated as a function
+statement, and nothing dated after the cutoff.
+
 Judged against the frequency prior and against the current method, per aspect,
-cross-fitted by homology, with the metadata of factor 1 excluded until it can be
-dated.
+cross-fitted by homology.
