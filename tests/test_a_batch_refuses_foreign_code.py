@@ -127,6 +127,12 @@ def test_only_two_clean_revisions_can_disagree() -> None:
 def test_a_dirty_tree_never_passes_for_a_commit(monkeypatch) -> None:
     """The recorded value has to say the tree was edited.
 
+    Drives ``_read_revision`` rather than ``code_revision``: the reading is
+    what this asserts, and since 2026-08-30 ``code_revision`` returns a stamp
+    taken once at import so a tree that moves under a running process cannot
+    change what that process claims. Calling it here would test the stamp, not
+    the rule.
+
     The fleet on this machine runs out of the working tree, so a sha read there
     names a commit the running code is not. Recording it bare would let two
     different edits of one commit compare equal, which is a comparison that
@@ -138,19 +144,19 @@ def test_a_dirty_tree_never_passes_for_a_commit(monkeypatch) -> None:
     monkeypatch.setattr(cr, "resolve_protea_git_sha", lambda: _OPENED_BY)
 
     monkeypatch.setattr(cr, "_working_tree_is_dirty", lambda: False)
-    assert cr.code_revision() == _OPENED_BY
+    assert cr._read_revision() == _OPENED_BY
 
     monkeypatch.setattr(cr, "_working_tree_is_dirty", lambda: True)
-    assert cr.code_revision() == _OPENED_BY + DIRTY_SUFFIX
-    assert is_identifying(cr.code_revision()) is False
+    assert cr._read_revision() == _OPENED_BY + DIRTY_SUFFIX
+    assert is_identifying(cr._read_revision()) is False
 
     # git unavailable: not a commit either, and not silently a clean one.
     monkeypatch.setattr(cr, "_working_tree_is_dirty", lambda: None)
-    assert cr.code_revision() == UNKNOWN
+    assert cr._read_revision() == UNKNOWN
 
     # A deployment with no .git can still declare what it runs.
     monkeypatch.setenv(cr.ENV_VAR, _RUNNING)
-    assert cr.code_revision() == _RUNNING
+    assert cr._read_revision() == _RUNNING
 
 
 def test_the_receipt_carries_the_revision() -> None:
