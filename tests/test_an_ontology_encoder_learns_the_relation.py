@@ -104,7 +104,7 @@ class TestTrainingLearnsTheDirection:
         big = _synthetic(levels=6, width=40, seed=0)
         closure = set(big.closure())
         cfg = TrainConfig(dim=32, epochs=60, batch=512, lr=0.1, negatives=6, seed=0)
-        return fit(big, sorted(closure), closure, cfg), OrderEncoder(big, cfg), closure
+        return fit(OrderEncoder(big, cfg), sorted(closure), closure, cfg), OrderEncoder(big, cfg), closure
 
     def test_a_true_pair_costs_less_than_the_same_pair_reversed(self, trained) -> None:
         model, _, closure = trained

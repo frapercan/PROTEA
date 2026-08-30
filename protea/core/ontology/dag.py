@@ -58,6 +58,7 @@ class Dag:
     _up: dict[str, set[str]] = field(init=False, repr=False, default_factory=dict)
     _down: dict[str, set[str]] = field(init=False, repr=False, default_factory=dict)
     _sib: dict[str, set[str]] = field(init=False, repr=False, default_factory=dict)
+    _sibl: dict[str, tuple[str, ...]] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         children: dict[str, list[str]] = {}
@@ -139,6 +140,18 @@ class Dag:
         out = out - {term} - self.ancestors(term) - self.descendants(term)
         self._sib[term] = out
         return out
+
+    def sibling_list(self, term: str) -> tuple[str, ...]:
+        """:meth:`siblings_of` as a stable sequence, sorted once.
+
+        A sampler draws from this millions of times, and sorting a set on every
+        draw was measured as the hot path of a training run.
+        """
+        hit = self._sibl.get(term)
+        if hit is None:
+            hit = tuple(sorted(self.siblings_of(term)))
+            self._sibl[term] = hit
+        return hit
 
     def closure(self) -> Iterator[tuple[str, str]]:
         """Every (ancestor, descendant) pair the direct edges imply.

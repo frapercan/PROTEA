@@ -22,6 +22,7 @@ subset whose parent and child names share no content token. That subset is
 
 from __future__ import annotations
 
+import csv
 import os
 import re
 import sys
@@ -40,13 +41,15 @@ from protea.core.ontology.graph_encoder import (
     build_adjacency,
 )
 from protea.core.ontology.order_encoder import OrderEncoder, TrainConfig
+from protea.core.ontology.semantics import Semantics
 from protea.core.ontology.term_features import (
     TextFeatureConfig,
     aspect_features,
     text_features,
 )
-from protea.core.ontology.training import fit
+from protea.core.ontology.training import SemanticNegatives, fit
 
+IC_PATH = "/tmp/ic_t0.csv"
 SNAPSHOT = "36038118-37ba-4858-8677-f5b5d730bf56"
 SAMPLE = 400
 STOP = {"of", "the", "a", "an", "in", "to", "and", "or", "by", "from", "with",
@@ -128,13 +131,31 @@ def main() -> int:
     train_pairs = sorted(p for p in closure if p not in held)
     lean = [(p, c) for p, c in split.test
             if _tok(names.get(p, "")) and not (_tok(names.get(p, "")) & _tok(names.get(c, "")))]
-    print(f"  aristas retenidas: {len(split.test):,}, de ellas sin solape lexico: {len(lean):,}\n")
+
+    # Resnik as the difficulty axis, in place of the lexical split as the
+    # headline. Sharing a word is a fact about strings; the information content
+    # of the most informative common ancestor is a fact about meaning, and it
+    # is graded rather than binary. The lexical subset is kept as a footnote
+    # because it answers a different question: whether the answer was copyable.
+    ic = {g: float(v) for g, v in csv.reader(open(IC_PATH))}
+    sem = Semantics(dag, ic)
+    rs = sem.resnik_bulk(list(split.test))
+    lo_r = [e for e, r in zip(split.test, rs, strict=True) if r < np.percentile(rs, 33)]
+    hi_r = [e for e, r in zip(split.test, rs, strict=True) if r >= np.percentile(rs, 67)]
+    print(f"  aristas retenidas: {len(split.test):,}   sin solape lexico: {len(lean):,}")
+    print(f"  Resnik(padre,hijo) sobre las retenidas: p33 {np.percentile(rs, 33):.2f}  "
+          f"p50 {np.median(rs):.2f}  p67 {np.percentile(rs, 67):.2f}")
+    print(f"  tercio bajo (lejanas) {len(lo_r):,}   tercio alto (cercanas) {len(hi_r):,}\n")
 
     tcfg = TrainConfig(dim=64, epochs=12, batch=8192, lr=0.05, negatives=4)
     table = fit(OrderEncoder(dag, tcfg), train_pairs, closure, tcfg, log=print).frozen()
 
     mats = build_adjacency(dag, typed, GRAPH_RELATIONS)
-    gcfg = GraphConfig(in_dim=X.shape[1], out_dim=64, hidden=256, layers=3)
+    # Hidden 128 rather than 256: the dense cost of a full-graph pass scales
+    # as the square of it, and 600 optimiser steps at half the width beats 240
+    # at full width when the first run stopped with the loss still falling.
+    # Depth is kept at three, since that is the receptive field.
+    gcfg = GraphConfig(in_dim=X.shape[1], out_dim=64, hidden=128, layers=3)
     # A large batch, because the cost is per STEP and not per pair: every step
     # recomputes all 40,214 term vectors whether the batch touches ten thousand
     # of them or a hundred thousand. Eight steps an epoch instead of sixty.
@@ -144,16 +165,22 @@ def main() -> int:
     # The table encoder above is deliberately NOT changed. It is the baseline
     # this is measured against, and retuning it would make the comparison say
     # something other than what it claims.
-    gtrain = TrainConfig(dim=64, epochs=30, batch=65536, lr=3e-3, negatives=4)
+    # Trained to convergence this time, and against Resnik-graded negatives.
+    # The previous run stopped with the loss still falling, which made the
+    # comparison one between a converged model and an unconverged one.
+    gtrain = TrainConfig(dim=64, epochs=40, batch=32768, lr=2e-3, negatives=4)
+    negs = SemanticNegatives(dag, closure, sem, near=0.6, seed=0)
     graph = fit(
         GraphOrderEncoder(dag, torch.tensor(X), mats, gcfg),  # type: ignore[arg-type]
-        train_pairs, closure, gtrain, log=print,
+        train_pairs, closure, gtrain, log=print, semantic=negs,
     )
     gfrozen = graph.frozen()
 
     lex = LexicalBaseline(names)
     for title, edges in (("todas las retenidas", list(split.test)),
-                         (f"SIN solape lexico ({len(lean):,})", lean)):
+                         (f"Resnik BAJO, padre e hijo lejanos ({len(lo_r):,})", lo_r),
+                         (f"Resnik ALTO, padre e hijo cercanos ({len(hi_r):,})", hi_r),
+                         (f"sin solape lexico ({len(lean):,})", lean)):
         print(f"\n  --- padre retenido entre los no-ancestros, {title} ---")
         for tag, m in (("grafo (texto+DAG)", gfrozen), ("tabla libre (Parte 1)", table),
                        ("contencion lexica", lex)):

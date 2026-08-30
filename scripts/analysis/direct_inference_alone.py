@@ -161,7 +161,7 @@ def main() -> int:
     for a in tr:
         for t in terms[a]:
             freq[dag.index[t]] += 1
-    ranks, franks = [], []
+    ranks, franks, tie_sizes = [], [], []
     with torch.no_grad():
         for s in range(0, len(te), 256):
             blk = te[s : s + 256]
@@ -171,7 +171,18 @@ def main() -> int:
                 held = rng.choice(sorted(have))
                 mask = np.array([t not in have or t == held for t in dag.terms])
                 j = dag.index[held]
-                ranks.append(1 + int(((scores[i] > scores[i][j]) & mask).sum()))
+                # PESSIMISTIC on ties, and the ties are the whole story. A
+                # projector can push a protein's point out until every term
+                # subsumes it, at which point the penalty is 0 for thousands of
+                # terms at once. Counting only strictly-better candidates then
+                # reports rank 1 for a model that has learned to say yes to
+                # everything, which is how the first run of this script
+                # produced h@10 of 58 per cent and h@100 of 59.4: nothing was
+                # being ranked, it was all tied at the top.
+                better = ((scores[i] > scores[i][j]) & mask).sum()
+                tied = ((scores[i] == scores[i][j]) & mask).sum() - 1
+                ranks.append(1 + int(better) + int(max(tied, 0)))
+                tie_sizes.append(int(tied))
                 franks.append(1 + int(((freq > freq[j]) & mask).sum()))
 
     r, f = np.array(ranks, dtype=float), np.array(franks, dtype=float)
@@ -180,6 +191,11 @@ def main() -> int:
     for tag, a in (("proyector de secuencia", r), ("prior de frecuencia", f)):
         print(f"  {tag:24s} p50 {np.median(a):7,.0f}  h@10 {(a <= 10).mean():6.1%}  "
               f"h@100 {(a <= 100).mean():6.1%}  h@1000 {(a <= 1000).mean():6.1%}")
+    t = np.array(tie_sizes, dtype=float)
+    print(f"\n  empatados con el retenido: p50 {np.median(t):,.0f}  p90 "
+          f"{np.percentile(t, 90):,.0f}  max {t.max():,.0f}")
+    print("  (un empate grande significa que el punto de la proteina cubre "
+          "medio ontologia, no que acierte)")
     print(f"\n  n = {len(r):,}   total {time.time() - t0:.0f}s")
     return 0
 
