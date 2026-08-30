@@ -109,3 +109,28 @@ def test_the_floor_is_still_computed() -> None:
     assert detectable_effect(None) is None
     # Smaller populations resolve less, which is the whole content of it.
     assert detectable_effect(1109) > detectable_effect(17438)
+
+
+def test_the_routing_class_records_that_it_is_not_one_number() -> None:
+    """Measured across five pairs, and it varies by a factor of six.
+
+    The constant survives, but the comment now carries the reason it is only
+    defensible for adjacent arms. A future reader who trims the table back to
+    a bare value re-creates the state this repository was in for a month: a
+    number nobody could check.
+    """
+    from protea.api.routers._graph_panels import _SIGMA_PAIRED, _SIGMA_ROUTING
+
+    block = _sigma_block("_SIGMA_ROUTING")
+    assert "MEASURED 2026-08-30" in block
+    # The span the class actually covers, so the single value cannot be read
+    # as if it were the whole story.
+    for value in ("0.0638", "0.3983", "0.1215"):
+        assert value in block, value
+    assert _SIGMA_ROUTING == 0.13
+    # And the prior that was wrong, kept so it is not rediscovered.
+    assert "QUIETER" in block
+    # Adjacent retrieval arms measured quieter than two scoring configs, which
+    # is the opposite of what was assumed. Asserted so the two constants
+    # cannot be silently reordered on the old intuition.
+    assert _SIGMA_ROUTING > _SIGMA_PAIRED
