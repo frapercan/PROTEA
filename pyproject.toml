@@ -74,7 +74,7 @@ priority = "explicit"
 # NOTE: protea-contracts is a MAIN dependency (imported at runtime by
 # protea.core.contracts.operation); the remaining four are optional
 # plugin extras installed via --with plugins.
-protea-method = { git = "https://github.com/frapercan/protea-method.git", rev = "f40801b9b7b7c634d3818c0bd3c767e13b600db2" }
+protea-method = { git = "https://github.com/frapercan/protea-method.git", rev = "204079f639274996e01fef7a291df45f24959163" }
 protea-sources = { git = "https://github.com/frapercan/protea-sources.git", rev = "ad0810b9a2d117c336189d6f3f55cb3fa9aba86a" }
 protea-runners = { git = "https://github.com/frapercan/protea-runners.git", rev = "ccd06fd80c12b5195339478dae7255d1ea58f4a6" }
 protea-backends = { git = "https://github.com/frapercan/protea-backends.git", rev = "9b76719a14d729390be7d0faf957fae06a31ced5" }
