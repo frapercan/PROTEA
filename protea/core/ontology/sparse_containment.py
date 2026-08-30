@@ -67,6 +67,10 @@ class SparseCodeConfig:
     depth: int = 24
     temperature: float = 1.0
     seed: int = 0
+    #: The largest share of the atom space the deepest term may demand. Past
+    #: this the codes saturate and the order collapses; see the check in
+    #: SparseTermCodes.__init__, which refuses rather than degrading quietly.
+    max_occupancy: float = 0.5
 
 
 def parent_index(dag: Dag) -> tuple[Tensor, Tensor]:
@@ -88,11 +92,47 @@ class SparseTermCodes(nn.Module):
         self.dag = dag
         self.config = config
         self.own = nn.Parameter(torch.randn(len(dag.terms), config.atoms) * 0.01)
+        deepest = max((len(dag.ancestors(t)) for t in dag.terms), default=0) + 1
+        needed = deepest * config.own_k
+        if needed > config.atoms * config.max_occupancy:
+            raise ValueError(
+                f"a term with {deepest} ancestors claiming {config.own_k} atoms each "
+                f"needs {needed} of {config.atoms}, over the {config.max_occupancy:.0%} "
+                "occupancy this construction tolerates. Past it the deepest codes "
+                "saturate, a parent and its child both hold every atom, and the "
+                "containment becomes symmetric, which is the one thing it exists to "
+                "avoid. Raise atoms or lower own_k."
+            )
         ch, pa = parent_index(dag)
         self.register_buffer("child_idx", ch)
         self.register_buffer("parent_idx", pa)
         self.child_idx: Tensor
         self.parent_idx: Tensor
+
+    def own_atoms(self) -> Tensor:
+        """Exactly ``own_k`` atoms per term, at one, and the rest at zero.
+
+        THE THING THAT WAS MISSING. The first version of this module declared
+        own_k and never used it: it left ``own`` as a dense vector of small
+        positive numbers, and a near-zero code is contained in ANY protein, so
+        the containment violation was near zero for everything. Worse, zero is
+        a FIXED POINT that satisfies every positive example, so nothing in the
+        loss pushed the codes away from it. Trained that way the model emitted
+        386 terms per protein at precision 0.0042, which is what "everything is
+        contained" looks like from outside.
+
+        Binary and of fixed size, so the magnitude cannot collapse. A term
+        claims k atoms; a descendant claims those of every ancestor plus its
+        own, so it demands strictly more of a protein than its parent does.
+
+        The selection is hard in the forward pass and smooth in the backward
+        one, so an atom a term does not currently claim can still be pulled in
+        by the gradient rather than being dead for the rest of training.
+        """
+        soft = torch.sigmoid(self.own / self.config.temperature)
+        keep = soft.topk(self.config.own_k, dim=1).indices
+        hard = torch.zeros_like(soft).scatter(1, keep, 1.0)
+        return hard.detach() + soft - soft.detach()
 
     def codes(self) -> Tensor:
         """Every term's full code, by propagating a max down from the roots.
@@ -101,7 +141,7 @@ class SparseTermCodes(nn.Module):
         and materialising it against a thousand atoms would be a billion-entry
         tensor for a quantity twenty cheap passes produce exactly.
         """
-        h = torch.relu(self.own)
+        h = self.own_atoms()
         for _ in range(self.config.depth):
             up = h.index_select(0, self.parent_idx)
             nxt = h.clone().index_reduce(

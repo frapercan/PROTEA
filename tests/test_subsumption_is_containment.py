@@ -45,7 +45,7 @@ def dag() -> Dag:
 @pytest.fixture(scope="module")
 def codes(dag: Dag) -> torch.Tensor:
     """UNTRAINED on purpose. The guarantee is structural or it is nothing."""
-    return SparseTermCodes(dag, SparseCodeConfig(atoms=64, seed=0)).codes().detach()
+    return SparseTermCodes(dag, SparseCodeConfig(atoms=1024, own_k=4, seed=0)).codes().detach()
 
 
 class TestContainmentIsExactAtInitialisation:
@@ -117,15 +117,74 @@ class TestThePropagationTerminates:
     def test_a_chain_longer_than_the_bound_is_still_monotone(self) -> None:
         """Depth bounds the pass; it must not break the order where it stops."""
         chain = Dag.from_pairs([(f"n{i}", f"n{i+1}") for i in range(40)])
-        c = SparseTermCodes(chain, SparseCodeConfig(atoms=16, depth=8, seed=0))
+        c = SparseTermCodes(chain, SparseCodeConfig(atoms=2048, own_k=2, depth=8, seed=0))
         v = c.codes().detach()
         idx = chain.index
         for i in range(8):
             assert not (v[idx[f"n{i}"]] > v[idx[f"n{i+1}"]] + 1e-9).any()
 
     def test_sparsify_keeps_the_strongest_and_zeroes_the_rest(self, dag: Dag) -> None:
-        m = SparseTermCodes(dag, SparseCodeConfig(atoms=64, own_k=4, seed=0))
+        m = SparseTermCodes(dag, SparseCodeConfig(atoms=1024, own_k=4, seed=0))
         dense = m.codes().detach()
         sparse = m.sparsify(dense)
         assert (sparse != 0).sum(1).max().item() <= 16
         assert torch.all(sparse.sum(1) <= dense.sum(1) + 1e-6)
+
+
+class TestTheCodeIsActuallySparse:
+    """The first version of this module declared own_k and never used it.
+
+    It left the codes as dense vectors of small positive numbers, and a
+    near-zero code is contained in ANY protein, so every containment violation
+    was near zero. Zero is a fixed point that satisfies every positive example,
+    so nothing in the loss pushed the codes off it, and the trained model
+    emitted 386 terms per protein at precision 0.0042. The tests above did not
+    catch it because they assert at initialisation and the collapse happens
+    during training.
+    """
+
+    def test_every_term_claims_exactly_own_k_atoms(self, dag: Dag) -> None:
+        m = SparseTermCodes(dag, SparseCodeConfig(atoms=1024, own_k=6, seed=0))
+        counts = (m.own_atoms().detach() > 0.5).sum(1)
+        assert counts.min().item() == 6
+        assert counts.max().item() == 6
+
+    def test_a_descendant_demands_strictly_more_than_its_parent(self, dag: Dag) -> None:
+        """The property that makes containment mean anything. If a child asked
+        no more of a protein than its parent, holding the parent would hold the
+        child and the ontology would be flat."""
+        m = SparseTermCodes(dag, SparseCodeConfig(atoms=2048, own_k=4, seed=0))
+        codes = m.codes().detach()
+        idx = dag.index
+        flat = [(p, c) for p, c in dag.edges
+                if (codes[idx[c]] > 0.5).sum() <= (codes[idx[p]] > 0.5).sum()]
+        assert not flat, f"{len(flat)} of {len(dag.edges)} children demand no more"
+
+    def test_it_survives_a_gradient_step(self, dag: Dag) -> None:
+        """THE GAP THAT LET THE COLLAPSE THROUGH. Asserting only at
+        initialisation says nothing about the state a run actually reaches."""
+        m = SparseTermCodes(dag, SparseCodeConfig(atoms=2048, own_k=4, seed=0))
+        opt = torch.optim.Adam(m.parameters(), lr=0.1)
+        for _ in range(40):
+            opt.zero_grad()
+            m.codes().sum().backward()   # pushes every atom DOWN, the collapse
+            opt.step()
+        counts = (m.own_atoms().detach() > 0.5).sum(1)
+        assert counts.min().item() == 4, "the code collapsed under pressure"
+        codes = m.codes().detach()
+        idx = dag.index
+        bad = [(p, c) for p, c in dag.edges
+               if (codes[idx[p]] > codes[idx[c]] + 1e-6).any()]
+        assert not bad, "containment broke after training"
+
+
+class TestTheConstructionRefusesToSaturate:
+    def test_it_will_not_run_a_configuration_that_collapses_the_order(self) -> None:
+        """Found by the asymmetry test, not by reading the code. With too few
+        atoms the deepest codes fill the space, a parent and its child both
+        hold every atom, and containment becomes symmetric. It refuses instead
+        of degrading quietly, because a symmetric containment still passes
+        every other assertion here."""
+        d = _layered(levels=5, width=20, seed=0)
+        with pytest.raises(ValueError, match="saturate"):
+            SparseTermCodes(d, SparseCodeConfig(atoms=64, own_k=6, seed=0))
