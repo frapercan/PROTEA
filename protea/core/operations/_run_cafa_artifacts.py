@@ -10,6 +10,7 @@ shrink toward the master-plan v3.2 §3 LOC ceiling.
 from __future__ import annotations
 
 import gzip
+import logging
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from protea.core.operations._base_frame_recount import (
     build_base_frame,
     ledger_columns,
 )
+from protea.core.operations._denials import apply_denials, drop_denied_records
 from protea.core.operations._run_cafa_helpers import (
     _NS_LABELS,
     _patch_query_known_features,
@@ -69,6 +71,9 @@ _BASE_SCORE_COLS: tuple[str, ...] = (
     "go_term_frequency",
 )
 
+_LOG = logging.getLogger(__name__)
+
+
 
 @dataclass(frozen=True)
 class WritePredictionsContext:
@@ -92,6 +97,14 @@ class WritePredictionsContext:
     #: is set; ``_depth_unit_guard`` refuses a run that names both or that
     #: names this one against candidates that cannot answer in it.
     max_sequence_rank: int | None = None
+    #: The annotation set the bank was built from, so a candidate can be
+    #: checked against what that bank explicitly DENIES about the query. None
+    #: leaves the check off, which is the behaviour every caller had before.
+    bank_annotation_set_id: uuid.UUID | None = None
+    #: The ontology the denial is propagated under. A NOT propagates DOWN: if a
+    #: protein does not have the parent, it does not have any descendant, which
+    #: is the contrapositive of the usual upward propagation of a positive.
+    denial_snapshot_id: uuid.UUID | None = None
 
 
 def download_obo(url: str, dest: str) -> None:
@@ -301,6 +314,7 @@ def write_predictions(
         build_fn=lambda: build_base_frame(session, ctx, _base_select, _BASE_SCORE_COLS),
     )
     _depth_guard.assert_depth_was_applied(session, ctx, base, _count_base_rows)
+    base = apply_denials(session, ctx, base)
     _write_scored_base(base, scoring_config, ctx.path)
 
 
@@ -583,9 +597,9 @@ def write_predictions_reranked(
     if ctx.max_sequence_rank is not None:
         q = q.filter(GOPrediction.sequence_rank <= ctx.max_sequence_rank)
 
-    records: list[dict[str, Any]] = [
+    records: list[dict[str, Any]] = drop_denied_records(session, ctx, [
         _record_from_pred(pred, go_id, aspect=aspect) for pred, go_id, aspect in q.yield_per(5000)
-    ]
+    ])
 
     if not records:
         with open(ctx.path, "w") as f:
@@ -668,7 +682,7 @@ def write_predictions_per_aspect(
     """
     import pandas as pd
 
-    records = _load_aspect_records(session, ctx)
+    records = drop_denied_records(session, ctx, _load_aspect_records(session, ctx))
     if not records:
         with open(ctx.path, "w") as f:
             pass

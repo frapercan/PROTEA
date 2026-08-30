@@ -871,11 +871,31 @@ def _base_row(
 
 
 def _core_session(rows):
-    """Mock a Session whose ``execute(stmt).all()`` returns ``rows`` (base tuples)."""
+    """Mock a Session whose ``execute(stmt).all()`` returns ``rows`` (base tuples).
+
+    Routed by statement rather than answering everything identically. The
+    writer asks two further questions of the session (which bank the
+    prediction set transferred from, and what that bank denies), and a double
+    that hands the base rows back to every caller made those denials look like
+    the whole frame. These tests seed no prediction set, so the honest answer
+    to both is nothing.
+    """
     session = MagicMock()
-    result = MagicMock()
-    result.all.return_value = list(rows)
-    session.execute.return_value = result
+    base = MagicMock()
+    base.all.return_value = list(rows)
+    # A COUNT over the same filter must agree with what the SELECT returns,
+    # or the depth guard fires on the double rather than on the code.
+    base.scalar_one.return_value = len(rows)
+    empty = MagicMock()
+    empty.all.return_value = []
+    empty.first.return_value = None
+
+    def _route(stmt, *args, **kwargs):
+        sql = str(getattr(stmt, "text", stmt))
+        asks_elsewhere = "FROM prediction_set" in sql or "RECURSIVE" in sql
+        return empty if asks_elsewhere else base
+
+    session.execute.side_effect = _route
     return session
 
 
@@ -973,7 +993,6 @@ class TestBaseSelectSql:
         # _count_base_rows builds a COUNT(*) statement we can render via the op.
         op = RunCafaEvaluationOperation()
         session = _core_session([])
-        session.execute.return_value.scalar_one.return_value = 0
         assert _count_base_rows(session, self._ctx(0.5)) == 0
         assert op is not None
 
