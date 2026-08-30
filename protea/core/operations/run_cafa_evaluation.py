@@ -41,8 +41,10 @@ from protea.core.operations._run_cafa_helpers import (  # noqa: F401
     _NS_LABELS,
     _NS_SHORT,
     _NUMERIC_ORM_COLS,
+    ResultRow,
     _patch_query_known_features,
     _record_from_pred,
+    build_result_row,
     eval_artifact_key,
 )
 from protea.core.operations._run_cafa_reranker_loader import (
@@ -56,8 +58,7 @@ from protea.core.operations._run_cafa_setup import (  # noqa: F401
     _PipelineCtx,
     bundle_run_context,
 )
-from protea.core.utils import contract_payload, job_id_from_payload
-from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
@@ -379,22 +380,17 @@ class RunCafaEvaluationOperation:
         first_reranker_id, reranker_config_snapshot = self._finalize_reranker_config(
             reranker_config_snapshot, reranker_models, p
         )
-        frame, temporal_window, leakage_role, arms_enabled = self._build_eval_provenance(
-            p, inputs.eval_set, bool(reranker_models)
-        )
-        eval_result = EvaluationResult(
-            id=result_id,
-            evaluation_set_id=inputs.eval_set_id,
-            prediction_set_id=inputs.pred_set_id,
-            scoring_config_id=uuid.UUID(p.scoring_config_id) if p.scoring_config_id else None,
-            reranker_model_id=first_reranker_id,
-            reranker_config=reranker_config_snapshot,
-            results=results,
-            frame=frame,
-            temporal_window=temporal_window,
-            leakage_role=leakage_role,
-            arms_enabled=arms_enabled,
-            job_id=job_id_from_payload(payload),
+        provenance = self._build_eval_provenance(p, inputs.eval_set, bool(reranker_models))
+        eval_result = build_result_row(
+            ResultRow(
+                result_id=result_id, inputs=inputs, payload=payload,
+                scoring_config_id=p.scoring_config_id,
+                first_reranker_id=first_reranker_id,
+                reranker_config_snapshot=reranker_config_snapshot,
+                results=results, provenance=provenance,
+                max_sequence_rank=p.max_sequence_rank,
+                max_k_position=p.max_k_position,
+            )
         )
         session.add(eval_result)
         session.flush()

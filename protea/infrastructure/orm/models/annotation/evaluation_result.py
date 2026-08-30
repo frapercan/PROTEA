@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -144,6 +144,26 @@ class EvaluationResult(Base):
     temporal_window: Mapped[str | None] = mapped_column(String(32), nullable=True)
     arms_enabled: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     leakage_role: Mapped[str | None] = mapped_column(String(8), nullable=True)
+
+    #: The depth this result actually scored, in whichever unit it was asked
+    #: for. Both null means the whole stored neighbourhood.
+    #:
+    #: WHY THESE ARE COLUMNS. Until 2026-08-30 a depth cut left no trace here.
+    #: The three reading surfaces rendered depth from
+    #: ``prediction_set.limit_per_entry``, which is the RETRIEVAL depth and is
+    #: 30 for every cut of a k=30 set, so a five point depth series appeared as
+    #: five results at depth 30 with different numbers and no visible reason.
+    #: The only witness was ``job.payload``, reached through a foreign key
+    #: declared ON DELETE SET NULL, so deleting a job erased the one field that
+    #: said what its result measured.
+    #:
+    #: The frame seal cannot substitute for this and should not try. Depth is a
+    #: LEVEL, not a frame: two depths of one retrieval belong under one digest
+    #: and differ in their level, which is why the five good results and five
+    #: results that had scored no cut at all shared a digest and could not be
+    #: told apart by it.
+    max_sequence_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_k_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     evaluation_set: Mapped[EvaluationSet] = relationship("EvaluationSet")
     prediction_set: Mapped[PredictionSet] = relationship("PredictionSet")
