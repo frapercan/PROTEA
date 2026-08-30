@@ -103,10 +103,28 @@ def panel_units_from_groundtruth(
 
 #: The paired standard deviation of the within-protein difference, for the
 #: cheapest contrast class this project has measured: two arms sharing their
-#: retrieval and differing in one downstream knob. Derived in
-#: ABLATION-ARCHITECTURE.md from a fold study, and it is the LOW end. Two arms
+#: retrieval and differing in one downstream knob. It is the LOW end. Two arms
 #: that retrieve different neighbours are noisier, so a panel that cannot
 #: resolve at this value cannot resolve at any.
+#:
+#: ITS DERIVATION IS NOT IN THIS REPOSITORY, OR IN ANY OTHER. It was cited to
+#: ``ABLATION-ARCHITECTURE.md``, which exists on no trunk: it lives only in
+#: agent-farm PR #246, unmerged since 2026-08-17, whose own population figure
+#: (5,674 protein-aspect units) is contradicted by the live frame's 17,438.
+#: So this number decides what the panel calls a separation and nobody can
+#: check where it came from.
+#:
+#: IT CANNOT BE RE-DERIVED YET, and saying so is the point of this comment.
+#: A paired sigma needs per-protein scores from two arms of one prediction
+#: set. Those live in the per_protein grid artefacts written by
+#: ``_persist_per_protein_grid``, and the only set the current campaign will
+#: report on, 9995651a, has 0 evaluations as of 2026-08-30. The first two arms
+#: evaluated on it produce the measurement, at which point this constant is
+#: replaced by one derived here, in code, from data that still exists.
+#:
+#: Kept rather than blanked. A floor that may be wrong still stops a reader
+#: taking a gap of 0.002 for a result, and ``detectable_effect`` returning
+#: nothing would remove the guard entirely to fix its provenance.
 _SIGMA_PAIRED = 0.081
 
 #: (z at 95 per cent + z at 80 per cent power), the constant that turns a
@@ -138,8 +156,10 @@ def detectable_effect(units: int | None) -> float | None:
 #: it is the class that matters here because sending a protein to one arm
 #: instead of another IS a contrast between arms that retrieve differently.
 #: The value is the one that reproduces the population floor of 332 declared in
-#: ``agent-farm/plans/SURVIVOR-CASCADE.md`` section 2, which is where the
-#: crossing arithmetic on this campaign was first worked out.
+#: ``SURVIVOR-CASCADE.md`` section 2. That file is also on no trunk: it is in
+#: agent-farm PR #257, unmerged, whose own vote-fraction claim was measured
+#: false on this campaign. Same standing as _SIGMA_PAIRED above, same remedy,
+#: and the two should be re-derived together so their ratio stays meaningful.
 _SIGMA_ROUTING = 0.13
 
 #: The difference a floor is asked to resolve, in weighted micro F. Two points
