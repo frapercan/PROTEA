@@ -17,7 +17,7 @@ import numpy as np
 import torch
 from sqlalchemy import create_engine, text
 
-from protea.core.ontology.order_encoder import TrainConfig
+from protea.core.ontology.order_encoder import OrderEncoder, TrainConfig
 from protea.core.ontology.training import fit
 from scripts.analysis.ontology_encoder_alone import load_go
 
@@ -26,7 +26,7 @@ dag = load_go(url)
 closure = set(dag.closure())
 print(f"  ontologia {len(dag.terms):,} terminos, cierre {len(closure):,}")
 cfg = TrainConfig(dim=64, epochs=12, batch=8192, lr=0.05, negatives=4)
-model = fit(dag, sorted(closure), closure, cfg)
+model = fit(OrderEncoder(dag, cfg), sorted(closure), closure, cfg)
 V = torch.abs(model.emb.weight).detach().numpy()
 idx = model.dag.index
 print("  encoder entrenado\n")

@@ -25,6 +25,31 @@ from torch import Tensor, nn
 from protea.core.ontology.dag import Dag
 
 
+class TermVectors:
+    """Every term's position, computed once and then read.
+
+    The evaluation ranks one held-out parent against the whole ontology, for
+    hundreds of edges. Asking the model for each candidate would re-run a graph
+    encoder's full forward pass every time and measure the wrong thing about
+    the code even while measuring the right thing about the encoder.
+    """
+
+    def __init__(self, dag: Dag, vectors: np.ndarray) -> None:
+        self.dag = dag
+        self.vectors = vectors
+
+    def score_pairs(self, pairs: list[tuple[str, str]]) -> np.ndarray:
+        idx = self.dag.index
+        up = self.vectors[[idx[a] for a, _ in pairs]]
+        lo = self.vectors[[idx[b] for _, b in pairs]]
+        return np.square(np.clip(up - lo, 0.0, None)).sum(-1)
+
+    def rank_parents(self, child: str, candidates: list[str]) -> np.ndarray:
+        lo = self.vectors[self.dag.index[child]]
+        cand = self.vectors[[self.dag.index[c] for c in candidates]]
+        return np.argsort(np.square(np.clip(cand - lo, 0.0, None)).sum(-1), kind="stable")
+
+
 @dataclass(frozen=True)
 class TrainConfig:
     """Everything the training loop reads. No value here is a default that
@@ -78,3 +103,7 @@ class OrderEncoder(nn.Module):
         """Order ``candidates`` by how well each subsumes ``child``."""
         scores = self.score_pairs([(c, child) for c in candidates])
         return np.argsort(scores, kind="stable")
+
+    def frozen(self) -> TermVectors:
+        with torch.no_grad():
+            return TermVectors(self.dag, torch.abs(self.emb.weight).cpu().numpy())

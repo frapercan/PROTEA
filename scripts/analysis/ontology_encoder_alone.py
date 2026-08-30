@@ -101,12 +101,15 @@ def main() -> int:
 
     cfg = TrainConfig(dim=64, epochs=12, batch=8192, lr=0.05, negatives=4)
     untrained = OrderEncoder(dag, cfg)
-    model = fit(dag, train_pairs, closure, cfg, log=print)
+    model = fit(OrderEncoder(dag, cfg), train_pairs, closure, cfg, log=print)
     _report(dag, closure, model, untrained, list(split.test))
     print(f"\n  total {time.time() - t0:.0f}s")
     return 0
 
 
 if __name__ == "__main__":
+    # Line-buffered on purpose: these runs take tens of minutes and a
+    # buffered stdout means no progress is readable until they end.
+    sys.stdout.reconfigure(line_buffering=True)
     random.seed(0)
     raise SystemExit(main())

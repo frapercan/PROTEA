@@ -10,6 +10,7 @@ from __future__ import annotations
 import random
 from collections.abc import Callable
 
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -32,6 +33,48 @@ class NegativeSampler:
         self.closure = closure
         self.rng = random.Random(seed)
         self.terms = dag.terms
+
+    def prepare_bulk(self) -> None:
+        """Pack the closure into a sorted integer array for vectorised lookup.
+
+        The per-pair sampler below is correct and far too slow to feed a large
+        batch: at 8,192 pairs and four negatives each it draws 23.6 million
+        pairs in Python across a run, and raising the batch to make the graph
+        forward pay off would take that to 84 million. The bulk path draws them
+        with numpy and rejects true pairs with a single searchsorted.
+        """
+        idx = self.dag.index
+        packed = np.fromiter(
+            (idx[a] * len(idx) + idx[b] for a, b in self.closure if a in idx and b in idx),
+            dtype=np.int64,
+        )
+        self._packed = np.sort(packed)
+        self._n = len(idx)
+
+    def corrupt_bulk(self, pairs: list[tuple[str, str]], n: int, rng: np.random.Generator
+                     ) -> tuple[np.ndarray, np.ndarray]:
+        """``n`` false pairs per true one, as index arrays.
+
+        Corrupted draws that turn out to be true are DROPPED rather than
+        redrawn. Retrying would put a Python loop back in the hot path, and a
+        batch that comes back a fraction short is harmless where a slow one is
+        not. It matters that they are dropped and not kept: the top of an
+        ontology subsumes nearly everything, so a corrupted pair landing on a
+        true one is not rare there, and training the encoder to push those
+        apart teaches the opposite of the relation.
+        """
+        idx = self.dag.index
+        up = np.repeat(np.array([idx[a] for a, _ in pairs], dtype=np.int64), n)
+        lo = np.repeat(np.array([idx[b] for _, b in pairs], dtype=np.int64), n)
+        head = np.tile(np.arange(n) % 2 == 0, len(pairs))
+        draw = rng.integers(0, self._n, size=up.shape, dtype=np.int64)
+        up = np.where(head, draw, up)
+        lo = np.where(head, lo, draw)
+        packed = up * self._n + lo
+        pos = np.searchsorted(self._packed, packed)
+        pos = np.clip(pos, 0, len(self._packed) - 1)
+        keep = (self._packed[pos] != packed) & (up != lo)
+        return up[keep], lo[keep]
 
     def corrupt(self, pair: tuple[str, str], n: int) -> list[tuple[str, str]]:
         """``n`` false pairs built from a true one, half by replacing each end."""
@@ -59,7 +102,7 @@ def _batch_ids(dag: Dag, pairs: list[tuple[str, str]]) -> tuple[Tensor, Tensor]:
 
 
 def fit(
-    dag: Dag,
+    model: OrderEncoder,
     train_pairs: list[tuple[str, str]],
     closure: set[tuple[str, str]],
     config: TrainConfig,
@@ -72,10 +115,13 @@ def fit(
     every parent-child inequality while getting grandparents wrong, and
     subsumption is exactly the relation that has to survive composition.
     """
-    model = OrderEncoder(dag, config).to(config.device)
+    dag = model.dag
+    model = model.to(config.device)
     opt = torch.optim.Adam(model.parameters(), lr=config.lr)
     sampler = NegativeSampler(dag, closure, config.seed)
+    sampler.prepare_bulk()
     rng = random.Random(config.seed)
+    nrng = np.random.default_rng(config.seed)
     pairs = list(train_pairs)
 
     for epoch in range(config.epochs):
@@ -83,11 +129,12 @@ def fit(
         total = 0.0
         for start in range(0, len(pairs), config.batch):
             chunk = pairs[start : start + config.batch]
-            neg = [c for p in chunk for c in sampler.corrupt(p, config.negatives)]
-            if not neg:
+            nu_a, nl_a = sampler.corrupt_bulk(chunk, config.negatives, nrng)
+            if not len(nu_a):
                 continue
             pu, pl = _batch_ids(dag, chunk)
-            nu, nl = _batch_ids(dag, neg)
+            nu = torch.from_numpy(nu_a)
+            nl = torch.from_numpy(nl_a)
             loss = model.penalty(pu, pl).mean() + torch.clamp(
                 config.margin - model.penalty(nu, nl), min=0.0
             ).mean()

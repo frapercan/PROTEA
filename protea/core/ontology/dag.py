@@ -49,6 +49,15 @@ class Dag:
     index: dict[str, int] = field(init=False, repr=False)
     _children: dict[str, list[str]] = field(init=False, repr=False)
     _parents: dict[str, list[str]] = field(init=False, repr=False)
+    #: Memoised traversals. Every one of these is asked for the same term
+    #: thousands of times: the closure walks up from each term, the evaluation
+    #: excludes a child's ancestors for every held-out edge, and the negative
+    #: sampler asks for siblings once per term per protein per epoch. Without
+    #: the cache that last one alone is millions of breadth-first searches, and
+    #: it was measured taking longer than the training it feeds.
+    _up: dict[str, set[str]] = field(init=False, repr=False, default_factory=dict)
+    _down: dict[str, set[str]] = field(init=False, repr=False, default_factory=dict)
+    _sib: dict[str, set[str]] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         children: dict[str, list[str]] = {}
@@ -75,6 +84,9 @@ class Dag:
 
     def ancestors(self, term: str) -> set[str]:
         """Everything above ``term``, itself excluded."""
+        hit = self._up.get(term)
+        if hit is not None:
+            return hit
         seen: set[str] = set()
         queue = deque(self._parents.get(term, []))
         depth = 0
@@ -85,7 +97,48 @@ class Dag:
                 continue
             seen.add(node)
             queue.extend(self._parents.get(node, []))
+        self._up[term] = seen
         return seen
+
+    def descendants(self, term: str) -> set[str]:
+        """Everything below ``term``, itself excluded."""
+        hit = self._down.get(term)
+        if hit is not None:
+            return hit
+        seen: set[str] = set()
+        queue = deque(self._children.get(term, []))
+        while queue:
+            node = queue.popleft()
+            if node in seen:
+                continue
+            seen.add(node)
+            queue.extend(self._children.get(node, []))
+        self._down[term] = seen
+        return seen
+
+    def siblings_of(self, term: str) -> set[str]:
+        """Terms sharing a parent with ``term`` and standing in no relation to it.
+
+        These are the negatives worth training on. A protein that has a parent
+        and one of its children usually does not have the other children, and
+        that is a far larger and more informative set than the 5,603 curated
+        denials. A sibling is also the hardest possible negative: adjacent in
+        the graph, one step from a term the protein really has, and still
+        false.
+
+        Anything that subsumes or is subsumed by ``term`` is removed. In a DAG
+        two children of one parent can still be related through another path,
+        and calling such a pair a negative would be teaching a falsehood.
+        """
+        hit = self._sib.get(term)
+        if hit is not None:
+            return hit
+        out: set[str] = set()
+        for parent in self._parents.get(term, []):
+            out.update(self._children.get(parent, []))
+        out = out - {term} - self.ancestors(term) - self.descendants(term)
+        self._sib[term] = out
+        return out
 
     def closure(self) -> Iterator[tuple[str, str]]:
         """Every (ancestor, descendant) pair the direct edges imply.
