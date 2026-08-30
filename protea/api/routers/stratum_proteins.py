@@ -105,7 +105,9 @@ _ARM = text(
     SELECT er.prediction_set_id::text          AS prediction_set_id,
            sc.name                             AS scoring_name,
            COALESCE(ec.display_name, ec.model_name) AS embedding_name,
-           ps.limit_per_entry                  AS depth,
+           COALESCE(er.max_sequence_rank::text || 'seq',
+                    er.max_k_position::text,
+                    ps.limit_per_entry::text)  AS depth,
 {ARM_IDENTITY_COLUMNS},
            ps.meta ->> 'metric'                AS metric
     FROM evaluation_result er

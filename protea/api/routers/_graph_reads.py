@@ -175,6 +175,10 @@ _Q_PREDICTION_SETS = text(
            a.source                                AS bank_source,
            a.source_version                        AS bank_version,
            ps.query_set_id::text                   AS query_set_id,
+           -- A prediction set has no scored depth: it is the RETRIEVAL
+           -- depth here, and it is correct. One set can be evaluated at many
+           -- depths, and each of those results carries its own cut. The
+           -- surfaces that read a RESULT use er.max_sequence_rank instead.
            ps.limit_per_entry::text                AS depth,
            ps.distance_threshold::text             AS distance_threshold,
            ps.meta ->> 'metric'                    AS metric,
@@ -262,7 +266,9 @@ _Q_PANELS = text(
     SELECT er.id::text                              AS result_id,
            sc.name                                  AS scoring_name,
            COALESCE(ec.display_name, ec.model_name) AS embedding_name,
-           ps.limit_per_entry::text                 AS depth,
+           COALESCE(er.max_sequence_rank::text || 'seq',
+                    er.max_k_position::text,
+                    ps.limit_per_entry::text)       AS depth,
            -- The donor policy is a level of the Bank node, so two arms that
            -- differ only in it are two levels. Leaving it out of the fields a
            -- level is named by rendered both under one name, which made the
