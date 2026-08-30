@@ -118,6 +118,7 @@ def _write_setting_predictions(
         delta_proteins=ctx.delta_proteins,
         max_distance=ctx.max_distance,
         max_k_position=ctx.max_k_position,
+        max_sequence_rank=ctx.max_sequence_rank,
         path=pred_path,
     )
     if "" in rr_aspect_map:

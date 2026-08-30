@@ -638,6 +638,7 @@ class RunCafaEvaluationOperation:
                 delta_proteins=delta_proteins,
                 max_distance=p.max_distance,
                 max_k_position=p.max_k_position,
+                max_sequence_rank=p.max_sequence_rank,
                 path=os.path.join(pred_dir, "predictions.tsv"),
             ),
             scoring_config=ctx.scoring_snapshot,
