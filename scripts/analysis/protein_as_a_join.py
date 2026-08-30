@@ -22,7 +22,8 @@ from protea.core.ontology.training import fit
 from scripts.analysis.ontology_encoder_alone import load_go
 
 url = os.environ["PROTEA_DB_URL"]
-dag = load_go(url); closure = set(dag.closure())
+dag = load_go(url)
+closure = set(dag.closure())
 print(f"  ontologia {len(dag.terms):,} terminos, cierre {len(closure):,}")
 cfg = TrainConfig(dim=64, epochs=12, batch=8192, lr=0.05, negatives=4)
 model = fit(dag, sorted(closure), closure, cfg)
@@ -57,27 +58,26 @@ print(f"  proteinas con >=8 terminos: {len(by_p):,}")
 
 # How often each term is used, as the baseline any placement has to beat.
 freq = {}
-for p_, gs in by_p.items():
+for gs in by_p.values():
     for g in gs:
         freq[g] = freq.get(g, 0) + 1
 rng = random.Random(0)
 all_terms = list(dag.terms)
 FV = np.array([freq.get(t, 0) for t in all_terms], dtype=float)
 held_pen, rand_pen, ranks, franks = [], [], [], []
-for p, gs in list(by_p.items())[:800]:
+for gs in list(by_p.values())[:800]:
     terms = sorted(gs)
     held = rng.choice(terms)
     known = [t for t in terms if t != held and held not in dag.ancestors(t)]
     if len(known) < 4:
         continue
     join = V[[idx[t] for t in known]].max(axis=0)          # the protein's point
-    pen = lambda t: float(np.square(np.clip(V[idx[t]] - join, 0, None)).sum())
-    held_pen.append(pen(held))
+    P = np.square(np.clip(V - join, 0, None)).sum(axis=1)
+    held_pen.append(float(P[idx[held]]))
     # Against the WHOLE ontology, minus what the protein is already known to
     # have. 500 random candidates would have made this look several hundred
     # times better than it is.
     mask = np.array([t not in gs or t == held for t in all_terms])
-    P = np.square(np.clip(V - join, 0, None)).sum(axis=1)
     hp = P[idx[held]]
     ranks.append(1 + int(((P < hp) & mask).sum()))
     rand_pen.extend(rng.sample(list(P[mask]), 5))
