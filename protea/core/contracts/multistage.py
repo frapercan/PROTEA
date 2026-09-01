@@ -148,7 +148,14 @@ class StageArtifactStore:
         Returns the opaque URI string (``file://…`` or ``s3://…``) that
         a downstream stage can pass to :meth:`read_intermediate`.
         """
-        blob: bytes = data if isinstance(data, (bytes, bytearray)) else json.dumps(data).encode()
+        # bytes(...) rather than a bare cast: a bytearray IS accepted here and
+        # is not a bytes, so the annotation was describing a type the branch
+        # could not produce. The copy is what makes the declared type true.
+        blob: bytes = (
+            bytes(data)
+            if isinstance(data, (bytes, bytearray))
+            else json.dumps(data).encode()
+        )
         full_key = self._key(stage, key)
         return self._store.put(full_key, blob)
 
