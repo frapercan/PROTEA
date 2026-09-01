@@ -97,11 +97,25 @@ def denied_pairs(session: Session, ctx: WritePredictionsContext) -> set[tuple[st
     suggests otherwise, which makes it the one record aimed squarely at the
     error this method makes.
 
-    Measured on the 2026-08-30 campaign before this existed: of 956 direct NOT
-    annotations on query proteins, 478 were predicted anyway, 298 of those
-    against experimental evidence, at a median k_position of 4, and 289 of them
-    inside the query's own top five. Propagated down the DAG the denied set is
-    39,134 pairs and 1,190 of them were predicted.
+    Measured on the 2026-08-30 campaign before this existed. Of 956 NOT rows on
+    query proteins, which are 936 distinct (protein, term) denials, 478 rows and
+    465 distinct denials were predicted anyway, at a median k_position of 4 and
+    with 289 inside the query's own top five.
+
+    298 of the violated rows carry an evidence code from the thirteen this
+    project's ``evidence_codes.EXPERIMENTAL`` calls experimental, a set that
+    also contains IC and TAS. Under the eleven strictly experimental and
+    high-throughput codes the figure is 286, and under the six strict
+    experimental ones it is 285. The predicate is named because this codebase
+    holds two different sets under the word: ``ia_regimes`` distinguishes
+    LAFA_EVIDENCE from EXPERIMENTAL_EVIDENCE, and the difference has already
+    produced one wrong reading.
+
+    Propagated down the DAG the denied set is 39,105 pairs and 1,190 of them
+    were predicted. That count is on the ontology THIS function resolves, the
+    prediction set's own snapshot. The same measurement on the evaluation pivot
+    gives 39,134, and the 29-pair gap is why the snapshot is resolved from the
+    row rather than chosen.
 
     The example worth remembering is O94526, fission yeast PTEN. A curator
     determined by direct assay that it does NOT have
