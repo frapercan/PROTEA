@@ -11,6 +11,7 @@ nothing about the pair.
 """
 import csv
 from collections import defaultdict
+
 import numpy as np
 
 BASE = "/home/bioxaxi2/Thesis-laptop/PROTEA/data/ref_cache/"
@@ -32,10 +33,12 @@ print(f"  terminos con portador en el pool: {len(carriers):,}")
 
 qvec, qname = [], []
 for row in csv.reader(open("/tmp/allqemb.csv")):
-    if len(row) < 2: continue
+    if len(row) < 2:
+        continue
     v = np.fromstring(row[1].strip("[]"), sep=",", dtype=np.float32)
     if v.size == D:
-        qvec.append(v / (np.linalg.norm(v) + 1e-12)); qname.append(row[0])
+        qvec.append(v / (np.linalg.norm(v) + 1e-12))
+        qname.append(row[0])
 Q = np.array(qvec, dtype=np.float32)
 qidx = {a: i for i, a in enumerate(qname)}
 print(f"  consultas con embedding: {len(qname):,}")
