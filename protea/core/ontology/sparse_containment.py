@@ -54,10 +54,20 @@ earlier run), which is the same shape the two learned-code arms of the
 twelve-arm sweep showed: the sparse side finds the material and cannot say no.
 That is the open problem, and it is on the sequence-to-atoms side, not here.
 
+AND THE DEFECTS WERE NOT THE REASON. With the codes correctly binary and sparse,
+the loss did not fall: 6.1972 to 0.6186 and flat for eight epochs. The negative
+term is zero, so negatives separate cleanly, and the positives cannot be
+satisfied at all. With random atom sets the codes overlap arbitrarily and there
+is no assignment that satisfies a protein's terms without also satisfying dozens
+it does not have. The codes would have to be LEARNED to be discriminative, and
+the gradient does not reach them: a straight-through estimator behind
+twenty-four chained max-propagations. That is circular, not a knob.
+
 So this module is kept for the construction and for the two failures it now
-refuses to repeat, not as a working method. The rest of the branch it came from
-was abandoned. If you are about to train something on it, the thing to fix first
-is precision, and nothing in this file addresses precision.
+refuses to repeat, not as a working method. Fixing the defects makes the
+construction correct; it does not make the method work. The full record, all
+four arms with their numbers, is in
+docs/findings/2026-09-01-generation-lands-an-order-of-magnitude-below-retrieval.md.
 """
 
 from __future__ import annotations
