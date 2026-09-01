@@ -674,8 +674,8 @@ test = ["pytest (>=7)"]
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/cafaeval-protea.git"
-reference = "2cb2e66dcde80f22d9fed14f9d5b3a147e1fc160"
-resolved_reference = "2cb2e66dcde80f22d9fed14f9d5b3a147e1fc160"
+reference = "e937e0e161c1b5ea9f840c5652dfd614e9d57163"
+resolved_reference = "e937e0e161c1b5ea9f840c5652dfd614e9d57163"
 
 [[package]]
 name = "certifi"
@@ -7033,4 +7033,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "79791046db968714bca71281616b14ee0b514dc260e6baeb25f117c7963cb1c7"
+content-hash = "e54438b5b083be88f65553c0740ffd296708e72e3ce33075adc9cfea5e35b999"

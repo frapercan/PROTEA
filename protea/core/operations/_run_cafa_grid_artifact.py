@@ -151,6 +151,10 @@ GRID_SEMANTIC_KEYS: tuple[str, ...] = (
 #: namespaces this producer refuses on a real corpus is exactly the number the
 #: pull request has to state. Every drop carries one of these.
 DROP_UNMAPPABLE_ROWS = "unmappable_row_numbering"
+#: Retired with cafaeval e937e0e, which restricted the PK pooled sums to the
+#: eligible rows. Kept exported because it names a real refusal that appears in
+#: 54 job events on this deployment, and a reader chasing one of those needs
+#: the code to still resolve to something.
 DROP_POOLED_SUMS_DIFFER = "pooled_sums_do_not_reproduce"
 DROP_VARIANT_POPULATIONS_DIFFER = "variant_populations_differ"
 DROP_ELIGIBILITY_DISAGREES = "eligibility_mask_disagrees"
@@ -354,7 +358,6 @@ def _grid_accessions(record: dict[str, Any]) -> list[str]:
 #: when the dropped rows really are zero and differ by a whole protein's mass
 #: when they are not. Nothing lives between the two scales, so the tolerance is
 #: not a judgement call.
-_POOLED_RTOL = 1e-9
 
 
 def _eligible(record: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
@@ -393,75 +396,29 @@ def _eligible(record: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
     return np.flatnonzero(keep), n_gt
 
 
-def _check_pooled(namespace: str, variant: str, record: dict[str, Any], keep: np.ndarray) -> None:
-    """The kept rows must still sum to the totals the kernel published.
-
-    This is the check cafaeval's own sink invites in as many words ("a caller
-    can verify that their column sums reproduce the published totals"), and it
-    is the one that catches the whole class of population defects, because every
-    one of them arrives here as a gap in ``T`` or ``P`` rather than as a
-    structural fault a schema gate could see.
-
-    It fires on PK and only on PK, and the asymmetry is worth stating because it
-    is the reason this was invisible. Both sparse kernels reduce with
-    ``tp_at_tau.sum(axis=0)`` and ``pred_at_tau.sum(axis=0)`` over EVERY row they
-    were handed. On the NK/LK path the kernel is handed only the rows of
-    ``proteins_has_gt``, computed with that call's own terms of interest, so
-    every row it sums already has ``n_gt > 0`` and dropping the ineligible rows
-    drops nothing. On the PK path ``proteins_has_gt`` is computed BEFORE the
-    exclusion mask, so a protein whose whole ground truth was already known is
-    still handed to the kernel, still contributes its predicted mass to ``P``,
-    and is removed only from the coverage column through ``eligible_rows``. Its
-    ``n_gt`` is zero so it adds nothing to ``G``, and its ``tp`` is zero because
-    a true positive needs a ground-truth term that survived the mask.
-
-    That leaves the file with no correct row set, and the two requirements are
-    not reconcilable by a cleverer producer. Keeping the row reproduces
-    ``f_micro_w`` and breaks the eligibility rule, which exists because the row
-    count is the panel's population. Dropping it satisfies the rule and inflates
-    the metric, because ``P`` shrinks while ``T`` and ``G`` do not. Measured on
-    a three-protein PK run through the installed kernel, dropping one such row
-    moved ``f_micro_w`` from the published 0.8824 to 1.0000. So the namespace is
-    refused: a producer that cannot write a table whose sums are the published
-    ones writes no table.
-    """
-    for name in ("tp_at_tau", "pred_at_tau"):
-        block = np.asarray(record[name], dtype=np.float64)
-        full = block.sum(axis=0)
-        kept = block[keep].sum(axis=0)
-        if bool(np.allclose(kept, full, rtol=_POOLED_RTOL, atol=0.0)):
-            continue
-        gap = np.abs(full - kept)
-        worst = int(np.argmax(gap))
-        dropped = int(block.shape[0] - keep.size)
-        raise GridProducerError(
-            f"{namespace}/{variant}: the {dropped} rows with no surviving ground truth carry "
-            f"{name.removesuffix('_at_tau')} mass that the kernel counted anyway. Summing the "
-            f"{int(keep.size)} rows this file would hold gives {kept[worst]:.6g} at threshold "
-            f"index {worst} where the kernel published {full[worst]:.6g}, a gap of "
-            f"{gap[worst]:.6g}. cafaeval reduces with sum(axis=0) over every row it was "
-            "handed and restricts only its coverage column to the eligible ones, so on the PK "
-            "path a protein whose whole ground truth is prior knowledge is outside the "
-            "population the cell is normalised by and inside the P the cell is computed from. "
-            "There is no row set that is both: keeping the row reproduces f_micro_w and "
-            "declares a population that was not scored, dropping it declares the right "
-            "population and inflates the metric, because P shrinks while T and G do not. "
-            "Refusing the namespace rather than writing a plausible number over the wrong "
-            "population. The fix is upstream and is one line: restrict tp_totals and "
-            "pred_totals in compute_confusion_matrix_exclude_sparse to eligible_rows, as "
-            "metrics[:, 0] already is. That changes published PK numbers, so it is a decision "
-            "and not a patch.",
-            code=DROP_POOLED_SUMS_DIFFER,
-        )
-
-
 def _population(
     record: dict[str, Any], namespace: str, variant: str
 ) -> tuple[list[str], np.ndarray, np.ndarray]:
-    """One variant's scored population: row names, kept rows, ground-truth mass."""
+    """One variant's scored population: row names, kept rows, ground-truth mass.
+
+    A second gate used to stand here, refusing a namespace whose kept rows did
+    not sum to the totals the kernel published. It was needed while the PK
+    kernel pooled its confusion matrix over every row it was handed while
+    normalising by the eligible ones alone, which left no row set that both
+    reproduced ``f_micro_w`` and declared the population that was scored.
+    cafaeval e937e0e restricts the pooled sums to the eligible rows, so the two
+    requirements reconcile and the gate has nothing left to catch.
+
+    What replaces it is already here and is stronger. :func:`_eligible` asserts
+    that the kernel's own eligibility mask and this module's ``n_gt > 0`` keep
+    the same rows, computed independently on the two sides. Given that
+    agreement, summing the kept rows IS the published total, so the pooled
+    check was implied by it rather than adding to it. The dependency is pinned
+    by commit, so a kernel that changed its aggregation again would arrive as a
+    deliberate repin and not as a silent drift.
+    """
     accs = _grid_accessions(record)
     keep, n_gt = _eligible(record)
-    _check_pooled(namespace, variant, record, keep)
     return accs, keep, n_gt
 
 
