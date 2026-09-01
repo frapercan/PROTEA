@@ -1308,9 +1308,17 @@ def test_pk_with_an_excluded_protein_that_predicts_is_refused_not_biased(
     P3's whole ground truth is prior knowledge, and it predicts inside the terms
     of interest. cafaeval keeps its predicted mass in ``P`` and drops it from the
     population, so recomposing from the eligible rows alone reads 1.0000 where
-    the frame publishes 0.8824. That gap is the reason the namespace is refused:
-    it is nearly 12 points of Fmax on a three-protein panel, against campaign
-    effects of 0.005 to 0.05, and it arrives dressed as a better system.
+    the frame publishes 0.8824. That gap is the reason the namespace is refused,
+    and it arrives dressed as a better system.
+
+    THE 12 POINTS ARE THIS FIXTURE'S, NOT THE CAMPAIGN'S. Three proteins, one of
+    them entirely prior knowledge and predicting inside the terms of interest, is
+    a worst case built on purpose to make the defect visible in a unit test. On
+    real panels the correction was measured at +0.0002 against a base of 0.15 in
+    the cell where it bites. Do not put the fixture number next to campaign
+    effects of 0.005 to 0.05 and let a reader conclude the kernel bug was worth
+    ten campaigns. What the fix buys is that PK.BPO and PK.MFO can be written at
+    all, not a movement in the numbers already published.
 
     THAT DAY ARRIVED. cafaeval e937e0e restricts ``tp_totals`` and
     ``pred_totals`` to ``eligible_rows`` the way ``metrics[:, 0]`` already did,
