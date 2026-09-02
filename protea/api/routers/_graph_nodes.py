@@ -12,7 +12,7 @@ from protea.api.routers._graph_edges import (
     held_values,
     split_fields,
 )
-from protea.api.routers._graph_panels import separated_from_floor
+from protea.api.routers._graph_panels import CrossedDepthAxes, separated_from_floor
 
 #
 # One per node. Each returns the node, the artifact it cannot produce, and the
@@ -370,6 +370,19 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
     used = [c for c in configs if int(c["results"] or 0) > 0]
     floor = floors.get("scoring")
     panels = record["panels"]
+    # A refusal is caught rather than allowed to escape, and it is caught here
+    # because this is the only place that can show it. Letting it reach the
+    # endpoint would turn a comparison nobody should have declared into a 500
+    # on a page that is otherwise entirely readable, and the reader would learn
+    # nothing about why. Held as a reason instead, and the separation drops to
+    # None, which already means the record established nothing.
+    crossed: str | None = None
+    separated: bool | None = None
+    if floor and panels:
+        try:
+            separated = separated_from_floor(panels, floor)
+        except CrossedDepthAxes as refusal:
+            crossed = str(refusal)
     edge = Edge(
         produced=bool(configs),
         instantiated=len(used),
@@ -380,7 +393,7 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
         # nothing about which weighting a candidate is scored under.
         forced=False,
         floor=floor,
-        separated=separated_from_floor(panels, floor) if floor and panels else None,
+        separated=separated,
     )
     if not used:
         reason = (
@@ -397,6 +410,8 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
             "contrast is real and its spread is in the panels below. No floor is declared for "
             "it anywhere in the record, so the spread cannot be called a separation."
         )
+    elif crossed is not None:
+        reason = crossed
     else:
         verdict = "clears" if edge.separated else "does not clear"
         reason = (

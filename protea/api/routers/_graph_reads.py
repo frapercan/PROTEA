@@ -178,7 +178,11 @@ _Q_PREDICTION_SETS = text(
            -- A prediction set has no scored depth: it is the RETRIEVAL
            -- depth here, and it is correct. One set can be evaluated at many
            -- depths, and each of those results carries its own cut. The
-           -- surfaces that read a RESULT use er.max_sequence_rank instead.
+           -- surfaces that read a RESULT use DEPTH_IDENTITY_COLUMN, which
+           -- says which of the three quantities it rendered. This one is not
+           -- prefixed: every row of this read is a retrieval depth, so there
+           -- is nothing here to tell apart, and the retriever node prints
+           -- these values in a sentence that already names them.
            ps.limit_per_entry::text                AS depth,
            ps.distance_threshold::text             AS distance_threshold,
            ps.meta ->> 'metric'                    AS metric,
@@ -266,9 +270,7 @@ _Q_PANELS = text(
     SELECT er.id::text                              AS result_id,
            sc.name                                  AS scoring_name,
            COALESCE(ec.display_name, ec.model_name) AS embedding_name,
-           COALESCE(er.max_sequence_rank::text || 'seq',
-                    er.max_k_position::text,
-                    ps.limit_per_entry::text)       AS depth,
+{DEPTH_IDENTITY_COLUMN},
            -- The donor policy is a level of the Bank node, so two arms that
            -- differ only in it are two levels. Leaving it out of the fields a
            -- level is named by rendered both under one name, which made the
