@@ -28,6 +28,26 @@ def _as_date(value: date | datetime) -> date:
     return value.date() if isinstance(value, datetime) else value
 
 
+def refuse_if_the_set_reads_the_holdout(
+    new_set: AnnotationSet | None, *, waiver: str | None, context: str
+) -> None:
+    """The rule, for a caller that already holds the corpus it is ending at.
+
+    Separate from the id form so a caller does not pay a second lookup for a row
+    it has already resolved. That is not only cost: an extra query inside an
+    operation is an extra thing a test double has to expect, and the first
+    version of this guard broke three existing tests by asking the session for a
+    row the operation had in hand.
+    """
+    if new_set is None or new_set.source_published_at is None:
+        return
+    assert_window_may_inform(
+        _as_date(new_set.source_published_at),
+        waiver=waiver,
+        context=f"{context} {new_set.source_version}",
+    )
+
+
 def refuse_if_it_reads_the_holdout(
     session: Session,
     new_annotation_set_id: UUID,
@@ -45,11 +65,6 @@ def refuse_if_it_reads_the_holdout(
     ``refresh_goa_release_dates`` fills the column and has run for every set
     this platform holds.
     """
-    new_set = session.get(AnnotationSet, new_annotation_set_id)
-    if new_set is None or new_set.source_published_at is None:
-        return
-    assert_window_may_inform(
-        _as_date(new_set.source_published_at),
-        waiver=waiver,
-        context=f"{context} {new_set.source_version}",
+    refuse_if_the_set_reads_the_holdout(
+        session.get(AnnotationSet, new_annotation_set_id), waiver=waiver, context=context
     )

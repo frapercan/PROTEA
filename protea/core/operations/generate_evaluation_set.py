@@ -15,7 +15,7 @@ from protea.core.evaluation import (
     groundtruth_key_for,
     serialize_evaluation_data_to_parquet,
 )
-from protea.core.operations._holdout_guard import refuse_if_it_reads_the_holdout
+from protea.core.operations._holdout_guard import refuse_if_the_set_reads_the_holdout
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -125,8 +125,8 @@ class GenerateEvaluationSetOperation:
             session, p, old_set_id, new_set_id
         )
         # Before anything is built: the holdout is scored once, at the end.
-        refuse_if_it_reads_the_holdout(
-            session, new_set_id, waiver=p.holdout_waiver, context="building the window ending at"
+        refuse_if_the_set_reads_the_holdout(
+            new_set, waiver=p.holdout_waiver, context="building the window ending at"
         )
         same_snapshot = old_native == new_native == pivot_id
         mode = "same_snapshot" if same_snapshot else "reconciled"
