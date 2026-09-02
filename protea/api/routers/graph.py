@@ -238,17 +238,20 @@ def build_graph(
     """
     head = record["evaluation_sets"][0] if record["evaluation_sets"] else None
     floors = {f["node"]: f["floor"] for f in record["floors"] if f["node"] and f["floor"]}
+    # EVERY builder gets the floors. Until 2026-09-02 this list handed the dict
+    # to _scoring_node alone, so nine of the ten nodes could not see a declared
+    # floor and `strength_of` returned CHOSEN for them whatever was declared.
     built: list[Built] = [
-        _frame_node(record, head),
-        _substrate_node(record),
-        _bank_node(record, head),
-        _retriever_node(record),
-        _generator_node(record),
+        _frame_node(record, head, floors),
+        _substrate_node(record, floors),
+        _bank_node(record, head, floors),
+        _retriever_node(record, floors),
+        _generator_node(record, floors),
         _scoring_node(record, floors),
-        _features_node(record),
-        _reranking_node(record),
-        _combination_node(record),
-        _routing_node(record),
+        _features_node(record, floors),
+        _reranking_node(record, floors),
+        _combination_node(record, floors),
+        _routing_node(record, floors),
     ]
     return {
         "frame": build_frame(record),
