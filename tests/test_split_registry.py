@@ -11,7 +11,8 @@ import pytest
 
 from protea.core.split_registry import (
     BOARD_MARK,
-    COMPARABLE_WINDOW,
+    SplitUndecidedError,
+    comparable_window,
     RELEASES,
     ExclusionBasis,
     ReleaseWindow,
@@ -58,12 +59,12 @@ class TestResolutionRaisesRatherThanGuessing:
 class TestAnUndecidedSplitHasNoDefault:
     """A placeholder here would propagate into results that look decided."""
 
-    @pytest.mark.parametrize("name", ["train", "adjustment"])
+    @pytest.mark.parametrize("name", ["train"])
     def test_it_raises_instead_of_returning_something(self, name: str) -> None:
         with pytest.raises(SplitUndecidedError):
             windows_for(name)
 
-    @pytest.mark.parametrize("name", ["train", "adjustment"])
+    @pytest.mark.parametrize("name", ["train"])
     def test_the_error_says_what_would_settle_it(self, name: str) -> None:
         """An error nobody can act on becomes an error everybody routes around."""
         with pytest.raises(SplitUndecidedError) as excinfo:
@@ -116,13 +117,55 @@ class TestTheValidationSplitIsNotOursToOptimise:
         assert resolve_split("adjustment").scored_by == "ours"
 
 
-class TestTheValidationSeriesCoversTheBoardWindowForward:
-    def test_it_starts_at_the_window_the_board_scored(self) -> None:
-        assert windows_for("validation")[0] == COMPARABLE_WINDOW
+class TestTheTuneWindowIsDecided:
+    """It was undecided until the author fixed it on 2026-07-27.
 
-    def test_the_comparable_window_ends_at_the_board_mark(self) -> None:
-        """The board scored one window; that window is the only comparable point."""
-        assert COMPARABLE_WINDOW.end == BOARD_MARK
+    E2E-CANONICAL-RUN.md section 3: "TUNE window: 226 -> 227. Every parameter,
+    threshold and design decision is selected here. Nothing after 227 informs a
+    choice." The registry refused to name it for five weeks after that, so a
+    caller asking it for the adjustment windows was told the decision had not
+    been taken when it had.
+    """
+
+    def test_it_names_the_window_the_author_fixed(self) -> None:
+        assert [str(w) for w in windows_for("adjustment")] == ["v226->v227"]
+
+    def test_it_may_inform_the_decisions_it_was_fixed_for(self) -> None:
+        for decision in ("hyperparameters", "thresholds", "design", "champion_choice"):
+            assert_may_inform("adjustment", decision)
+
+    def test_the_validation_split_still_may_inform_nothing(self) -> None:
+        with pytest.raises(SplitLeakError):
+            assert_may_inform("validation", "champion_choice")
+
+
+class TestTheValidationSeriesCoversTheBoardWindowForward:
+    def test_it_starts_AT_the_mark_and_not_one_window_earlier(self) -> None:
+        """The boundary the whole temporal design rests on.
+
+        It used to start at the window ENDING at the mark, which is 226->227 --
+        the window the author fixed as TUNE. That put the selection set inside
+        the holdout split, so asking whether it could inform a hyperparameter
+        raised a leak error about the very window chosen for that purpose.
+        """
+        assert windows_for("validation")[0].start == BOARD_MARK
+
+    def test_the_tune_window_is_not_in_the_validation_series(self) -> None:
+        """The two halves of the design, kept apart, pinned."""
+        tune = windows_for("adjustment")[0]
+        assert tune.end == BOARD_MARK
+        assert tune not in windows_for("validation")
+
+    def test_the_comparable_point_refuses_rather_than_guesses(self) -> None:
+        """One point must be designated and nothing in the record designates it.
+
+        The board's own frame is recorded elsewhere as 227->230, which spans
+        three consecutive releases and is therefore not a member of this series
+        at all. Returning the first point instead would publish a
+        characterisation point as the competitive claim.
+        """
+        with pytest.raises(SplitUndecidedError, match="not decided"):
+            comparable_window()
 
     def test_it_runs_through_the_newest_release(self) -> None:
         assert windows_for("validation")[-1].end == RELEASES[-1].identifier
@@ -144,8 +187,13 @@ class TestTheAdjustmentSetCannotTouchTheBoardWindow:
         validation = set(windows_for("validation"))
         assert not set(adjustment_candidates()) & validation
 
-    def test_no_candidate_ends_after_the_comparable_window_starts(self) -> None:
-        cutoff = release(COMPARABLE_WINDOW.start).published
+    def test_no_candidate_ends_after_the_mark(self) -> None:
+        """The author's rule verbatim: nothing after 227 informs a choice.
+
+        A window ending AT the mark satisfies it. A window starting at the mark
+        does not, and those are the validation series.
+        """
+        cutoff = release(BOARD_MARK).published
         assert all(release(w.end).published <= cutoff for w in adjustment_candidates())
 
     def test_the_menu_is_reported_insufficient_while_it_is(self) -> None:
@@ -159,8 +207,20 @@ class TestTheAdjustmentSetCannotTouchTheBoardWindow:
         assert menu_is_sufficient() == (len(adjustment_candidates()) >= 2)
 
     def test_a_single_window_menu_is_not_sufficient(self) -> None:
-        """One window means the contraction, which the campaign rules out."""
+        """One window means the tune window alone, with nothing to check it against."""
         assert not menu_is_sufficient() or len(adjustment_candidates()) >= 2
+
+    def test_the_menu_holds_the_tune_window_and_nothing_earlier(self) -> None:
+        """What the fixed frame costs, pinned so it is visible rather than found.
+
+        The release table begins at v226, so the only window the leak rule
+        admits is the tune window itself. A decision selected on it cannot
+        currently be shown to hold anywhere else, and the tune window is one of
+        the two roughly thirty percent contractions. Ingesting a release before
+        v226 is what changes this, and this test is what says so.
+        """
+        assert adjustment_candidates() == tuple(windows_for("adjustment"))
+        assert not menu_is_sufficient()
 
 
 class TestWindowsAreOrderedPairs:
