@@ -148,6 +148,16 @@ _KEY_COLUMNS = ("protein_accession", "namespace")
 _RTOL = 1e-6
 _ATOL = 1e-9
 
+#: How close a declared threshold must be to a grid value to name that column.
+#: Two error sources have to fit under it and neither is the caller's fault:
+#: cafaeval's ``arange`` leaves about an ulp on each grid value, and a producer
+#: that computed its grid in float32 leaves about 6e-8 at a tau near 0.57. It
+#: has to stay far below half a step so that no threshold can ever match two
+#: columns, which at cafaeval's own th_step of 0.01 means far below 0.005; this
+#: is three orders under that, and remains unambiguous for any step above 2e-6,
+#: which is finer than any grid a 99-column producer writes.
+_TAU_ATOL = 1e-6
+
 
 class ThresholdGridUnavailableError(RuntimeError):
     """The per-protein artefact cannot support a re-selected operating point."""
@@ -182,6 +192,40 @@ class GridMeta:
 
     def comparability(self) -> dict[str, str]:
         return {key: self.values.get(key, "") for key in COMPARABILITY_KEYS}
+
+    def tau_index(self, tau: float) -> int:
+        """The column a declared threshold names, or a refusal naming the grid.
+
+        A threshold that is not on the grid is refused rather than snapped to
+        its nearest neighbour. Snapping is the whole reason this function
+        exists to be written carefully: the caller who declares 0.57 and is
+        silently served 0.56 has published a number under a threshold it was
+        not read at, and nothing downstream can tell, because the result would
+        carry the tau it asked for. The grid is a property of the artefact, and
+        which thresholds a comparison can be read at is therefore a fact about
+        the files rather than a preference of the caller.
+
+        The comparison is on the grid's own floats within
+        :data:`_TAU_ATOL` rather than on exact equality. The normative grid is
+        cafaeval's ``np.arange(th_step, 1, th_step)``, whose accumulated error
+        makes the stored value for a nominal 0.57 a number no caller could type
+        by hand; demanding the bit pattern would refuse every correct request
+        at a step other than a power of two. The tolerance is far below half a
+        step at any step this producer writes, so at most one column can match
+        and the refusal above cannot be reached by rounding.
+        """
+        hits = np.flatnonzero(np.abs(self.tau_grid - float(tau)) <= _TAU_ATOL)
+        if hits.size != 1:
+            raise ThresholdGridUnavailableError(
+                f"setting {self.setting}: a fixed operating point was declared at tau "
+                f"{tau!r}, which is not a threshold this artefact carries. The grid holds "
+                f"{self.n_tau} thresholds from {float(self.tau_grid.min())} to "
+                f"{float(self.tau_grid.max())} at th_step {self.th_step}. Refusing rather "
+                "than reading the nearest column: a comparison reported at a tau it was "
+                "not evaluated at is not recoverable from its own result, because the "
+                "result would carry the tau that was asked for."
+            )
+        return int(hits[0])
 
 
 @dataclass(frozen=True)
