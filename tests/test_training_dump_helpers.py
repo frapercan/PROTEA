@@ -498,7 +498,7 @@ class TestResolveTrainSplitEval:
         eset = MagicMock()
         eval_data = MagicMock()
         session = MagicMock()
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = eset
+        session.query.return_value.filter_by.return_value.all.return_value = [eset]
         with patch(
             "protea.core.training_dump._train_split.load_evaluation_data_for_set",
             return_value=(eval_data, "pivot"),
@@ -509,10 +509,34 @@ class TestResolveTrainSplitEval:
     def test_missing_eset_raises_runtime_error(self) -> None:
         ctx = _make_train_split_context(version_to_set={170: uuid.uuid4(), 200: uuid.uuid4()})
         session = MagicMock()
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.all.return_value = []
         with pytest.raises(RuntimeError, match="EvaluationSet missing for train pair"):
             _resolve_train_split_eval(session, ctx, 170, 200)
 
+    def test_several_sets_for_one_pair_are_named_not_guessed(self) -> None:
+        """The ambiguity the widened identity key admits, refused legibly.
+
+        The pair used to be UNIQUE, so ``one_or_none`` could not raise here.
+        Now two sets can differ only in a propagation graph, and picking either
+        one silently would train the reranker on a delta nobody chose. The
+        error names the candidates and the graphs that tell them apart.
+        """
+        ctx = _make_train_split_context(version_to_set={170: uuid.uuid4(), 200: uuid.uuid4()})
+        session = MagicMock()
+        first, second = MagicMock(), MagicMock()
+        for e in (first, second):
+            e.id = uuid.uuid4()
+            e.pivot_snapshot_id = uuid.uuid4()
+            e.old_native_snapshot_id = uuid.uuid4()
+            e.new_native_snapshot_id = uuid.uuid4()
+        session.query.return_value.filter_by.return_value.all.return_value = [first, second]
+
+        with pytest.raises(RuntimeError, match="2 EvaluationSets exist") as excinfo:
+            _resolve_train_split_eval(session, ctx, 170, 200)
+        message = str(excinfo.value)
+        assert str(first.id) in message
+        assert str(second.id) in message
+        assert "propagation graph" in message
 
 class TestPrepareSplitQueryInputs:
     def test_filters_unknown_accessions_and_slices_pool(self) -> None:

@@ -44,20 +44,37 @@ class EvaluationSet(Base):
     the structural piece that lets selection happen off the reported
     window (no winner's-curse). The field is metadata only: it does not
     change how the delta is computed.
+
+    ``pivot_snapshot_id``, ``old_native_snapshot_id`` and
+    ``new_native_snapshot_id`` are the opposite: they change the delta, and
+    they are part of the row's identity for that reason. Each side's ancestors
+    are closed under its native DAG and the result is intersected with the
+    pivot's term universe, so a rewiring between two ontology releases can put
+    a term in the gain set that nobody annotated. Measured on GOA 220 -> 227,
+    choosing native-per-side over pivot-for-both moves the PK bucket by 21
+    percent of its annotations and by 51 percent of its proteins. Two rows
+    differing only in these three are two different measurements and coexist.
     """
 
     __tablename__ = "evaluation_set"
     __table_args__ = (
         # T3.5: list endpoints order by ``created_at DESC``.
         Index("ix_evaluation_set_created_at", "created_at"),
-        # The (old, new) pair semantically identifies one evaluation
-        # episode; two rows for the same pair are duplicates by
-        # construction. Enforced at the DB level via
-        # alembic revision ``b8e3f1a7c2d9_evaluation_set_pair_unique``.
+        # What identifies one evaluation episode. The (old, new) pair alone
+        # used to, and it does not: the same pair under a different
+        # propagation graph is a different measurement, by 21 percent of the
+        # PK bucket's annotations on the 220 -> 227 window. The pivot fixes
+        # the term universe both sides are read into and the two natives fix
+        # the DAG each side's ancestors are closed under, so all five are the
+        # key. Enforced at the DB level via alembic revision
+        # ``d4b8c2f10a37_evaluation_set_identity_includes_graphs``.
         UniqueConstraint(
             "old_annotation_set_id",
             "new_annotation_set_id",
-            name="uq_evaluation_set_old_new_annotation_set",
+            "pivot_snapshot_id",
+            "old_native_snapshot_id",
+            "new_native_snapshot_id",
+            name="uq_evaluation_set_identity",
         ),
         # ADR D40: keep the protocol-window vocabulary closed at the DB
         # level without a native enum type (cheaper to extend later).
@@ -79,6 +96,24 @@ class EvaluationSet(Base):
         ForeignKey("annotation_set.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
+    )
+    # The three graphs that decide the delta, stored RESOLVED rather than as
+    # the overrides that were requested: a row says which DAG actually ran, so
+    # it can be read without its producing job. See the class docstring.
+    pivot_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ontology_snapshot.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    old_native_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ontology_snapshot.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    new_native_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ontology_snapshot.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

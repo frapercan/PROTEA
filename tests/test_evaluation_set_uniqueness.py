@@ -1,16 +1,21 @@
 """Tests for the ``EvaluationSet`` pair-uniqueness contract.
 
-Layer 1 (schema): the ``(old_annotation_set_id, new_annotation_set_id)``
-pair is enforced UNIQUE at the DB level so that the dump pipeline's
-``.one_or_none()`` lookup at
-``protea/core/training_dump_helpers.py:_resolve_train_split_eval`` can
-never trip ``MultipleResultsFound`` (root cause of the LB.1 vanilla
-incident on 2026-05-12).
+Layer 1 (schema): the identity is UNIQUE at the DB level -- the pair of
+annotation sets AND the three snapshots that decide the delta. The pair alone
+was the key until it turned out not to be an identity: the same pair read under
+a different propagation graph is a different measurement, by 21 percent of the
+PK bucket's annotations on the 220 -> 227 window.
 
-Layer 2 (operation): ``GenerateEvaluationSetOperation`` short-circuits
-to the existing row when an EvaluationSet for the pair already exists,
-keeping ``POST /jobs`` submissions idempotent without bouncing off the
-DB constraint.
+Widening it reopens an ambiguity the narrow key used to make impossible, so the
+caller that relied on it -- ``_resolve_train_split_eval``, whose
+``.one_or_none()`` on the bare pair was the root cause of the LB.1 vanilla
+incident on 2026-05-12 -- now collects candidates and names them instead of
+letting SQLAlchemy raise ``MultipleResultsFound`` from three frames down.
+
+Layer 2 (operation): ``GenerateEvaluationSetOperation`` short-circuits to the
+existing row when one exists under the SAME identity, keeping ``POST /jobs``
+idempotent; a submission that changes a propagation graph finds nothing and
+computes, which is the behaviour the widened key exists to allow.
 """
 
 from __future__ import annotations
@@ -45,19 +50,36 @@ def pg_session(postgres_url: str):
     Base.metadata.drop_all(engine)
 
 
-def _seed_annotation_sets(session: Session) -> tuple[uuid.UUID, uuid.UUID]:
-    """Insert one OntologySnapshot + two AnnotationSet rows."""
-    snap = OntologySnapshot(
-        obo_url="http://example/go.obo",
-        obo_version="releases/2024-01-17",
-    )
-    session.add(snap)
+def _seed_annotation_sets(session: Session) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Insert two OntologySnapshots + two AnnotationSet rows.
+
+    Two snapshots, not one: every test below has to be able to vary a
+    propagation graph while holding the pair fixed, which is the whole point of
+    the widened key.
+    """
+    snaps = [
+        OntologySnapshot(obo_url="http://example/go.obo", obo_version=v)
+        for v in ("releases/2024-01-17", "releases/2025-01-17")
+    ]
+    session.add_all(snaps)
     session.flush()
-    old_as = AnnotationSet(source="goa", source_version="226", ontology_snapshot_id=snap.id)
-    new_as = AnnotationSet(source="goa", source_version="230", ontology_snapshot_id=snap.id)
+    old_as = AnnotationSet(source="goa", source_version="226", ontology_snapshot_id=snaps[0].id)
+    new_as = AnnotationSet(source="goa", source_version="230", ontology_snapshot_id=snaps[0].id)
     session.add_all([old_as, new_as])
     session.flush()
-    return old_as.id, new_as.id
+    return old_as.id, new_as.id, snaps[0].id, snaps[1].id
+
+
+def _eval_set(old_id, new_id, pivot, old_native, new_native) -> EvaluationSet:
+    """An EvaluationSet spelled out by every field of its identity."""
+    return EvaluationSet(
+        old_annotation_set_id=old_id,
+        new_annotation_set_id=new_id,
+        pivot_snapshot_id=pivot,
+        old_native_snapshot_id=old_native,
+        new_native_snapshot_id=new_native,
+        stats={},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -66,53 +88,44 @@ def _seed_annotation_sets(session: Session) -> tuple[uuid.UUID, uuid.UUID]:
 
 
 @pytest.mark.integration
-def test_duplicate_pair_rejected_by_unique_constraint(pg_session: Session) -> None:
-    """Inserting two ``EvaluationSet`` rows for the same (old, new) pair
-    must raise ``IntegrityError`` thanks to the UNIQUE constraint added
-    in alembic revision ``b8e3f1a7c2d9``.
-    """
-    old_id, new_id = _seed_annotation_sets(pg_session)
+def test_identical_identity_rejected_by_unique_constraint(pg_session: Session) -> None:
+    """Same pair AND same three graphs is the same measurement twice."""
+    old_id, new_id, s1, _ = _seed_annotation_sets(pg_session)
 
-    pg_session.add(
-        EvaluationSet(
-            old_annotation_set_id=old_id,
-            new_annotation_set_id=new_id,
-            stats={},
-        )
-    )
+    pg_session.add(_eval_set(old_id, new_id, s1, s1, s1))
     pg_session.commit()
 
-    pg_session.add(
-        EvaluationSet(
-            old_annotation_set_id=old_id,
-            new_annotation_set_id=new_id,
-            stats={},
-        )
-    )
+    pg_session.add(_eval_set(old_id, new_id, s1, s1, s1))
     with pytest.raises(IntegrityError):
         pg_session.commit()
     pg_session.rollback()
 
 
 @pytest.mark.integration
+def test_same_pair_under_different_graphs_coexist(pg_session: Session) -> None:
+    """The reason the key was widened.
+
+    One row propagates both sides under the pivot; the other reads the new side
+    under its own native DAG. They hold different deltas over the same two
+    annotation sets, and a schema that admitted only one of them would force a
+    choice the evidence has not yet settled.
+    """
+    old_id, new_id, s1, s2 = _seed_annotation_sets(pg_session)
+
+    pg_session.add(_eval_set(old_id, new_id, s1, s1, s1))
+    pg_session.add(_eval_set(old_id, new_id, s1, s1, s2))
+    pg_session.commit()
+
+    assert pg_session.query(EvaluationSet).count() == 2
+
+
+@pytest.mark.integration
 def test_swapped_pair_is_a_different_row(pg_session: Session) -> None:
     """``(A, B)`` and ``(B, A)`` are distinct evaluation episodes."""
-    old_id, new_id = _seed_annotation_sets(pg_session)
+    old_id, new_id, s1, _ = _seed_annotation_sets(pg_session)
 
-    pg_session.add(
-        EvaluationSet(
-            old_annotation_set_id=old_id,
-            new_annotation_set_id=new_id,
-            stats={},
-        )
-    )
-    pg_session.add(
-        EvaluationSet(
-            old_annotation_set_id=new_id,
-            new_annotation_set_id=old_id,
-            stats={},
-        )
-    )
+    pg_session.add(_eval_set(old_id, new_id, s1, s1, s1))
+    pg_session.add(_eval_set(new_id, old_id, s1, s1, s1))
     # Both rows commit cleanly — the swap is a legitimately distinct pair.
     pg_session.commit()
     assert pg_session.query(EvaluationSet).count() == 2
