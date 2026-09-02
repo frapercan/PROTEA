@@ -28,6 +28,13 @@ ExecStartPre=/home/bioxaxi2/Thesis-laptop/PROTEA/deploy/systemd/protea-guard-que
 # worker; this one stops a worker on a revision nobody declared. Both are
 # ExecStartPre so a non-zero exit leaves the unit down rather than running
 # something wrong: a silent wrong consumer is worse than no consumer.
+# The revision guard is told both paths and guesses neither. DEPLOY must equal
+# WorkingDirectory above: the guard compares them and refuses if they differ,
+# because a guard reading one tree while its worker starts in another reports on
+# something else and calls it in-sync. That is not hypothetical -- it is how the
+# compute node ran three revisions behind for a day on 2026-09-02.
+Environment=DEPLOY=/home/bioxaxi2/Thesis-laptop/PROTEA
+Environment=AGENT_FARM_ROOT=/home/bioxaxi2/Thesis-laptop/agent-farm
 ExecStartPre=/home/bioxaxi2/Thesis-laptop/PROTEA/deploy/systemd/protea-guard-revision.sh
 
 ExecStart=/home/bioxaxi2/Thesis-laptop/PROTEA/.venv/bin/python scripts/worker.py --queue %I
