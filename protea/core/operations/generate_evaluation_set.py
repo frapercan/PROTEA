@@ -3,9 +3,10 @@ from __future__ import annotations
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import field_validator
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
@@ -21,6 +22,21 @@ from protea.infrastructure.orm.models.annotation.evaluation_set import Evaluatio
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
+
+
+class _Identity(NamedTuple):
+    """The five fields that decide which delta a row holds.
+
+    Kept as one object because they travel together: every lookup, every
+    refusal and every insert needs all five, and a signature that took them
+    loose is a signature somebody can call with four.
+    """
+
+    old_set_id: uuid.UUID
+    new_set_id: uuid.UUID
+    pivot_id: uuid.UUID
+    old_native: uuid.UUID
+    new_native: uuid.UUID
 
 
 class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
@@ -118,43 +134,22 @@ class GenerateEvaluationSetOperation:
         old_set, new_set, old_native, new_native, pivot_id = self._resolve_eval_inputs(
             session, p, old_set_id, new_set_id
         )
-        same_snapshot = old_native == new_native == pivot_id
-        mode = "same_snapshot" if same_snapshot else "reconciled"
+        mode = self._delta_mode(old_set, new_set, old_native, new_native, pivot_id)
 
-        short = self._short_circuit(session, p, old_set_id, new_set_id, emit)
+        ident = _Identity(old_set_id, new_set_id, pivot_id, old_native, new_native)
+        short = self._maybe_reuse_existing(session, ident, p.window_role, emit)
         if short is not None:
             return short
 
-        emit(
-            "generate_evaluation_set.start",
-            None,
-            {
-                "old_annotation_set_id": str(old_set_id),
-                "new_annotation_set_id": str(new_set_id),
-                "old_ontology_snapshot_id": str(old_native),
-                "new_ontology_snapshot_id": str(new_native),
-                "pivot_ontology_snapshot_id": str(pivot_id),
-                "mode": mode,
-            },
-            "info",
-        )
-        emit("generate_evaluation_set.computing_delta", None, {"mode": mode}, "info")
-        if same_snapshot:
-            data = compute_evaluation_data(session, old_set_id, new_set_id, pivot_id)
-        else:
-            data = compute_evaluation_data_reconciled(
-                session, old_set_id, new_set_id,
-                old_native, new_native, pivot_id,
-            )
-
-        stats = data.stats()
-        stats["mode"] = mode
-        stats["pivot_ontology_snapshot_id"] = str(pivot_id)
-        emit("generate_evaluation_set.delta_done", None, stats, "info")
+        data, stats = self._compute_delta(session, ident, mode, emit)
+        self._refuse_empty_delta(session, ident, stats)
 
         eval_set = EvaluationSet(
             old_annotation_set_id=old_set_id,
             new_annotation_set_id=new_set_id,
+            pivot_snapshot_id=pivot_id,
+            old_native_snapshot_id=old_native,
+            new_native_snapshot_id=new_native,
             stats=stats,
             window_role=p.window_role,
             job_id=job_id_from_payload(payload),
@@ -166,64 +161,166 @@ class GenerateEvaluationSetOperation:
         emit("generate_evaluation_set.done", None, result, "info")
         return OperationResult(result=result)
 
-    def _existing_set(
-        self, session: Session, old_set_id: uuid.UUID, new_set_id: uuid.UUID
-    ) -> EvaluationSet | None:
-        """The EvaluationSet already stored for this unique ``(old, new)`` pair, if any."""
-        return (
-            session.query(EvaluationSet)
-            .filter_by(old_annotation_set_id=old_set_id, new_annotation_set_id=new_set_id)
-            .one_or_none()
+    @staticmethod
+    def _delta_mode(
+        old_set: AnnotationSet,
+        new_set: AnnotationSet,
+        old_native: uuid.UUID,
+        new_native: uuid.UUID,
+        pivot_id: uuid.UUID,
+    ) -> str:
+        """Which delta path is VALID here, which is not the same as which was asked for.
+
+        The fast path resolves annotations through ``go_term.id``, and that
+        column is scoped to a snapshot: the same GO accession has one row per
+        snapshot, so an id minted under one graph matches nothing under
+        another. It is therefore only correct when both annotation sets are
+        BOUND to the graph being used -- a property of the sets, not of the
+        arguments.
+
+        This used to test ``old_native == new_native == pivot_id``, which is a
+        property of the arguments alone. The two agree whenever no override is
+        passed, and diverge exactly when one is: asking for both sides under a
+        pivot the sets are not bound to satisfied the old test, took the fast
+        path, and matched none of the 11.2 million annotations of the 220 ->
+        227 window. Every one was dropped by ``_load_experimental_annotations_by_ns``,
+        which drops terms of unknown aspect without comment, and the operation
+        stored a perfectly well-formed EvaluationSet holding zero of everything.
+
+        So the test is on all five, and the sets' own bindings lead. The
+        reconciled path resolves by ``go_id`` text and is correct in every case;
+        the fast path is an optimisation, and an optimisation that can be wrong
+        has to prove it is not.
+        """
+        bound_alike = old_set.ontology_snapshot_id == new_set.ontology_snapshot_id == pivot_id
+        asked_alike = old_native == new_native == pivot_id
+        return "same_snapshot" if bound_alike and asked_alike else "reconciled"
+
+    def _compute_delta(
+        self, session: Session, ident: _Identity, mode: str, emit: EmitFn
+    ) -> tuple[Any, dict[str, Any]]:
+        """Run the delta under this identity and return it with its stats.
+
+        The two compute paths are one decision, taken once here: if all three
+        snapshots coincide there is nothing to reconcile, and the cheaper
+        same-snapshot path gives the same answer. Anything else needs each side
+        closed under its own DAG and intersected with the pivot.
+        """
+        emit(
+            "generate_evaluation_set.start",
+            None,
+            {
+                "old_annotation_set_id": str(ident.old_set_id),
+                "new_annotation_set_id": str(ident.new_set_id),
+                "old_ontology_snapshot_id": str(ident.old_native),
+                "new_ontology_snapshot_id": str(ident.new_native),
+                "pivot_ontology_snapshot_id": str(ident.pivot_id),
+                "mode": mode,
+            },
+            "info",
+        )
+        emit("generate_evaluation_set.computing_delta", None, {"mode": mode}, "info")
+        if mode == "same_snapshot":
+            data = compute_evaluation_data(
+                session, ident.old_set_id, ident.new_set_id, ident.pivot_id
+            )
+        else:
+            data = compute_evaluation_data_reconciled(
+                session,
+                ident.old_set_id,
+                ident.new_set_id,
+                ident.old_native,
+                ident.new_native,
+                ident.pivot_id,
+            )
+        stats = data.stats()
+        stats["mode"] = mode
+        stats["pivot_ontology_snapshot_id"] = str(ident.pivot_id)
+        emit("generate_evaluation_set.delta_done", None, stats, "info")
+        return data, stats
+
+    @staticmethod
+    def _refuse_empty_delta(session: Session, ident: _Identity, stats: dict[str, Any]) -> None:
+        """Refuse a delta of nothing taken over corpora of something.
+
+        An EvaluationSet with zero delta proteins is a legitimate result only
+        when there was nothing to find. When the two corpora hold millions of
+        annotations between them and the delta is empty, the terms did not
+        resolve -- and nothing downstream can tell the two apart, because the
+        row that comes out is well formed either way. That is how a silently
+        empty ground truth reaches an evaluation and reports a clean zero.
+
+        The check is cheap and it can fail, which is the only kind worth
+        having: it counts the annotations the two sets actually hold and only
+        raises when they are not empty either.
+        """
+        if int(stats.get("delta_proteins") or 0):
+            return
+        held = session.execute(
+            text(
+                "SELECT count(*) FROM protein_go_annotation "
+                "WHERE annotation_set_id IN (:old_id, :new_id)"
+            ),
+            {"old_id": ident.old_set_id, "new_id": ident.new_set_id},
+        ).scalar_one()
+        if not held:
+            return
+        raise ValueError(
+            f"the delta is empty but the two annotation sets hold {held} annotations. "
+            "Their terms did not resolve under the graphs asked for "
+            f"(pivot {str(ident.pivot_id)[:8]}, natives {str(ident.old_native)[:8]}/"
+            f"{str(ident.new_native)[:8]}). Storing this would be a ground truth of "
+            "nothing that reports a clean zero."
         )
 
-    def _short_circuit(
-        self,
-        session: Session,
-        p: GenerateEvaluationSetPayload,
-        old_set_id: uuid.UUID,
-        new_set_id: uuid.UUID,
-        emit: EmitFn,
-    ) -> OperationResult | None:
-        """Resolve the existing-set short-circuit before computing the delta.
+    def _existing_set(self, session: Session, ident: _Identity) -> EvaluationSet | None:
+        """The EvaluationSet already stored under this identity, if any.
 
-        A native-snapshot override changes the computed delta, so it must never be
-        silently served from (nor silently overwrite) the unique-per-pair cached set:
-        raise a clear error instead. Without an override, fall back to the idempotent
-        reuse of an existing set.
+        The identity is the five fields the delta depends on, not the two it
+        used to be. A pair of annotation sets read under a different
+        propagation graph is a different measurement: on GOA 220 -> 227 the
+        choice moves the PK bucket by 21 percent of its annotations. Looking
+        one up by the pair alone would serve a caller a set that answers a
+        question they did not ask.
         """
-        if p.old_native_snapshot_id or p.new_native_snapshot_id:
-            if self._existing_set(session, old_set_id, new_set_id) is not None:
-                raise ValueError(
-                    "an EvaluationSet already exists for this (old, new) pair; remove it "
-                    "before regenerating with a native-snapshot override (the pair is unique)"
-                )
-            return None
-        return self._maybe_reuse_existing(session, old_set_id, new_set_id, p.window_role, emit)
+        return (
+            session.query(EvaluationSet)
+            .filter_by(
+                old_annotation_set_id=ident.old_set_id,
+                new_annotation_set_id=ident.new_set_id,
+                pivot_snapshot_id=ident.pivot_id,
+                old_native_snapshot_id=ident.old_native,
+                new_native_snapshot_id=ident.new_native,
+            )
+            .one_or_none()
+        )
 
     def _maybe_reuse_existing(
         self,
         session: Session,
-        old_set_id: uuid.UUID,
-        new_set_id: uuid.UUID,
+        ident: _Identity,
         window_role: str | None,
         emit: EmitFn,
     ) -> OperationResult | None:
         """Return the existing EvaluationSet's result, or None if absent.
 
-        Idempotency: if an EvaluationSet already exists for this
-        ``(old, new)`` pair, return its summary instead of computing and
-        inserting a duplicate. The DB-level UNIQUE constraint enforces
-        this at the schema layer (alembic
-        ``b8e3f1a7c2d9_evaluation_set_pair_unique``); this short-circuit
-        avoids paying the delta compute cost on a re-submission and keeps
-        the operation idempotent from the caller's perspective.
+        Idempotency: if an EvaluationSet already exists under this identity,
+        return its summary instead of computing and inserting a duplicate. The
+        DB-level UNIQUE constraint enforces it at the schema layer (alembic
+        ``d4b8c2f10a37_evaluation_set_identity_includes_graphs``); this
+        short-circuit avoids paying the delta compute cost on a re-submission.
+
+        A caller asking for the same pair under a DIFFERENT propagation graph
+        does not land here: no row matches, and the delta is computed. That is
+        the point of widening the key. It used to raise instead, which made two
+        legitimate measurements mutually exclusive.
 
         ADR D40: a re-submission MAY carry a ``window_role`` to (re)bind an
         already-computed set to a protocol window. Designating the window
         is metadata only, so it is applied in place without recomputing
         the delta.
         """
-        existing = self._existing_set(session, old_set_id, new_set_id)
+        existing = self._existing_set(session, ident)
         if existing is None:
             return None
         self._rebind_window_role(session, existing, window_role, emit)
@@ -238,8 +335,11 @@ class GenerateEvaluationSetOperation:
             None,
             {
                 "evaluation_set_id": str(existing.id),
-                "old_annotation_set_id": str(old_set_id),
-                "new_annotation_set_id": str(new_set_id),
+                "old_annotation_set_id": str(ident.old_set_id),
+                "new_annotation_set_id": str(ident.new_set_id),
+                "pivot_snapshot_id": str(ident.pivot_id),
+                "old_native_snapshot_id": str(ident.old_native),
+                "new_native_snapshot_id": str(ident.new_native),
             },
             "info",
         )

@@ -224,10 +224,10 @@ def _walk(session: Session, rows: list[dict[str, Any]], p: Any) -> _Tally:
 class SealEvaluationFramesOperation(Operation):
     name = "seal_evaluation_frames"
     description = (
-        "Stamp evaluation_result.frame with a content digest of the window, pivot, "
-        "accretion set and evaluation caps each result was produced under. Refuses "
-        "rows whose provenance is unrecoverable and never overwrites a differing "
-        "seal. Defaults to a dry run."
+        "Stamp evaluation_result.frame_digest with a content digest of the window, "
+        "pivot, accretion set and evaluation caps each result was produced under. "
+        "Leaves the frame harness label alone. Refuses rows whose provenance is "
+        "unrecoverable and never overwrites a differing seal. Defaults to a dry run."
     )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
@@ -240,7 +240,7 @@ class SealEvaluationFramesOperation(Operation):
         """
         if payload.get("dry_run", True):
             return "dry run: report the frame digest each result would be stamped with"
-        return "stamp evaluation_result.frame with the digest of its window, pivot and caps"
+        return "stamp evaluation_result.frame_digest with the digest of its window, pivot and caps"
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn

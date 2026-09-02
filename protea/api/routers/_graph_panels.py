@@ -23,6 +23,7 @@ from typing import Any
 
 import pandas as pd
 
+from protea.api.routers._arm_identity import depth_kind
 from protea.core.domain.aspect import Aspect
 from protea.core.domain.category import Category
 
@@ -56,6 +57,12 @@ _SCORED_BUCKETS: frozenset[str] = frozenset({"nk", "lk", "pk"})
 _LEVEL_FIELDS: tuple[str, ...] = (
     "scoring_name",
     "embedding_name",
+    # Three quantities used to arrive here under this one name, and two of them
+    # rendered identically: a cut at k-position 10 and a retrieval depth of 10
+    # were both the string '10'. The column now says which quantity it is, so
+    # the three are three levels. That is only half of it, because a level that
+    # is merely distinguishable can still be laddered against the wrong one;
+    # ``separated_from_floor`` below is the other half.
     "depth",
     "donor_policy",
     # A stored donor policy is byte-identical either side of the 2026-08-29
@@ -295,21 +302,132 @@ def build_panels(
     ]
 
 
+class CrossedFrames(ValueError):
+    """A declared floor names arms that were not scored under the same seal.
+
+    Raised rather than resolved, and raised at the point of comparison rather
+    than when the record is read, for the same reason CrossedDepthAxes is: the
+    record is allowed to hold arms from many frames, and only a comparison that
+    reaches across them is wrong. Picking one of the seals would publish a
+    number whose population nobody chose.
+    """
+
+
+class CrossedDepthAxes(ValueError):
+    """A comparison was asked to put a retrieval depth against an evaluation cut.
+
+    Its message is written for the reader of the graph, not for a log: the
+    scoring node catches it and prints it where the separation would have been,
+    because a refusal a reader never sees is a silent None and this project has
+    already been burnt by one of those.
+    """
+
+
+def _refuse_crossed_depths(
+    floor: str, at_floor: list[dict[str, Any]], rivals: list[dict[str, Any]]
+) -> None:
+    """Refuse a comparison whose two sides are not depths of one axis.
+
+    A RETRIEVAL depth decides which candidates were ever fetched, so changing
+    it re-runs the neighbourhood and rescores everything that follows. An
+    EVALUATION CUT truncates a candidate list that had already been retrieved:
+    the arms of such a ladder are readings of one prediction set, and the deeper
+    arm's list contains the shallower one's. Laddering the two against each
+    other reads a truncation as a routing result, which is the reading this
+    campaign has already published once.
+
+    An unrecorded depth refuses against either of them for the reason
+    ``_arm_identity`` gives for an unrecorded code revision: a row that does not
+    say which quantity its number is of cannot be placed on an axis, and
+    guessing puts it on the axis that happens to be convenient.
+    """
+    kinds = {depth_kind(r.get("depth")) for r in at_floor}
+    crossed = {depth_kind(r.get("depth")) for r in rivals} - kinds
+    if not crossed:
+        return
+    raise CrossedDepthAxes(
+        f"The declared floor '{floor}' is a depth of one kind ({'/'.join(sorted(kinds))}), "
+        "and it is being compared against depths of another "
+        f"({'/'.join(sorted(crossed))}). Those are not two levels of one axis. A "
+        "retrieval depth decides which candidates exist and rescores everything "
+        "downstream of it; an evaluation cut only truncates a candidate list that was "
+        "already retrieved and scored; an unrecorded depth states a number without "
+        "saying which of the two it is. A ladder that mixes them reads a truncation as "
+        "a retrieval result and overstates what was varied. Declare a floor whose depth "
+        "is the same quantity as its rivals'."
+    )
+
+
+def _within_the_floors_frame(
+    rows: list[dict[str, Any]], floor: str, fields: tuple[str, ...]
+) -> list[dict[str, Any]]:
+    """The rows that share the floor's seal, or a refusal saying why there are none.
+
+    Split out of :func:`separated_from_floor` to keep it inside the smell budget,
+    and it earns its own name: this is the whole of the rule that a comparison
+    happens inside one frame.
+    """
+    seals = {r.get("frame_digest") for r in rows if _level_name(r, fields) == floor}
+    seals.discard(None)
+    if len(seals) > 1:
+        raise CrossedFrames(
+            f"the declared floor {floor!r} appears under {len(seals)} different frame "
+            f"seals, so it does not name one comparable population: "
+            f"{', '.join(sorted(str(s) for s in seals))}. A level that spans two "
+            f"frames cannot be the thing others are measured against."
+        )
+    if not seals:
+        raise CrossedFrames(
+            f"the declared floor {floor!r} carries no frame seal, so nothing can be "
+            f"shown to share a frame with it. An unstamped marker is not a matching "
+            f"one: returning 'did not separate' here would report a comparison that "
+            f"was never made. Seal the results with seal_evaluation_frames and ask "
+            f"again."
+        )
+    seal = next(iter(seals))
+    return [r for r in rows if r.get("frame_digest") == seal]
+
+
 def separated_from_floor(rows: list[dict[str, Any]], floor: str) -> bool:
     """Whether some level clears the floor on every panel that carries both.
 
     Panels are never pooled, so a separation has to hold panel by panel. A panel
     holding only the floor, or only its rivals, cannot testify either way and is
     skipped; if no panel can testify, nothing separated.
+
+    Raises:
+        CrossedDepthAxes: when a panel that would have testified holds a floor
+            and a rival whose depths are different quantities. Checked inside
+            the loop rather than once over every row, so the refusal fires
+            exactly where a comparison was about to be made and not merely
+            because the record happens to contain both kinds somewhere.
     """
     fields = level_fields(rows)
+    # THE COMPARISON IS INSIDE ONE FRAME OR IT IS NOT A COMPARISON.
+    #
+    # This used to test the floor against every level that happened to land in
+    # the same panel, which is every arm the record holds regardless of the
+    # window, the corpus or the accretion table it was scored under. On
+    # 2026-09-02 a retriever floor on the 226->227 tune frame was being compared
+    # against arms from 220->227, and the rivals that beat it in all nine panels
+    # were from the other window. A panel key is a category and an aspect; it is
+    # not a frame.
+    #
+    # The seal is the project's own answer to when two numbers may be compared,
+    # and this function was the one place that asked the question and did not
+    # consult it. An unsealed row is EXCLUDED rather than treated as matching:
+    # an unstamped marker is not a matching one, which is the rule
+    # seal_evaluation_frames states and refuses on.
+    comparable = _within_the_floors_frame(rows, floor, fields)
+
     tested = 0
     for key in PANEL_KEYS:
-        here = [r for r in rows if (str(r.get("category")), str(r.get("aspect"))) == key]
+        here = [r for r in comparable if (str(r.get("category")), str(r.get("aspect"))) == key]
         at_floor = [r for r in here if _level_name(r, fields) == floor]
         rivals = [r for r in here if _level_name(r, fields) != floor]
         if not at_floor or not rivals:
             continue
+        _refuse_crossed_depths(floor, at_floor, rivals)
         tested += 1
         if max(r.get("f_micro_w") or 0.0 for r in rivals) <= max(
             r.get("f_micro_w") or 0.0 for r in at_floor

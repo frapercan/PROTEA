@@ -446,24 +446,33 @@ def test_pk_rows_are_exactly_the_scored_population(consumer: Any, tmp_path: Path
     _assert_pooled(consumer, path, sink, setting="PK")
 
 
-def test_refuses_a_pk_namespace_whose_excluded_rows_carry_mass(tmp_path: Path) -> None:
-    """The gate the whole PK path turns on, and why no file can satisfy both rules.
+def test_a_pk_namespace_with_ineligible_mass_is_now_written(tmp_path: Path) -> None:
+    """The gate the whole PK path used to turn on, and why it is gone.
 
-    cafaeval reduces with ``sum(axis=0)`` over every row it was handed and
-    restricts only its coverage column to the eligible ones, so an ineligible
-    PK row's predicted mass is inside the published ``P`` and outside the
-    published population. Keeping the row reproduces ``f_micro_w`` and violates
-    the consumer's eligibility rule; dropping it satisfies the rule and inflates
-    the metric, because ``P`` shrinks while ``T`` and ``G`` do not. The producer
-    writes neither and refuses the namespace.
+    cafaeval used to reduce with ``sum(axis=0)`` over every row it was handed
+    while restricting only its coverage column to the eligible ones, so an
+    ineligible PK row's predicted mass was inside the published ``P`` and
+    outside the published population. Keeping the row reproduced ``f_micro_w``
+    and violated the consumer's eligibility rule; dropping it satisfied the rule
+    and inflated the metric. The producer wrote neither and refused.
+
+    e937e0e restricts the pooled sums too, so the row set that satisfies the
+    eligibility rule is the row set the frame publishes. This asserts the
+    namespace is written and, more importantly, that it is written with the
+    ineligible row ABSENT: the refusal is gone but the population rule it was
+    protecting is not.
     """
-    from protea.core.operations import _run_cafa_per_protein as prod
+    sink = _pk_sink_with_excluded_mass()
+    artifact = grid_rows_from_sink(sink)
+    assert artifact.dropped == []
 
-    artifact = grid_rows_from_sink(_pk_sink_with_excluded_mass())
-    assert artifact.rows == []
-    assert [d["code"] for d in artifact.dropped] == [prod.DROP_POOLED_SUMS_DIFFER]
-    reason = artifact.dropped[0]["reason"]
-    assert "prior knowledge" in reason and "eligible_rows" in reason
+    bp = [r for r in artifact.rows if r["namespace"] == BP]
+    assert bp, "the namespace that used to be refused is now written"
+
+    record = next(r for r in sink.records if r["variant"] == "weighted")
+    n_gt = np.asarray(record["n_gt"], dtype=np.float64)
+    assert (n_gt <= 0.0).any(), "the fixture must still carry an ineligible row"
+    assert len(bp) == int((n_gt > 0.0).sum()), "an ineligible row reached the file"
 
 
 def test_refuses_a_namespace_whose_two_variants_scored_different_proteins(
@@ -1299,14 +1308,29 @@ def test_pk_with_an_excluded_protein_that_predicts_is_refused_not_biased(
     P3's whole ground truth is prior knowledge, and it predicts inside the terms
     of interest. cafaeval keeps its predicted mass in ``P`` and drops it from the
     population, so recomposing from the eligible rows alone reads 1.0000 where
-    the frame publishes 0.8824. That gap is the reason the namespace is refused:
-    it is nearly 12 points of Fmax on a three-protein panel, against campaign
-    effects of 0.005 to 0.05, and it arrives dressed as a better system.
+    the frame publishes 0.8824. That gap is the reason the namespace is refused,
+    and it arrives dressed as a better system.
 
-    **This test fails the day cafaeval restricts ``tp_totals`` and
-    ``pred_totals`` to ``eligible_rows`` the way ``metrics[:, 0]`` already is.**
-    That is the intent: the failure is the signal that the PK path can be
-    written, and the gate in ``_check_pooled`` can then go.
+    THE 12 POINTS ARE THIS FIXTURE'S, NOT THE CAMPAIGN'S. Three proteins, one of
+    them entirely prior knowledge and predicting inside the terms of interest, is
+    a worst case built on purpose to make the defect visible in a unit test. On
+    real panels the correction was measured at +0.0002 against a base of 0.15 in
+    the cell where it bites. Do not put the fixture number next to campaign
+    effects of 0.005 to 0.05 and let a reader conclude the kernel bug was worth
+    ten campaigns. What the fix buys is that PK.BPO and PK.MFO can be written at
+    all, not a movement in the numbers already published.
+
+    THAT DAY ARRIVED. cafaeval e937e0e restricts ``tp_totals`` and
+    ``pred_totals`` to ``eligible_rows`` the way ``metrics[:, 0]`` already did,
+    so the published cell is now computed over the population it declares. The
+    test that predicted its own obsolescence is rewritten here to assert the
+    other side of it: the same three-protein panel that could not be written now
+    can, and the number recomposed from the kept rows IS the published one.
+
+    The two facts it still pins are the ones the reconciliation rests on. The
+    kernel is still handed the ineligible row, so the raw block still carries
+    its predicted mass and a producer that summed every row would still be
+    wrong. What changed is which sum the frame publishes.
     """
     ia = {g: v for (g, _), v in zip(_OBO_TERMS, [0.5, 1.0, 2.0, 3.5], strict=True)}
     sink, df = _real_run(
@@ -1323,14 +1347,17 @@ def test_pk_with_an_excluded_protein_that_predicts_is_refused_not_biased(
     gt = float(np.asarray(weighted["n_gt"])[keep].sum())
     from_kept_rows = 2 * tp / (float(kept[0]) + gt)
     published = _published_curve(df, BP, "f_micro_w")[0]
-    assert published == pytest.approx(0.882353, abs=1e-5)
-    assert from_kept_rows == pytest.approx(1.0, abs=1e-9)
+
+    # The reconciliation, stated as the equality it is. Before e937e0e these
+    # were 0.882353 and 1.0, a gap of nearly twelve points of Fmax on three
+    # proteins, and the namespace was refused rather than written over a
+    # population that had not been scored.
+    assert published == pytest.approx(from_kept_rows, abs=1e-9)
+    assert published == pytest.approx(1.0, abs=1e-9)
 
     artifact = grid_rows_from_sink(sink)
-    assert artifact.rows == []
-    from protea.core.operations import _run_cafa_per_protein as prod
-
-    assert {d["code"] for d in artifact.dropped} == {prod.DROP_POOLED_SUMS_DIFFER}
+    assert [r["protein_accession"] for r in artifact.rows if r["namespace"] == BP] != []
+    assert artifact.dropped == []
 
 
 def test_the_writer_refuses_a_footer_it_was_handed(tmp_path: Path) -> None:

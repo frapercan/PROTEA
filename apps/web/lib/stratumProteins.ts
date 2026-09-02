@@ -49,7 +49,12 @@ export type StratumArm = {
   embedding_name: string | null;
   scoring_name: string | null;
   donor_policy: string | null;
-  depth: number | null;
+  /** The depth this arm was read at, and WHICH of the three depths that is:
+   *  'retrieval depth 30' fetched thirty neighbours, 'cut at sequence rank 30'
+   *  truncated an already-retrieved list at thirty. The API has always sent a
+   *  string here and this type said number, which is the same mistake the
+   *  string used to make: a name that does not say what the value is. */
+  depth: string | null;
   metric: string | null;
 };
 

@@ -177,10 +177,49 @@ class TestTheGridIsDerivedNotEnumerated:
         x 6 taxonomy bands x 5 propagation bands.
 
         The number is large on purpose and is not a reporting frame. See
-        ``reportable_strata``: of the 1,920 combinations the five
-        protein-level axes admit, 77 were populated when this was measured.
+        ``reportable_strata``: of the 1,080 combinations the five
+        protein-level axes admit, 77 were populated on prot_t5 at K=30
+        before the campaign wipe of 2026-08-27.
         """
         assert len(all_strata()) == 3 * 3 * 4 * 9 * 6 * 5
+
+    def test_the_protein_level_axes_admit_one_thousand_and_eighty(self) -> None:
+        """The count the docstring quotes, held to the grid that produces it.
+
+        The five protein-level axes are not freely crossed: homology and donor
+        evidence are coupled, so their pair contributes 9 states and not 15,
+        and the free product of the enums (1,800) is an overcount. The number
+        that belongs in prose is 1,080, and it has been wrong in this docstring
+        before, so it is pinned here rather than left to be re-derived by hand.
+        """
+        grid = all_strata()
+        protein_level = {
+            (s.length, s.homology, s.donor_evidence, s.taxonomy, s.propagation) for s in grid
+        }
+        category_aspect = {(s.category, s.aspect) for s in grid}
+
+        assert len(protein_level) == 1080
+        assert len(category_aspect) == 9
+        # The grid is the full rectangle of the two halves, which is why the
+        # 9,720 total already implies the 1,080 and cannot disagree with it.
+        assert len(grid) == 9720
+        assert len(grid) == len(category_aspect) * len(protein_level)
+
+    def test_the_docstring_quotes_the_count_the_grid_produces(self) -> None:
+        """The defect this guards against was prose, so the prose is asserted.
+
+        ``all_strata`` was correct while its docstring claimed the five
+        protein-level axes admit 1,920 combinations, a number that is neither
+        the coupled count nor the free product, and that contradicted the same
+        docstring's own 9,720. Nothing failed, because no code reads a
+        docstring. This reads it.
+        """
+        doc = all_strata.__doc__ or ""
+
+        assert "1,080" in doc
+        assert "1,920" not in doc
+        # The 77 is a pre-wipe observation and must not read as a current one.
+        assert "2026-08-27" in doc
 
     def test_a_placed_observation_is_in_the_grid(self) -> None:
         s = stratum_for(

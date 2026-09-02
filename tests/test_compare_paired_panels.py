@@ -351,6 +351,63 @@ class TestPayload:
                 }
             )
 
+    def test_there_is_no_auto_operating_point(self) -> None:
+        """The same argument as the weighting vocabulary, one step sharper.
+
+        The only thing an ``auto`` could resolve to is the argmax, which is not
+        a fallback but the other semantics taken silently.
+        """
+        with pytest.raises(ValidationError, match="'reselected_per_resample' or 'fixed'"):
+            ComparePairedPanelsPayload.model_validate(
+                {
+                    "evaluation_result_id": "a",
+                    "baseline_evaluation_result_id": "b",
+                    "operating_point": "auto",
+                }
+            )
+
+    def test_a_fixed_operating_point_without_a_tau_is_refused_not_guessed(self) -> None:
+        """Guessing the tau here would be the max-over-tau selection, reinstated.
+
+        The campaign reads its primary metric at a fixed declared threshold
+        precisely to remove an undeclared max-over-tau selection. An operation
+        that filled the missing tau in with the panel's argmax would give that
+        decision back the thing it was taken to remove, under the name that
+        says it was removed.
+        """
+        with pytest.raises(ValidationError, match="needs declared_tau"):
+            ComparePairedPanelsPayload.model_validate(
+                {
+                    "evaluation_result_id": "a",
+                    "baseline_evaluation_result_id": "b",
+                    "operating_point": "fixed",
+                }
+            )
+
+    def test_a_declared_tau_nothing_would_read_is_refused(self) -> None:
+        """A payload recording a decision the arithmetic did not take.
+
+        Under re-selection the threshold is chosen inside every resample and
+        the declared one is read nowhere. Accepting it would leave a job row
+        whose stored payload names a tau, which is what a later reader would
+        take the comparison to have been read at.
+        """
+        with pytest.raises(ValidationError, match="a threshold no arithmetic used"):
+            ComparePairedPanelsPayload.model_validate(
+                {
+                    "evaluation_result_id": "a",
+                    "baseline_evaluation_result_id": "b",
+                    "declared_tau": 0.57,
+                }
+            )
+
+    def test_reselection_is_the_default_so_nothing_existing_moves(self) -> None:
+        p = ComparePairedPanelsPayload.model_validate(
+            {"evaluation_result_id": "a", "baseline_evaluation_result_id": "b"}
+        )
+        assert p.operating_point == "reselected_per_resample"
+        assert p.declared_tau is None
+
     def test_too_few_resamples_is_refused(self) -> None:
         with pytest.raises(ValidationError):
             ComparePairedPanelsPayload.model_validate(
@@ -529,6 +586,219 @@ class TestTheCampaignMetricAndTheOracleMean:
         assert panel["diagnostics"]["mde_basis"] == "recentred_percentile"
         assert panel["status"] == "null_unread"
         assert any(e[0] == "compare_paired_panels.null_unread" for e in result["_events"])
+
+
+class TestTheOperatingPointIsDeclaredAndNotHardcoded:
+    """Which threshold the estimator is read at is the caller's decision.
+
+    The re-selection panel above is built so that the two semantics disagree
+    about the answer, which is what makes it the right fixture here: the frozen
+    bootstrap resolves the difference and the re-selecting one cannot. That was
+    the argument for re-selection being the DEFAULT, and it is also the
+    demonstration that the choice is load-bearing and therefore has to be
+    declared. A campaign reading its primary metric at a threshold fixed in
+    advance is estimating a different quantity, and while the operation
+    hardcoded ``reselected_per_resample`` at both of its emission sites and
+    exposed no field for it, that decision could not be expressed here and so
+    read as free when it was not.
+    """
+
+    def test_a_fixed_operating_point_resolves_what_reselection_cannot(
+        self, tmp_path: Path
+    ) -> None:
+        """The two semantics give different, and oppositely readable, answers.
+
+        Both arms' full-sample optima are the lower threshold, so the point
+        estimate is the same 0.0530 either way and everything that differs
+        differs because of the resample. Fixing the threshold at that same tau
+        removes the variance of selecting it, and on this panel that is the
+        whole distance between a resolved difference and a null.
+        """
+        spec = _write_reselection_panel(tmp_path)
+        frozen_lo, frozen_hi = _reference_bootstrap(spec, reselect=False)
+        fixed = _run(
+            tmp_path,
+            min_population=_GUARD_N,
+            interval_method="percentile",
+            operating_point="fixed",
+            declared_tau=TAUS[0],
+        )["panels"]["NK:MFO"]
+        reselected = _run(
+            tmp_path, min_population=_GUARD_N, interval_method="percentile"
+        )["panels"]["NK:MFO"]
+
+        assert fixed["delta"] == pytest.approx(reselected["delta"], abs=1e-12), (
+            "the fixture is wrong: both arms' full-sample optima are the lower threshold, "
+            "so declaring that threshold must not move the point estimate. Only the "
+            "resample should differ."
+        )
+        assert fixed["ci_low"] == pytest.approx(frozen_lo, abs=0.01)
+        assert fixed["ci_high"] == pytest.approx(frozen_hi, abs=0.01)
+        assert fixed["ci_low"] > 0 > reselected["ci_low"], (
+            f"the fixed operating point reports [{fixed['ci_low']:.4f}, "
+            f"{fixed['ci_high']:.4f}] and the re-selecting one "
+            f"[{reselected['ci_low']:.4f}, {reselected['ci_high']:.4f}]. If these two "
+            "agree, the declared operating point was not honoured and the bootstrap took "
+            "its own argmax per resample whatever the payload said."
+        )
+        assert fixed["resolves"] is True
+        assert fixed["verdict"] == "a_greater"
+        assert reselected["resolves"] is False
+        assert reselected["verdict"] == "not_resolved"
+
+    def test_a_fixed_operating_point_reads_the_declared_column_and_no_other(
+        self, tmp_path: Path
+    ) -> None:
+        """The declared tau is read, not the best one near it.
+
+        At 0.8 this panel's arms score 0.1538 and 0.3333, so the difference
+        changes sign against the 0.0530 the maximum reports. A consumer that
+        accepted the declaration and then maximised anyway would return the
+        positive delta, which is why the sign is what is asserted.
+        """
+        _write_reselection_panel(tmp_path)
+        panel = _run(
+            tmp_path, min_population=_GUARD_N, operating_point="fixed", declared_tau=TAUS[1]
+        )["panels"]["NK:MFO"]
+
+        assert panel["a"]["estimate"] == pytest.approx(0.1538461, abs=1e-6)
+        assert panel["b"]["estimate"] == pytest.approx(0.3333333, abs=1e-6)
+        assert panel["delta"] == pytest.approx(-0.1794872, abs=1e-6), (
+            f"the panel reports a delta of {panel['delta']!r}. At the declared tau of 0.8 "
+            "system B leads by 0.1795; +0.0530 is the delta at the MAXIMUM, which is the "
+            "operating point that was not asked for."
+        )
+        assert panel["a"]["tau"] == TAUS[1]
+        assert panel["b"]["tau"] == TAUS[1]
+        assert panel["a"]["tau_star_tied"] is False
+        assert panel["a"]["n_tau_at_max"] == 1
+
+    def test_nothing_switches_when_nothing_is_selected(self, tmp_path: Path) -> None:
+        """The diagnostic that measures re-selection reports the truth about a fixed run.
+
+        Under re-selection B's optimum moves in about a quarter of the
+        resamples on this panel, which is the measurement the whole
+        re-selection argument rests on. Under a fixed operating point the same
+        counter must read zero and one distinct threshold, because no threshold
+        was ever chosen: a nonzero reading here would mean the resampler took
+        its own argmax while the result claimed a declared tau.
+        """
+        _write_reselection_panel(tmp_path)
+        diag = _run(
+            tmp_path, min_population=_GUARD_N, operating_point="fixed", declared_tau=TAUS[0]
+        )["panels"]["NK:MFO"]["diagnostics"]
+        assert diag["tau_a_switched_fraction"] == 0.0
+        assert diag["tau_b_switched_fraction"] == 0.0
+        assert diag["tau_a_distinct"] == 1
+        assert diag["tau_b_distinct"] == 1
+
+    def test_a_fixed_run_reproduces_itself(self, tmp_path: Path) -> None:
+        """Deterministic under its seed, like the re-selecting one."""
+        _write_reselection_panel(tmp_path)
+        body = {
+            "min_population": _GUARD_N,
+            "operating_point": "fixed",
+            "declared_tau": TAUS[0],
+        }
+        first = _run(tmp_path, **body)["panels"]["NK:MFO"]
+        second = _run(tmp_path, **body)["panels"]["NK:MFO"]
+        assert (first["delta"], first["ci_low"], first["ci_high"]) == (
+            second["delta"],
+            second["ci_low"],
+            second["ci_high"],
+        )
+
+    def test_a_tau_the_grid_does_not_carry_is_refused_not_snapped(
+        self, tmp_path: Path
+    ) -> None:
+        """Reading the nearest column would publish a number under the wrong tau.
+
+        The result would carry the tau that was asked for, so nothing
+        downstream could tell that a different column was read.
+        """
+        _write_reselection_panel(tmp_path)
+        with pytest.raises(ThresholdGridUnavailableError, match="not a threshold this artefact"):
+            _run(tmp_path, min_population=_GUARD_N, operating_point="fixed", declared_tau=0.5)
+
+    def test_the_semantics_that_ran_are_recoverable_from_the_result(
+        self, tmp_path: Path
+    ) -> None:
+        """Both channels that used to carry the literal now carry the real value.
+
+        A stored comparison is read long after the job that produced it, and
+        the interval is not a function the semantics can be recovered from: the
+        result has to say which of the two produced it, and so does the event a
+        reader filters the job log with.
+        """
+        _write_reselection_panel(tmp_path)
+        fixed = _run(
+            tmp_path, min_population=_GUARD_N, operating_point="fixed", declared_tau=TAUS[0]
+        )
+        reselected = _run(tmp_path, min_population=_GUARD_N)
+
+        assert fixed["operating_point"] == "fixed"
+        assert fixed["declared_tau"] == TAUS[0]
+        assert reselected["operating_point"] == "reselected_per_resample"
+        assert reselected["declared_tau"] is None
+
+        for result, expected in ((fixed, "fixed"), (reselected, "reselected_per_resample")):
+            start = [e for e in result["_events"] if e[0] == "compare_paired_panels.start"]
+            panel = [e for e in result["_events"] if e[0] == "compare_paired_panels.panel"]
+            assert start and panel
+            assert start[0][2]["operating_point"] == expected
+            assert panel[0][2]["operating_point"] == expected, (
+                "the per-panel event reports "
+                f"{panel[0][2].get('operating_point')!r} for a run whose operating point is "
+                f"{expected!r}. This event is where a reader of a stored comparison learns "
+                "which semantics produced the interval beside it."
+            )
+        assert fixed["_events"][0][2]["declared_tau"] == TAUS[0]
+
+    def test_the_published_cell_is_still_checked_against_its_own_maximum(
+        self, tmp_path: Path
+    ) -> None:
+        """The parity control does not go out of service on a fixed-tau run.
+
+        The stored cell is an Fmax number, published at the threshold that
+        maximised the panel, so under a fixed operating point the reported
+        estimate sits below it by construction. Comparing the two would refuse
+        every fixed-tau comparison; dropping the check instead would retire the
+        guard whose absence let a wrong-tau slice sit unnoticed on exactly the
+        runs that declare a tau. It is therefore recomposed at the maximum
+        whatever the caller asked for.
+        """
+        TestPopulationAndProvenance._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
+        TestPopulationAndProvenance._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
+        published = round(2 * 12.0 / (24.0 + 30.0), 4)
+        session = _session(a={"results": {"NK": {"MFO": {"f_micro_w": published}}}})
+        panel = _run(
+            tmp_path,
+            session=session,
+            operating_point="fixed",
+            declared_tau=TAUS[1],
+        )["panels"]["NK:MFO"]
+
+        assert panel["a"]["estimator_parity_checked"] is True
+        assert panel["a"]["estimate_own_population"] == pytest.approx(1.0 / 6.0, abs=1e-9), (
+            "the arm's own-population estimate is the value at the DECLARED tau of 0.8, "
+            f"which is 0.166667. Got {panel['a']['estimate_own_population']!r}: "
+            f"{published} is the maximum, which parity is checked against and which the "
+            "reported estimate is not."
+        )
+
+    def test_a_published_cell_that_does_not_reproduce_still_refuses_at_a_fixed_tau(
+        self, tmp_path: Path
+    ) -> None:
+        TestPopulationAndProvenance._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
+        TestPopulationAndProvenance._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
+        session = _session(a={"results": {"NK": {"MFO": {"f_micro_w": 0.9999}}}})
+        with pytest.raises(PanelComparabilityError, match="at its best threshold"):
+            _run(
+                tmp_path,
+                session=session,
+                operating_point="fixed",
+                declared_tau=TAUS[1],
+            )
 
 
 class TestANullIsReadAgainstTheEffectOfInterest:
@@ -1070,6 +1340,63 @@ class TestTheResamplerItself:
     def test_the_tie_rule_takes_the_smallest_tau(self) -> None:
         point = boot.select_operating_point(np.array([0.2, 0.5, 0.5, 0.1]))
         assert (point.tau_index, point.n_tau_at_max, point.tied) == (1, 2, True)
+
+    def test_a_declared_column_is_read_and_reports_no_tie(self) -> None:
+        """Nothing was selected, so there is no tie to report about the selection."""
+        curve = np.array([0.2, 0.5, 0.5, 0.1])
+        point = boot.operating_point(curve, 3)
+        assert (point.value, point.tau_index, point.n_tau_at_max, point.tied) == (
+            0.1,
+            3,
+            1,
+            False,
+        )
+        assert boot.operating_point(curve, None).tau_index == 1
+
+    def test_a_fixed_resample_never_leaves_the_declared_column(self) -> None:
+        """Every resample reads the same column, in both arms, and says so.
+
+        The value is checked against the same column of the same curve computed
+        the long way, so a resampler that maximised anyway would be caught on
+        the number and not only on the reported index.
+        """
+        n, taus = 9, 3
+        rng = np.random.default_rng(6)
+        tp = np.sort(rng.uniform(0, 5, size=(n, taus)), axis=1)[:, ::-1]
+        pred = tp + 3.0
+        gt = np.full(n, 6.0)
+        a = boot.PanelArrays(tuple(f"P{i}" for i in range(n)), tp, pred, gt)
+        b = boot.PanelArrays(a.accessions, tp * 0.6, pred, gt)
+        draws = boot.paired_bootstrap(a, b, n_resamples=500, seed=3, tau_index=2)
+        assert np.all(draws.a_tau_index == 2)
+        assert np.all(draws.b_tau_index == 2)
+        assert boot.switched_fraction(draws.a_tau_index, 2) == 0.0
+        reselected = boot.paired_bootstrap(a, b, n_resamples=500, seed=3)
+        assert float(np.abs(draws.deltas - reselected.deltas).max()) > 0.0, (
+            "the declared column produced the same draws as re-selection, so tau_index "
+            "was accepted and then ignored"
+        )
+
+    def test_the_jackknife_follows_the_resample_to_the_declared_column(self) -> None:
+        """The acceleration is about the statistic being reported, not another one.
+
+        A jackknife that maximises over tau while the resample holds a column
+        measures the influence of one protein on a different statistic. It
+        would still be finite and the BCa endpoints would still move, so the
+        only symptom would be an interval corrected in the wrong direction.
+        """
+        n, taus = 7, 3
+        rng = np.random.default_rng(7)
+        tp = np.sort(rng.uniform(0, 4, size=(n, taus)), axis=1)[:, ::-1]
+        pred = tp + 2.0
+        gt = np.full(n, 5.0)
+        a = boot.PanelArrays(tuple(f"P{i}" for i in range(n)), tp, pred, gt)
+        b = boot.PanelArrays(a.accessions, tp * 0.5, pred, gt)
+        fast = boot.jackknife_deltas(a, b, tau_index=1)
+        for i in range(n):
+            keep = np.array([j for j in range(n) if j != i])
+            slow = boot.panel_curve(a.take(keep))[1] - boot.panel_curve(b.take(keep))[1]
+            assert fast[i] == pytest.approx(slow, abs=1e-12)
 
     def test_the_pairing_is_one_draw_used_twice(self) -> None:
         """Two arms differing by a constant on every protein have a constant delta.

@@ -53,7 +53,7 @@ __all__ = [
     "SplitUndecidedError",
     "UnknownReleaseError",
     "UnknownSplitError",
-    "COMPARABLE_WINDOW",
+    "comparable_window",
     "adjustment_candidates",
     "menu_is_sufficient",
     "assert_may_inform",
@@ -223,22 +223,27 @@ class Split:
             )
 
 
-# The board's own window and everything after it. Decided, because it is not
-# ours to choose: it is wherever the board's mark falls and whatever has been
-# published since. Reported as a series, one point per release, crossing the
-# corpus contraction rather than stopping short of it, because a curve that
-# shows the discontinuity is more defensible than a single number that hides it.
+# The board's mark and everything after it. Decided, because it is not ours to
+# choose: it is wherever the mark falls and whatever has been published since.
+# Reported as a series, one point per release, crossing the corpus contraction
+# rather than stopping short of it, because a curve that shows the discontinuity
+# is more defensible than a single number that hides it.
 #
-# The series STARTS at the window ending at the board's mark, not at the mark.
-# That window is the one the board scored, so it is the only point comparable
-# to anyone else's number, and a series that excluded it would report no
-# comparable point at all. It also fixes where the adjustment set has to stop:
-# strictly earlier, or the champion would be selected on the window it is then
-# validated against.
-_VALIDATION_WINDOWS = consecutive_windows(
-    RELEASES[RELEASES.index(release(BOARD_MARK)) - 1].identifier,
-    RELEASES[-1].identifier,
-)
+# THE SERIES STARTS AT THE MARK, NOT ONE WINDOW EARLIER. It used to start at the
+# window ENDING at the mark, on the reasoning that that window was the one the
+# board scored. That was wrong, and wrong in the direction that destroys the
+# design: the window ending at the mark is 226->227, which
+# ``E2E-CANONICAL-RUN.md`` section 3 fixed on 2026-07-27 as the TUNE window, the
+# one every parameter and threshold is selected on. Putting it in the validation
+# split classified the selection set as the holdout, so a caller asking whether
+# it could inform a hyperparameter got a :class:`SplitLeakError` about the very
+# window the author fixed for that purpose, and the two halves of the temporal
+# design were exchanged.
+#
+# The author's rule is "nothing after 227 informs a choice". A window ending AT
+# the mark satisfies it; a window starting at the mark does not. That is the
+# whole of the boundary, and it is what this now encodes.
+_VALIDATION_WINDOWS = consecutive_windows(BOARD_MARK, RELEASES[-1].identifier)
 
 _SPLITS: dict[SplitName, Split] = {
     SplitName.TRAIN: Split(
@@ -262,17 +267,24 @@ _SPLITS: dict[SplitName, Split] = {
             {"model_fitting", "hyperparameters", "thresholds", "design", "champion_choice"}
         ),
         balanced=True,
-        windows=None,
-        undecided_because=(
-            "The adjustment windows are chosen for representativeness, and nobody "
-            "knows which are representative until additions and removals have been "
-            "decomposed per release. The obvious choice, the single window ending "
-            "at the board's mark, is the worst available: that window is one of the "
-            "two roughly thirty percent corpus contractions, so selecting champions "
-            "on it would tune against an anomaly and then validate on normal "
-            "accretion. Decide it from the decomposition, then write the windows "
-            "here."
-        ),
+        # DECIDED BY THE AUTHOR 2026-07-27, in E2E-CANONICAL-RUN.md section 3:
+        # "TUNE window: 226 -> 227. Every parameter, threshold and design
+        # decision is selected here. Nothing after 227 informs a choice."
+        #
+        # This registry previously refused to name these windows, on the
+        # reasoning that the window ending at the mark is one of the two roughly
+        # thirty percent contractions and would tune against an anomaly. That
+        # reasoning is sound and the author overrode it knowingly: the window is
+        # the one adjacent to the mark, so it is the most representative of the
+        # regime the frozen champion will actually meet, and the contraction is
+        # a property of that regime rather than a distortion of it.
+        #
+        # The objection survives as a caution rather than a refusal, and it is
+        # why :func:`adjustment_candidates` still exists: a decision that also
+        # holds on an earlier window is better evidence than one selected on a
+        # single contraction, and the menu says which earlier windows the
+        # release table can currently offer. Today it offers none.
+        windows=(ReleaseWindow("v226", "v227"),),
     ),
     SplitName.VALIDATION: Split(
         name=SplitName.VALIDATION,
@@ -285,11 +297,33 @@ _SPLITS: dict[SplitName, Split] = {
     ),
 }
 
-#: The window other methods are scored on, and therefore the only point in the
-#: validation series that is comparable to anyone else's number. Every other
-#: point is characterisation and is labelled as such, because a series with no
-#: designated headline invites the reader to choose the flattering point.
-COMPARABLE_WINDOW = _VALIDATION_WINDOWS[0]
+def comparable_window() -> ReleaseWindow:
+    """The one point of the validation series that supports a competitive claim.
+
+    Raises, because it is not decided, and the decision is not this module's to
+    take. ``E2E-CANONICAL-RUN.md`` section 3 requires that exactly one point be
+    designated -- "a series with no designated headline invites the reader to
+    pick the flattering point" -- and its section 9 still lists the frame as an
+    open decision even though section 3 fixed the rest of it.
+
+    The difficulty is concrete rather than procedural. The board's own window is
+    whatever the board scored, and the laboratory's LAFA-aligned artefacts are
+    named for **227->230**, which spans three consecutive releases and is
+    therefore not a member of :data:`_VALIDATION_WINDOWS` at all. So the
+    designated point is either a window this series does not contain, or the
+    first point of the series, and nothing in the record settles which.
+
+    This used to be a constant equal to the first validation window, which under
+    the old off-by-one boundary was 226->227: the TUNE window, published as the
+    number other methods are compared against.
+    """
+    raise SplitUndecidedError(
+        "the comparable window is not decided. The series runs "
+        f"{_VALIDATION_WINDOWS[0]} to {_VALIDATION_WINDOWS[-1]}, and the board's "
+        "own frame is recorded elsewhere as 227->230, which spans three of those "
+        "windows and is not one of them. Designate the point explicitly, in the "
+        "campaign document, and write it here."
+    )
 
 
 def resolve_split(name: str | SplitName) -> Split:
@@ -323,18 +357,23 @@ def adjustment_candidates() -> tuple[ReleaseWindow, ...]:
     guards, and a caller that treats the whole menu as the adjustment set has
     made that decision by accident.
 
-    The cut-off is the start of the comparable window, not the board's mark. A
-    window that ended at the mark would be the very window the board scored, so
-    a champion selected on it would then be validated against it.
+    The cut-off is the board's mark. The author's rule is that nothing after the
+    mark informs a choice, so a window ending AT the mark satisfies it and a
+    window starting at the mark does not. This used to cut off one window
+    earlier, which excluded the tune window from its own menu.
 
-    The menu is currently **empty**, and that is not a defect in this function,
-    it is the finding: the release table begins at the comparable window's own
-    start, so nothing earlier exists to select on. **A representative adjustment
-    set cannot be assembled from the releases currently in the table.** Releases
-    preceding it have to be ingested first. :func:`menu_is_sufficient` is the
-    check to gate on rather than reading this docstring.
+    The menu now holds exactly **one** window, 226->227, which is the tune
+    window itself, so it offers no second window to check a decision against.
+    That is the finding rather than a defect here: the release table begins at
+    v226, so **there is nothing earlier in it to widen the tune set with**, and
+    a decision selected on 226->227 cannot currently be shown to hold anywhere
+    else. Since 226->227 is itself one of the two roughly thirty percent
+    contractions, that is a real exposure and not a formality. Releases
+    preceding v226 have to be ingested to close it.
+    :func:`menu_is_sufficient` is the check to gate on rather than this
+    docstring.
     """
-    cutoff = release(COMPARABLE_WINDOW.start).published
+    cutoff = release(BOARD_MARK).published
     return tuple(
         w
         for w in consecutive_windows(RELEASES[0].identifier, RELEASES[-1].identifier)
@@ -345,11 +384,17 @@ def adjustment_candidates() -> tuple[ReleaseWindow, ...]:
 def menu_is_sufficient() -> bool:
     """Whether the release table can express a representative adjustment set.
 
-    False while :func:`adjustment_candidates` offers fewer than two windows,
-    because a set of one is the single window ending at the board's mark, and
-    the campaign rules that one out explicitly: it is one of the two roughly
-    thirty percent corpus contractions, so selecting champions on it tunes
-    against an anomaly and then validates on normal accretion.
+    False while :func:`adjustment_candidates` offers fewer than two windows. A
+    menu of one is the tune window alone, so a decision selected on it cannot be
+    shown to hold on any other window that the leak rule admits. That matters
+    here more than it usually would, because the tune window is one of the two
+    roughly thirty percent corpus contractions: a decision tuned only there is
+    tuned on an anomalous release transition, and nothing in the table can
+    currently show whether it survives a normal one.
+
+    This does not block the campaign, which the author fixed on 226->227
+    knowingly. It records what that fixing costs, so the cost is visible rather
+    than discovered later.
     """
     return len(adjustment_candidates()) >= 2
 

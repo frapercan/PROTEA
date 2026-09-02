@@ -402,11 +402,24 @@ def all_strata() -> tuple[Stratum, ...]:
     This is an ordering key and not a reporting frame. The six axes cross to
     9,720 strata, and the evaluation set holds 6,216 proteins, so most of these
     can never be occupied and the cross is not a claim that they should be.
-    Measured on prot_t5 at K=30, the five protein-level axes admit 1,920
-    combinations and exactly 77 are populated, because length, homology,
-    taxonomy and propagation covary strongly. Report from
-    :func:`reportable_strata`, which enumerates what the data actually holds,
-    and use this only to sort what that returns.
+
+    The five protein-level axes admit 1,080 combinations, not the 1,800 a free
+    product of the enums would give, because homology and donor evidence are
+    coupled here rather than crossed: :attr:`HomologyBand.NONE` admits only
+    :attr:`DonorEvidence.NONE`, and each of the four bands that do have a donor
+    admits only EXPERIMENTAL or OTHER, never all three. That pair therefore
+    contributes 1 + 4x2 = 9 states rather than 15, and the protein-level count
+    is 4 lengths x 9 donor states x 6 taxonomy bands x 5 propagation bands =
+    1,080. The 9,720 above already implies it: 9 category-aspect pairs x 1,080.
+
+    Of those 1,080, exactly 77 were populated when this was last measured, on
+    prot_t5 at K=30, because length, homology, taxonomy and propagation covary
+    strongly. That measurement predates the campaign wipe of 2026-08-27 and no
+    result now in the database is older than the wipe, so the 77 describes a
+    window that no longer exists and has not been re-measured on the current
+    one. Read it as evidence that the populated fraction is small, not as a
+    current count. Report from :func:`reportable_strata`, which enumerates what
+    the data actually holds, and use this only to sort what that returns.
     """
     out: list[Stratum] = []
     for category in Category:

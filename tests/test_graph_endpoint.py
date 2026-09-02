@@ -39,9 +39,12 @@ from protea.api.routers._graph_edges import (
     strength_of,
 )
 from protea.api.routers._graph_panels import (
+    CrossedFrames,
     PANEL_KEYS,
+    CrossedDepthAxes,
     build_panels,
     panel_units_from_groundtruth,
+    separated_from_floor,
 )
 from protea.api.routers._graph_reads import (
     _PIVOT_ASPECTS,
@@ -148,10 +151,16 @@ def _client(record: dict[str, list[dict[str, Any]]]) -> tuple[TestClient, FakeSe
 
 
 def _panel_rows(levels: dict[str, float]) -> list[dict[str, Any]]:
-    """One scored row per (level, panel), all nine panels, one shared cohort."""
+    """One scored row per (level, panel), all nine panels, one shared cohort.
+
+    And one shared frame seal. A separation is asked inside a seal, so a fixture
+    without one is asking a question that cannot be answered rather than one
+    whose answer happens to be no.
+    """
     return [
         {
             "result_id": f"r-{name}",
+            "frame_digest": "f-one-frame",
             "scoring_name": name,
             "embedding_name": "esm2_650m",
             "depth": "10",
@@ -555,3 +564,246 @@ def test_the_floors_are_served_with_the_record_and_not_left_to_the_client() -> N
     assert populations[0] < populations[1]
     assert floors["target_effect"] > 0
     assert all(c["contrast"] for c in floors["classes"])
+
+
+# ── A retrieval depth and an evaluation cut are not one axis ──────────────────
+
+
+def _depth_rows(depths: dict[str, str]) -> list[dict[str, Any]]:
+    """One scored row per (arm, panel), the arms differing only in depth.
+
+    Depth is the only field that moves, so it is the only field the level is
+    named by and a level name here IS a depth. The scores rise with the key so
+    the first arm is always the loser: whatever else the comparison does, it
+    cannot come out False for want of a winner, which keeps the tests below
+    about the refusal and not about the arithmetic.
+    """
+    return [
+        {
+            "result_id": f"r-{name}",
+            # One frame, so these tests stay about the depth refusal. A separation
+            # now happens inside a seal, and a fixture without one is asking a
+            # question that cannot be answered rather than one whose answer is no.
+            "frame_digest": "f-one-frame",
+            "scoring_name": "composite",
+            "embedding_name": "esm2_650m",
+            "depth": depth,
+            "category": category,
+            "aspect": aspect,
+            "f_micro_w": 0.1 + 0.1 * i,
+            "tau": 0.5,
+            "n_at_tau": 950,
+            "coverage_at_tau": 0.95,
+        }
+        for i, (name, depth) in enumerate(depths.items())
+        for category, aspect in PANEL_KEYS
+    ]
+
+
+def test_a_ladder_of_cuts_over_one_retrieval_is_still_a_comparison() -> None:
+    """Cuts against cuts is one axis, and the surface answers it as before.
+
+    The refusal is about crossing two quantities, not about disliking one of
+    them. A truncation ladder is a real contrast between real numbers; what it
+    must not do is stand in for a retrieval result.
+    """
+    rows = _depth_rows({"shallow": "cut at sequence rank 2", "deep": "cut at sequence rank 30"})
+    assert separated_from_floor(rows, "cut at sequence rank 2") is True
+
+
+def test_a_floor_at_a_retrieval_depth_refuses_its_rivals_evaluation_cuts() -> None:
+    """The comparison this endpoint must not answer.
+
+    A retrieval depth decides which candidates were ever fetched; a cut only
+    truncates a list that was already retrieved and scored. Put on one ladder
+    they read as five settings of one knob, and the campaign published exactly
+    that reading once.
+    """
+    rows = _depth_rows({"retrieved": "retrieval depth 30", "cut": "cut at sequence rank 30"})
+    with pytest.raises(CrossedDepthAxes) as refusal:
+        separated_from_floor(rows, "retrieval depth 30")
+    message = str(refusal.value)
+    assert "retrieval depth" in message
+    assert "evaluation cut" in message
+    # The message has to say WHY, not merely that it declined: a reader who is
+    # told only 'refused' declares the other floor next and meets it again.
+    assert "truncat" in message
+
+
+def test_the_two_cuts_that_used_to_render_alike_are_two_levels() -> None:
+    """A k-position cut of 10 and a retrieval depth of 10 were both '10'.
+
+    Sixteen results of prediction set d5b634b2 sit in exactly this shape in the
+    record: retrieved at depth 10, evaluated both uncut and cut at k-position
+    10. Under the old rendering they shared a level name, so the floor matched
+    both sides and nothing was ever put against anything.
+    """
+    rows = _depth_rows({"cut": "cut at protein rank 10", "uncut": "retrieval depth 10"})
+    with pytest.raises(CrossedDepthAxes):
+        separated_from_floor(rows, "cut at protein rank 10")
+
+
+def test_a_crossed_ladder_reaches_the_reader_as_a_reason_and_not_a_500() -> None:
+    """The refusal is caught where it can be shown, and shown.
+
+    A page that answers with a stack trace teaches nobody anything, and one
+    that answers None teaches them that the record established nothing without
+    saying which question was wrong. The node comes out unmeasured, carries the
+    refusal as its reason, and the endpoint still serves.
+    """
+    record = populated_record({"composite": 0.1})
+    record["panels"] = _depth_rows(
+        {"retrieved": "retrieval depth 30", "cut": "cut at sequence rank 30"}
+    )
+    record["scoring"] = [
+        {
+            "id": "sc-composite",
+            "name": "composite",
+            "formula": "linear",
+            "weights": "{}",
+            "evidence_weights": "{}",
+            "params": "{}",
+            "results": 1,
+        },
+        {
+            "id": "sc-other",
+            "name": "other",
+            "formula": "linear",
+            "weights": "{}",
+            "evidence_weights": "{}",
+            "params": "{}",
+            "results": 1,
+        },
+    ]
+    record["floors"] = [
+        {
+            "node": "scoring",
+            "floor": "retrieval depth 30",
+            "name": "a ladder that crosses two quantities",
+        }
+    ]
+    client, _ = _client(record)
+    response = client.get("/v1/graph")
+    assert response.status_code == 200
+    node = next(n for n in response.json()["nodes"] if n["key"] == "scoring")
+    assert node["strength"] != MEASURED
+    assert "evaluation cut" in node["blocked_reason"]
+    assert "truncat" in node["blocked_reason"]
+
+
+
+class TestEveryNodeCanReachAMeasurement:
+    """The vocabulary promised `measured` and nine of ten nodes could not reach it.
+
+    Until 2026-09-02 `build_nodes` handed the floors dict to `_scoring_node`
+    alone. Every other builder constructed its Edge with `floor` left at its
+    default of None, so `strength_of` short-circuited to CHOSEN before it ever
+    reached the separation test -- whatever an `experiment_run` declared.
+
+    It was invisible from outside because the reasons a node gives are about its
+    levels, not about its floor, so a node with a declared floor and a real
+    contrast reported exactly what a node with neither reported. The first time
+    it mattered, a retriever contrast with nine of nine panels resolved and a
+    floor named in an experiment_run still read `chosen`, and the declaration
+    looked wrong when the surface was.
+
+    These tests are structural on purpose. Asserting the strength of a fixture
+    would pass again the moment somebody added an eleventh node and forgot it;
+    asserting that every builder takes the floors and that every one is given
+    them cannot.
+    """
+
+    def test_every_node_builder_accepts_the_floors(self) -> None:
+        import inspect
+
+        from protea.api.routers import _graph_nodes
+        from protea.api.routers._graph_edges import SPECS
+
+        builders = [
+            getattr(_graph_nodes, f"_{spec.key.replace('-', '_')}_node")
+            for spec in SPECS
+        ]
+        assert len(builders) == 10
+        for builder in builders:
+            params = inspect.signature(builder).parameters
+            assert "floors" in params, f"{builder.__name__} cannot see a declared floor"
+
+    def test_every_builder_is_handed_them_at_the_call_site(self) -> None:
+        """Taking the argument is worthless if the caller does not pass it."""
+        import ast
+        import inspect
+
+        from protea.api.routers import graph as graph_module
+        from protea.api.routers._graph_edges import SPECS
+
+        tree = ast.parse(inspect.getsource(graph_module))  # build_graph is where they are called
+        called_with_floors = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id.endswith("_node")
+            and any(isinstance(a, ast.Name) and a.id == "floors" for a in node.args)
+        }
+        expected = {f"_{spec.key.replace('-', '_')}_node" for spec in SPECS}
+        assert expected - called_with_floors == set(), (
+            f"these builders are never handed the floors: {sorted(expected - called_with_floors)}"
+        )
+
+
+class TestASeparationHappensInsideOneFrame:
+    """Two arms that were not scored under the same seal are not two levels.
+
+    Until 2026-09-02 `separated_from_floor` tested the declared floor against
+    every level that landed in the same panel, which is every arm the record
+    holds regardless of the window, the corpus or the accretion table behind it.
+    The first time a second frame existed it bit immediately: a retriever floor
+    on the 226->227 tune frame was being compared against arms from 220->227,
+    and the rivals that beat it in all nine panels were the other window's.
+
+    A panel key is a category and an aspect. It is not a frame.
+    """
+
+    def _rows(self, seal: str, levels: dict[str, float]) -> list[dict[str, Any]]:
+        rows = _panel_rows(levels)
+        for row in rows:
+            row["frame_digest"] = seal
+        return rows
+
+    def test_a_rival_from_another_frame_cannot_clear_the_floor(self) -> None:
+        """The defect, pinned: the outsider wins on every panel and counts for nothing."""
+        rows = self._rows("f-ours", {"floor-level": 0.10}) + self._rows(
+            "f-theirs", {"outsider": 0.90}
+        )
+        assert separated_from_floor(rows, "floor-level") is False
+
+    def test_a_rival_inside_the_frame_still_clears_it(self) -> None:
+        """The restriction is about provenance, not about refusing comparisons."""
+        rows = self._rows("f-ours", {"floor-level": 0.10, "rival": 0.30}) + self._rows(
+            "f-theirs", {"outsider": 0.90}
+        )
+        assert separated_from_floor(rows, "floor-level") is True
+
+    def test_an_unsealed_floor_refuses_rather_than_reporting_no_separation(self) -> None:
+        """Returning False would report a comparison that was never made.
+
+        An unstamped marker is not a matching one -- the rule
+        seal_evaluation_frames states and refuses on -- so the honest answer is
+        that the question cannot be asked yet.
+        """
+        rows = _panel_rows({"floor-level": 0.10, "rival": 0.30})
+        for row in rows:
+            row.pop("frame_digest", None)
+        with pytest.raises(CrossedFrames, match="no frame seal"):
+            separated_from_floor(rows, "floor-level")
+
+    def test_a_floor_that_spans_two_frames_is_not_one_population(self) -> None:
+        """Picking one seal would publish a number whose population nobody chose."""
+        # A second level in each frame so the level name is the scoring name and
+        # the two floors render alike; with one level nothing varies and the name
+        # falls back to the whole tuple.
+        rows = self._rows("f-ours", {"floor-level": 0.10, "rival": 0.30}) + self._rows(
+            "f-theirs", {"floor-level": 0.90, "rival": 0.95}
+        )
+        with pytest.raises(CrossedFrames, match="different frame"):
+            separated_from_floor(rows, "floor-level")
