@@ -679,3 +679,62 @@ def test_a_crossed_ladder_reaches_the_reader_as_a_reason_and_not_a_500() -> None
     assert "evaluation cut" in node["blocked_reason"]
     assert "truncat" in node["blocked_reason"]
 
+
+
+class TestEveryNodeCanReachAMeasurement:
+    """The vocabulary promised `measured` and nine of ten nodes could not reach it.
+
+    Until 2026-09-02 `build_nodes` handed the floors dict to `_scoring_node`
+    alone. Every other builder constructed its Edge with `floor` left at its
+    default of None, so `strength_of` short-circuited to CHOSEN before it ever
+    reached the separation test -- whatever an `experiment_run` declared.
+
+    It was invisible from outside because the reasons a node gives are about its
+    levels, not about its floor, so a node with a declared floor and a real
+    contrast reported exactly what a node with neither reported. The first time
+    it mattered, a retriever contrast with nine of nine panels resolved and a
+    floor named in an experiment_run still read `chosen`, and the declaration
+    looked wrong when the surface was.
+
+    These tests are structural on purpose. Asserting the strength of a fixture
+    would pass again the moment somebody added an eleventh node and forgot it;
+    asserting that every builder takes the floors and that every one is given
+    them cannot.
+    """
+
+    def test_every_node_builder_accepts_the_floors(self) -> None:
+        import inspect
+
+        from protea.api.routers import _graph_nodes
+        from protea.api.routers._graph_edges import SPECS
+
+        builders = [
+            getattr(_graph_nodes, f"_{spec.key.replace('-', '_')}_node")
+            for spec in SPECS
+        ]
+        assert len(builders) == 10
+        for builder in builders:
+            params = inspect.signature(builder).parameters
+            assert "floors" in params, f"{builder.__name__} cannot see a declared floor"
+
+    def test_every_builder_is_handed_them_at_the_call_site(self) -> None:
+        """Taking the argument is worthless if the caller does not pass it."""
+        import ast
+        import inspect
+
+        from protea.api.routers import graph as graph_module
+        from protea.api.routers._graph_edges import SPECS
+
+        tree = ast.parse(inspect.getsource(graph_module))  # build_graph is where they are called
+        called_with_floors = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id.endswith("_node")
+            and any(isinstance(a, ast.Name) and a.id == "floors" for a in node.args)
+        }
+        expected = {f"_{spec.key.replace('-', '_')}_node" for spec in SPECS}
+        assert expected - called_with_floors == set(), (
+            f"these builders are never handed the floors: {sorted(expected - called_with_floors)}"
+        )

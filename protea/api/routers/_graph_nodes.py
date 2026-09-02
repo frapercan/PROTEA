@@ -34,7 +34,9 @@ def _window_span(head: dict[str, Any]) -> dict[str, Any] | None:
     return {"from": start, "to": end, "days": days, "months": round(days / 30.44, 1)}
 
 
-def _frame_node(record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None) -> Built:
+def _frame_node(
+    record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None, floors: dict[str, str]
+) -> Built:
     """The frame's own decision: which accretion regime weights the terms.
 
     Eligibility is the whole of the argument here. An accretion table computed
@@ -51,6 +53,8 @@ def _frame_node(record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | 
     used = [a for a in record["accretion"] if a["in_use"]]
     pool = eligible or record["accretion"]
     results = [r for r in record["results"] if head and r["evaluation_set_id"] == head["id"]]
+    floor = floors.get("frame")
+    separated, _crossed = _separation(record["panels"], floor)
     edge = Edge(
         produced=head is not None,
         instantiated=len(used),
@@ -58,6 +62,8 @@ def _frame_node(record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | 
         scored=len(used) if results else 0,
         results=len(results),
         forced=len(eligible) == 1 and bool(used) and used[0]["id"] == eligible[0]["id"],
+        floor=floor,
+        separated=separated,
     )
     if head is None:
         reason = "No evaluation set exists, so there is no window for a number to be read in."
@@ -106,7 +112,7 @@ _SUBSTRATE_FIELDS: tuple[str, ...] = (
 )
 
 
-def _substrate_node(record: dict[str, list[dict[str, Any]]]) -> Built:
+def _substrate_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """Which representation the neighbourhood is computed in.
 
     Available counts the configurations that hold stored embeddings, not the
@@ -119,6 +125,8 @@ def _substrate_node(record: dict[str, list[dict[str, Any]]]) -> Built:
     producible = [r for r in rows if r["producible"]]
     used_ids = {r["id"] for r in used}
     results = [r for r in record["results"] if r["embedding_config_id"] in used_ids]
+    floor = floors.get("substrate")
+    separated, _crossed = _separation(record["panels"], floor)
     edge = Edge(
         produced=bool(producible),
         instantiated=len(used),
@@ -130,6 +138,8 @@ def _substrate_node(record: dict[str, list[dict[str, Any]]]) -> Built:
         # single instantiated level here is a value nobody chose rather than one
         # the frame fixed.
         forced=False,
+        floor=floor,
+        separated=separated,
     )
     if not used:
         reason = "No prediction set names a representation, so nothing has been retrieved against."
@@ -181,7 +191,9 @@ _BANK_FIELDS: tuple[str, ...] = (
 )
 
 
-def _bank_node(record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None) -> Built:
+def _bank_node(
+    record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None, floors: dict[str, str]
+) -> Built:
     """Which corpus the donors come from, under which donor policy.
 
     The two are one node because they cannot be decided apart: a corpus and the
@@ -198,6 +210,8 @@ def _bank_node(record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | N
     used_ids = {p["annotation_set_id"] for p in sets}
     pinned = bool(eligible) and used_ids <= {b["id"] for b in eligible}
     policy_set = bool(sets) and not all(_policy_is_empty(p) for p in sets)
+    floor = floors.get("bank")
+    separated, _crossed = _separation(record["panels"], floor)
     edge = Edge(
         produced=bool(record["banks"]),
         instantiated=len(levels),
@@ -205,6 +219,8 @@ def _bank_node(record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | N
         scored=len({r["annotation_set_id"] for r in record["results"]}),
         results=len(record["results"]),
         forced=pinned and policy_set,
+        floor=floor,
+        separated=separated,
     )
     if not sets:
         reason = "No prediction set names a corpus, so no bank has been drawn from."
@@ -263,7 +279,7 @@ def _donor_required(record: dict[str, list[dict[str, Any]]]) -> bool:
     return any(row.get("is_nullable") == "NO" for row in record["donor_column"])
 
 
-def _retriever_node(record: dict[str, list[dict[str, Any]]]) -> Built:
+def _retriever_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """How candidates are drawn from the bank, and how deep.
 
     There is no catalogue of retrievers to choose from. Unlike a representation
@@ -278,6 +294,8 @@ def _retriever_node(record: dict[str, list[dict[str, Any]]]) -> Built:
     levels = {tuple(repr(p.get(f)) for f in _RETRIEVER_FIELDS) for p in sets}
     candidates = sum(int(c["candidates"]) for c in record["candidates"])
     depths = sorted({p["depth"] for p in sets if p["depth"]})
+    floor = floors.get("retriever")
+    separated, _crossed = _separation(record["panels"], floor)
     edge = Edge(
         produced=bool(sets),
         instantiated=len(levels),
@@ -285,6 +303,8 @@ def _retriever_node(record: dict[str, list[dict[str, Any]]]) -> Built:
         scored=len({r["prediction_set_id"] for r in record["results"]}),
         results=len(record["results"]),
         forced=False,
+        floor=floor,
+        separated=separated,
     )
     if not sets:
         reason = "No prediction set exists, so nothing has been retrieved."
@@ -320,7 +340,7 @@ def _artifacts(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     return record["artifacts"][0] if record["artifacts"] else {}
 
 
-def _generator_node(record: dict[str, list[dict[str, Any]]]) -> Built:
+def _generator_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """Whether any candidate arrives without a donor.
 
     A generator is the second half of a second flow: a source that proposes a
@@ -333,7 +353,15 @@ def _generator_node(record: dict[str, list[dict[str, Any]]]) -> Built:
     interpro = int(art.get("interpro_annotation") or 0)
     mappings = int(art.get("interpro_go_mapping") or 0)
     models = int(art.get("reranker_model") or 0)
-    edge = Edge(produced=bool(interpro and mappings), instantiated=0, available=0)
+    floor = floors.get("generator")
+    separated, _crossed = _separation(record["panels"], floor)
+    edge = Edge(
+        produced=bool(interpro and mappings),
+        instantiated=0,
+        available=0,
+        floor=floor,
+        separated=separated,
+    )
     schema = (
         "the candidate column naming the donor is NOT NULL, so a term that arrived without one "
         "has nowhere to be written, and "
@@ -451,7 +479,7 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
     )
 
 
-def _features_node(record: dict[str, list[dict[str, Any]]]) -> Built:
+def _features_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """Which per-candidate features enter a model.
 
     The features exist. Every candidate row carries the families the run asked
@@ -470,7 +498,15 @@ def _features_node(record: dict[str, list[dict[str, Any]]]) -> Built:
             if f.strip()
         }
     )
-    edge = Edge(produced=models > 0, instantiated=0, available=len(families))
+    floor = floors.get("features")
+    separated, _crossed = _separation(record["panels"], floor)
+    edge = Edge(
+        produced=models > 0,
+        instantiated=0,
+        available=len(families),
+        floor=floor,
+        separated=separated,
+    )
     named = ", ".join(families) if families else "none"
     reason = (
         f"Candidates carry the feature families their run asked for ({named}), but choosing "
@@ -484,13 +520,22 @@ def _features_node(record: dict[str, list[dict[str, Any]]]) -> Built:
     )
 
 
-def _reranking_node(record: dict[str, list[dict[str, Any]]]) -> Built:
+def _reranking_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """Whether a model reorders the candidates."""
     art = _artifacts(record)
     models = int(art.get("reranker_model") or 0)
     reranked = int(art.get("reranked_results") or 0)
     used = len({r["reranker_model_id"] for r in record["results"] if r["reranker_model_id"]})
-    edge = Edge(produced=models > 0, instantiated=used, available=models, results=reranked)
+    floor = floors.get("reranking")
+    separated, _crossed = _separation(record["panels"], floor)
+    edge = Edge(
+        produced=models > 0,
+        instantiated=used,
+        available=models,
+        results=reranked,
+        floor=floor,
+        separated=separated,
+    )
     reason = (
         f"No model exists to reorder with: reranker_model holds {models} rows and {reranked} "
         "published results name one. The candidate order is the retriever's, unchanged."
@@ -516,11 +561,19 @@ def _flow_count(record: dict[str, list[dict[str, Any]]]) -> int:
     return len({p["bank_source"] for p in record["prediction_sets"] if p["bank_source"]})
 
 
-def _combination_node(record: dict[str, list[dict[str, Any]]]) -> Built:
+def _combination_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """How two or more flows are merged into one answer."""
     flows = _flow_count(record)
     sources = sorted({p["bank_source"] for p in record["prediction_sets"] if p["bank_source"]})
-    edge = Edge(produced=flows >= 2, instantiated=0, available=flows)
+    floor = floors.get("combination")
+    separated, _crossed = _separation(record["panels"], floor)
+    edge = Edge(
+        produced=flows >= 2,
+        instantiated=0,
+        available=flows,
+        floor=floor,
+        separated=separated,
+    )
     reason = (
         f"{flows} {'flow is' if flows == 1 else 'flows are'} instantiated, so there is nothing "
         f"to combine. Every prediction set draws from a single kind of source "
@@ -534,10 +587,18 @@ def _combination_node(record: dict[str, list[dict[str, Any]]]) -> Built:
     )
 
 
-def _routing_node(record: dict[str, list[dict[str, Any]]]) -> Built:
+def _routing_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """Which flow answers which panel."""
     flows = _flow_count(record)
-    edge = Edge(produced=flows >= 2, instantiated=0, available=flows)
+    floor = floors.get("routing")
+    separated, _crossed = _separation(record["panels"], floor)
+    edge = Edge(
+        produced=flows >= 2,
+        instantiated=0,
+        available=flows,
+        floor=floor,
+        separated=separated,
+    )
     reason = (
         f"Routing picks a flow per panel and there {'is' if flows == 1 else 'are'} {flows} of "
         "them, so no panel has a choice to make. It is downstream of combination, which is "
