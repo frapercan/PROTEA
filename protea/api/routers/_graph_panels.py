@@ -302,6 +302,17 @@ def build_panels(
     ]
 
 
+class CrossedFrames(ValueError):
+    """A declared floor names arms that were not scored under the same seal.
+
+    Raised rather than resolved, and raised at the point of comparison rather
+    than when the record is read, for the same reason CrossedDepthAxes is: the
+    record is allowed to hold arms from many frames, and only a comparison that
+    reaches across them is wrong. Picking one of the seals would publish a
+    number whose population nobody chose.
+    """
+
+
 class CrossedDepthAxes(ValueError):
     """A comparison was asked to put a retrieval depth against an evaluation cut.
 
@@ -347,6 +358,36 @@ def _refuse_crossed_depths(
     )
 
 
+def _within_the_floors_frame(
+    rows: list[dict[str, Any]], floor: str, fields: tuple[str, ...]
+) -> list[dict[str, Any]]:
+    """The rows that share the floor's seal, or a refusal saying why there are none.
+
+    Split out of :func:`separated_from_floor` to keep it inside the smell budget,
+    and it earns its own name: this is the whole of the rule that a comparison
+    happens inside one frame.
+    """
+    seals = {r.get("frame_digest") for r in rows if _level_name(r, fields) == floor}
+    seals.discard(None)
+    if len(seals) > 1:
+        raise CrossedFrames(
+            f"the declared floor {floor!r} appears under {len(seals)} different frame "
+            f"seals, so it does not name one comparable population: "
+            f"{', '.join(sorted(str(s) for s in seals))}. A level that spans two "
+            f"frames cannot be the thing others are measured against."
+        )
+    if not seals:
+        raise CrossedFrames(
+            f"the declared floor {floor!r} carries no frame seal, so nothing can be "
+            f"shown to share a frame with it. An unstamped marker is not a matching "
+            f"one: returning 'did not separate' here would report a comparison that "
+            f"was never made. Seal the results with seal_evaluation_frames and ask "
+            f"again."
+        )
+    seal = next(iter(seals))
+    return [r for r in rows if r.get("frame_digest") == seal]
+
+
 def separated_from_floor(rows: list[dict[str, Any]], floor: str) -> bool:
     """Whether some level clears the floor on every panel that carries both.
 
@@ -362,9 +403,26 @@ def separated_from_floor(rows: list[dict[str, Any]], floor: str) -> bool:
             because the record happens to contain both kinds somewhere.
     """
     fields = level_fields(rows)
+    # THE COMPARISON IS INSIDE ONE FRAME OR IT IS NOT A COMPARISON.
+    #
+    # This used to test the floor against every level that happened to land in
+    # the same panel, which is every arm the record holds regardless of the
+    # window, the corpus or the accretion table it was scored under. On
+    # 2026-09-02 a retriever floor on the 226->227 tune frame was being compared
+    # against arms from 220->227, and the rivals that beat it in all nine panels
+    # were from the other window. A panel key is a category and an aspect; it is
+    # not a frame.
+    #
+    # The seal is the project's own answer to when two numbers may be compared,
+    # and this function was the one place that asked the question and did not
+    # consult it. An unsealed row is EXCLUDED rather than treated as matching:
+    # an unstamped marker is not a matching one, which is the rule
+    # seal_evaluation_frames states and refuses on.
+    comparable = _within_the_floors_frame(rows, floor, fields)
+
     tested = 0
     for key in PANEL_KEYS:
-        here = [r for r in rows if (str(r.get("category")), str(r.get("aspect"))) == key]
+        here = [r for r in comparable if (str(r.get("category")), str(r.get("aspect"))) == key]
         at_floor = [r for r in here if _level_name(r, fields) == floor]
         rivals = [r for r in here if _level_name(r, fields) != floor]
         if not at_floor or not rivals:
