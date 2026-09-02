@@ -29,6 +29,7 @@ from protea.core.operations._evaluation_artifacts import (
     resolve_ia_file,
     resolve_obo,
 )
+from protea.core.operations._holdout_guard import refuse_if_it_reads_the_holdout
 from protea.core.operations._run_cafa_eval_driver import (
     CafaEvalRunContext,
     evaluate_all_settings,
@@ -72,6 +73,8 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
 
 
     evaluation_set_id: str
+    #: Permits the single pass on the holdout; see split_registry.HOLDOUT_WAIVER.
+    holdout_waiver: str | None = None
     prediction_set_id: str
     max_distance: float | None = Field(default=None, ge=0.0, le=2.0)
     max_k_position: int | None = Field(
@@ -422,6 +425,9 @@ class RunCafaEvaluationOperation:
         pred_set = session.get(PredictionSet, pred_set_id)
         if pred_set is None:
             raise ValueError(f"PredictionSet {pred_set_id} not found")
+        refuse_if_it_reads_the_holdout(
+            session, eval_set.new_annotation_set_id, waiver=p.holdout_waiver, context="scoring at"
+        )
         refuse_uncertifiable_encoding(session, pred_set, eval_set)
         # Before anything is staged or scored: a sequence depth asked of
         # candidates that carry no sequence rank selects no rows at all,
