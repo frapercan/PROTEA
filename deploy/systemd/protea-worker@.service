@@ -24,6 +24,11 @@ EnvironmentFile=/home/bioxaxi2/Thesis-laptop/PROTEA/.env
 # draining a multi-hour job). Non-zero ExecStartPre fails the unit cleanly and
 # leaves the running process untouched -- fail-safe, not fail-open.
 ExecStartPre=/home/bioxaxi2/Thesis-laptop/PROTEA/deploy/systemd/protea-guard-queue.sh %I
+# The second half of the same refusal. The queue guard stops a duplicate
+# worker; this one stops a worker on a revision nobody declared. Both are
+# ExecStartPre so a non-zero exit leaves the unit down rather than running
+# something wrong: a silent wrong consumer is worse than no consumer.
+ExecStartPre=/home/bioxaxi2/Thesis-laptop/PROTEA/deploy/systemd/protea-guard-revision.sh
 
 ExecStart=/home/bioxaxi2/Thesis-laptop/PROTEA/.venv/bin/python scripts/worker.py --queue %I
 
