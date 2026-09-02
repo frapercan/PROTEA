@@ -138,6 +138,34 @@ class AuditEvaluationFramesPayload(ProteaPayload, frozen=True):
     max_combinations: PositiveInt = 200
 
 
+def _emit_verdict(emit: EmitFn, needs_declaration: int, deletable_only: int) -> int:
+    """Say what the work is, and return the count of what cannot be redone.
+
+    Split out of :meth:`AuditEvaluationFramesOperation.execute` only because the
+    method outgrew the smell budget; the reasoning is the point and belongs
+    beside the sentence it produces.
+
+    The verdict names a missing DECLARATION, not a missing computation. Nothing
+    in this platform computes ``frame``: it is a payload field that
+    ``run_cafa_evaluation`` and ``batch_rescore_evaluation`` stamp from whatever
+    the dispatcher declared. So these rows need someone to decide which frame
+    they belong to before re-running them means anything. The wording this
+    replaced promised that a recomputation would supply the frame, which sends a
+    reader looking for a step in the pipeline that has never existed.
+    """
+    emit(
+        "audit.verdict",
+        f"{needs_declaration} rows carry no frame and can still be re-run with one "
+        f"declared; {deletable_only} can only be deleted",
+        {
+            "needs_frame_declaration": needs_declaration,
+            "deletable_only": deletable_only,
+        },
+        "info",
+    )
+    return deletable_only
+
+
 class AuditEvaluationFramesOperation(Operation):
     name = "audit_evaluation_frames"
     description = (
@@ -179,27 +207,7 @@ class AuditEvaluationFramesOperation(Operation):
             "info",
         )
 
-        # The number that decides the shape of the work, stated once and plainly
-        # so nobody has to derive it from the rest -- and counted rather than
-        # derived, for the reason set out above _REACHABLE.
-        #
-        # It names a missing declaration, not a missing computation. Nothing
-        # computes ``frame``; a re-run stamps whatever the dispatcher declared,
-        # so these rows need someone to decide which frame they belong to before
-        # re-running them means anything. The old wording promised that a
-        # recomputation would supply the frame, which sends a reader looking for
-        # a step in the pipeline that has never existed.
-        deletable_only = n_rows - recomputable
-        emit(
-            "audit.verdict",
-            f"{needs_declaration} rows carry no frame and can still be re-run with one "
-            f"declared; {deletable_only} can only be deleted",
-            {
-                "needs_frame_declaration": needs_declaration,
-                "deletable_only": deletable_only,
-            },
-            "info",
-        )
+        deletable_only = _emit_verdict(emit, needs_declaration, n_rows - recomputable)
 
         return OperationResult(
             result={
