@@ -15,6 +15,7 @@ from protea.core.evaluation import (
     groundtruth_key_for,
     serialize_evaluation_data_to_parquet,
 )
+from protea.core.operations._holdout_guard import refuse_if_the_set_reads_the_holdout
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -42,6 +43,11 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     # | ``None`` (unbound). Defaults to None so existing callers are
     # unaffected.
     window_role: str | None = None
+    #: The sentence a caller must repeat verbatim to build a window that reads
+    #: past the board's mark. Deliberately not a boolean: the holdout is meant
+    #: to be scored once, at the end, and a flag that can be set by reflex is a
+    #: flag that gets set by reflex. See split_registry.HOLDOUT_WAIVER.
+    holdout_waiver: str | None = None
 
     @field_validator("old_annotation_set_id", "new_annotation_set_id", mode="before")
     @classmethod
@@ -117,6 +123,10 @@ class GenerateEvaluationSetOperation:
         new_set_id = uuid.UUID(p.new_annotation_set_id)
         old_set, new_set, old_native, new_native, pivot_id = self._resolve_eval_inputs(
             session, p, old_set_id, new_set_id
+        )
+        # Before anything is built: the holdout is scored once, at the end.
+        refuse_if_the_set_reads_the_holdout(
+            new_set, waiver=p.holdout_waiver, context="building the window ending at"
         )
         same_snapshot = old_native == new_native == pivot_id
         mode = "same_snapshot" if same_snapshot else "reconciled"

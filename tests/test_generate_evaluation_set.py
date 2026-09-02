@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -105,7 +106,18 @@ class TestGenerateEvaluationSetPayload:
 
 
 def _make_annotation_set(snapshot_id: uuid.UUID) -> MagicMock:
+    """A stand-in corpus, and it has to say when it was published.
+
+    A MagicMock answers every attribute with another MagicMock, so a corpus
+    whose publication date is left unspecified used to compare as "some date" to
+    anything that asked. The holdout guard asks, and it refuses rather than
+    guesses: a corpus with no readable date is a corpus that cannot be placed
+    either side of the board's mark. Dated well before the mark here, since
+    these tests are about reconciliation and not about the reserve.
+    """
     s = MagicMock()
+    s.source_published_at = date(2024, 4, 16)
+    s.source_version = "220"
     s.ontology_snapshot_id = snapshot_id
     return s
 
