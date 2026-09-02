@@ -8,10 +8,19 @@ This module holds the per-panel driver so that
 :mod:`protea.core.operations.compare_paired_panels` can stay the payload, the
 provenance gate and the emissions, and so that the arithmetic can be exercised
 on a ten-protein panel written by hand without a job, a session or a store.
+
+It also holds :func:`load_side`, which builds a :class:`Side` out of an
+artifacts root or the object store, and :func:`resolve_tau_index`, which turns
+a declared threshold into a column of that side's grid. Both are constructors
+for objects defined here rather than steps of the operation, and neither is a
+payload, a provenance gate or an emission, so they sit beside what they build.
 """
 
 from __future__ import annotations
 
+import contextlib
+import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,11 +29,20 @@ import numpy as np
 
 from protea.core.operations import _paired_panels_bootstrap as boot
 from protea.core.operations._paired_panels_artifact import (
+    GRID_FILENAME,
+    LEGACY_FILENAME,
     NAMESPACE_TO_CAFA,
     GridMeta,
     PanelComparabilityError,
     SettingGrid,
+    ThresholdGridUnavailableError,
+    assert_settings_agree,
+    load_setting_grid,
+    read_grid_metadata,
+    require_variant,
+    resolve_setting_file,
 )
+from protea.core.operations._run_cafa_helpers import eval_artifact_key
 
 # The exact-path control. ``_micro`` is the function behind every published
 # ``f_micro_w`` cell in this project; the vectorised curve in the bootstrap
@@ -65,6 +83,16 @@ class PanelConfig:
     #: The effect the caller came to detect. Without it a null cannot be read:
     #: see :func:`verdict_for`.
     effect_of_interest: float | None = None
+    #: The column the estimator is read at, or ``None`` to re-select the
+    #: operating point inside every resample. One field rather than a word
+    #: beside an index: the two cannot then disagree, and every consumer of it
+    #: below needs the index and not the word.
+    tau_index: int | None = None
+
+    @property
+    def operating_point(self) -> str:
+        """The vocabulary word for what :attr:`tau_index` says, never stored twice."""
+        return boot.RESELECTED_PER_RESAMPLE if self.tau_index is None else boot.FIXED
 
 
 @dataclass
@@ -91,6 +119,98 @@ class Side:
         cell = (blob.get(setting) or {}).get(aspect) or {}
         value = cell.get("f_micro_w")
         return None if value is None else float(value)
+
+
+def resolve_tau_index(
+    sides: tuple[Side, Side], operating_point: str, declared_tau: float | None
+) -> int | None:
+    """A declared threshold becomes a column here, once, or the run refuses.
+
+    Here and nowhere else, so everything downstream carries the index rather
+    than the float and no second site can re-derive it differently.
+
+    One index serves both arms and every setting because ``tau_grid`` is a
+    semantic comparability key: by the time this is called the artefact gates
+    have already refused two sides, or two settings of one side, that declare
+    different grids. Reading the grid off ``sides[0]`` is therefore a choice of
+    which copy to read and not a choice of which grid to use.
+    """
+    if operating_point != boot.FIXED:
+        return None
+    meta = sides[0].meta()
+    if meta is None:  # pragma: no cover - a side with no grid is refused earlier
+        raise PanelComparabilityError(
+            f"evaluation result {sides[0].result_id} declares no threshold grid, so a fixed "
+            f"operating point at tau {declared_tau} cannot be resolved to a column"
+        )
+    return meta.tau_index(float(declared_tau or 0.0))
+
+
+def _fetch_from_store(result_id: str, settings: tuple[str, ...], root: Path) -> None:
+    """Pull the grid file, and the legacy one only when there is no grid file.
+
+    The legacy table is fetched so a refusal can read "found the single-threshold
+    table" rather than "found nothing", which are different problems with
+    different fixes. It is fetched second and only on that path: every
+    evaluation result in the store has one, and downloading it beside a grid
+    file that supersedes it is a transfer per setting per run to support a
+    refusal that cannot be raised.
+    """
+    from protea.infrastructure.settings import load_settings
+    from protea.infrastructure.storage.factory import get_artifact_store
+
+    store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
+    for setting in settings:
+        for name in (GRID_FILENAME, LEGACY_FILENAME):
+            key = eval_artifact_key(uuid.UUID(result_id), f"{setting}/{name}")
+            if not store.exists(key):
+                continue
+            target = root / setting
+            target.mkdir(parents=True, exist_ok=True)
+            (target / name).write_bytes(store.get(key))
+            break
+
+
+def load_side(
+    result_id: str,
+    local_root: str | None,
+    provenance: dict[str, Any],
+    stack: contextlib.ExitStack,
+    spec: tuple[tuple[str, ...], str],
+) -> Side:
+    """Resolve where one arm's bytes are, then read and gate every setting."""
+    settings, variant = spec
+    if local_root:
+        root = Path(local_root)
+        if not root.is_dir():
+            raise ThresholdGridUnavailableError(
+                f"evaluation result {result_id}: artifacts_root {str(root)!r} is not a "
+                "directory. A root that does not exist resolves every setting to an absence "
+                "and would return a successful job with nine nulls, which is "
+                "indistinguishable from a comparison whose artefacts were never produced."
+            )
+    else:
+        root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="protea_panels_")))
+        _fetch_from_store(result_id, settings, root)
+    grids: dict[str, SettingGrid] = {}
+    for setting in settings:
+        path = resolve_setting_file(root, setting, result_id=result_id)
+        if path is None:
+            continue
+        meta = read_grid_metadata(path, setting, result_id=result_id)
+        require_variant(meta, variant, result_id=result_id)
+        grids[setting] = load_setting_grid(path, meta, variant=variant, result_id=result_id)
+    if not grids:
+        raise ThresholdGridUnavailableError(
+            f"evaluation result {result_id}: no {GRID_FILENAME} was found for any of the "
+            f"requested settings {list(settings)} under "
+            f"{str(root) if local_root else 'the artifact store'}. Nothing was read, so every "
+            "panel would report a null and the job would succeed: a mis-typed root, an "
+            "upload that never happened and a comparison of two real systems would all look "
+            "the same in the job list. Refusing and naming the precondition instead."
+        )
+    assert_settings_agree(result_id, {name: grid.meta for name, grid in grids.items()})
+    return Side(result_id, root, provenance, grids)
 
 
 def population_stats(
@@ -211,8 +331,43 @@ def exact_path_control(arrays: boot.PanelArrays, op: boot.OperatingPoint) -> Non
         )
 
 
+def estimator_parity(curve_own: np.ndarray, stored: float | None) -> bool | None:
+    """Do these components describe the run that published that cell.
+
+    Always against the MAXIMUM over the grid, whatever operating point the
+    caller declared for the comparison itself. The stored cell is an Fmax
+    number: it was published at the threshold that maximised the panel, so
+    under a fixed operating point the reported estimate is a different quantity
+    from it by construction and is expected to sit below it. Comparing the two
+    would turn this control into a guaranteed refusal of every fixed-tau
+    comparison; dropping it instead would retire the guard whose absence let a
+    wrong-tau slice sit unnoticed on exactly the runs that declare a tau.
+    Recomposing the maximum costs one argmax over a curve already in hand and
+    keeps the control answering its own question rather than a new one.
+
+    ``None`` when the result row carries no cell for this panel, which is a
+    third state and not a pass: nothing was checked.
+    """
+    if stored is None:
+        return None
+    published = boot.select_operating_point(curve_own)
+    if abs(published.value - stored) > STORED_PARITY_ATOL:
+        raise PanelComparabilityError(
+            f"recomposing the panel from the grid artefact gives {published.value:.6f} at "
+            f"its best threshold, where the evaluation result stores {stored:.4f}. The "
+            "components and the published number do not describe the same run; refusing "
+            "before any resampling, because this is the guard whose absence let a "
+            "wrong-tau slice sit unnoticed."
+        )
+    return True
+
+
 def arm_block(
-    shared: boot.PanelArrays, own: boot.PanelArrays, meta: GridMeta, stored: float | None
+    shared: boot.PanelArrays,
+    own: boot.PanelArrays,
+    meta: GridMeta,
+    stored: float | None,
+    tau_index: int | None,
 ) -> tuple[boot.OperatingPoint, dict[str, Any]]:
     """One arm's numbers, on the paired population and on its own.
 
@@ -221,21 +376,18 @@ def arm_block(
     paired estimate would put a number in a table that does not match the one
     already published under the same panel name, which is a plausible number
     over the wrong population.
+
+    ``tau_index`` is the caller's operating point and governs every number
+    reported here. It does not govern :func:`estimator_parity`, which explains
+    there why it cannot.
     """
-    op_shared = boot.select_operating_point(boot.panel_curve(shared))
-    op_own = boot.select_operating_point(boot.panel_curve(own))
+    curve_shared = boot.panel_curve(shared)
+    curve_own = boot.panel_curve(own)
+    op_shared = boot.operating_point(curve_shared, tau_index)
+    op_own = boot.operating_point(curve_own, tau_index)
     exact_path_control(shared, op_shared)
     exact_path_control(own, op_own)
-    parity: bool | None = None
-    if stored is not None:
-        parity = abs(op_own.value - stored) <= STORED_PARITY_ATOL
-        if not parity:
-            raise PanelComparabilityError(
-                f"recomposing the panel from the grid artefact gives {op_own.value:.6f} where "
-                f"the evaluation result stores {stored:.4f}. The components and the published "
-                "number do not describe the same run; refusing before any resampling, because "
-                "this is the guard whose absence let a wrong-tau slice sit unnoticed."
-            )
+    parity = estimator_parity(curve_own, stored)
     scored = int(np.count_nonzero(shared.pred[:, op_shared.tau_index] > 0.0))
     scored_own = int(np.count_nonzero(own.pred[:, op_own.tau_index] > 0.0))
     return op_shared, {
@@ -342,8 +494,10 @@ def resample(
     """
     delta = float(ops[0].value - ops[1].value)
     seed = np.random.SeedSequence(cfg.seed, spawn_key=(panel_index,))
-    draws = boot.paired_bootstrap(a, b, n_resamples=cfg.n_resamples, seed=seed)
-    jack = boot.jackknife_deltas(a, b)
+    draws = boot.paired_bootstrap(
+        a, b, n_resamples=cfg.n_resamples, seed=seed, tau_index=cfg.tau_index
+    )
+    jack = boot.jackknife_deltas(a, b, tau_index=cfg.tau_index)
     interval = boot.build_interval(
         draws.deltas, delta, jack, alpha=cfg.alpha, force_percentile=cfg.force_percentile
     )
@@ -421,13 +575,22 @@ def absent_stats(rule: tuple[str, float]) -> dict[str, Any]:
 def _arms(
     sides: tuple[Side, Side], key: str, aligned: tuple[boot.PanelArrays, boot.PanelArrays],
     raw: tuple[boot.PanelArrays, boot.PanelArrays],
+    tau_index: int | None,
 ) -> tuple[tuple[boot.OperatingPoint, boot.OperatingPoint], dict[str, Any], dict[str, Any]]:
     setting, aspect = key.split(":")
     op_a, block_a = arm_block(
-        aligned[0], raw[0], sides[0].grids[setting].meta, sides[0].stored_metric(setting, aspect)
+        aligned[0],
+        raw[0],
+        sides[0].grids[setting].meta,
+        sides[0].stored_metric(setting, aspect),
+        tau_index,
     )
     op_b, block_b = arm_block(
-        aligned[1], raw[1], sides[1].grids[setting].meta, sides[1].stored_metric(setting, aspect)
+        aligned[1],
+        raw[1],
+        sides[1].grids[setting].meta,
+        sides[1].stored_metric(setting, aspect),
+        tau_index,
     )
     return (op_a, op_b), block_a, block_b
 
@@ -457,7 +620,7 @@ def panel_result(
             f"{a.n} and {b.n}; the number and the population it is over have come apart"
         )
     assert_same_ground_truth(a, b, key)
-    ops, block_a, block_b = _arms(sides, key, (a, b), (raw_a, raw_b))
+    ops, block_a, block_b = _arms(sides, key, (a, b), (raw_a, raw_b), cfg.tau_index)
     delta = float(ops[0].value - ops[1].value)
     silent = [n for n, blk in (("A", block_a), ("B", block_b)) if blk["silent"]]
     arm_silent = silent[0] if len(silent) == 1 else None

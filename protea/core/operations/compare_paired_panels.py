@@ -26,14 +26,25 @@ read-only, like ``audit_evaluation_frames``: no rows, no artefacts, nothing
 rewritten.
 
 **What it does.** Per panel, category by aspect, nine of them: a protein-level
-paired bootstrap of the panel's ratio of sums, with the operating point
-re-selected inside every resample, a bias-corrected and accelerated interval
-where the acceleration is computable and a named percentile fallback where it is
-not, and a minimum detectable effect read off the bootstrap distribution so that
-a null can be told from an unanswerable question. The reading needs one number
-from the caller: ``effect_of_interest``, the smallest difference worth
-detecting. A null is read against that and never against the difference the run
-itself observed, which would be the procedure grading its own resolution.
+paired bootstrap of the panel's ratio of sums, at an operating point the caller
+declares, a bias-corrected and accelerated interval where the acceleration is
+computable and a named percentile fallback where it is not, and a minimum
+detectable effect read off the bootstrap distribution so that a null can be
+told from an unanswerable question. The reading needs one number from the
+caller: ``effect_of_interest``, the smallest difference worth detecting. A null
+is read against that and never against the difference the run itself observed,
+which would be the procedure grading its own resolution.
+
+**The operating point is declared, not assumed.** ``reselected_per_resample``
+is the default and is what the estimator argument above is about; ``fixed``
+reads the estimator at a threshold the caller declares, which is what a
+campaign wants when its primary metric is read at a fixed tau precisely to
+remove an undeclared max-over-tau selection. That second reading was for a long
+time inexpressible here, because the word was a literal in the emitted output
+and the payload had no field for it, so the decision to fix the threshold read
+as free when it was not. ``_paired_panels_bootstrap`` argues why both are
+correct procedures for different published quantities, the payload below argues
+why the vocabulary is closed, and the result records which one ran.
 
 **What it does not do.** It does not report a mean over the nine panels or an
 interval for one. The nine panels are nine populations, since an aspect scores
@@ -51,9 +62,6 @@ different statistic.
 from __future__ import annotations
 
 import contextlib
-import tempfile
-import uuid
-from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
@@ -62,27 +70,20 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
 from protea.core.operations._paired_panels_artifact import (
-    GRID_FILENAME,
-    LEGACY_FILENAME,
     SETTINGS,
     GridMeta,
     PanelComparabilityError,
-    SettingGrid,
     ThresholdGridUnavailableError,
     assert_comparable,
-    assert_settings_agree,
-    load_setting_grid,
-    read_grid_metadata,
-    require_variant,
-    resolve_setting_file,
 )
 from protea.core.operations._paired_panels_panel import (
     PanelConfig,
     Side,
+    load_side,
     panel_result,
+    resolve_tau_index,
     tally,
 )
-from protea.core.operations._run_cafa_helpers import eval_artifact_key
 from protea.core.utils import contract_payload
 
 #: The nine panels, category by aspect, in canonical report order. There is no
@@ -129,6 +130,15 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
     requirement expressed in the type rather than in a comment somebody has to
     read.
 
+    ``operating_point`` is a closed vocabulary for the same argument. Two
+    semantics give two intervals from the same bytes and neither is recoverable
+    from the numbers afterwards, so the choice belongs on the job row beside
+    the seed. There is no ``auto`` here either, for a sharper version of the
+    reason: the only thing an ``auto`` could do is take the argmax, which is
+    not a fallback but the other semantics, silently. Hence the two refusals
+    below, which are one rule read in both directions: a declared threshold
+    exactly when something reads it.
+
     Unknown keys are refused. ``{"artifact_root": ...}`` is a plausible typo of
     ``artifacts_root``, and without this it validates, resolves to no local
     root, sends the operation to the object store, finds nothing there and
@@ -148,6 +158,22 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
     confidence: Annotated[float, Field(default=0.95, gt=0.5, lt=1.0)]
     power: Annotated[float, Field(default=0.80, gt=0.5, lt=1.0)]
     weighting: Literal["ia_weighted", "unweighted"] = "ia_weighted"
+    operating_point: Literal["reselected_per_resample", "fixed"] = "reselected_per_resample"
+    declared_tau: Annotated[
+        float | None,
+        Field(
+            default=None,
+            gt=0.0,
+            lt=1.0,
+            description=(
+                "the threshold a fixed operating point is read at, required by "
+                "operating_point='fixed' and refused otherwise. It must be one the "
+                "artefact's grid carries: a tau off the grid is refused and never snapped "
+                "to its neighbour, because a comparison reported at a threshold it was not "
+                "evaluated at is not recoverable from its own result."
+            ),
+        ),
+    ]
     min_population: Annotated[int, Field(default=30, ge=1)]
     interval_method: Literal["bca", "percentile"] = "bca"
     effect_of_interest: Annotated[
@@ -210,6 +236,22 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
             raise ValueError(
                 "give both artifacts_root and baseline_artifacts_root or neither; one local "
                 "and one remote is two different resolutions of where the bytes are"
+            )
+        if self.operating_point == "fixed" and self.declared_tau is None:
+            raise ValueError(
+                "operating_point='fixed' needs declared_tau: the threshold has to come from "
+                "the caller. The only other place it could come from is the argmax of the "
+                "panel curve, and taking that would reinstate the max-over-tau selection a "
+                "fixed operating point exists to remove, under the name that says it was "
+                "removed. Declare the tau the campaign reads its primary metric at."
+            )
+        if self.operating_point != "fixed" and self.declared_tau is not None:
+            raise ValueError(
+                f"declared_tau={self.declared_tau} was given with "
+                f"operating_point={self.operating_point!r}, which re-selects the threshold "
+                "inside every resample and reads nothing at the declared one. Recording a "
+                "threshold no arithmetic used tells a later reader that a decision was taken "
+                "when it was not. Set operating_point='fixed', or drop declared_tau."
             )
         return self
 
@@ -292,73 +334,6 @@ def _frame_gate(
         "warning" if mismatch else "info",
     )
     return a, b, mismatch
-
-
-def _fetch_from_store(result_id: str, settings: tuple[str, ...], root: Path) -> None:
-    """Pull the grid file, and the legacy one only when there is no grid file.
-
-    The legacy table is fetched so a refusal can read "found the single-threshold
-    table" rather than "found nothing", which are different problems with
-    different fixes. It is fetched second and only on that path: every
-    evaluation result in the store has one, and downloading it beside a grid
-    file that supersedes it is a transfer per setting per run to support a
-    refusal that cannot be raised.
-    """
-    from protea.infrastructure.settings import load_settings
-    from protea.infrastructure.storage.factory import get_artifact_store
-
-    store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
-    for setting in settings:
-        for name in (GRID_FILENAME, LEGACY_FILENAME):
-            key = eval_artifact_key(uuid.UUID(result_id), f"{setting}/{name}")
-            if not store.exists(key):
-                continue
-            target = root / setting
-            target.mkdir(parents=True, exist_ok=True)
-            (target / name).write_bytes(store.get(key))
-            break
-
-
-def _load_side(
-    result_id: str,
-    local_root: str | None,
-    provenance: dict[str, Any],
-    stack: contextlib.ExitStack,
-    spec: tuple[tuple[str, ...], str],
-) -> Side:
-    """Resolve where one arm's bytes are, then read and gate every setting."""
-    settings, variant = spec
-    if local_root:
-        root = Path(local_root)
-        if not root.is_dir():
-            raise ThresholdGridUnavailableError(
-                f"evaluation result {result_id}: artifacts_root {str(root)!r} is not a "
-                "directory. A root that does not exist resolves every setting to an absence "
-                "and would return a successful job with nine nulls, which is "
-                "indistinguishable from a comparison whose artefacts were never produced."
-            )
-    else:
-        root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="protea_panels_")))
-        _fetch_from_store(result_id, settings, root)
-    grids: dict[str, SettingGrid] = {}
-    for setting in settings:
-        path = resolve_setting_file(root, setting, result_id=result_id)
-        if path is None:
-            continue
-        meta = read_grid_metadata(path, setting, result_id=result_id)
-        require_variant(meta, variant, result_id=result_id)
-        grids[setting] = load_setting_grid(path, meta, variant=variant, result_id=result_id)
-    if not grids:
-        raise ThresholdGridUnavailableError(
-            f"evaluation result {result_id}: no {GRID_FILENAME} was found for any of the "
-            f"requested settings {list(settings)} under "
-            f"{str(root) if local_root else 'the artifact store'}. Nothing was read, so every "
-            "panel would report a null and the job would succeed: a mis-typed root, an "
-            "upload that never happened and a comparison of two real systems would all look "
-            "the same in the job list. Refusing and naming the precondition instead."
-        )
-    assert_settings_agree(result_id, {name: grid.meta for name, grid in grids.items()})
-    return Side(result_id, root, provenance, grids)
 
 
 def _grid_block(meta: GridMeta | None) -> dict[str, Any] | None:
@@ -450,13 +425,22 @@ def _emit_pairing(panel: dict[str, Any], key: str, p: ComparePairedPanelsPayload
 
 
 def _emit_panel(
-    panel: dict[str, Any], key: str, p: ComparePairedPanelsPayload, emit: EmitFn
+    panel: dict[str, Any],
+    key: str,
+    p: ComparePairedPanelsPayload,
+    cfg: PanelConfig,
+    emit: EmitFn,
 ) -> None:
     """What the panel measured, at the level it belongs.
 
     What a reader should CONCLUDE from it is emitted separately, because the
     two answer different questions and are filtered at different levels: this
     one is always info, and a verdict about power is a warning.
+
+    ``operating_point`` sits beside ``tau_a`` and ``tau_b`` because the three
+    are one fact: two taus that may differ are each an argmax, two equal ones
+    are the declared threshold. It comes off the config, the object the
+    resampler was handed, so this event reports what ran and not what was asked.
     """
     _emit_pairing(panel, key, p, emit)
     reported = (
@@ -475,6 +459,7 @@ def _emit_panel(
         {
             "panel": key,
             **{k: panel.get(k) for k in reported},
+            "operating_point": cfg.operating_point,
             "tau_a": (panel["a"] or {}).get("tau"),
             "tau_b": (panel["b"] or {}).get("tau"),
             "tau_a_switched_fraction": panel["diagnostics"].get("tau_a_switched_fraction"),
@@ -538,7 +523,7 @@ def _refuse_if_nothing_was_comparable(
 ) -> None:
     """A run in which every requested panel was absent is not a result.
 
-    Each side loaded something, otherwise ``_load_side`` would already have
+    Each side loaded something, otherwise ``load_side`` would already have
     refused, and yet no requested panel exists on both: the two results were
     written for different settings, or the aspect asked for is in neither file.
     Returning nine nulls from that is the quiet-success shape, indistinguishable
@@ -561,9 +546,10 @@ class ComparePairedPanelsOperation(Operation):
     name = "compare_paired_panels"
     description = (
         "Read-only paired bootstrap of f_micro_w between two evaluation results, one "
-        "interval per category-by-aspect panel, with the operating point re-selected "
-        "inside every resample and a minimum detectable effect read against the declared "
-        "effect of interest so a null can be read. Writes nothing."
+        "interval per category-by-aspect panel, at a declared operating point (the "
+        "threshold re-selected inside every resample by default, or held at a declared "
+        "tau) and a minimum detectable effect read against the declared effect of "
+        "interest so a null can be read. Writes nothing."
     )
     payload_model = ComparePairedPanelsPayload
 
@@ -586,10 +572,10 @@ class ComparePairedPanelsOperation(Operation):
         settings = tuple(s for s in SETTINGS if s in wanted)
         with contextlib.ExitStack() as stack:
             sides = (
-                _load_side(
+                load_side(
                     p.evaluation_result_id, p.artifacts_root, prov_a, stack, (settings, p.variant)
                 ),
-                _load_side(
+                load_side(
                     p.baseline_evaluation_result_id,
                     p.baseline_artifacts_root,
                     prov_b,
@@ -598,9 +584,14 @@ class ComparePairedPanelsOperation(Operation):
                 ),
             )
             artifact_mismatch = self._grid_events(sides, p, emit)
-            panels = self._panels(sides, p, emit)
+            # After the comparability gate, deliberately: only past it is one
+            # grid known to be declared by both sides, so one column index can
+            # serve both arms. Resolved before it, a grid disagreement would
+            # surface as an off-grid tau, the right refusal under a wrong name.
+            cfg = self._config(sides, p)
+            panels = self._panels(sides, p, cfg, emit)
             _refuse_if_nothing_was_comparable(sides, panels)
-            result = self._result(sides, p, panels, mismatch, artifact_mismatch)
+            result = self._result(sides, p, cfg, panels, mismatch, artifact_mismatch)
         emit("compare_paired_panels.verdict", None, result["verdict"], "info")
         return OperationResult(
             result=result, progress_current=len(panels), progress_total=len(p.panels)
@@ -608,6 +599,13 @@ class ComparePairedPanelsOperation(Operation):
 
     @staticmethod
     def _emit_start(p: ComparePairedPanelsPayload, emit: EmitFn) -> None:
+        """What was asked for, before a single byte is read.
+
+        The payload's operating point, not the config's: this fires before the
+        artefacts exist to resolve a tau against, so it records the request and
+        the panel events record what ran. It used to record the literal
+        ``reselected_per_resample``, true only because nothing else was possible.
+        """
         emit(
             "compare_paired_panels.start",
             f"{p.estimator} on {len(p.panels)} panels, {p.n_resamples} resamples",
@@ -616,7 +614,8 @@ class ComparePairedPanelsOperation(Operation):
                 "baseline_evaluation_result_id": p.baseline_evaluation_result_id,
                 "estimator": p.estimator,
                 "weighting": p.weighting,
-                "operating_point": "reselected_per_resample",
+                "operating_point": p.operating_point,
+                "declared_tau": p.declared_tau,
                 "n_resamples": p.n_resamples,
                 "seed": p.seed,
                 "confidence": p.confidence,
@@ -689,10 +688,14 @@ class ComparePairedPanelsOperation(Operation):
         return artifact_mismatch
 
     @staticmethod
-    def _panels(
-        sides: tuple[Side, Side], p: ComparePairedPanelsPayload, emit: EmitFn
-    ) -> dict[str, dict[str, Any]]:
-        cfg = PanelConfig(
+    def _config(sides: tuple[Side, Side], p: ComparePairedPanelsPayload) -> PanelConfig:
+        """The payload's request, resolved against the grid the artefacts declare.
+
+        Every emission below reads the operating point off this object and not
+        off the payload: what the resampler was handed is what a reader of a
+        stored comparison needs, and what was asked for is not.
+        """
+        return PanelConfig(
             alpha=p.alpha,
             power=p.power,
             n_resamples=p.n_resamples,
@@ -700,12 +703,21 @@ class ComparePairedPanelsOperation(Operation):
             min_population=p.min_population,
             force_percentile=p.interval_method == "percentile",
             effect_of_interest=p.effect_of_interest,
+            tau_index=resolve_tau_index(sides, p.operating_point, p.declared_tau),
         )
+
+    @staticmethod
+    def _panels(
+        sides: tuple[Side, Side],
+        p: ComparePairedPanelsPayload,
+        cfg: PanelConfig,
+        emit: EmitFn,
+    ) -> dict[str, dict[str, Any]]:
         rule = (p.population_rule, p.min_jaccard)
         out: dict[str, dict[str, Any]] = {}
         for key in p.panels:
             panel = panel_result(sides, key, cfg, ALL_PANELS.index(key), rule)
-            _emit_panel(panel, key, p, emit)
+            _emit_panel(panel, key, p, cfg, emit)
             out[key] = panel
         return out
 
@@ -713,14 +725,22 @@ class ComparePairedPanelsOperation(Operation):
     def _result(
         sides: tuple[Side, Side],
         p: ComparePairedPanelsPayload,
+        cfg: PanelConfig,
         panels: dict[str, dict[str, Any]],
         mismatch: list[str],
         artifact_mismatch: dict[str, list[str]],
     ) -> dict[str, Any]:
+        """Everything a later reader needs to know what these numbers are.
+
+        ``operating_point`` is read off the config for the same reason
+        ``estimator`` is derived rather than typed: it has to be the semantics
+        the arithmetic used, not the ones the payload hoped for.
+        """
         return {
             "estimator": p.estimator,
             "weighting": p.weighting,
-            "operating_point": "reselected_per_resample",
+            "operating_point": cfg.operating_point,
+            "declared_tau": p.declared_tau,
             "sampling_unit": "protein",
             "n_resamples": p.n_resamples,
             "seed": p.seed,

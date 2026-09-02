@@ -154,6 +154,36 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         },
         ("weighting",),
     ),
+    # invariant: which threshold the estimator is read at changes the interval
+    # and is not recoverable from it afterwards, so the operating point is a
+    # closed vocabulary for the same reason the weighting is. "auto" is absent
+    # for a sharper version of that reason: the only thing it could resolve to
+    # is the argmax, which is not a fallback but the other semantics, taken
+    # silently by an operation that was asked not to take them.
+    (
+        "compare_paired_panels",
+        ComparePairedPanelsPayload,
+        {
+            "evaluation_result_id": "a",
+            "baseline_evaluation_result_id": "b",
+            "operating_point": "auto",
+        },
+        ("operating_point",),
+    ),
+    # invariant: a fixed operating point needs the tau it is fixed at. Filling
+    # it in from the panel's argmax would reinstate the max-over-tau selection
+    # that reading at a declared threshold exists to remove, under the name
+    # that says it was removed.
+    (
+        "compare_paired_panels",
+        ComparePairedPanelsPayload,
+        {
+            "evaluation_result_id": "a",
+            "baseline_evaluation_result_id": "b",
+            "operating_point": "fixed",
+        },
+        (),
+    ),
     # invariant: a population floor of zero would report every cell, including
     # the ones holding a single protein, at the same weight as one holding
     # thousands. The floor is the whole point of withholding.

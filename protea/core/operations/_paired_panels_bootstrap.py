@@ -16,14 +16,27 @@ of per-protein F is a different statistic under the same word, and a protein
 holding two hundred terms contributes equally to that mean and very unequally
 to this ratio.
 
-**The operating point is re-selected inside every resample.** The published
-quantity is a maximum over an estimated surface, so a resample that replays
-only part of the estimation procedure estimates a different functional. Holding
-the threshold at the full-sample optimum understates the variance, and it does
-not understate it equally for two systems whose score surfaces differ in
-flatness, so it is not conservative and cannot be defended as conservative.
-:func:`paired_bootstrap` therefore recomputes the whole threshold curve per
-resample and takes that resample's own argmax, per arm, independently.
+**The operating point is a declared property of the comparison, and the
+default re-selects it inside every resample.** When the reported quantity is a
+maximum over an estimated surface, a resample that replays only part of the
+estimation procedure estimates a different functional. Holding the threshold at
+the full-sample optimum understates the variance, and it does not understate it
+equally for two systems whose score surfaces differ in flatness, so it is not
+conservative and cannot be defended as conservative. Under
+:data:`RESELECTED_PER_RESAMPLE`, :func:`paired_bootstrap` therefore recomputes
+the whole threshold curve per resample and takes that resample's own argmax,
+per arm, independently.
+
+That is Fmax's selection semantics, and it is not the only defensible reading.
+A caller reporting the estimator at a threshold fixed in advance, precisely so
+that no max-over-tau selection is taken at all, is estimating a different
+quantity and needs the resample to replay THAT procedure: the same column,
+every time, in both arms. Under :data:`FIXED` the threshold is not estimated,
+so re-selecting it inside the resample would inflate the variance of a
+statistic that has none of that variance to begin with. Which of the two is in
+force is a choice the caller states and this module never infers, because both
+are correct procedures for different published quantities and the wrong one is
+not detectable from the arrays.
 
 **The sampling unit is the protein.** Rows and terms inside one protein are not
 independent, so resampling them would produce an interval narrower than the
@@ -52,6 +65,18 @@ _CHUNK = 256
 BCA = "bca"
 PERCENTILE = "percentile"
 DEGENERATE = "degenerate"
+
+#: Operating-point vocabulary: which threshold the estimator is read at, and
+#: whether that threshold is re-estimated inside the resample. Two values and
+#: no third, for the same reason the weighting vocabulary has no ``auto``: an
+#: operating point nobody declared is one the reader of a stored comparison
+#: cannot recover, and the two semantics give different intervals on the same
+#: bytes. Everywhere below, ``tau_index=None`` carries
+#: :data:`RESELECTED_PER_RESAMPLE` and an integer carries :data:`FIXED`, so the
+#: choice travels with the only parameter that can act on it and no call site
+#: can hold a word that disagrees with what it computes.
+RESELECTED_PER_RESAMPLE = "reselected_per_resample"
+FIXED = "fixed"
 
 
 @dataclass(frozen=True)
@@ -134,6 +159,33 @@ def select_operating_point(curve: np.ndarray) -> OperatingPoint:
     return OperatingPoint(best, int(np.argmax(curve)), int(np.count_nonzero(curve == best)))
 
 
+def read_operating_point(curve: np.ndarray, tau_index: int) -> OperatingPoint:
+    """What the panel scores at a threshold the caller declared. No maximum.
+
+    ``n_tau_at_max`` is 1 and :attr:`OperatingPoint.tied` is therefore False,
+    which is a statement of fact rather than a convenience: nothing was
+    selected here, so no tie was broken. Reporting a tie count from a curve
+    that was never maximised would put a diagnostic about selection beside a
+    number produced without any, and a reader would take it as evidence that
+    the argmax happened to be flat.
+    """
+    return OperatingPoint(float(curve[tau_index]), int(tau_index), 1)
+
+
+def operating_point(curve: np.ndarray, tau_index: int | None) -> OperatingPoint:
+    """The one entry point, so the semantics cannot diverge between call sites.
+
+    ``None`` re-selects, an integer reads the declared column. Written once
+    here because the full sample, the jackknife and the resample all have to
+    answer the same question the same way; a caller that got this right in two
+    of the three places would produce an interval around a point estimate the
+    interval is not about.
+    """
+    if tau_index is None:
+        return select_operating_point(curve)
+    return read_operating_point(curve, tau_index)
+
+
 @dataclass(frozen=True)
 class Draws:
     """What one paired bootstrap produced.
@@ -163,10 +215,27 @@ def _counts_matrix(rng: np.random.Generator, n: int, size: int) -> np.ndarray:
     return rng.multinomial(n, np.full(n, 1.0 / n), size=size).astype(np.float64)
 
 
-def _resample_arm(counts: np.ndarray, arm: PanelArrays) -> tuple[np.ndarray, np.ndarray]:
-    """Per-resample metric and argmax for one arm, one BLAS call per component."""
+def _read_curves(curves: np.ndarray, tau_index: int | None) -> tuple[np.ndarray, np.ndarray]:
+    """Reduce a stack of threshold curves to one value and one index per row.
+
+    The two branches are the two operating points, and this is the only place
+    either is applied to a stack, so ``paired_bootstrap`` and
+    ``jackknife_deltas`` cannot drift apart on it. The index column is returned
+    in both cases, filled with the declared index under :data:`FIXED`, so the
+    switched-fraction diagnostic downstream keeps its shape and reports the
+    truth about a fixed run: nothing switched, because nothing was selected.
+    """
+    if tau_index is None:
+        return curves.max(axis=1), curves.argmax(axis=1)
+    return curves[:, tau_index], np.full(curves.shape[0], tau_index, dtype=np.int64)
+
+
+def _resample_arm(
+    counts: np.ndarray, arm: PanelArrays, tau_index: int | None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-resample metric and threshold index for one arm, one BLAS call per component."""
     curves = micro_curve(counts @ arm.tp, counts @ arm.pred, (counts @ arm.n_gt)[:, None])
-    return curves.max(axis=1), curves.argmax(axis=1)
+    return _read_curves(curves, tau_index)
 
 
 def paired_bootstrap(
@@ -175,8 +244,16 @@ def paired_bootstrap(
     *,
     n_resamples: int,
     seed: int | np.random.SeedSequence,
+    tau_index: int | None = None,
 ) -> Draws:
-    """Protein-level paired bootstrap, re-selecting the operating point each time.
+    """Protein-level paired bootstrap at the caller's operating point.
+
+    ``tau_index`` is ``None`` by default, which re-selects the threshold inside
+    every resample: that is what the module docstring argues for and what every
+    existing caller gets without saying anything. An integer holds the
+    threshold at that column in both arms and in every resample, which is the
+    procedure that matches an estimator reported at a threshold fixed in
+    advance.
 
     The two arms must already be aligned on the protein axis; the caller owns
     the population rule. One count vector is built per resample and used twice,
@@ -190,21 +267,30 @@ def paired_bootstrap(
     while done < n_resamples:
         size = min(_CHUNK, n_resamples - done)
         counts = _counts_matrix(rng, a.n, size)
-        va, ia = _resample_arm(counts, a)
-        vb, ib = _resample_arm(counts, b)
+        va, ia = _resample_arm(counts, a, tau_index)
+        vb, ib = _resample_arm(counts, b, tau_index)
         blocks.append((va - vb, va, vb, ia, ib))
         done += size
     stacked = [np.concatenate([block[i] for block in blocks]) for i in range(5)]
     return Draws(stacked[0], stacked[1], stacked[2], stacked[3], stacked[4])
 
 
-def jackknife_deltas(a: PanelArrays, b: PanelArrays) -> np.ndarray:
-    """Leave-one-protein-out deltas, with the threshold re-selected each time.
+def jackknife_deltas(
+    a: PanelArrays, b: PanelArrays, *, tau_index: int | None = None
+) -> np.ndarray:
+    """Leave-one-protein-out deltas, at the same operating point as the resample.
 
     Exact and cheap because the estimator is a ratio of pooled sums: the
     leave-one-out totals are the totals minus that protein's row, so all ``n``
     replicates including their own argmax cost one ``(n, n_tau)`` subtraction
     per arm. Acceleration is therefore never skipped for cost.
+
+    ``tau_index`` has to be the resample's, not a default: the acceleration is
+    the skewness of the influence of one protein on the statistic being
+    reported, and a jackknife that maximises over tau while the resample does
+    not is measuring the influence on a different statistic. It would still
+    produce a finite number, and the BCa endpoints would still move, so the
+    only symptom would be an interval quietly corrected in the wrong direction.
     """
     out = []
     for arm in (a, b):
@@ -214,7 +300,7 @@ def jackknife_deltas(a: PanelArrays, b: PanelArrays) -> np.ndarray:
         curves = micro_curve(
             totals_tp - arm.tp, totals_pred - arm.pred, (total_gt - arm.n_gt)[:, None]
         )
-        out.append(curves.max(axis=1))
+        out.append(_read_curves(curves, tau_index)[0])
     return out[0] - out[1]
 
 
