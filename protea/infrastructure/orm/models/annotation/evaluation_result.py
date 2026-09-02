@@ -141,6 +141,23 @@ class EvaluationResult(Base):
     # legacy rows and existing flows are unaffected). See the class
     # docstring for the vocabulary of each field.
     frame: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    #: The content address of the six fields two results must share to be
+    #: measuring the same thing, written by ``seal_evaluation_frames``.
+    #:
+    #: It is NOT ``frame``. That column is a harness label under a check
+    #: constraint admitting exactly 'lafa' or 'internal', and a 24-character
+    #: digest would violate it. The two were confused for a day because the
+    #: seal's own description named the wrong one.
+    #:
+    #: Declared here because it was not, and the absence had costs. Migrated by
+    #: c4e88a1b6d30 and reachable only through raw SQL in
+    #: ``seal_evaluation_frames`` and ``_graph_reads``, it was invisible to
+    #: ``Base.metadata``: any schema built from the models rather than from the
+    #: migrations simply did not have it, so a query that read it passed
+    #: against the live store and failed against a test database. A column two
+    #: operations disagree about, that no model declares, is a column nothing
+    #: can be checked against.
+    frame_digest: Mapped[str | None] = mapped_column(String(32), nullable=True)
     temporal_window: Mapped[str | None] = mapped_column(String(32), nullable=True)
     arms_enabled: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     leakage_role: Mapped[str | None] = mapped_column(String(8), nullable=True)

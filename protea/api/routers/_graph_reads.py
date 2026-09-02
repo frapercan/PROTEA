@@ -268,6 +268,11 @@ _Q_PANELS = text(
     with_arm_identity(
     """
     SELECT er.id::text                              AS result_id,
+           -- The seal, carried into the panels so a comparison can refuse two
+           -- arms that were not scored under the same frame. Without it
+           -- separated_from_floor compared a floor against every level that
+           -- happened to land in the same panel, across windows and corpora.
+           er.frame_digest                          AS frame_digest,
            sc.name                                  AS scoring_name,
            COALESCE(ec.display_name, ec.model_name) AS embedding_name,
 {DEPTH_IDENTITY_COLUMN},

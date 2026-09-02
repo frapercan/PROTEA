@@ -39,6 +39,7 @@ from protea.api.routers._graph_edges import (
     strength_of,
 )
 from protea.api.routers._graph_panels import (
+    CrossedFrames,
     PANEL_KEYS,
     CrossedDepthAxes,
     build_panels,
@@ -150,10 +151,16 @@ def _client(record: dict[str, list[dict[str, Any]]]) -> tuple[TestClient, FakeSe
 
 
 def _panel_rows(levels: dict[str, float]) -> list[dict[str, Any]]:
-    """One scored row per (level, panel), all nine panels, one shared cohort."""
+    """One scored row per (level, panel), all nine panels, one shared cohort.
+
+    And one shared frame seal. A separation is asked inside a seal, so a fixture
+    without one is asking a question that cannot be answered rather than one
+    whose answer happens to be no.
+    """
     return [
         {
             "result_id": f"r-{name}",
+            "frame_digest": "f-one-frame",
             "scoring_name": name,
             "embedding_name": "esm2_650m",
             "depth": "10",
@@ -574,6 +581,10 @@ def _depth_rows(depths: dict[str, str]) -> list[dict[str, Any]]:
     return [
         {
             "result_id": f"r-{name}",
+            # One frame, so these tests stay about the depth refusal. A separation
+            # now happens inside a seal, and a fixture without one is asking a
+            # question that cannot be answered rather than one whose answer is no.
+            "frame_digest": "f-one-frame",
             "scoring_name": "composite",
             "embedding_name": "esm2_650m",
             "depth": depth,
@@ -738,3 +749,61 @@ class TestEveryNodeCanReachAMeasurement:
         assert expected - called_with_floors == set(), (
             f"these builders are never handed the floors: {sorted(expected - called_with_floors)}"
         )
+
+
+class TestASeparationHappensInsideOneFrame:
+    """Two arms that were not scored under the same seal are not two levels.
+
+    Until 2026-09-02 `separated_from_floor` tested the declared floor against
+    every level that landed in the same panel, which is every arm the record
+    holds regardless of the window, the corpus or the accretion table behind it.
+    The first time a second frame existed it bit immediately: a retriever floor
+    on the 226->227 tune frame was being compared against arms from 220->227,
+    and the rivals that beat it in all nine panels were the other window's.
+
+    A panel key is a category and an aspect. It is not a frame.
+    """
+
+    def _rows(self, seal: str, levels: dict[str, float]) -> list[dict[str, Any]]:
+        rows = _panel_rows(levels)
+        for row in rows:
+            row["frame_digest"] = seal
+        return rows
+
+    def test_a_rival_from_another_frame_cannot_clear_the_floor(self) -> None:
+        """The defect, pinned: the outsider wins on every panel and counts for nothing."""
+        rows = self._rows("f-ours", {"floor-level": 0.10}) + self._rows(
+            "f-theirs", {"outsider": 0.90}
+        )
+        assert separated_from_floor(rows, "floor-level") is False
+
+    def test_a_rival_inside_the_frame_still_clears_it(self) -> None:
+        """The restriction is about provenance, not about refusing comparisons."""
+        rows = self._rows("f-ours", {"floor-level": 0.10, "rival": 0.30}) + self._rows(
+            "f-theirs", {"outsider": 0.90}
+        )
+        assert separated_from_floor(rows, "floor-level") is True
+
+    def test_an_unsealed_floor_refuses_rather_than_reporting_no_separation(self) -> None:
+        """Returning False would report a comparison that was never made.
+
+        An unstamped marker is not a matching one -- the rule
+        seal_evaluation_frames states and refuses on -- so the honest answer is
+        that the question cannot be asked yet.
+        """
+        rows = _panel_rows({"floor-level": 0.10, "rival": 0.30})
+        for row in rows:
+            row.pop("frame_digest", None)
+        with pytest.raises(CrossedFrames, match="no frame seal"):
+            separated_from_floor(rows, "floor-level")
+
+    def test_a_floor_that_spans_two_frames_is_not_one_population(self) -> None:
+        """Picking one seal would publish a number whose population nobody chose."""
+        # A second level in each frame so the level name is the scoring name and
+        # the two floors render alike; with one level nothing varies and the name
+        # falls back to the whole tuple.
+        rows = self._rows("f-ours", {"floor-level": 0.10, "rival": 0.30}) + self._rows(
+            "f-theirs", {"floor-level": 0.90, "rival": 0.95}
+        )
+        with pytest.raises(CrossedFrames, match="different frame"):
+            separated_from_floor(rows, "floor-level")

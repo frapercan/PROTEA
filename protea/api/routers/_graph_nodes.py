@@ -12,7 +12,11 @@ from protea.api.routers._graph_edges import (
     held_values,
     split_fields,
 )
-from protea.api.routers._graph_panels import CrossedDepthAxes, separated_from_floor
+from protea.api.routers._graph_panels import (
+    CrossedDepthAxes,
+    CrossedFrames,
+    separated_from_floor,
+)
 
 #
 # One per node. Each returns the node, the artifact it cannot produce, and the
@@ -411,7 +415,7 @@ def _separation(
         return None, None
     try:
         return separated_from_floor(panels, floor), None
-    except CrossedDepthAxes as refusal:
+    except (CrossedDepthAxes, CrossedFrames) as refusal:
         return None, str(refusal)
 
 
