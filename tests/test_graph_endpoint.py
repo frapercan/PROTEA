@@ -40,8 +40,10 @@ from protea.api.routers._graph_edges import (
 )
 from protea.api.routers._graph_panels import (
     PANEL_KEYS,
+    CrossedDepthAxes,
     build_panels,
     panel_units_from_groundtruth,
+    separated_from_floor,
 )
 from protea.api.routers._graph_reads import (
     _PIVOT_ASPECTS,
@@ -555,3 +557,125 @@ def test_the_floors_are_served_with_the_record_and_not_left_to_the_client() -> N
     assert populations[0] < populations[1]
     assert floors["target_effect"] > 0
     assert all(c["contrast"] for c in floors["classes"])
+
+
+# ── A retrieval depth and an evaluation cut are not one axis ──────────────────
+
+
+def _depth_rows(depths: dict[str, str]) -> list[dict[str, Any]]:
+    """One scored row per (arm, panel), the arms differing only in depth.
+
+    Depth is the only field that moves, so it is the only field the level is
+    named by and a level name here IS a depth. The scores rise with the key so
+    the first arm is always the loser: whatever else the comparison does, it
+    cannot come out False for want of a winner, which keeps the tests below
+    about the refusal and not about the arithmetic.
+    """
+    return [
+        {
+            "result_id": f"r-{name}",
+            "scoring_name": "composite",
+            "embedding_name": "esm2_650m",
+            "depth": depth,
+            "category": category,
+            "aspect": aspect,
+            "f_micro_w": 0.1 + 0.1 * i,
+            "tau": 0.5,
+            "n_at_tau": 950,
+            "coverage_at_tau": 0.95,
+        }
+        for i, (name, depth) in enumerate(depths.items())
+        for category, aspect in PANEL_KEYS
+    ]
+
+
+def test_a_ladder_of_cuts_over_one_retrieval_is_still_a_comparison() -> None:
+    """Cuts against cuts is one axis, and the surface answers it as before.
+
+    The refusal is about crossing two quantities, not about disliking one of
+    them. A truncation ladder is a real contrast between real numbers; what it
+    must not do is stand in for a retrieval result.
+    """
+    rows = _depth_rows({"shallow": "cut at sequence rank 2", "deep": "cut at sequence rank 30"})
+    assert separated_from_floor(rows, "cut at sequence rank 2") is True
+
+
+def test_a_floor_at_a_retrieval_depth_refuses_its_rivals_evaluation_cuts() -> None:
+    """The comparison this endpoint must not answer.
+
+    A retrieval depth decides which candidates were ever fetched; a cut only
+    truncates a list that was already retrieved and scored. Put on one ladder
+    they read as five settings of one knob, and the campaign published exactly
+    that reading once.
+    """
+    rows = _depth_rows({"retrieved": "retrieval depth 30", "cut": "cut at sequence rank 30"})
+    with pytest.raises(CrossedDepthAxes) as refusal:
+        separated_from_floor(rows, "retrieval depth 30")
+    message = str(refusal.value)
+    assert "retrieval depth" in message
+    assert "evaluation cut" in message
+    # The message has to say WHY, not merely that it declined: a reader who is
+    # told only 'refused' declares the other floor next and meets it again.
+    assert "truncat" in message
+
+
+def test_the_two_cuts_that_used_to_render_alike_are_two_levels() -> None:
+    """A k-position cut of 10 and a retrieval depth of 10 were both '10'.
+
+    Sixteen results of prediction set d5b634b2 sit in exactly this shape in the
+    record: retrieved at depth 10, evaluated both uncut and cut at k-position
+    10. Under the old rendering they shared a level name, so the floor matched
+    both sides and nothing was ever put against anything.
+    """
+    rows = _depth_rows({"cut": "cut at protein rank 10", "uncut": "retrieval depth 10"})
+    with pytest.raises(CrossedDepthAxes):
+        separated_from_floor(rows, "cut at protein rank 10")
+
+
+def test_a_crossed_ladder_reaches_the_reader_as_a_reason_and_not_a_500() -> None:
+    """The refusal is caught where it can be shown, and shown.
+
+    A page that answers with a stack trace teaches nobody anything, and one
+    that answers None teaches them that the record established nothing without
+    saying which question was wrong. The node comes out unmeasured, carries the
+    refusal as its reason, and the endpoint still serves.
+    """
+    record = populated_record({"composite": 0.1})
+    record["panels"] = _depth_rows(
+        {"retrieved": "retrieval depth 30", "cut": "cut at sequence rank 30"}
+    )
+    record["scoring"] = [
+        {
+            "id": "sc-composite",
+            "name": "composite",
+            "formula": "linear",
+            "weights": "{}",
+            "evidence_weights": "{}",
+            "params": "{}",
+            "results": 1,
+        },
+        {
+            "id": "sc-other",
+            "name": "other",
+            "formula": "linear",
+            "weights": "{}",
+            "evidence_weights": "{}",
+            "params": "{}",
+            "results": 1,
+        },
+    ]
+    record["floors"] = [
+        {
+            "node": "scoring",
+            "floor": "retrieval depth 30",
+            "name": "a ladder that crosses two quantities",
+        }
+    ]
+    client, _ = _client(record)
+    response = client.get("/v1/graph")
+    assert response.status_code == 200
+    node = next(n for n in response.json()["nodes"] if n["key"] == "scoring")
+    assert node["strength"] != MEASURED
+    assert "evaluation cut" in node["blocked_reason"]
+    assert "truncat" in node["blocked_reason"]
+

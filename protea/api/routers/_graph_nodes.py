@@ -12,7 +12,7 @@ from protea.api.routers._graph_edges import (
     held_values,
     split_fields,
 )
-from protea.api.routers._graph_panels import separated_from_floor
+from protea.api.routers._graph_panels import CrossedDepthAxes, separated_from_floor
 
 #
 # One per node. Each returns the node, the artifact it cannot produce, and the
@@ -355,6 +355,62 @@ def _generator_node(record: dict[str, list[dict[str, Any]]]) -> Built:
 _SCORING_FIELDS: tuple[str, ...] = ("formula", "weights", "evidence_weights", "params")
 
 
+def _separation(
+    panels: list[dict[str, Any]], floor: str | None
+) -> tuple[bool | None, str | None]:
+    """Whether the declared floor was cleared, or why it could not be asked.
+
+    A refusal is caught rather than allowed to escape, and it is caught on this
+    side of the node because this is the only place that can show it. Letting it
+    reach the endpoint would turn a comparison nobody should have declared into
+    a 500 on a page that is otherwise entirely readable, and the reader would
+    learn nothing about why. Returned as a reason instead, with the separation
+    at None, which already means the record established nothing.
+    """
+    if not floor or not panels:
+        return None, None
+    try:
+        return separated_from_floor(panels, floor), None
+    except CrossedDepthAxes as refusal:
+        return None, str(refusal)
+
+
+def _scoring_reason(
+    configs: list[dict[str, Any]],
+    used: list[dict[str, Any]],
+    floor: str | None,
+    separated: bool | None,
+    crossed: str | None,
+) -> str:
+    """Why the scoring node stands where it does, in one sentence.
+
+    The order of the branches is the order the questions arise in: whether
+    anything scored, whether more than one thing did, whether a floor was named,
+    whether the floor could be asked at all, and only then what it answered.
+    """
+    if not used:
+        return f"{len(configs)} weightings are registered and none of them has a surviving result."
+    if len(used) == 1:
+        return (
+            f"One of {len(configs)} registered weightings carries a result. With nothing to "
+            "contrast it against, its numbers are a reading and not a separation."
+        )
+    if floor is None:
+        return (
+            f"{len(used)} weightings scored the same candidates in the same frame, so the "
+            "contrast is real and its spread is in the panels below. No floor is declared for "
+            "it anywhere in the record, so the spread cannot be called a separation."
+        )
+    if crossed is not None:
+        return crossed
+    verdict = "clears" if separated else "does not clear"
+    return (
+        f"{len(used)} weightings scored the same candidates in the same frame against the "
+        f"declared floor '{floor}', and the best of them {verdict} it on every panel that "
+        "carries both."
+    )
+
+
 def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """Which weighting turns a candidate into a score.
 
@@ -369,7 +425,7 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
     configs = record["scoring"]
     used = [c for c in configs if int(c["results"] or 0) > 0]
     floor = floors.get("scoring")
-    panels = record["panels"]
+    separated, crossed = _separation(record["panels"], floor)
     edge = Edge(
         produced=bool(configs),
         instantiated=len(used),
@@ -380,35 +436,13 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
         # nothing about which weighting a candidate is scored under.
         forced=False,
         floor=floor,
-        separated=separated_from_floor(panels, floor) if floor and panels else None,
+        separated=separated,
     )
-    if not used:
-        reason = (
-            f"{len(configs)} weightings are registered and none of them has a surviving result."
-        )
-    elif len(used) == 1:
-        reason = (
-            f"One of {len(configs)} registered weightings carries a result. With nothing to "
-            "contrast it against, its numbers are a reading and not a separation."
-        )
-    elif floor is None:
-        reason = (
-            f"{len(used)} weightings scored the same candidates in the same frame, so the "
-            "contrast is real and its spread is in the panels below. No floor is declared for "
-            "it anywhere in the record, so the spread cannot be called a separation."
-        )
-    else:
-        verdict = "clears" if edge.separated else "does not clear"
-        reason = (
-            f"{len(used)} weightings scored the same candidates in the same frame against the "
-            f"declared floor '{floor}', and the best of them {verdict} it on every panel that "
-            "carries both."
-        )
     return (
         _node(
             "scoring",
             edge,
-            reason,
+            _scoring_reason(configs, used, floor, separated, crossed),
             split_fields(used, _SCORING_FIELDS),
             held_values(used, _SCORING_FIELDS),
         ),
