@@ -48,6 +48,8 @@ __all__ = [
     "Release",
     "ReleaseWindow",
     "Split",
+    "HoldoutTouchedError",
+    "HOLDOUT_WAIVER",
     "SplitLeakError",
     "SplitName",
     "SplitUndecidedError",
@@ -57,12 +59,14 @@ __all__ = [
     "adjustment_candidates",
     "menu_is_sufficient",
     "assert_may_inform",
+    "assert_window_may_inform",
     "consecutive_windows",
     "exclusion_basis",
     "ground_truth_requires_history",
     "release",
     "releases_before",
     "resolve_split",
+    "window_reads_past_the_mark",
     "windows_for",
 ]
 
@@ -414,6 +418,82 @@ def assert_may_inform(name: str | SplitName, decision: str) -> None:
             f"it may inform: {permitted}. It is scored by {split.scored_by} and "
             f"is reported, never optimised against."
         )
+
+
+class HoldoutTouchedError(SplitLeakError):
+    """A window was built or scored that reads past the board's mark.
+
+    A subclass of :class:`SplitLeakError` because it is the same failure caught
+    earlier: something that may not inform a decision is about to. It has its
+    own type so a caller can let the general leak error escape while catching
+    this one to report a waiver, and so a reader of a traceback learns which
+    half of the temporal design was breached without opening this module.
+    """
+
+
+def window_reads_past_the_mark(end_published: date) -> bool:
+    """Whether a window ending on this date reads past the board's mark.
+
+    The comparison is on DATES and not on release identifiers, deliberately.
+    Membership in :data:`_VALIDATION_WINDOWS` is the wrong test and it is wrong
+    in the direction that matters: those windows are consecutive pairs, so
+    227->230 spans three of them and belongs to none, and a membership check
+    would wave through the exact window the holdout exists to protect. It is
+    also the wrong test for the corpora this platform actually holds, since
+    GOA 220 is not in the release table at all and a window starting there
+    cannot be resolved by identifier.
+
+    A date can always be resolved -- every annotation set records when its
+    corpus was published -- and the rule the author stated is about time:
+    nothing after the mark informs a choice.
+    """
+    return end_published > release(BOARD_MARK).published
+
+
+#: What a caller must say, verbatim, to score the holdout. It is long and it
+#: names its own consequence on purpose: a flag that can be set by reflex is a
+#: flag that gets set by reflex, and this one may be used once.
+HOLDOUT_WAIVER = "this is the single declared pass on the holdout"
+
+
+def assert_window_may_inform(
+    end_published: date, *, waiver: str | None = None, context: str = ""
+) -> None:
+    """Raise unless this window may inform a decision, or the waiver is claimed.
+
+    Called by the operations that BUILD an evaluation window and that SCORE
+    against one, because a rule enforced only in a document is a rule that
+    depends on everybody having read the document. This one had not been
+    enforced anywhere: :func:`assert_may_inform` existed, said the right thing,
+    and had no call sites in the whole tree.
+
+    That absence has a receipt. On 2026-08-27 the campaign's stored results
+    were deleted, and the reason recorded with the deletion was that 594 of
+    1,296 results had been evaluated on 220->230 -- the UNION of the
+    experimental window and the competitive one. Depth, preset and
+    representation had all been chosen on a window that contained the holdout,
+    and no preservation could undo it. Nothing in the platform had objected,
+    because nothing in the platform was asking.
+
+    The waiver exists because the holdout is meant to be scored, once, at the
+    end. It must be claimed in the caller's own words rather than inferred from
+    a boolean, and it is recorded on the row it produces so the single pass is
+    visible afterwards rather than reconstructed.
+    """
+    if not window_reads_past_the_mark(end_published):
+        return
+    if waiver == HOLDOUT_WAIVER:
+        return
+    where = f"{context}: " if context else ""
+    raise HoldoutTouchedError(
+        f"{where}this window ends {end_published.isoformat()}, after the board's mark "
+        f"{BOARD_MARK} was published {release(BOARD_MARK).published.isoformat()}, so it "
+        f"reads the holdout. The validation split is scored by the board and informs "
+        f"nothing; every parameter, threshold and design decision is selected strictly "
+        f"earlier. If this IS the single declared pass on the holdout, say so by passing "
+        f"the waiver verbatim: {HOLDOUT_WAIVER!r}. It is deliberately a sentence and not "
+        f"a flag, because it may be used once and should not be settable by reflex."
+    )
 
 
 def ground_truth_requires_history() -> bool:
