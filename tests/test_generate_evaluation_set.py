@@ -11,6 +11,7 @@ from protea.core.evaluation import EvaluationData
 from protea.core.operations.generate_evaluation_set import (
     GenerateEvaluationSetOperation,
     GenerateEvaluationSetPayload,
+    _Identity,
 )
 
 # ---------------------------------------------------------------------------
@@ -482,3 +483,63 @@ class TestGenerateEvaluationSetExecute:
             "old_native_snapshot_id",
             "new_native_snapshot_id",
         }
+
+
+class TestDeltaModeAndEmptyRefusal:
+    """The fast path is only correct when the SETS are bound to the graph."""
+
+    @staticmethod
+    def _set(snapshot_id):
+        s = MagicMock()
+        s.ontology_snapshot_id = snapshot_id
+        return s
+
+    def test_fast_path_when_sets_are_bound_to_the_pivot(self):
+        snap = uuid.uuid4()
+        mode = GenerateEvaluationSetOperation._delta_mode(
+            self._set(snap), self._set(snap), snap, snap, snap
+        )
+        assert mode == "same_snapshot"
+
+    def test_override_to_a_graph_the_sets_are_not_bound_to_reconciles(self):
+        """The case that stored an empty ground truth.
+
+        Asking for both sides under a pivot the annotation sets are not bound
+        to satisfies ``old_native == new_native == pivot`` while every
+        ``go_term_id`` in the corpora belongs to another snapshot. The old test
+        took the fast path and matched nothing.
+        """
+        bound, pivot = uuid.uuid4(), uuid.uuid4()
+        mode = GenerateEvaluationSetOperation._delta_mode(
+            self._set(bound), self._set(bound), pivot, pivot, pivot
+        )
+        assert mode == "reconciled"
+
+    def test_sets_bound_apart_reconcile(self):
+        a, b = uuid.uuid4(), uuid.uuid4()
+        mode = GenerateEvaluationSetOperation._delta_mode(self._set(a), self._set(b), a, b, a)
+        assert mode == "reconciled"
+
+    def test_empty_delta_over_populated_corpora_is_refused(self):
+        session = MagicMock()
+        session.execute.return_value.scalar_one.return_value = 11_197_453
+        ident = _Identity(*(uuid.uuid4() for _ in range(5)))
+        with pytest.raises(ValueError, match="11197453 annotations"):
+            GenerateEvaluationSetOperation._refuse_empty_delta(
+                session, ident, {"delta_proteins": 0}
+            )
+
+    def test_empty_delta_over_empty_corpora_is_allowed(self):
+        """Nothing to find is a result; nothing resolving is a defect."""
+        session = MagicMock()
+        session.execute.return_value.scalar_one.return_value = 0
+        ident = _Identity(*(uuid.uuid4() for _ in range(5)))
+        GenerateEvaluationSetOperation._refuse_empty_delta(session, ident, {"delta_proteins": 0})
+
+    def test_a_non_empty_delta_is_never_queried_for(self):
+        session = MagicMock()
+        ident = _Identity(*(uuid.uuid4() for _ in range(5)))
+        GenerateEvaluationSetOperation._refuse_empty_delta(
+            session, ident, {"delta_proteins": 23736}
+        )
+        assert not session.execute.called
