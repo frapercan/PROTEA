@@ -13,6 +13,15 @@ labelled ``lafa`` can still be incomparable. All four provenance markers are
 nullable with no default, so the guarantee is opt-in, which means it is not a
 guarantee.
 
+Nothing in the platform derives ``frame`` from a run. It is a payload field:
+``run_cafa_evaluation`` stamps onto the row whatever its caller passed, and
+``batch_rescore_evaluation`` forwards that same value unchanged to every config
+in the batch. So a row without a frame is missing a *declaration*, not a
+computation, and re-running it produces another unframed row unless whoever
+dispatches it declares one. The census says so in those words, because a verdict
+that promises recomputation will supply the frame describes work that does not
+exist.
+
 This operation changes nothing. It answers the questions that decide whether
 making the frame mandatory is an afternoon of recomputation or a week of it, and
 it exists as an operation rather than a script because a procedure outside the
@@ -44,9 +53,20 @@ _TOTALS = (
 
 #: Recomputable means both parents are still reachable. A row whose prediction
 #: set or evaluation set is gone can be described but not reproduced, so it can
-#: only be deleted, never re-framed.
+#: only be deleted, never re-run.
+#:
+#: The second column is counted here, in the same statement, rather than derived
+#: afterwards from two totals. ``recomputable`` and ``with_frame`` describe
+#: different populations: the first is a count over the join, the second a count
+#: over the whole table, and a row can be reachable and already framed, or
+#: neither. Subtracting one from the other therefore answers no question about
+#: any row -- it yields the smallest number of unframed reachable rows the two
+#: totals permit, which equals the truth only when the populations happen to
+#: coincide. Asking the database for the conjunction costs the same join and is
+#: right for every mixture.
 _REACHABLE = (
-    "SELECT count(*) AS recomputable"
+    "SELECT count(*) AS recomputable,"
+    "       count(*) FILTER (WHERE r.frame IS NULL) AS needs_frame_declaration"
     "  FROM evaluation_result r"
     "  JOIN prediction_set p ON p.id = r.prediction_set_id"
     "  JOIN evaluation_set e ON e.id = r.evaluation_set_id"
@@ -70,8 +90,15 @@ def _read_totals(session: Session) -> dict[str, int]:
     return {key: int(row[key]) for key in row.keys()}
 
 
-def _read_recomputable(session: Session) -> int:
-    return int(session.execute(text(_REACHABLE)).mappings().one()["recomputable"])
+def _read_reachable(session: Session) -> tuple[int, int]:
+    """Return (rows whose parents survive, of those, rows carrying no frame).
+
+    Both come out of one statement so the two numbers cannot end up describing
+    different populations, which is the whole reason the second one is not
+    computed from the totals.
+    """
+    row = session.execute(text(_REACHABLE)).mappings().one()
+    return int(row["recomputable"]), int(row["needs_frame_declaration"])
 
 
 def _read_combinations(session: Session, limit: int) -> tuple[list[dict[str, Any]], int]:
@@ -126,7 +153,7 @@ class AuditEvaluationFramesOperation(Operation):
         emit("audit.start", "Counting the evaluation layer", {}, "info")
 
         totals = _read_totals(session)
-        recomputable = _read_recomputable(session)
+        recomputable, needs_declaration = _read_reachable(session)
         combinations, dropped = _read_combinations(session, p.max_combinations)
         if dropped:
             emit(
@@ -153,15 +180,24 @@ class AuditEvaluationFramesOperation(Operation):
         )
 
         # The number that decides the shape of the work, stated once and plainly
-        # so nobody has to derive it from the rest. A row can carry a frame label
-        # and still have lost its parents, so this is clamped rather than
-        # subtracted blind.
-        re_framable = max(0, recomputable - with_frame)
+        # so nobody has to derive it from the rest -- and counted rather than
+        # derived, for the reason set out above _REACHABLE.
+        #
+        # It names a missing declaration, not a missing computation. Nothing
+        # computes ``frame``; a re-run stamps whatever the dispatcher declared,
+        # so these rows need someone to decide which frame they belong to before
+        # re-running them means anything. The old wording promised that a
+        # recomputation would supply the frame, which sends a reader looking for
+        # a step in the pipeline that has never existed.
         deletable_only = n_rows - recomputable
         emit(
             "audit.verdict",
-            f"{re_framable} rows can be re-framed by recomputing; {deletable_only} can only be deleted",
-            {"re_framable_by_recompute": re_framable, "deletable_only": deletable_only},
+            f"{needs_declaration} rows carry no frame and can still be re-run with one "
+            f"declared; {deletable_only} can only be deleted",
+            {
+                "needs_frame_declaration": needs_declaration,
+                "deletable_only": deletable_only,
+            },
             "info",
         )
 
@@ -171,7 +207,7 @@ class AuditEvaluationFramesOperation(Operation):
                 "with_frame": with_frame,
                 "recomputable": recomputable,
                 "combinations": combinations,
-                "re_framable_by_recompute": re_framable,
+                "needs_frame_declaration": needs_declaration,
                 "deletable_only": deletable_only,
             }
         )
