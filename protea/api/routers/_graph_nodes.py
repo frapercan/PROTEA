@@ -34,6 +34,23 @@ def _window_span(head: dict[str, Any]) -> dict[str, Any] | None:
     return {"from": start, "to": end, "days": days, "months": round(days / 30.44, 1)}
 
 
+def _floor_for(
+    key: str, record: dict[str, list[dict[str, Any]]], floors: dict[str, str]
+) -> tuple[str | None, bool | None]:
+    """The floor declared for this node, and whether it was cleared.
+
+    One line at each call site rather than two, which is what keeps the builders
+    inside the smell budget, but it also puts the pairing in one place: a floor
+    and the verdict on it are never read apart, and a builder that fetched one
+    without the other would be exactly the half-wiring this helper was written
+    to end. :func:`_scoring_node` still reads them itself because it also needs
+    the crossed-ladder reason.
+    """
+    floor = floors.get(key)
+    separated, _ = _separation(record["panels"], floor)
+    return floor, separated
+
+
 def _frame_node(
     record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None, floors: dict[str, str]
 ) -> Built:
@@ -53,8 +70,7 @@ def _frame_node(
     used = [a for a in record["accretion"] if a["in_use"]]
     pool = eligible or record["accretion"]
     results = [r for r in record["results"] if head and r["evaluation_set_id"] == head["id"]]
-    floor = floors.get("frame")
-    separated, _crossed = _separation(record["panels"], floor)
+    floor, separated = _floor_for("frame", record, floors)
     edge = Edge(
         produced=head is not None,
         instantiated=len(used),
@@ -125,8 +141,7 @@ def _substrate_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     producible = [r for r in rows if r["producible"]]
     used_ids = {r["id"] for r in used}
     results = [r for r in record["results"] if r["embedding_config_id"] in used_ids]
-    floor = floors.get("substrate")
-    separated, _crossed = _separation(record["panels"], floor)
+    floor, separated = _floor_for("substrate", record, floors)
     edge = Edge(
         produced=bool(producible),
         instantiated=len(used),
@@ -210,8 +225,7 @@ def _bank_node(
     used_ids = {p["annotation_set_id"] for p in sets}
     pinned = bool(eligible) and used_ids <= {b["id"] for b in eligible}
     policy_set = bool(sets) and not all(_policy_is_empty(p) for p in sets)
-    floor = floors.get("bank")
-    separated, _crossed = _separation(record["panels"], floor)
+    floor, separated = _floor_for("bank", record, floors)
     edge = Edge(
         produced=bool(record["banks"]),
         instantiated=len(levels),
@@ -294,8 +308,7 @@ def _retriever_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     levels = {tuple(repr(p.get(f)) for f in _RETRIEVER_FIELDS) for p in sets}
     candidates = sum(int(c["candidates"]) for c in record["candidates"])
     depths = sorted({p["depth"] for p in sets if p["depth"]})
-    floor = floors.get("retriever")
-    separated, _crossed = _separation(record["panels"], floor)
+    floor, separated = _floor_for("retriever", record, floors)
     edge = Edge(
         produced=bool(sets),
         instantiated=len(levels),
@@ -353,8 +366,7 @@ def _generator_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     interpro = int(art.get("interpro_annotation") or 0)
     mappings = int(art.get("interpro_go_mapping") or 0)
     models = int(art.get("reranker_model") or 0)
-    floor = floors.get("generator")
-    separated, _crossed = _separation(record["panels"], floor)
+    floor, separated = _floor_for("generator", record, floors)
     edge = Edge(
         produced=bool(interpro and mappings),
         instantiated=0,
@@ -498,8 +510,7 @@ def _features_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, st
             if f.strip()
         }
     )
-    floor = floors.get("features")
-    separated, _crossed = _separation(record["panels"], floor)
+    floor, separated = _floor_for("features", record, floors)
     edge = Edge(
         produced=models > 0,
         instantiated=0,
@@ -526,8 +537,7 @@ def _reranking_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     models = int(art.get("reranker_model") or 0)
     reranked = int(art.get("reranked_results") or 0)
     used = len({r["reranker_model_id"] for r in record["results"] if r["reranker_model_id"]})
-    floor = floors.get("reranking")
-    separated, _crossed = _separation(record["panels"], floor)
+    floor, separated = _floor_for("reranking", record, floors)
     edge = Edge(
         produced=models > 0,
         instantiated=used,
@@ -565,8 +575,7 @@ def _combination_node(record: dict[str, list[dict[str, Any]]], floors: dict[str,
     """How two or more flows are merged into one answer."""
     flows = _flow_count(record)
     sources = sorted({p["bank_source"] for p in record["prediction_sets"] if p["bank_source"]})
-    floor = floors.get("combination")
-    separated, _crossed = _separation(record["panels"], floor)
+    floor, separated = _floor_for("combination", record, floors)
     edge = Edge(
         produced=flows >= 2,
         instantiated=0,
@@ -590,8 +599,7 @@ def _combination_node(record: dict[str, list[dict[str, Any]]], floors: dict[str,
 def _routing_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """Which flow answers which panel."""
     flows = _flow_count(record)
-    floor = floors.get("routing")
-    separated, _crossed = _separation(record["panels"], floor)
+    floor, separated = _floor_for("routing", record, floors)
     edge = Edge(
         produced=flows >= 2,
         instantiated=0,

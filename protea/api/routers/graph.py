@@ -238,12 +238,9 @@ def build_graph(
     """
     head = record["evaluation_sets"][0] if record["evaluation_sets"] else None
     floors = {f["node"]: f["floor"] for f in record["floors"] if f["node"] and f["floor"]}
-    # EVERY builder gets the floors, not one of them. Until 2026-09-02 this list
-    # handed the dict to _scoring_node alone, so nine of the ten nodes could not
-    # see a declared floor at all and `strength_of` returned CHOSEN for them
-    # whatever anyone declared. The vocabulary said `measured` was reachable and
-    # for nine nodes it was not, which is a surface asserting a state it cannot
-    # produce -- the same defect this endpoint exists to end.
+    # EVERY builder gets the floors. Until 2026-09-02 this list handed the dict
+    # to _scoring_node alone, so nine of the ten nodes could not see a declared
+    # floor and `strength_of` returned CHOSEN for them whatever was declared.
     built: list[Built] = [
         _frame_node(record, head, floors),
         _substrate_node(record, floors),
