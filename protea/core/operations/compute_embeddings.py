@@ -68,6 +68,37 @@ _WRITE_QUEUE = "protea.embeddings.write"
 # ---------------------------------------------------------------------------
 
 
+def _residue_budget(sequences: list[Sequence], config: EmbeddingConfig) -> dict[str, int]:
+    """What the forward pass actually consumed, so cost has a comparable unit.
+
+    The event carried a clock and no residues, and the backends carried residues
+    and no clock, so residues per second could not be formed from either. It is
+    the unit that matters here because the corpus is heavy-tailed -- median 318
+    residues against a maximum of 35,991 -- and the layer grid compares four
+    lineages with different tokenizers. A batch of 256 short sequences and a
+    batch of 256 long ones are two different jobs under one name, so sequences
+    per second is not comparable across them.
+
+    Two numbers rather than one, because they differ and the difference is
+    itself unmeasured. ``residues_available`` is what the corpus holds;
+    ``residues_processed`` is what the model saw. Without chunking a sequence
+    longer than ``max_length`` is truncated, so the second is the cost driver
+    and the gap between them says how much of the corpus never reaches the
+    model at all.
+    """
+    lengths = [len(s.sequence) for s in sequences]
+    available = sum(lengths)
+    if config.use_chunking:
+        processed = available
+    else:
+        processed = sum(min(n, config.max_length) for n in lengths)
+    return {
+        "residues_available": available,
+        "residues_processed": processed,
+        "residues_truncated": available - processed,
+    }
+
+
 class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
     """Coordinator payload: decides *which* sequences to embed and how to batch.
 
@@ -403,6 +434,7 @@ class ComputeEmbeddingsBatchOperation:
         fields: dict[str, Any] = {
             "sequences_inferred": len(write_sequences),
             "elapsed_seconds": total_s,
+            **_residue_budget(sequences, config),
             **phases,
         }
         # The fraction the substrate plan turns on. Reported per batch so it can
