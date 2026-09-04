@@ -46,9 +46,7 @@ def fetch_embedding_scale(session: Session, config_id: uuid.UUID) -> float:
     return scale if scale > 0.0 else 1.0
 
 
-def scale_and_clip_embedding(
-    vector: list[float], scale: float
-) -> tuple[list[float], int]:
+def scale_and_clip_embedding(vector: list[float], scale: float) -> tuple[list[float], int]:
     """Divide a per-sequence embedding by ``scale`` and clip it to the fp16 range.
 
     Returns ``(scaled_vector, n_clipped)``. ``scale == 1.0`` (the default for
@@ -108,6 +106,10 @@ def build_batch_dispatch_messages(
                     "device": p.device,
                     "skip_existing": p.skip_existing,
                     "batch_size": p.batch_size,
+                    # Passed through so the batch worker can fill several
+                    # layer depths from one forward pass. Empty for an
+                    # ordinary run, which behaves exactly as before.
+                    "sibling_config_ids": list(getattr(p, "sibling_config_ids", []) or []),
                 },
             },
         )

@@ -68,6 +68,32 @@ _WRITE_QUEUE = "protea.embeddings.write"
 # ---------------------------------------------------------------------------
 
 
+def _shared_pass_config(base: EmbeddingConfig, plan: Any) -> EmbeddingConfig:
+    """A throwaway recipe that asks the backend for every layer at once.
+
+    Not persisted and never given an id: it exists for the duration of one
+    forward pass. ``layer_agg`` is forced to ``concat`` because that is the only
+    aggregation that keeps the layers separable afterwards -- ``mean`` and
+    ``last`` collapse them, and a config carrying either cannot be split back
+    into its parts.
+    """
+    return EmbeddingConfig(
+        id=base.id,
+        model_name=base.model_name,
+        model_backend=base.model_backend,
+        layer_indices=list(plan.layer_indices),
+        layer_agg="concat",
+        pooling=base.pooling,
+        normalize_residues=base.normalize_residues,
+        normalize=base.normalize,
+        use_chunking=base.use_chunking,
+        chunk_size=base.chunk_size,
+        chunk_overlap=base.chunk_overlap,
+        max_length=base.max_length,
+        embedding_scale=base.embedding_scale,
+    )
+
+
 class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
     """Coordinator payload: decides *which* sequences to embed and how to batch.
 
@@ -99,6 +125,11 @@ class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
     accessions: list[str] | None = None
     query_set_id: str | None = None
     sequences_per_job: PositiveInt = 64
+    #: Other configurations differing from this one ONLY in the layer. Naming
+    #: them here makes the coordinator dispatch ONE pass that fills all of
+    #: them, instead of one pass per depth that discards the other layers the
+    #: forward already computed.
+    sibling_config_ids: list[str] = []
     device: str = "cuda"
     skip_existing: bool = True
     batch_size: PositiveInt = 1
@@ -120,6 +151,10 @@ class ComputeEmbeddingsBatchPayload(ProteaPayload, frozen=True):
     device: str = "cuda"
     skip_existing: bool = True
     batch_size: PositiveInt = 1
+    #: Other configurations that differ from this one ONLY in the layer, and so
+    #: can be filled from the same forward pass. Empty is the ordinary case and
+    #: behaves exactly as before.
+    sibling_config_ids: list[str] = []
 
 
 # ---------------------------------------------------------------------------
@@ -393,8 +428,13 @@ class ComputeEmbeddingsBatchOperation:
 
         from protea.core.operations._learned_code_embed import is_learned_code_config
 
+        siblings = self._siblings(session, config, p, emit)
         if is_learned_code_config(config):
             write_sequences = self._infer_all_learned_code(session, config, sequences, p, emit)
+        elif siblings:
+            write_sequences = self._infer_all(
+                _shared_pass_config(config, siblings), sequences, p, emit
+            )
         else:
             write_sequences = self._infer_all(config, sequences, p, emit)
 
@@ -412,11 +452,70 @@ class ComputeEmbeddingsBatchOperation:
             accounted = sum(phases.values())
             fields["inference_fraction"] = round(phases["inference_s"] / total_s, 4)
             fields["unaccounted_s"] = round(total_s - accounted, 3)
+        if siblings:
+            fields["layers_in_one_pass"] = len(siblings.layer_indices)
         emit("compute_embeddings_batch.done", None, fields, "info")
         return OperationResult(
             result={"sequences_inferred": len(write_sequences)},
-            publish_operations=[build_store_message(parent_job_id, p, write_sequences)],
+            publish_operations=self._store_messages(
+                parent_job_id, p, config, siblings, write_sequences
+            ),
         )
+
+    def _siblings(
+        self,
+        session: Session,
+        config: EmbeddingConfig,
+        p: ComputeEmbeddingsBatchPayload,
+        emit: EmitFn,
+    ) -> Any:
+        """The plan for a shared pass, or None when this batch is ordinary.
+
+        Refuses rather than degrades: a sibling that turns out to differ in more
+        than the layer would otherwise be filled from a pass its recipe never
+        asked for, and the stored rows would carry the right id and the wrong
+        contents.
+        """
+        if not p.sibling_config_ids:
+            return None
+        from protea.core.operations._multi_layer import plan_for
+
+        configs = [config]
+        for cid in p.sibling_config_ids:
+            sib = session.get(EmbeddingConfig, uuid.UUID(cid))
+            if sib is None:
+                raise ValueError(f"sibling EmbeddingConfig {cid} not found")
+            configs.append(sib)
+        plan = plan_for(configs)
+        emit(
+            "compute_embeddings_batch.shared_pass",
+            None,
+            {"configs": len(configs), "layers": plan.layer_indices},
+            "info",
+        )
+        return plan
+
+    def _store_messages(
+        self,
+        parent_job_id: uuid.UUID,
+        p: ComputeEmbeddingsBatchPayload,
+        config: EmbeddingConfig,
+        plan: Any,
+        write_sequences: list[dict],
+    ) -> list[tuple[str, dict]]:
+        """One write message per configuration the pass covered."""
+        if plan is None:
+            return [build_store_message(parent_job_id, p, write_sequences)]
+
+        from protea.core.operations._multi_layer import split_write_sequences
+
+        messages = []
+        n = len(plan.layer_indices)
+        for cid, slot in plan.slot_of.items():
+            piece = split_write_sequences(write_sequences, slot, n, config.normalize)
+            sub = p.model_copy(update={"embedding_config_id": cid})
+            messages.append(build_store_message(parent_job_id, sub, piece))
+        return messages
 
     def _infer_all(
         self,
