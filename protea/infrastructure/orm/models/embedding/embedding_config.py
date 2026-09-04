@@ -109,7 +109,22 @@ class EmbeddingConfig(Base):
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    #: The lineage a model descends from: ``ankh``, ``esm2``, ``esmc``,
+    #: ``prot_t5``, ``prostt5``, ``protst``, ``rung2``. One statement only —
+    #: it used to hold architectures for the learned configs too, which made
+    #: grouping by it mix lineages with architectures.
     family: Mapped[str | None] = mapped_column(String, nullable=True)
+    #: ``pretrained`` or ``learned``. The coarse split that ``family`` was
+    #: carrying as a second, unmarked meaning.
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="pretrained")
+    #: For a learned encoding, the config whose vectors it was built on top of.
+    #: NULL for a pretrained one — a sentinel would make "no parent" and
+    #: "parent unknown" the same answer.
+    derived_from_embedding_config_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("embedding_config.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     param_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     #: The annotation release this encoding was FITTED against, for
     #: encodings that were fitted at all.
