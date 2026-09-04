@@ -13,11 +13,13 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    event,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from protea.core.embedding_identity import derive_embedding_config_id
 from protea.infrastructure.orm.base import Base
 
 _VALID_LAYER_AGG = {"mean", "last", "concat"}
@@ -157,3 +159,25 @@ class EmbeddingConfig(Base):
             f"| pool={self.pooling} | norm_res={self.normalize_residues} "
             f"| norm={self.normalize} | chunking={self.use_chunking})>"
         )
+
+
+@event.listens_for(EmbeddingConfig, "before_insert")
+def _derive_id_from_recipe(_mapper, _connection, target: EmbeddingConfig) -> None:
+    """Give every new config the id its own recipe derives.
+
+    ``embedding_identity`` was written so there would be "one derivation with
+    callers, rather than one derivation per place that remembers to do it". It
+    ended up with none: four call sites construct an ``EmbeddingConfig`` and all
+    four took the column's ``uuid.uuid4`` default, which is how five of thirteen
+    configs came to hold ids no second machine could reproduce.
+
+    A listener rather than four calls, because the four were the problem. The id
+    is what lets two machines build the same recipe and land on the same row
+    without talking to each other, and that property cannot depend on each new
+    call site remembering it exists.
+
+    An explicitly supplied id is honoured, so a migration or a repair script can
+    still place a row deliberately.
+    """
+    if target.id is None:
+        target.id = derive_embedding_config_id(target)
