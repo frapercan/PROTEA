@@ -333,9 +333,7 @@ class TestStreamGaf:
         mock_resp.raw = raw
         mock_resp.raise_for_status = MagicMock()
 
-        with patch(
-            "protea_sources.goa.requests.get", return_value=mock_resp
-        ):
+        with patch("protea_sources.goa.requests.get", return_value=mock_resp):
             return list(self.op._stream_gaf(payload, emit))
 
     def test_parses_valid_gaf_line(self):
@@ -411,9 +409,7 @@ class TestStreamGaf:
         mock_resp.raw = raw
         mock_resp.raise_for_status = MagicMock()
 
-        with patch(
-            "protea_sources.goa.requests.get", return_value=mock_resp
-        ):
+        with patch("protea_sources.goa.requests.get", return_value=mock_resp):
             records = list(self.op._stream_gaf(payload, emit))
         assert len(records) == 1
 
@@ -520,10 +516,29 @@ class TestExecute:
         self.op = LoadGOAAnnotationsOperation()
         self.snapshot_id = uuid.uuid4()
 
+    @pytest.fixture(autouse=True)
+    def _offline_ontology_check(self):
+        """``execute`` reads the GAF's ``!go-version`` before touching the DB.
+
+        These tests are offline, so serve a header declaring a build later
+        than the snapshot they bind to; the guard itself is pinned in
+        ``test_gaf_header_guard.py``.
+        """
+        with patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value=(
+                "!gaf-version: 2.2\n"
+                "!go-version: http://purl.obolibrary.org/obo/go/releases/"
+                "2030-01-01/extensions/go-plus.owl\n"
+            ),
+        ):
+            yield
+
     def _make_session(self, accessions, go_terms):
         session = MagicMock()
-        # session.get(OntologySnapshot, id) returns a truthy mock
-        session.get.return_value = MagicMock()
+        # session.get(OntologySnapshot, id) returns a truthy mock carrying the
+        # release the ontology guard compares against.
+        session.get.return_value = MagicMock(obo_version="releases/2024-03-28")
         # _load_accessions uses session.scalars
         session.scalars.return_value = iter(accessions)
         # _load_go_term_map uses session.query
@@ -862,6 +877,106 @@ class TestExecute:
 # ---------------------------------------------------------------------------
 
 
+class TestExecuteRefusesAMismatchedOntology:
+    """The guard must fire before any row is read, written, or downloaded.
+
+    GOA 220 was loaded against an ontology eleven months after the build its
+    own header declares. Nothing rejected it, and the mislabel only surfaced
+    months later when prediction refused to run.
+    """
+
+    def _session(self, obo_version):
+        session = MagicMock()
+        session.get.return_value = MagicMock(obo_version=obo_version)
+        return session
+
+    def _payload(self, **extra):
+        return {
+            "ontology_snapshot_id": str(uuid.uuid4()),
+            "gaf_url": "https://example.invalid/goa_uniprot_all.gaf.220.gz",
+            "source_version": "220",
+            **extra,
+        }
+
+    _HEADER_220 = (
+        "!gaf-version: 2.2\n"
+        "!go-version: http://purl.obolibrary.org/obo/go/releases/2024-04-13/"
+        "extensions/go-plus.owl\n"
+    )
+
+    def test_refuses_a_snapshot_later_than_the_declared_build(self):
+        session = self._session("releases/2025-03-16")
+        with patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value=self._HEADER_220,
+        ):
+            with pytest.raises(ValueError, match="which is later"):
+                LoadGOAAnnotationsOperation().execute(session, self._payload(), emit=_noop_emit)
+
+    def test_nothing_is_created_when_it_refuses(self):
+        """No AnnotationSet, no accession scan, no stream: it fails first."""
+        session = self._session("releases/2025-03-16")
+        op = LoadGOAAnnotationsOperation()
+        with (
+            patch(
+                "protea.core.operations.load_goa_annotations.fetch_header",
+                return_value=self._HEADER_220,
+            ),
+            patch.object(op, "_stream_gaf") as stream,
+        ):
+            with pytest.raises(ValueError):
+                op.execute(session, self._payload(), emit=_noop_emit)
+        session.add.assert_not_called()
+        session.scalars.assert_not_called()
+        stream.assert_not_called()
+
+    def test_accepts_the_era_correct_snapshot(self):
+        """``releases/2024-03-28`` is what GAF 220 should have been bound to."""
+        session = self._session("releases/2024-03-28")
+        op = LoadGOAAnnotationsOperation()
+        with patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value=self._HEADER_220,
+        ):
+            checked = op._check_declared_ontology(
+                LoadGOAAnnotationsPayload.model_validate(self._payload()),
+                session.get.return_value,
+                _noop_emit,
+            )
+        assert checked == {
+            "declared": "releases/2024-04-13",
+            "bound": "releases/2024-03-28",
+        }
+
+    def test_an_unreadable_header_refuses_unless_the_skip_is_declared(self):
+        session = self._session("releases/2024-03-28")
+        op = LoadGOAAnnotationsOperation()
+        with patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value="",
+        ):
+            with pytest.raises(ValueError, match="allow_unverified_ontology"):
+                op.execute(session, self._payload(), emit=_noop_emit)
+
+            payload = LoadGOAAnnotationsPayload.model_validate(
+                self._payload(allow_unverified_ontology=True)
+            )
+            checked = op._check_declared_ontology(payload, session.get.return_value, _noop_emit)
+        assert checked["declared"] is None
+
+    def test_the_check_is_recorded_in_the_emitted_event(self):
+        session = self._session("releases/2025-03-16")
+        emit, events = _make_emit()
+        with patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value=self._HEADER_220,
+        ):
+            with pytest.raises(ValueError):
+                LoadGOAAnnotationsOperation().execute(session, self._payload(), emit=emit)
+        started = [e for e in events if e["event"] == "load_goa_annotations.start"]
+        assert len(started) == 1, "the refusal happens after start, before work"
+
+
 class TestMaybeEnqueueAtomicEval:
     """Covers the automatic generate_evaluation_set enqueue triggered by a
     successful load_goa_annotations run.
@@ -959,9 +1074,7 @@ class TestMaybeEnqueueAtomicEval:
         assert result == child_id
         # Two add() calls: the Job and its job.created JobEvent.
         assert session.add.call_count == 2
-        enqueued = [
-            e for e in events if e["event"] == "load_goa_annotations.auto_eval_enqueued"
-        ]
+        enqueued = [e for e in events if e["event"] == "load_goa_annotations.auto_eval_enqueued"]
         assert len(enqueued) == 1
         assert enqueued[0]["fields"]["child_job_id"] == str(child_id)
         assert enqueued[0]["fields"]["old_source_version"] == "215"

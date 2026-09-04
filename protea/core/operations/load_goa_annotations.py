@@ -12,6 +12,11 @@ from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.operations._gaf_header import (
+    assert_not_newer_than_declared,
+    declared_release,
+    fetch_header,
+)
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -52,6 +57,7 @@ class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
     timeout_seconds: PositiveInt = 300
     commit_every_page: bool = True
     total_limit: PositiveInt | None = None
+    allow_unverified_ontology: bool = False
 
     @field_validator("ontology_snapshot_id", "gaf_url", "source_version", mode="before")
     @classmethod
@@ -125,6 +131,8 @@ class LoadGOAAnnotationsOperation:
             "info",
         )
 
+        ontology_check = self._check_declared_ontology(p, snapshot, emit)
+
         canonical_accessions = self._load_accessions(session, emit)
         if not canonical_accessions:
             emit("load_goa_annotations.no_proteins", None, {}, "warning")
@@ -146,6 +154,7 @@ class LoadGOAAnnotationsOperation:
             "annotations_inserted": totals.inserted,
             "annotations_skipped": totals.skipped,
             "elapsed_seconds": time.perf_counter() - t0,
+            "ontology_check": ontology_check,
         }
 
         # Auto-trigger an atomic generate_evaluation_set against the latest
@@ -160,6 +169,32 @@ class LoadGOAAnnotationsOperation:
 
         emit("load_goa_annotations.done", None, result, "info")
         return OperationResult(result=result, publish_after_commit=publish_after_commit)
+
+    def _check_declared_ontology(
+        self,
+        p: LoadGOAAnnotationsPayload,
+        snapshot: OntologySnapshot,
+        emit: EmitFn,
+    ) -> dict[str, str | None]:
+        """Refuse a snapshot newer than the GO build the GAF declares.
+
+        Runs before any row is read or written, so a mismatch costs a few
+        kilobytes rather than a full stream. See ``_gaf_header`` for the rule.
+        """
+        declared = declared_release(fetch_header(p.gaf_url, p.timeout_seconds))
+        checked = assert_not_newer_than_declared(
+            gaf_url=p.gaf_url,
+            obo_version=snapshot.obo_version,
+            declared=declared,
+            allow_unverified=p.allow_unverified_ontology,
+        )
+        emit(
+            "load_goa_annotations.ontology_checked",
+            None,
+            {**checked, "verified": declared is not None},
+            "info" if declared is not None else "warning",
+        )
+        return checked
 
     def _create_annotation_set(
         self,
