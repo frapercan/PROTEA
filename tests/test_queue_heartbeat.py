@@ -110,6 +110,31 @@ class TestTheBrokerItself:
         assert "CRITICO" in r.stderr
 
 
+class TestQueuesWithNoConsumerByDesign:
+    def test_the_dead_letter_queue_is_not_a_stall(self, tmp_path):
+        """It has no consumer on purpose, so "messages and nobody attached" is
+        its normal state. Alarming on it would fire forever, which is exactly
+        how an alarm gets ignored -- the failure this whole check exists to
+        avoid, reintroduced by the check itself."""
+        r = _run([_q("protea.dead-letter", 5203, 0)], tmp_path)
+        assert r.returncode == 0
+        assert "sin consumidor por diseño" in r.stdout
+        assert "ATASCADA" not in r.stderr
+
+    def test_its_depth_is_still_reported(self, tmp_path):
+        """Not a fault is not the same as not worth saying: five thousand
+        dead letters is a fact somebody should see."""
+        r = _run([_q("protea.dead-letter", 5203, 0)], tmp_path)
+        assert "5203" in r.stdout
+
+    def test_an_ordinary_queue_with_the_same_shape_still_alarms(self, tmp_path):
+        """The exemption is by name, not by shape, so it cannot silently
+        swallow a real stall on a working queue."""
+        r = _run([_q("protea.predictions.batch", 5203, 0)], tmp_path)
+        assert r.returncode == 1
+        assert "ATASCADA" in r.stderr
+
+
 class TestScope:
     def test_queues_outside_the_prefix_are_ignored(self, tmp_path):
         r = _run([_q("otracosa", 500, 0)], tmp_path)

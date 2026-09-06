@@ -77,6 +77,15 @@ def main() -> int:
     ap.add_argument("--password", default=os.environ.get("PROTEA_RABBIT_PASS", "guest"))
     ap.add_argument("--prefix", default="protea.", help="only watch queues named like this")
     ap.add_argument(
+        "--no-consumer-by-design",
+        action="append",
+        default=None,
+        help=(
+            "queues that are SUPPOSED to have no consumer; they are reported as "
+            "growth, never as stalled. Defaults to the dead-letter queue."
+        ),
+    )
+    ap.add_argument(
         "--grace-seconds",
         type=int,
         default=900,
@@ -100,6 +109,7 @@ def main() -> int:
         print(f"CRITICO: no se puede consultar el broker en {a.api}: {exc}", file=sys.stderr)
         return 2
 
+    by_design = set(a.no_consumer_by_design or [f"{a.prefix}dead-letter"])
     seen, faults, healthy = _load_seen(a.state), [], []
     fresh: dict[str, float] = {}
 
@@ -113,6 +123,15 @@ def main() -> int:
 
         if msgs == 0:
             continue  # idle is not a fault, however long it lasts
+
+        if name in by_design:
+            # A dead-letter queue has no consumer on purpose, so "messages and
+            # nobody attached" is its normal state and alarming on it would fire
+            # forever -- which is how an alarm gets ignored, the failure this
+            # whole check is written to avoid. Its depth is still worth saying
+            # out loud, because 5,203 of them is a fact somebody should see.
+            healthy.append(f"{name}: {msgs} mensajes retenidos (sin consumidor por diseño)")
+            continue
         if acks and acks > 0:
             healthy.append(f"{name}: {msgs} en cola, {cons} consumidor(es), {acks:.2f} ack/s")
             continue
