@@ -103,6 +103,7 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./docker/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./docker/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -111,7 +112,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          # 512M was too small for what this broker actually carries: the
+          # write queues hold embedding vectors in the message body, and a
+          # coordinator publishes a whole configuration's batches at once --
+          # 2,062 messages for one model over the full corpus. Raised with the
+          # watermark above kept under it, so the two numbers cannot disagree
+          # again. Still under 14% of this machine's memory.
+          memory: 4G
 
   migrate:
     build: .
