@@ -31,8 +31,16 @@ THREE STATES, AND ONLY TWO ARE FAULTS.
 
 A queue with a slow consumer is not starved: one acknowledgement inside the
 window clears it. The grace period therefore has to exceed the longest single
-operation the queue serves, or a heavy batch reads as a stall. It defaults to
-fifteen minutes and is worth raising rather than lowering.
+operation the queue serves, or a heavy batch reads as a stall. Fifteen minutes
+was the first guess and it was wrong within a day: predict_go_terms_batch loads
+a reference pool before it scores anything, and two machines share the queue, so
+this consumer can legitimately go forty minutes without acking while the other
+one works. It cried wolf twice, which is worse than silence -- an alarm that
+fires on healthy work teaches everyone to close the tab.
+
+So the grace period is per queue, not global, and the default is deliberately
+generous. Raise it when a queue cries wolf; lowering it buys nothing, because a
+genuinely stalled queue stays stalled and will trip any threshold eventually.
 
 Exit codes are the whole interface: 0 healthy, 1 faults found, 2 the broker
 itself could not be reached -- which is its own fault and the one that hid the
@@ -88,8 +96,19 @@ def main() -> int:
     ap.add_argument(
         "--grace-seconds",
         type=int,
-        default=900,
-        help="how long a queue may hold messages without an ack before it counts as starved",
+        default=1800,
+        help="default grace for queues without one of their own",
+    )
+    ap.add_argument(
+        "--grace",
+        action="append",
+        default=None,
+        metavar="QUEUE=SECONDS",
+        help=(
+            "per-queue grace, for queues whose single operation is long. "
+            "Repeatable. Defaults cover the batch queues, whose workers load a "
+            "reference pool before scoring and are shared between two machines."
+        ),
     )
     ap.add_argument(
         "--state",
@@ -110,6 +129,16 @@ def main() -> int:
         return 2
 
     by_design = set(a.no_consumer_by_design or [f"{a.prefix}dead-letter"])
+    # Measured, not guessed: a predictions batch spent 37 minutes between acks
+    # on 2026-09-06 while completing sixteen in the following ten, because the
+    # two machines take turns and a reference load precedes every score.
+    grace_of = {
+        f"{a.prefix}predictions.batch": 5400,
+        f"{a.prefix}embeddings.batch": 5400,
+    }
+    for spec in a.grace or []:
+        q, _, secs = spec.partition("=")
+        grace_of[q] = int(secs)
     seen, faults, healthy = _load_seen(a.state), [], []
     fresh: dict[str, float] = {}
 
@@ -145,10 +174,11 @@ def main() -> int:
             faults.append(
                 f"ATASCADA {name}: {msgs} mensajes, CERO consumidores ({held / 60:.0f} min)"
             )
-        elif held >= a.grace_seconds:
+        elif held >= grace_of.get(name, a.grace_seconds):
             faults.append(
                 f"HAMBRIENTA {name}: {msgs} mensajes, {cons} consumidor(es), "
-                f"sin acks desde hace {held / 60:.0f} min"
+                f"sin acks desde hace {held / 60:.0f} min "
+                f"(margen {grace_of.get(name, a.grace_seconds) / 60:.0f} min)"
             )
 
     try:

@@ -77,22 +77,27 @@ class TestStarvation:
     def test_a_first_quiet_sample_does_not_alarm(self, tmp_path):
         """One silent reading is a busy batch, not a stall. The grace period
         has to exceed the longest single operation the queue serves."""
-        r = _run([_q("protea.predictions.batch", 216, 2)], tmp_path)
+        r = _run([_q("protea.predictions", 216, 2)], tmp_path)
         assert r.returncode == 0
 
     def test_quiet_past_the_grace_period_does_alarm(self, tmp_path):
         """The 2026-09-06 shape: consumers attached, nothing moving through
-        them, because they are blocked inside an operation."""
-        first = _run([_q("protea.predictions.batch", 216, 2)], tmp_path, now=1000.0)
+        them, because they are blocked inside an operation.
+
+        Uses the coordinator queue rather than the batch one: batch queues were
+        later given a grace of their own, since a reference load precedes every
+        score and two machines take turns on them.
+        """
+        first = _run([_q("protea.predictions", 216, 2)], tmp_path, now=1000.0)
         assert first.returncode == 0
-        later = _run([_q("protea.predictions.batch", 216, 2)], tmp_path, now=1000.0 + 1200)
+        later = _run([_q("protea.predictions", 216, 2)], tmp_path, now=1000.0 + 2400)
         assert later.returncode == 1
         assert "HAMBRIENTA" in later.stderr
-        assert "20 min" in later.stderr
+        assert "40 min" in later.stderr
 
     def test_an_ack_clears_the_clock(self, tmp_path):
-        _run([_q("protea.predictions.batch", 216, 2)], tmp_path, now=1000.0)
-        moving = _run([_q("protea.predictions.batch", 216, 2, 0.4)], tmp_path, now=1000.0 + 1200)
+        _run([_q("protea.predictions", 216, 2)], tmp_path, now=1000.0)
+        moving = _run([_q("protea.predictions", 216, 2, 0.4)], tmp_path, now=1000.0 + 2400)
         assert moving.returncode == 0
 
 
@@ -108,6 +113,39 @@ class TestTheBrokerItself:
         )
         assert r.returncode == 2
         assert "CRITICO" in r.stderr
+
+
+class TestTheGraceIsPerQueue:
+    def test_a_batch_queue_gets_a_longer_rope_than_the_default(self, tmp_path):
+        """It cried wolf on a healthy queue within a day of being written.
+        predict_go_terms_batch loads a reference pool before it scores, and two
+        machines share the queue, so this consumer can legitimately go forty
+        minutes without acking while the other one works. Sixteen batches
+        completed in the ten minutes after the alarm fired."""
+        _run([_q("protea.predictions.batch", 213, 2)], tmp_path, now=1000.0)
+        r = _run([_q("protea.predictions.batch", 213, 2)], tmp_path, now=1000.0 + 2400)
+        assert r.returncode == 0, "40 min on a batch queue is work, not a stall"
+
+    def test_the_same_wait_on_an_ordinary_queue_does_alarm(self, tmp_path):
+        """The longer rope is given by name, so it cannot quietly cover a
+        queue whose operations are short."""
+        _run([_q("protea.predictions", 213, 2)], tmp_path, now=1000.0)
+        r = _run([_q("protea.predictions", 213, 2)], tmp_path, now=1000.0 + 2400)
+        assert r.returncode == 1
+        assert "HAMBRIENTA" in r.stderr
+
+    def test_a_batch_queue_still_alarms_once_past_its_own_grace(self, tmp_path):
+        """Generous is not infinite: a real stall trips any threshold in the end."""
+        _run([_q("protea.predictions.batch", 213, 2)], tmp_path, now=1000.0)
+        r = _run([_q("protea.predictions.batch", 213, 2)], tmp_path, now=1000.0 + 6000)
+        assert r.returncode == 1
+        assert "margen 90 min" in r.stderr
+
+    def test_zero_consumers_needs_no_grace_at_all(self, tmp_path):
+        """Nobody attached is not slowness, so the longer rope does not apply."""
+        r = _run([_q("protea.predictions.batch", 213, 0)], tmp_path)
+        assert r.returncode == 1
+        assert "ATASCADA" in r.stderr
 
 
 class TestQueuesWithNoConsumerByDesign:
