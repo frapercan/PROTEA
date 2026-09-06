@@ -253,14 +253,24 @@ class OperationTuning(BaseModel):
         ),
     )
     ref_cache_freshness_seconds: int = Field(
-        default=300,
+        default=21600,
         ge=0,
         description=(
             "Ventana de frescura del disco cache de reference pool en segundos. "
             "Si los archivos .npy existen y su mtime es menor a este umbral, "
             "se salta la COUNT(*) de validación (consulta cara sobre JOIN de "
             "500k+ filas). 0 desactiva el skip y siempre ejecuta COUNT(*). "
-            "Override: PROTEA_TUNING__operation__ref_cache_freshness_seconds."
+            "Override: PROTEA_TUNING__operation__ref_cache_freshness_seconds. "
+            "\n\n"
+            "POR QUÉ 6 HORAS Y NO 300 SEGUNDOS. El valor anterior era MÁS CORTO "
+            "que la operación que existe para evitar: en el corpus 220 esa "
+            "COUNT(*) tarda 338 s, así que la caché caducaba antes de que "
+            "terminara el trabajo que cachea y NUNCA acertaba. Cada tanda de "
+            "cada trabajo la repetía; doce trabajos de rejilla son 216 cuentas "
+            "de cinco minutos, y los consumidores se bloqueaban dentro de ellas "
+            "hasta que el broker les quitaba el consumidor. El banco donante "
+            "está congelado mientras dura una campaña, así que horas es la "
+            "frescura honesta y no un truco para esquivar la consulta."
         ),
     )
     max_ground_truth_restriction: float = Field(
