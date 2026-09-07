@@ -103,7 +103,12 @@ def unified_predict_via_pipeline(
     # this helper (F2C.5c compatibility).
     from protea.core.operations.predict_go_terms import _batch_op
 
-    annotations, unique_neighbors = op._unified_load_annotations(session, ctx)
+    # Read BEFORE the pre-search and reused by all three consumers, because the
+    # pre-search needs it to know how deep to ask and building it from the
+    # pre-search's own hits would be circular. Same rule as _sequence_keys_for
+    # on the aspect path.
+    sequence_keys = _unified_sequence_keys(session, ctx)
+    annotations, unique_neighbors = op._unified_load_annotations(session, ctx, sequence_keys)
     ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = op._unified_load_pair_inputs(
         session, ctx, unique_neighbors
     )
@@ -127,10 +132,31 @@ def unified_predict_via_pipeline(
             # query from its own neighbourhood by SEQUENCE, so it has to be
             # able to recognise the query's own; with only the bank mapped it
             # refuses, which is correct and useless.
-            ref_sequence_identities=load_sequence_identities(
-                session, set(ctx.valid_accessions) | set(unique_neighbors)
+            ref_sequence_identities=(
+                sequence_keys
+                if sequence_keys is not None
+                else load_sequence_identities(
+                    session, set(ctx.valid_accessions) | set(unique_neighbors)
+                )
             ),
         )
+    )
+
+
+def _unified_sequence_keys(session: Session, ctx: _UnifiedPredictContext) -> dict[str, str] | None:
+    """The accession-to-sequence map for the unified path, over the WHOLE bank.
+
+    Built from the pool rather than from the pre-search's hits, so no neighbour
+    the method reaches can be unmapped. Building it from the hits is what failed
+    on 2026-09-07: the pre-search dropped by accession and trimmed, the method
+    dropped by sequence and reached further, and the difference had no identity.
+
+    None when the run did not ask for the exclusion, which skips the read.
+    """
+    if not bool(getattr(ctx.p, "exclude_self_neighbour", False)):
+        return None
+    return load_sequence_identities(
+        session, set(ctx.valid_accessions) | set(ctx.ref_data["accessions"])
     )
 
 
@@ -138,29 +164,35 @@ def unified_load_annotations(
     op: PredictGOTermsBatchOperation,
     session: Session,
     ctx: _UnifiedPredictContext,
+    sequence_keys: dict[str, str] | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], set[str]]:
     """Pre-search KNN to resolve the unique-neighbour set, then load
-    the lazy go-map only for those references."""
-    from protea.core.knn_search import search_knn
-    from protea.core.operations.predict_go_terms._self_neighbour import (
-        search_k_for,
-        without_self,
+    the lazy go-map only for those references.
+
+    ``sequence_keys`` covers the queries and the WHOLE bank, read before this
+    runs and reused downstream; None when the run did not ask for it."""
+    from protea_method._self_by_sequence import (
+        extra_neighbours_for,
+        without_own_sequence,
     )
+
+    from protea.core.knn_search import search_knn
 
     p = ctx.p
     use_cos = p.metric == "cosine"
     ref_embeddings_f32 = (
         ctx.ref_data["embeddings_f32_cos"] if use_cos else ctx.ref_data["embeddings_f32"]
     )
-    # One more than asked for when the query may not be its own neighbour, so
-    # that dropping the self hit below leaves limit_per_entry real donors rather
-    # than one fewer. See _self_neighbour for the measurement that prompted it.
-    exclude_self = bool(getattr(p, "exclude_self_neighbour", False))
+    # The SAME horizon and the SAME drop the method uses, or it reaches past
+    # what this delivered. See _self_neighbour for why, and what it cost.
+    accs = list(ctx.ref_data["accessions"])
+    keys = sequence_keys
+    margin = extra_neighbours_for(ctx.valid_accessions, accs, keys) if keys else 0
     neighbors = search_knn(
         ctx.query_embeddings,
         ref_embeddings_f32,
-        ctx.ref_data["accessions"],
-        k=search_k_for(p.limit_per_entry, exclude_self),
+        accs,
+        k=p.limit_per_entry + margin,
         distance_threshold=p.distance_threshold,
         backend=p.search_backend,
         metric=p.metric,
@@ -171,9 +203,10 @@ def unified_load_annotations(
         faiss_hnsw_m=p.faiss_hnsw_m,
         faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
     )
-    neighbors = without_self(
-        neighbors, list(ctx.valid_accessions), p.limit_per_entry, exclude_self
-    )
+    if keys:
+        neighbors = without_own_sequence(
+            neighbors, list(ctx.valid_accessions), p.limit_per_entry, keys
+        )
     unique_neighbors: set[str] = {ref_acc for top_refs in neighbors for ref_acc, _ in top_refs}
     # The neighbours' annotations are what gets TRANSFERRED, so the donor
     # policy applies here. It used to gate only which proteins entered the
