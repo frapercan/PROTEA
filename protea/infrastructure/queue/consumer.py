@@ -395,33 +395,17 @@ class OperationConsumer(Stoppable):
     def _handle_stop(self, *_: object) -> None:
         """Mark the consumer stopping and wake the IO loop so ``run`` returns.
 
-        Setting the flag alone is not a stop. ``_on_message`` is the only
-        reader, so it is consulted exactly when a message is delivered, and a
-        consumer with nothing to deliver stays blocked inside
-        ``start_consuming`` with the flag set and nobody looking at it. That
-        is the state ``Stoppable`` names in its own docstring: not a slow
-        shutdown, a worker no signal short of SIGKILL can restart.
-
-        It was invisible because it is the IDLE consumer that hangs, so the
-        cost only appears at restart, and only as a delay that looks like
-        drain. Every restart of an idle compute queue paid the full stop
-        timeout and then died to SIGKILL -- on this host at 300s, on the
-        compute node at 120s -- on 2026-09-07, four times on one machine and
-        once on the other, before the two sides traced it to the same line
-        independently. ``_OPERATION_QUEUES`` in ``scripts/worker.py`` covers
-        every compute queue there is, so none of them could stop cleanly.
-
-        ``QueueConsumer._handle_stop`` has always done this correctly, and
-        this is deliberately the same shape rather than a second idiom:
-        ``add_callback_threadsafe`` queues ``stop_consuming`` on the IO loop,
-        so it lands whether the loop is idle or mid-callback.
+        The flag alone is not a stop: ``_on_message`` is its only reader, so
+        an idle consumer stays parked in ``start_consuming`` and no signal
+        short of SIGKILL reaches it -- the state ``Stoppable`` describes.
+        Same shape as ``QueueConsumer._handle_stop`` on purpose, not a second
+        idiom. See ``tests/test_an_idle_consumer_hears_sigterm``.
         """
         if self._stop:
             return
         self._stop = True
-        # Kept without an ``in_flight=`` field, unlike the sibling: the two
-        # log lines are how the classes are told apart in a fleet log, and
-        # that is how this defect was finally located.
+        # No ``in_flight=`` field, unlike the sibling: the two log lines are
+        # how the classes are told apart in a fleet log.
         logger.info("Stop signal received. queue=%s", self._queue_name)
         channel = self._channel
         if channel is not None:
