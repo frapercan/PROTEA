@@ -66,9 +66,7 @@ class _AspectKnnPreSearch:
         aspect_refs = ref_data_by_aspect[aspect]
         if not aspect_refs["accessions"]:
             return aspect, [[] for _ in queries.accessions]
-        ref_f32 = (
-            aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
-        )
+        ref_f32 = aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
         # Per aspect, the same rule as the unified path: ask for one more when
         # the query may not be its own neighbour, then drop it. Aspect-separated
         # retrieval hits this harder, because a protein present in all three
@@ -81,13 +79,9 @@ class _AspectKnnPreSearch:
         # this chunk's hits. The stored neighbourhood stops being a function
         # of the query and the bank and becomes a function of who shared the
         # batch: 264 of 14,032 queries, 887 donor slots, measured.
-        keys = sequence_keys if bool(
-            getattr(p, "exclude_self_neighbour", False)
-        ) else None
+        keys = sequence_keys if bool(getattr(p, "exclude_self_neighbour", False)) else None
         accs = list(aspect_refs["accessions"])
-        margin = (
-            extra_neighbours_for(queries.accessions, accs, keys) if keys else 0
-        )
+        margin = extra_neighbours_for(queries.accessions, accs, keys) if keys else 0
         result = search_knn(
             queries.embeddings,
             ref_f32,
@@ -105,9 +99,7 @@ class _AspectKnnPreSearch:
         )
         if keys is None:
             return aspect, result
-        return aspect, without_own_sequence(
-            result, queries.accessions, p.limit_per_entry, keys
-        )
+        return aspect, without_own_sequence(result, queries.accessions, p.limit_per_entry, keys)
 
     @staticmethod
     def run(
@@ -130,8 +122,12 @@ class _AspectKnnPreSearch:
 
         def _run_one(asp: str) -> tuple[str, list[list[tuple[str, float]]]]:
             return _AspectKnnPreSearch._knn_one_aspect(
-                asp, Queries(list(valid_accessions), query_embeddings),
-                ref_data_by_aspect, p, use_cos, sequence_keys,
+                asp,
+                Queries(list(valid_accessions), query_embeddings),
+                ref_data_by_aspect,
+                p,
+                use_cos,
+                sequence_keys,
             )
 
         neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
@@ -193,7 +189,10 @@ def _load_aspect_go_map_for_hits(
             ),
         )
     return op._load_annotations_for(
-        session, source.annotation_set_id, hits_in_aspect, aspect=aspect,
+        session,
+        source.annotation_set_id,
+        hits_in_aspect,
+        aspect=aspect,
         donor_policy=source.policy,
     )
 
@@ -222,8 +221,12 @@ def _load_aspect_separated_annotations(
         if not hits_in_aspect:
             continue
         asp_go_map = _load_aspect_go_map_for_hits(
-            op, session, aspect_ref,
-            DonorSource(annotation_set_id, donor_policy), hits_in_aspect, aspect,
+            op,
+            session,
+            aspect_ref,
+            DonorSource(annotation_set_id, donor_policy),
+            hits_in_aspect,
+            aspect,
         )
         for ref_acc, anns in asp_go_map.items():
             annotations.setdefault(ref_acc, []).extend(anns)
@@ -246,10 +249,31 @@ def _sequence_keys_for(
     if not getattr(p, "exclude_self_neighbour", False):
         return None
     return load_sequence_identities(
-        session,
-        set(ctx.valid_accessions)
-        | {a for d in ctx.ref_data_by_aspect.values() for a in d["accessions"]},
+        session, set(ctx.valid_accessions) | _pool_accessions(ctx.ref_data_by_aspect)
     )
+
+
+def _pool_accessions(ref_data: dict[str, Any]) -> set[str]:
+    """Every accession the reference pool holds, whichever shape it is in.
+
+    ``ref_data_by_aspect`` is two different structures under one name. With
+    ``aspect_separated_knn`` on, ``_load_reference_data_per_aspect`` returns a
+    dict KEYED BY ASPECT whose values are ``{"accessions": [...], ...}``. With
+    it off, ``_load_reference_data`` returns that inner dict FLAT.
+
+    Reading it as if it were always the first shape is what blocked the
+    aspect-separation arm of axis C on 2026-09-07: in unified mode the union
+    came out short and every batch died on ``SequenceIdentityMissingError``,
+    "1 of 200 neighbours have no sequence identity", against a store where zero
+    donors are unmappable. The neighbour existed; the map had been built over a
+    different population.
+
+    Sniffing the shape is not elegant, and the honest fix is for one name to
+    mean one structure. Until that refactor, this reads both and says so.
+    """
+    if "accessions" in ref_data:
+        return set(ref_data["accessions"])
+    return {a for d in ref_data.values() for a in d["accessions"]}
 
 
 def _build_aspect_adapter_inputs(
@@ -268,17 +292,25 @@ def _build_aspect_adapter_inputs(
     p = ctx.payload
     sequence_keys = _sequence_keys_for(session, ctx, p)
     neighbors_by_aspect, all_unique_neighbors = _AspectKnnPreSearch.run(
-        ctx.valid_accessions, ctx.query_embeddings, ctx.ref_data_by_aspect, p,
+        ctx.valid_accessions,
+        ctx.query_embeddings,
+        ctx.ref_data_by_aspect,
+        p,
         sequence_keys,
     )
     annotations = _load_aspect_separated_annotations(
-        op, session, ctx.ref_data_by_aspect, ctx.annotation_set_id, all_unique_neighbors,
+        op,
+        session,
+        ctx.ref_data_by_aspect,
+        ctx.annotation_set_id,
+        all_unique_neighbors,
         getattr(p, "donor_policy", None),
     )
-    ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = (
-        op._load_feature_engineering_data(
-            session, p, ctx.valid_accessions, all_unique_neighbors,
-        )
+    ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = op._load_feature_engineering_data(
+        session,
+        p,
+        ctx.valid_accessions,
+        all_unique_neighbors,
     )
     go_id_map, go_aspect_map = op._load_go_term_metadata(session, annotations)
     return neighbors_by_aspect, AdapterInputs(
@@ -296,12 +328,12 @@ def _build_aspect_adapter_inputs(
         query_tax_ids=query_tax_ids,
         alignment_cache=SessionAlignmentCache(session),
         # The QUERIES go in too, not only the bank. The method excludes a
-            # query from its own neighbourhood by SEQUENCE, so it has to be
-            # able to recognise the query's own; with only the bank mapped it
-            # refuses, which is correct and useless.
-            ref_sequence_identities=load_sequence_identities(
-                session, set(ctx.valid_accessions) | set(all_unique_neighbors)
-            ),
+        # query from its own neighbourhood by SEQUENCE, so it has to be
+        # able to recognise the query's own; with only the bank mapped it
+        # refuses, which is correct and useless.
+        ref_sequence_identities=load_sequence_identities(
+            session, set(ctx.valid_accessions) | set(all_unique_neighbors)
+        ),
     )
 
 
