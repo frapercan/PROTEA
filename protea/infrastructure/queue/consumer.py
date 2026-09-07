@@ -348,6 +348,7 @@ class OperationConsumer(Stoppable):
         self._prefetch_count = options.prefetch_count
         self._requeue_on_failure = options.requeue_on_failure
         self._stop = False
+        self._channel: BlockingChannel | None = None
 
     def run(self) -> None:
         signal.signal(signal.SIGINT, self._handle_stop)
@@ -359,6 +360,7 @@ class OperationConsumer(Stoppable):
         params.heartbeat = get_tuning().queue.amqp_heartbeat
         connection = pika.BlockingConnection(params)
         channel = connection.channel()
+        self._channel = channel
 
         setup_dead_letter(channel)
         channel.queue_declare(
@@ -387,11 +389,41 @@ class OperationConsumer(Stoppable):
                     connection.close()
             except Exception:
                 pass
+            self._channel = None
             logger.info("OperationConsumer stopped. queue=%s", self._queue_name)
 
     def _handle_stop(self, *_: object) -> None:
+        """Mark the consumer stopping and wake the IO loop so ``run`` returns.
+
+        The flag alone is not a stop: ``_on_message`` is its only reader, so
+        an idle consumer stays parked in ``start_consuming`` and no signal
+        short of SIGKILL reaches it -- the state ``Stoppable`` describes.
+        Same shape as ``QueueConsumer._handle_stop`` on purpose, not a second
+        idiom. See ``tests/test_an_idle_consumer_hears_sigterm``.
+        """
+        if self._stop:
+            return
         self._stop = True
+        # No ``in_flight=`` field, unlike the sibling: the two log lines are
+        # how the classes are told apart in a fleet log.
         logger.info("Stop signal received. queue=%s", self._queue_name)
+        channel = self._channel
+        if channel is not None:
+            try:
+                channel.connection.add_callback_threadsafe(self._stop_consuming_safely)
+            except Exception:
+                try:
+                    channel.stop_consuming()
+                except Exception:
+                    pass
+
+    def _stop_consuming_safely(self) -> None:
+        if self._channel is None:
+            return
+        try:
+            self._channel.stop_consuming()
+        except Exception:
+            pass
 
     def _is_parent_job_cancelled(self, parent_job_id: UUID | None) -> bool:
         """Return True when the parent job row exists and is CANCELLED.
