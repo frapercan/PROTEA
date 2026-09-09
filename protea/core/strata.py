@@ -50,6 +50,8 @@ __all__ = [
     "report_order",
     "reportable_strata",
     "stratum_for",
+    "NEIGHBOURHOOD_AXES",
+    "SEQUENCE_AXES",
     "taxonomy_band_for",
 ]
 
@@ -349,6 +351,25 @@ class Stratum(NamedTuple):
             f"{self.homology.value}/{self.donor_evidence.value}/"
             f"{self.taxonomy.value}/{self.propagation.value}"
         )
+
+
+#: The :class:`Stratum` fields that are read off the donor neighbourhood.
+#: Reporting on any of them needs a donor that was actually aligned; reporting
+#: on the other three does not.
+#:
+#: This distinction is load-bearing rather than cosmetic. Placing a query used
+#: to require a neighbourhood whatever was being crossed, so a run asking only
+#: for length discarded every query whose donors had never been aligned -- on
+#: this campaign, most of them -- and reported the survivors as if they were
+#: the population. The axes a caller asks for decide what it needs, and this
+#: set is where that is written down.
+NEIGHBOURHOOD_AXES = frozenset(
+    {"homology", "donor_evidence", "taxonomy", "propagation"}
+)
+
+#: The other three, kept as a name so the split is checkable against
+#: ``Stratum._fields`` rather than trusted.
+SEQUENCE_AXES = frozenset({"category", "aspect", "length"})
 
 
 def stratum_for(
