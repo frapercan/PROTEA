@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import tempfile
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -26,8 +27,10 @@ from protea.core.contracts.operation import EmitFn, Operation, OperationResult, 
 from protea.core.operations._run_cafa_helpers import eval_artifact_key
 from protea.core.operations._run_cafa_strata import micro_cells, neighbourhoods_for, project
 from protea.core.strata import (
+    NEIGHBOURHOOD_AXES,
     Aspect,
     Category,
+    Neighbourhood,
     Stratum,
     stratum_for,
 )
@@ -87,27 +90,50 @@ def _category_for(setting: str) -> Category | None:
         return None
 
 
+#: Stands in for the donor neighbourhood when none is needed, so that the one
+#: placement path serves both kinds of run. Every field is ``None``, so the
+#: four donor axes come out as "no donor" -- which is why it may only be used
+#: when none of those axes was requested and none of them will be read. Asking
+#: for a donor axis and getting this would report an empty neighbourhood as a
+#: measurement, and :func:`_strata_for_rows` refuses instead.
+_UNREAD_NEIGHBOURHOOD = Neighbourhood(best_identity=None, donor_is_experimental=None)
+
+
 def _strata_for_rows(
     rows: list[dict[str, Any]],
     *,
     category: Category,
     lengths: dict[str, int],
     neighbourhoods: dict[str, Any],
+    axes: Sequence[str],
 ) -> dict[int, Stratum]:
     """Index of row position -> stratum, skipping rows that cannot be placed.
 
-    A protein with no length, no resolvable aspect or no non-self donor is
-    skipped rather than defaulted into a band, because every default here would
-    move a published number by an amount nobody chose.
+    A protein with no length or no resolvable aspect is skipped rather than
+    defaulted into a band, because every default here would move a published
+    number by an amount nobody chose.
+
+    A missing donor neighbourhood is only disqualifying when the run asks for
+    an axis that reads one. It used to disqualify unconditionally, which meant
+    a run crossing category x aspect x length -- three facts about the query's
+    own sequence, needing no alignment at all -- silently reported on whichever
+    proteins happened to have aligned donors. On this campaign that was a small
+    and non-random minority, so the withheld-cell counts looked like a coverage
+    floor and were really a filter nobody had asked for.
     """
+    needs_donor = bool(NEIGHBOURHOOD_AXES & set(axes))
     placed: dict[int, Stratum] = {}
     for i, row in enumerate(rows):
         aspect = _ASPECT_FOR_NAMESPACE.get(str(row.get("namespace")))
         acc = str(row.get("protein_accession"))
         residues = lengths.get(acc)
-        neighbourhood = neighbourhoods.get(acc)
-        if aspect is None or not residues or neighbourhood is None:
+        if aspect is None or not residues:
             continue
+        neighbourhood = neighbourhoods.get(acc)
+        if neighbourhood is None:
+            if needs_donor:
+                continue
+            neighbourhood = _UNREAD_NEIGHBOURHOOD
         placed[i] = stratum_for(
             category=category, aspect=aspect, residues=residues, neighbourhood=neighbourhood
         )
@@ -215,7 +241,11 @@ class StratifyEvaluationOperation(Operation):
                 continue
             rows = pd.read_parquet(parquet).to_dict("records")
             placed = _strata_for_rows(
-                rows, category=category, lengths=lengths, neighbourhoods=neighbourhoods
+                rows,
+                category=category,
+                lengths=lengths,
+                neighbourhoods=neighbourhoods,
+                axes=p.axes,
             )
             # The stratum rides on the row rather than being looked up by
             # position: resolving it per row through list.index would be
