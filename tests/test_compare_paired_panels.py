@@ -2010,3 +2010,115 @@ class TestTheAdvertisedInvariants:
             )
         with pytest.raises(ThresholdGridUnavailableError, match="nothing was compared"):
             _run(tmp_path, panels=["NK:MFO", "LK:MFO"])
+
+
+class TestRestrictingThePanelToOneStratum:
+    """A delta over a stratum, and the refusals that keep it from being read as more.
+
+    The campaign's decisions are declared with this bootstrap, and until now it
+    had nine panels keyed on category and aspect and no way to ask a question
+    inside them. That mattered: the descriptive view over length bands changed
+    which substrate won in almost every aspect, with margins between 0.0001 and
+    0.0172 -- every one of them under the 0.02 the campaign declares as its
+    effect of interest, and several under the error of the pooling that produced
+    them. An ordering that moves by less than the noise of the estimator that
+    produced it is not a finding, and only a resampled interval can say so.
+    """
+
+    @staticmethod
+    def _arrays(accs: tuple[str, ...], scale: float = 1.0) -> boot.PanelArrays:
+        n = len(accs)
+        tp = np.tile(np.linspace(0.9, 0.1, 5), (n, 1)) * scale
+        pred = np.tile(np.linspace(1.0, 0.2, 5), (n, 1))
+        gt = np.full(n, 2.0)
+        return boot.PanelArrays(accs, tp, pred, gt)
+
+    def test_restrict_keeps_only_the_named_accessions_in_order(self) -> None:
+        from protea.core.operations._paired_panels_panel import restrict
+
+        arrays = self._arrays(("P0", "P1", "P2", "P3"))
+        out = restrict(arrays, frozenset({"P3", "P1"}))
+        assert out.accessions == ("P1", "P3")
+        assert out.n == 2
+        # The rows must travel with their accession, not merely be the right count.
+        np.testing.assert_allclose(out.tp[0], arrays.tp[1])
+        np.testing.assert_allclose(out.tp[1], arrays.tp[3])
+
+    def test_restricting_to_nothing_leaves_an_empty_panel_not_a_wrong_one(self) -> None:
+        from protea.core.operations._paired_panels_panel import restrict
+
+        out = restrict(self._arrays(("P0", "P1")), frozenset({"NOT_HERE"}))
+        assert out.n == 0
+
+    @pytest.mark.parametrize(
+        ("restriction", "expected"),
+        [
+            (None, "NK:MFO"),
+            ({"length": "512-1024"}, "NK:MFO@length=512-1024"),
+            ({"homology": "<=30"}, "NK:MFO@homology=<=30"),
+        ],
+    )
+    def test_the_reported_key_carries_the_restriction(self, restriction, expected) -> None:
+        """A restricted delta filed under the unrestricted name is a number that
+        cannot be told apart from the one it is not."""
+        from protea.core.operations.compare_paired_panels import stratum_label
+
+        assert stratum_label("NK:MFO", restriction) == expected
+
+    def test_the_key_does_not_depend_on_mapping_order(self) -> None:
+        """Two dicts with the same content must not file one stratum twice."""
+        from protea.core.operations.compare_paired_panels import stratum_label
+
+        one = stratum_label("PK:BPO", {"length": "<=512", "homology": "30-50"})
+        other = stratum_label("PK:BPO", {"homology": "30-50", "length": "<=512"})
+        assert one == other
+
+    @pytest.mark.parametrize(
+        ("bad", "says"),
+        [
+            ({"longitud": "<=512"}, "unknown stratum axes"),
+            ({"length": "0-100"}, "is not one of"),
+            ({}, "omit restrict_to_stratum"),
+        ],
+    )
+    def test_an_unreadable_restriction_is_refused(self, bad, says) -> None:
+        """Can refuse. An unknown AXIS would restrict nothing and report the whole
+        panel under a stratum's name; an unknown BAND would restrict to the empty
+        set and report a refusal that reads like a sparse stratum, not a typo."""
+        with pytest.raises(ValidationError, match=says):
+            ComparePairedPanelsPayload.model_validate(
+                {
+                    "evaluation_result_id": "a",
+                    "baseline_evaluation_result_id": "b",
+                    "restrict_to_stratum": bad,
+                }
+            )
+
+    def test_a_readable_restriction_is_accepted_on_every_axis(self) -> None:
+        """Can act, once per axis: a refusal test alone would pass against a
+        validator that refused everything."""
+        from protea.core.strata import Stratum
+
+        for axis, band in (
+            ("length", "<=512"),
+            ("homology", "<=30"),
+            ("donor_evidence", "exp"),
+            ("category", "NK"),
+        ):
+            p = ComparePairedPanelsPayload.model_validate(
+                {
+                    "evaluation_result_id": "a",
+                    "baseline_evaluation_result_id": "b",
+                    "restrict_to_stratum": {axis: band},
+                }
+            )
+            assert p.restrict_to_stratum == {axis: band}
+            assert axis in Stratum._fields
+
+    def test_omitting_the_restriction_is_the_whole_panel(self) -> None:
+        """Every result published before this field existed was unrestricted, so
+        the default has to keep meaning that."""
+        p = ComparePairedPanelsPayload.model_validate(
+            {"evaluation_result_id": "a", "baseline_evaluation_result_id": "b"}
+        )
+        assert p.restrict_to_stratum is None

@@ -595,20 +595,52 @@ def _arms(
     return (op_a, op_b), block_a, block_b
 
 
+def restrict(arrays: boot.PanelArrays, keep: frozenset[str]) -> boot.PanelArrays:
+    """The panel narrowed to the accessions in ``keep``, order preserved.
+
+    Applied BEFORE the population statistics rather than after, so that the
+    Jaccard overlap, ``n_paired`` and every refusal downstream all describe the
+    restricted population. Restricting afterwards would report a stratum's
+    delta beside the whole panel's population counts, and the two would be read
+    as one fact.
+    """
+    order = np.array(
+        [i for i, acc in enumerate(arrays.accessions) if acc in keep], dtype=np.int64
+    )
+    return arrays.take(order)
+
+
 def panel_result(
     sides: tuple[Side, Side],
     key: str,
     cfg: PanelConfig,
     index: int,
     rule: tuple[str, float],
+    keep: frozenset[str] | None = None,
+    label: str | None = None,
 ) -> dict[str, Any]:
-    """One panel's whole answer, including the answers that are refusals to answer."""
+    """One panel's whole answer, including the answers that are refusals to answer.
+
+    ``keep`` restricts the paired population to one stratum; ``label`` is the
+    name that restriction is reported under. The two travel together on purpose:
+    a restricted delta reported under the unrestricted panel's name is a number
+    that cannot be told apart from the one it is not.
+    """
     setting, aspect = key.split(":")
     namespace = CAFA_TO_NAMESPACE[aspect]
+    reported = label or key
     raw_a, raw_b = sides[0].panel(setting, namespace), sides[1].panel(setting, namespace)
     if raw_a is None or raw_b is None:
-        return empty_panel({"panel": key, **absent_stats(rule)}, "artefact_absent_for_panel", "empty")
-    stats = {"panel": key, **population_stats(raw_a, raw_b, rule[0])}
+        return empty_panel(
+            {"panel": reported, **absent_stats(rule)}, "artefact_absent_for_panel", "empty"
+        )
+    if keep is not None:
+        raw_a, raw_b = restrict(raw_a, keep), restrict(raw_b, keep)
+        if not (raw_a.n and raw_b.n):
+            return empty_panel(
+                {"panel": reported, **absent_stats(rule)}, "stratum_empty_for_panel", "empty"
+            )
+    stats = {"panel": reported, **population_stats(raw_a, raw_b, rule[0])}
     refusal = population_refusal(raw_a, raw_b, stats, rule[0], rule[1])
     if refusal is not None:
         return refused_panel(stats, *refusal)
@@ -616,10 +648,10 @@ def panel_result(
     # Assert the population, never infer it from a count reported elsewhere.
     if not (a.n == b.n == stats["n_paired"]):
         raise PanelComparabilityError(
-            f"panel {key}: declared {stats['n_paired']} paired proteins but the arrays hold "
+            f"panel {reported}: declared {stats['n_paired']} paired proteins but the arrays hold "
             f"{a.n} and {b.n}; the number and the population it is over have come apart"
         )
-    assert_same_ground_truth(a, b, key)
+    assert_same_ground_truth(a, b, reported)
     ops, block_a, block_b = _arms(sides, key, (a, b), (raw_a, raw_b), cfg.tau_index)
     delta = float(ops[0].value - ops[1].value)
     silent = [n for n, blk in (("A", block_a), ("B", block_b)) if blk["silent"]]

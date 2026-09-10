@@ -84,6 +84,21 @@ from protea.core.operations._paired_panels_panel import (
     resolve_tau_index,
     tally,
 )
+from protea.core.operations._run_cafa_strata import neighbourhoods_for
+from protea.core.operations.stratify_evaluation import _protein_lengths
+from protea.core.strata import (
+    NEIGHBOURHOOD_AXES,
+    Aspect,
+    Category,
+    DonorEvidence,
+    HomologyBand,
+    LengthBand,
+    Neighbourhood,
+    PropagationBand,
+    Stratum,
+    TaxonomyBand,
+    stratum_for,
+)
 from protea.core.utils import contract_payload
 
 #: The nine panels, category by aspect, in canonical report order. There is no
@@ -99,6 +114,25 @@ ALL_PANELS: tuple[str, ...] = (
     "PK:BPO",
     "PK:CCO",
 )
+
+
+#: Which closed vocabulary each Stratum axis draws from. Written here rather
+#: than inferred, so a seventh axis added to Stratum fails this operation's
+#: tests instead of silently accepting any string for itself.
+#: Stands in when no donor axis was requested, so the one placement path serves
+#: both kinds of restriction. Only the sequence axes may be read off a stratum
+#: built with it -- which is exactly the case in which it is used.
+_NO_DONOR_READ = Neighbourhood(best_identity=None, donor_is_experimental=None)
+
+_BAND_TYPE: dict[str, type] = {
+    "category": Category,
+    "aspect": Aspect,
+    "length": LengthBand,
+    "homology": HomologyBand,
+    "donor_evidence": DonorEvidence,
+    "taxonomy": TaxonomyBand,
+    "propagation": PropagationBand,
+}
 
 #: Markers that must agree for two evaluation results to be comparable.
 #: ``prediction_set_id`` and ``scoring_config_id`` are expected to differ: that
@@ -192,6 +226,17 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
     ]
     population_rule: Literal["intersect", "require_identical"] = "intersect"
     min_jaccard: Annotated[float, Field(default=0.95, gt=0.0, le=1.0)]
+    restrict_to_stratum: Annotated[
+        dict[str, str] | None,
+        Field(
+            default=None,
+            description=(
+                "axis -> band, restricting the paired population to one stratum. "
+                "None compares the whole panel, which is what every result before "
+                "this field existed did."
+            ),
+        ),
+    ]
     allow_frame_mismatch: bool = False
     artifacts_root: str | None = None
     baseline_artifacts_root: str | None = None
@@ -224,6 +269,36 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
                 "per-panel membership tracked, which this operation does not compute."
             )
         return value
+
+    @field_validator("restrict_to_stratum")
+    @classmethod
+    def _known_stratum(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        """A restriction is a claim about a population, so an unreadable one is refused.
+
+        Both halves are checked. An unknown AXIS would silently restrict nothing
+        and report a whole-panel delta under a stratum's name; an unknown BAND
+        would restrict to the empty set and report a refusal that looks like a
+        sparse stratum rather than like a typo.
+        """
+        if value is None:
+            return None
+        if not value:
+            raise ValueError(
+                "omit restrict_to_stratum to compare the whole panel; an empty mapping "
+                "asks for a restriction and names none"
+            )
+        unknown = sorted(k for k in value if k not in Stratum._fields)
+        if unknown:
+            raise ValueError(
+                f"unknown stratum axes {unknown}; the seven are {list(Stratum._fields)}"
+            )
+        for axis, band in value.items():
+            allowed = [b.value for b in _BAND_TYPE[axis]]
+            if band not in allowed:
+                raise ValueError(
+                    f"{axis}={band!r} is not one of {allowed}"
+                )
+        return dict(value)
 
     @model_validator(mode="after")
     def _coherent(self) -> ComparePairedPanelsPayload:
@@ -540,6 +615,88 @@ def _refuse_if_nothing_was_comparable(
     )
 
 
+def stratum_label(key: str, restrict: dict[str, str] | None) -> str:
+    """``NK:MFO`` unrestricted, ``NK:MFO@length=512-1024`` restricted.
+
+    Axes are sorted so the same restriction always produces the same string:
+    a key that varied with dict order would file one stratum under two names.
+    """
+    if not restrict:
+        return key
+    inner = ",".join(f"{a}={restrict[a]}" for a in sorted(restrict))
+    return f"{key}@{inner}"
+
+
+def _stratum_population(
+    session: Session,
+    restrict: dict[str, str],
+    baseline_prediction_set_id: str,
+    emit: EmitFn,
+) -> frozenset[str]:
+    """The accessions that sit in the requested stratum, read off the BASELINE.
+
+    WHOSE NEIGHBOURHOOD DEFINES MEMBERSHIP. For the three sequence axes --
+    category, aspect, length -- the question does not arise: they are properties
+    of the query itself and both arms answer identically. The four donor axes
+    are properties of a RETRIEVAL, and the two arms retrieved different donors,
+    so the same protein can sit in ``<=30`` for one arm and ``30-50`` for the
+    other.
+
+    Membership is therefore always taken from the baseline, never from the arm
+    under test. "Among the proteins the baseline found hard, does the challenger
+    help?" is a question with an answer. "Among the proteins the challenger
+    placed in the twilight zone" is the challenger choosing its own population,
+    and a method that retrieves worse would be handed an easier stratum to be
+    measured on. The choice is recorded on the job so a reader is never left to
+    infer which arm the band came from.
+    """
+    needs_donor = bool(NEIGHBOURHOOD_AXES & set(restrict))
+    lengths = _protein_lengths(session)
+    hoods = neighbourhoods_for(session, baseline_prediction_set_id) if needs_donor else {}
+
+    keep: set[str] = set()
+    unplaceable = 0
+    for acc, residues in lengths.items():
+        if not residues:
+            continue
+        hood = hoods.get(acc)
+        if hood is None:
+            if needs_donor:
+                unplaceable += 1
+                continue
+            hood = _NO_DONOR_READ
+        # category and aspect vary per row of the artefact, not per protein, so
+        # they are matched downstream against the panel key rather than here.
+        st = stratum_for(
+            category=Category.NO_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION,
+            residues=residues, neighbourhood=hood,
+        )
+        if all(getattr(st, axis) == band for axis, band in restrict.items()
+               if axis in NEIGHBOURHOOD_AXES or axis == "length"):
+            keep.add(acc)
+
+    emit(
+        "compare_paired_panels.stratum",
+        f"population restricted to {restrict}",
+        {
+            "restrict_to_stratum": dict(restrict),
+            "membership_from": "baseline",
+            "baseline_prediction_set_id": baseline_prediction_set_id,
+            "n_in_stratum": len(keep),
+            "n_unplaceable": unplaceable,
+            "reads_a_donor": needs_donor,
+        },
+        "info",
+    )
+    if not keep:
+        raise PanelComparabilityError(
+            f"no protein sits in stratum {restrict}: the restriction selects an empty "
+            "population, so there is nothing to resample. That is a refusal and not a "
+            "zero delta."
+        )
+    return frozenset(keep)
+
+
 class ComparePairedPanelsOperation(Operation):
     """Paired interval on the campaign's own estimator, one per panel."""
 
@@ -589,7 +746,14 @@ class ComparePairedPanelsOperation(Operation):
             # serve both arms. Resolved before it, a grid disagreement would
             # surface as an off-grid tau, the right refusal under a wrong name.
             cfg = self._config(sides, p)
-            panels = self._panels(sides, p, cfg, emit)
+            keep = (
+                _stratum_population(
+                    session, p.restrict_to_stratum, prov_b["prediction_set_id"], emit
+                )
+                if p.restrict_to_stratum
+                else None
+            )
+            panels = self._panels(sides, p, cfg, emit, keep=keep)
             _refuse_if_nothing_was_comparable(sides, panels)
             result = self._result(sides, p, cfg, panels, mismatch, artifact_mismatch)
         emit("compare_paired_panels.verdict", None, result["verdict"], "info")
@@ -712,13 +876,20 @@ class ComparePairedPanelsOperation(Operation):
         p: ComparePairedPanelsPayload,
         cfg: PanelConfig,
         emit: EmitFn,
+        keep: frozenset[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         rule = (p.population_rule, p.min_jaccard)
         out: dict[str, dict[str, Any]] = {}
         for key in p.panels:
-            panel = panel_result(sides, key, cfg, ALL_PANELS.index(key), rule)
-            _emit_panel(panel, key, p, cfg, emit)
-            out[key] = panel
+            # The reported name carries the restriction, so a stratum's delta
+            # and the whole panel's delta cannot be filed under one key and
+            # later read as two measurements of the same thing.
+            reported = stratum_label(key, p.restrict_to_stratum)
+            panel = panel_result(
+                sides, key, cfg, ALL_PANELS.index(key), rule, keep=keep, label=reported
+            )
+            _emit_panel(panel, reported, p, cfg, emit)
+            out[reported] = panel
         return out
 
     @staticmethod
@@ -747,6 +918,8 @@ class ComparePairedPanelsOperation(Operation):
             "confidence": p.confidence,
             "power": p.power,
             "min_population": p.min_population,
+            "restrict_to_stratum": p.restrict_to_stratum,
+            "stratum_membership_from": "baseline" if p.restrict_to_stratum else None,
             "population_rule": p.population_rule,
             "interval_method_requested": p.interval_method,
             "effect_of_interest": p.effect_of_interest,
