@@ -42,6 +42,7 @@ from protea.core.operations._paired_panels_artifact import (
     require_variant,
     resolve_setting_file,
 )
+from protea.core.operations._paired_panels_stratum import Restriction
 from protea.core.operations._run_cafa_helpers import eval_artifact_key
 
 # The exact-path control. ``_micro`` is the function behind every published
@@ -595,20 +596,90 @@ def _arms(
     return (op_a, op_b), block_a, block_b
 
 
+def restrict(arrays: boot.PanelArrays, keep: frozenset[str]) -> boot.PanelArrays:
+    """The panel narrowed to the accessions in ``keep``, order preserved.
+
+    Applied BEFORE the population statistics rather than after, so that the
+    Jaccard overlap, ``n_paired`` and every refusal downstream all describe the
+    restricted population. Restricting afterwards would report a stratum's
+    delta beside the whole panel's population counts, and the two would be read
+    as one fact.
+    """
+    order = np.array(
+        [i for i, acc in enumerate(arrays.accessions) if acc in keep], dtype=np.int64
+    )
+    return arrays.take(order)
+
+
+def _raw_pair(
+    sides: tuple[Side, Side],
+    key: str,
+    narrow: Restriction | None,
+) -> tuple[boot.PanelArrays, boot.PanelArrays] | str:
+    """Both arms' arrays for one panel, narrowed if asked, or WHY there are none.
+
+    The two ways of having nothing are returned as different strings rather than
+    as one empty result. An artefact that was never written and a stratum that
+    holds no protein both leave zero rows to resample, but the first is a run
+    that did not happen and the second is a population that does not exist, and
+    the actions they call for are not the same.
+    """
+    setting, aspect = key.split(":")
+    namespace = CAFA_TO_NAMESPACE[aspect]
+    raw_a, raw_b = sides[0].panel(setting, namespace), sides[1].panel(setting, namespace)
+    if raw_a is None or raw_b is None:
+        return "artefact_absent_for_panel"
+    if narrow is not None:
+        raw_a, raw_b = restrict(raw_a, narrow.keep), restrict(raw_b, narrow.keep)
+        if not (raw_a.n and raw_b.n):
+            return "stratum_empty_for_panel"
+    return raw_a, raw_b
+
+
+def _below_floor(
+    stats: dict[str, Any],
+    block_a: dict[str, Any],
+    block_b: dict[str, Any],
+    delta: float,
+    arm_silent: str | None,
+) -> dict[str, Any]:
+    """Computed, and unresolvable -- which is not the same fact as never read.
+
+    A panel with fewer than two paired proteins has a delta and cannot have an
+    interval. The verdict says "not resolved" and the tally counts it among the
+    panels that could not answer, rather than among the panels that were not
+    asked; folding the two together would let a missing artefact hide inside a
+    thin stratum.
+    """
+    return {
+        **empty_panel(stats, "population_below_bootstrap_floor", "unresolvable"),
+        "verdict": "not_resolved",
+        "a": block_a,
+        "b": block_b,
+        "delta": delta,
+        "arm_silent": arm_silent,
+    }
+
+
 def panel_result(
     sides: tuple[Side, Side],
     key: str,
     cfg: PanelConfig,
     index: int,
     rule: tuple[str, float],
+    narrow: Restriction | None = None,
 ) -> dict[str, Any]:
-    """One panel's whole answer, including the answers that are refusals to answer."""
-    setting, aspect = key.split(":")
-    namespace = CAFA_TO_NAMESPACE[aspect]
-    raw_a, raw_b = sides[0].panel(setting, namespace), sides[1].panel(setting, namespace)
-    if raw_a is None or raw_b is None:
-        return empty_panel({"panel": key, **absent_stats(rule)}, "artefact_absent_for_panel", "empty")
-    stats = {"panel": key, **population_stats(raw_a, raw_b, rule[0])}
+    """One panel's whole answer, including the answers that are refusals to answer.
+
+    ``narrow`` restricts the paired population to one stratum and carries the
+    name that restriction is reported under. ``None`` is the whole panel.
+    """
+    reported = narrow.label if narrow else key
+    raw = _raw_pair(sides, key, narrow)
+    if isinstance(raw, str):
+        return empty_panel({"panel": reported, **absent_stats(rule)}, raw, "empty")
+    raw_a, raw_b = raw
+    stats = {"panel": reported, **population_stats(raw_a, raw_b, rule[0])}
     refusal = population_refusal(raw_a, raw_b, stats, rule[0], rule[1])
     if refusal is not None:
         return refused_panel(stats, *refusal)
@@ -616,28 +687,16 @@ def panel_result(
     # Assert the population, never infer it from a count reported elsewhere.
     if not (a.n == b.n == stats["n_paired"]):
         raise PanelComparabilityError(
-            f"panel {key}: declared {stats['n_paired']} paired proteins but the arrays hold "
+            f"panel {reported}: declared {stats['n_paired']} paired proteins but the arrays hold "
             f"{a.n} and {b.n}; the number and the population it is over have come apart"
         )
-    assert_same_ground_truth(a, b, key)
+    assert_same_ground_truth(a, b, reported)
     ops, block_a, block_b = _arms(sides, key, (a, b), (raw_a, raw_b), cfg.tau_index)
     delta = float(ops[0].value - ops[1].value)
     silent = [n for n, blk in (("A", block_a), ("B", block_b)) if blk["silent"]]
     arm_silent = silent[0] if len(silent) == 1 else None
     if a.n < 2:
-        # Computed, and unresolvable. Not the same fact as an artefact that was
-        # never read, so the verdict says "not resolved" and the tally counts it
-        # among the panels that could not answer rather than among the panels
-        # that were not asked.
-        floor = empty_panel(stats, "population_below_bootstrap_floor", "unresolvable")
-        return {
-            **floor,
-            "verdict": "not_resolved",
-            "a": block_a,
-            "b": block_b,
-            "delta": delta,
-            "arm_silent": arm_silent,
-        }
+        return _below_floor(stats, block_a, block_b, delta, arm_silent)
     panel: dict[str, Any] = {
         **stats,
         "a": block_a,
