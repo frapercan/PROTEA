@@ -114,10 +114,29 @@ ALL_PANELS: tuple[str, ...] = (
 #: Markers that must agree for two evaluation results to be comparable.
 #: ``prediction_set_id`` and ``scoring_config_id`` are expected to differ: that
 #: is what is being compared.
+#:
+#: THE SEAL, NOT THE LABEL. This gate used to compare ``frame`` and
+#: ``temporal_window``, which are strings a harness writes. ``frame_digest`` is
+#: computed from the material a frame is actually made of -- the evaluation set,
+#: the pivot snapshot, the accretion set, the window and the two evaluation caps
+#: -- so it is the only column that can say two results were measured against
+#: the same thing.
+#:
+#: Reading the label had both failure modes at once, and both were live on this
+#: campaign. It PASSED results that are not comparable: four distinct digests
+#: shared two labels, so two rows both stamped ``internal`` / ``SELECT_220_227``
+#: could sit in different frames and compare anyway. And it REFUSED results that
+#: are: 110 of the campaign's 153 evaluations carried a digest and no label, so
+#: every substrate and depth comparison was rejected while the three arms that
+#: happened to be labelled went through. Which axes could be declared with this
+#: bootstrap was decided by that, and nobody chose it.
+#:
+#: ``leakage_role`` stays a marker of its own because it is not part of the
+#: digest; ``evaluation_set_id`` is kept although the digest covers it, so a
+#: mismatch names the set rather than only two opaque hashes.
 _FRAME_MARKERS: tuple[str, ...] = (
     "evaluation_set_id",
-    "frame",
-    "temporal_window",
+    "frame_digest",
     "leakage_role",
 )
 
@@ -127,7 +146,7 @@ _PROVENANCE_SQL = text(
     "       prediction_set_id::text AS prediction_set_id,"
     "       scoring_config_id::text AS scoring_config_id,"
     "       reranker_model_id::text AS reranker_model_id,"
-    "       frame, temporal_window, leakage_role, results"
+    "       frame, temporal_window, frame_digest, leakage_role, results"
     "  FROM evaluation_result WHERE id = :id"
 )
 
