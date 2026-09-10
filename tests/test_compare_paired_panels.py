@@ -2167,8 +2167,10 @@ class TestTheRestrictionReachesTheArrays:
         from protea.core.operations._paired_panels_panel import _raw_pair
 
         sides = (self._side(("P0", "P1", "P2")), self._side(("P0", "P1", "P2")))
-        a, b = _raw_pair(sides, "NK:MFO", None)
+        a, b, whole = _raw_pair(sides, "NK:MFO", None)
         assert a.accessions == b.accessions == ("P0", "P1", "P2")
+        # No restriction, so there is no separate whole panel to carry.
+        assert whole is None
 
     def test_a_restriction_narrows_both_arms_to_the_stratum(self):
         """Can act, and through the seam rather than beside it."""
@@ -2177,8 +2179,12 @@ class TestTheRestrictionReachesTheArrays:
 
         sides = (self._side(("P0", "P1", "P2")), self._side(("P0", "P1", "P2")))
         narrow = Restriction(frozenset({"P1"}), "NK:MFO@length=<=512")
-        a, b = _raw_pair(sides, "NK:MFO", narrow)
+        a, b, whole = _raw_pair(sides, "NK:MFO", narrow)
         assert a.accessions == b.accessions == ("P1",)
+        # The whole panel travels back for the parity control, which cannot be
+        # read off a stratum: see TestParityIsCheckedOnTheWholePanel.
+        assert whole is not None
+        assert whole[0].accessions == ("P0", "P1", "P2")
 
     def test_a_stratum_no_protein_falls_in_is_named_as_such(self):
         """Distinct from an absent artefact: one is a population that does not
@@ -2274,3 +2280,88 @@ class TestTheGateReadsTheSealNotTheLabel:
         session = _session(a=dict(same), b=dict(same))
         with pytest.raises(PanelComparabilityError, match="do not both declare"):
             _run(tmp_path, session=session)
+
+
+class TestParityIsCheckedOnTheWholePanel:
+    """The stored cell is a whole-population number, so a stratum cannot be
+    compared against it.
+
+    Found on real data within minutes of the first band-restricted run: the
+    parity control recomposed the ``<=512`` stratum to 0.052507 and refused it
+    against the 0.0433 the evaluation result stores for the whole panel. The
+    guard was right and the feature was wrong. The control asks whether an
+    artefact recomposes to the number published from it -- a property of the
+    artefact, not of the population a later caller chose to look at.
+    """
+
+    @staticmethod
+    def _meta():
+        from protea.core.operations._paired_panels_artifact import GridMeta
+
+        return GridMeta(
+            setting="NK",
+            tau_grid=np.array([0.5, 0.9]),
+            th_step=0.4,
+            variants=("weighted",),
+            values={},
+        )
+
+    @staticmethod
+    def _arrays(accs: tuple[str, ...], tp: float) -> Any:
+        """A panel whose first two proteins score far above the rest.
+
+        Heterogeneous on purpose. Written with one tp for every protein, any
+        subset recomposes to the same value as the whole and the test passes
+        against the bug it exists to catch -- which is what the first version of
+        it did.
+        """
+        n = len(accs)
+        tps = np.full((n, 2), 0.5)
+        tps[:2] = tp
+        return boot.PanelArrays(
+            accs,
+            tps,
+            np.full((n, 2), 8.0),
+            np.full(n, 10.0),
+        )
+
+    @staticmethod
+    def _keep(arrays, accs: frozenset):
+        from protea.core.operations._paired_panels_panel import restrict
+
+        return restrict(arrays, accs)
+
+    def test_a_stratum_is_not_measured_against_the_whole_panels_cell(self) -> None:
+        """Can act: the restricted arm reports the stratum, and parity passes
+        because it was read off the whole panel."""
+        from protea.core.operations._paired_panels_panel import arm_block
+
+        whole = self._arrays(tuple(f"P{i}" for i in range(10)), 4.0)
+        stratum = self._keep(whole, frozenset({"P0", "P1"}))
+        stored = float(boot.select_operating_point(boot.panel_curve(whole)).value)
+        op, block = arm_block(stratum, stratum, self._meta(), stored, None, parity_from=whole)
+        assert block["stored_metric"] == pytest.approx(stored)
+        assert block["estimator_parity_checked"] is True
+
+    def test_reading_parity_off_the_stratum_refuses(self) -> None:
+        """Can refuse, and this is the bug: pass the stratum as its own parity
+        source and the control fires exactly as it did on the campaign."""
+        from protea.core.operations._paired_panels_panel import arm_block
+
+        whole = self._arrays(tuple(f"P{i}" for i in range(10)), 4.0)
+        thin = self._keep(whole, frozenset({"P0"}))
+        thin = boot.PanelArrays(thin.accessions, thin.tp * 0.2, thin.pred, thin.n_gt)
+        stored = float(boot.select_operating_point(boot.panel_curve(whole)).value)
+        with pytest.raises(PanelComparabilityError, match="do not describe the same run"):
+            arm_block(thin, thin, self._meta(), stored, None)
+
+    def test_without_a_restriction_the_arm_is_its_own_parity_source(self) -> None:
+        """The unrestricted path must not change: passing None has to keep
+        reading the arm's own arrays, or this fix would retire the guard on
+        every comparison that never asked for a stratum."""
+        from protea.core.operations._paired_panels_panel import arm_block
+
+        whole = self._arrays(tuple(f"P{i}" for i in range(10)), 4.0)
+        stored = float(boot.select_operating_point(boot.panel_curve(whole)).value)
+        op, block = arm_block(whole, whole, self._meta(), stored, None)
+        assert block["estimator_parity_checked"] is True
