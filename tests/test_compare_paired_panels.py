@@ -87,6 +87,10 @@ def _row(result_id: str, **overrides: Any) -> dict[str, Any]:
         "reranker_model_id": None,
         "frame": "lafa",
         "temporal_window": "220->230",
+        # The seal, which is what the gate reads. ``frame`` and
+        # ``temporal_window`` stay in the row because they are still reported;
+        # they are no longer what decides comparability.
+        "frame_digest": "f-0000000000000000000000",
         "leakage_role": "test",
         "results": {},
     }
@@ -1239,7 +1243,7 @@ class TestPopulationAndProvenance:
         """
         self._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
         self._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
-        blank = {"frame": None, "temporal_window": None, "leakage_role": None}
+        blank = {"frame": None, "frame_digest": None, "leakage_role": None}
         session = _session(a=blank, b=blank)
         with pytest.raises(PanelComparabilityError, match="do not both declare"):
             _run(tmp_path, session=session)
@@ -1248,7 +1252,7 @@ class TestPopulationAndProvenance:
         """The flag waives a DISAGREEMENT between two declarations, not a silence."""
         self._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
         self._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
-        blank = {"frame": None, "temporal_window": None, "leakage_role": None}
+        blank = {"frame": None, "frame_digest": None, "leakage_role": None}
         with pytest.raises(PanelComparabilityError, match="not waivable"):
             _run(tmp_path, session=_session(a=blank, b=blank), allow_frame_mismatch=True)
 
@@ -2192,3 +2196,81 @@ class TestTheRestrictionReachesTheArrays:
 
         sides = (self._side(("P0",), present=False), self._side(("P0",)))
         assert _raw_pair(sides, "NK:MFO", None) == "artefact_absent_for_panel"
+
+
+class TestTheGateReadsTheSealNotTheLabel:
+    """Which column decides comparability, and why the other one cannot.
+
+    ``frame`` and ``temporal_window`` are strings a harness writes.
+    ``frame_digest`` is computed from what a frame is made of: the evaluation
+    set, the pivot snapshot, the accretion set, the window and the two
+    evaluation caps. Only the second can say two results were measured against
+    the same thing.
+
+    Both failure modes below were live on this campaign at once. Four distinct
+    digests shared two labels, so rows in different frames compared anyway; and
+    110 of 153 evaluations carried a digest and no label, so every substrate and
+    depth comparison was refused while the three labelled arms went through.
+    Which axes could be declared with this bootstrap was decided by that, and
+    nobody chose it.
+    """
+
+    @staticmethod
+    def _write(tmp_path: Path, side: str, accs: list[str], tp: list[float]) -> None:
+        write_grid_parquet(
+            tmp_path / side / "NK" / "per_protein_grid.parquet",
+            [
+                {"accession": a, "namespace": MFO, "tp": tp, "pred": [8.0, 2.0], "n_gt": 10.0}
+                for a in accs
+            ],
+            th_step=TH_STEP,
+            setting="NK",
+        )
+
+    def test_one_label_over_two_frames_is_refused(self, tmp_path: Path) -> None:
+        """The mode that PASSED what is not comparable.
+
+        Both rows say ``internal`` / ``SELECT_220_227`` and were measured under
+        different accretion sets. Reading the label, the gate agrees they share
+        a frame. They do not, and the same reranker reads 0.3433 under one and
+        0.117 under another.
+        """
+        self._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
+        self._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
+        session = _session(
+            a={"frame": "internal", "temporal_window": "SELECT_220_227",
+               "frame_digest": "f-aaaaaaaaaaaaaaaaaaaaaa"},
+            b={"frame": "internal", "temporal_window": "SELECT_220_227",
+               "frame_digest": "f-bbbbbbbbbbbbbbbbbbbbbb"},
+        )
+        with pytest.raises(PanelComparabilityError, match="frame_digest"):
+            _run(tmp_path, session=session)
+
+    def test_two_labels_over_one_frame_are_compared(self, tmp_path: Path) -> None:
+        """The mode that REFUSED what is comparable, and the larger loss.
+
+        One row carries a harness label and no digest was ever written on the
+        other; both were produced under the same material frame. The digest says
+        so. Refusing here is what kept axes A and B out of this statistic.
+        """
+        self._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
+        self._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
+        session = _session(
+            a={"frame": "internal", "temporal_window": "SELECT_220_227",
+               "frame_digest": "f-cccccccccccccccccccccc"},
+            b={"frame": None, "temporal_window": None,
+               "frame_digest": "f-cccccccccccccccccccccc"},
+        )
+        result = _run(tmp_path, session=session)
+        assert result["panels"]["NK:MFO"]["delta"] is not None
+        assert result["frame_mismatch"] == []
+
+    def test_a_missing_seal_is_still_refused(self, tmp_path: Path) -> None:
+        """Presence before equality. Two rows with no digest are not two rows in
+        the same frame, however identical their labels look."""
+        self._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
+        self._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
+        same = {"frame": "internal", "temporal_window": "SELECT_220_227", "frame_digest": None}
+        session = _session(a=dict(same), b=dict(same))
+        with pytest.raises(PanelComparabilityError, match="do not both declare"):
+            _run(tmp_path, session=session)
