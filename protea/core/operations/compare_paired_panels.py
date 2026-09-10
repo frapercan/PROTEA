@@ -76,6 +76,7 @@ from protea.core.operations._paired_panels_artifact import (
     ThresholdGridUnavailableError,
     assert_comparable,
 )
+from protea.core.operations._paired_panels_events import _emit_panel
 from protea.core.operations._paired_panels_panel import (
     PanelConfig,
     Side,
@@ -84,20 +85,11 @@ from protea.core.operations._paired_panels_panel import (
     resolve_tau_index,
     tally,
 )
-from protea.core.operations._run_cafa_strata import neighbourhoods_for
-from protea.core.operations.stratify_evaluation import _protein_lengths
-from protea.core.strata import (
-    NEIGHBOURHOOD_AXES,
-    Aspect,
-    Category,
-    DonorEvidence,
-    HomologyBand,
-    LengthBand,
-    Neighbourhood,
-    PropagationBand,
-    Stratum,
-    TaxonomyBand,
-    stratum_for,
+from protea.core.operations._paired_panels_stratum import (
+    Restriction,
+    stratum_label,
+    stratum_population,
+    validate_stratum,
 )
 from protea.core.utils import contract_payload
 
@@ -119,21 +111,6 @@ ALL_PANELS: tuple[str, ...] = (
 #: Which closed vocabulary each Stratum axis draws from. Written here rather
 #: than inferred, so a seventh axis added to Stratum fails this operation's
 #: tests instead of silently accepting any string for itself.
-#: Stands in when no donor axis was requested, so the one placement path serves
-#: both kinds of restriction. Only the sequence axes may be read off a stratum
-#: built with it -- which is exactly the case in which it is used.
-_NO_DONOR_READ = Neighbourhood(best_identity=None, donor_is_experimental=None)
-
-_BAND_TYPE: dict[str, type] = {
-    "category": Category,
-    "aspect": Aspect,
-    "length": LengthBand,
-    "homology": HomologyBand,
-    "donor_evidence": DonorEvidence,
-    "taxonomy": TaxonomyBand,
-    "propagation": PropagationBand,
-}
-
 #: Markers that must agree for two evaluation results to be comparable.
 #: ``prediction_set_id`` and ``scoring_config_id`` are expected to differ: that
 #: is what is being compared.
@@ -273,32 +250,7 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
     @field_validator("restrict_to_stratum")
     @classmethod
     def _known_stratum(cls, value: dict[str, str] | None) -> dict[str, str] | None:
-        """A restriction is a claim about a population, so an unreadable one is refused.
-
-        Both halves are checked. An unknown AXIS would silently restrict nothing
-        and report a whole-panel delta under a stratum's name; an unknown BAND
-        would restrict to the empty set and report a refusal that looks like a
-        sparse stratum rather than like a typo.
-        """
-        if value is None:
-            return None
-        if not value:
-            raise ValueError(
-                "omit restrict_to_stratum to compare the whole panel; an empty mapping "
-                "asks for a restriction and names none"
-            )
-        unknown = sorted(k for k in value if k not in Stratum._fields)
-        if unknown:
-            raise ValueError(
-                f"unknown stratum axes {unknown}; the seven are {list(Stratum._fields)}"
-            )
-        for axis, band in value.items():
-            allowed = [b.value for b in _BAND_TYPE[axis]]
-            if band not in allowed:
-                raise ValueError(
-                    f"{axis}={band!r} is not one of {allowed}"
-                )
-        return dict(value)
+        return validate_stratum(value)
 
     @model_validator(mode="after")
     def _coherent(self) -> ComparePairedPanelsPayload:
@@ -444,153 +396,6 @@ def _system_block(side: Side) -> dict[str, Any]:
     return block
 
 
-def _emit_pairing(panel: dict[str, Any], key: str, p: ComparePairedPanelsPayload, emit: EmitFn) -> None:
-    emit(
-        "compare_paired_panels.pairing",
-        None,
-        {
-            "panel": key,
-            **{k: panel.get(k) for k in ("n_paired", "n_only_a", "n_only_b", "population_rule")},
-        },
-        "info",
-    )
-    if panel["status"] == "refused":
-        emit(
-            "compare_paired_panels.panel_refused",
-            f"{key}: {panel['message']}",
-            {"panel": key, "reason": panel["reason"], **{
-                k: panel.get(k) for k in ("n_paired", "n_only_a", "n_only_b", "jaccard")
-            }},
-            "error",
-        )
-        return
-    if panel["status"] == "empty":
-        emit(
-            "compare_paired_panels.panel_absent",
-            f"{key}: no artefact for this panel on one or both sides, so it was not "
-            "computed; it is reported as absent and never as a null",
-            {"panel": key, "reason": panel["reason"]},
-            "warning",
-        )
-        return
-    if not panel["reportable"]:
-        emit(
-            "compare_paired_panels.withheld",
-            f"{key} holds {panel['n_paired']} paired proteins, below the floor of "
-            f"{p.min_population}; computed and flagged, never dropped",
-            {"panel": key, "n_paired": panel["n_paired"], "min_population": p.min_population},
-            "warning",
-        )
-    if panel.get("arm_silent"):
-        emit(
-            "compare_paired_panels.arm_silent",
-            f"{key}: arm {panel['arm_silent']} predicts nothing on this panel and scores "
-            "zero; the difference against it is a real difference, so it is named rather "
-            "than dropped",
-            {"panel": key, "arm": panel["arm_silent"]},
-            "info",
-        )
-    if panel.get("interval_fallback_reason"):
-        emit(
-            "compare_paired_panels.interval_fallback",
-            None,
-            {"panel": key, "reason": panel["interval_fallback_reason"]},
-            "warning",
-        )
-
-
-def _emit_panel(
-    panel: dict[str, Any],
-    key: str,
-    p: ComparePairedPanelsPayload,
-    cfg: PanelConfig,
-    emit: EmitFn,
-) -> None:
-    """What the panel measured, at the level it belongs.
-
-    What a reader should CONCLUDE from it is emitted separately, because the
-    two answer different questions and are filtered at different levels: this
-    one is always info, and a verdict about power is a warning.
-
-    ``operating_point`` sits beside ``tau_a`` and ``tau_b`` because the three
-    are one fact: two taus that may differ are each an argmax, two equal ones
-    are the declared threshold. It comes off the config, the object the
-    resampler was handed, so this event reports what ran and not what was asked.
-    """
-    _emit_pairing(panel, key, p, emit)
-    reported = (
-        "delta",
-        "ci_low",
-        "ci_high",
-        "interval_method",
-        "minimum_detectable_effect",
-        "resolves",
-        "status",
-        "verdict",
-    )
-    emit(
-        "compare_paired_panels.panel",
-        None,
-        {
-            "panel": key,
-            **{k: panel.get(k) for k in reported},
-            "operating_point": cfg.operating_point,
-            "tau_a": (panel["a"] or {}).get("tau"),
-            "tau_b": (panel["b"] or {}).get("tau"),
-            "tau_a_switched_fraction": panel["diagnostics"].get("tau_a_switched_fraction"),
-        },
-        "info",
-    )
-    _emit_verdict(panel, key, emit)
-
-
-def _emit_verdict(panel: dict[str, Any], key: str, emit: EmitFn) -> None:
-    """Which of the three readings of an interval covering zero this one is.
-
-    The distinction is the operation's reason to exist. An interval covering
-    zero can mean the two systems are the same down to a size worth caring
-    about, or that the comparison could never have resolved anything, or that
-    nobody declared what size was worth caring about so the question is
-    unanswered. Those are different conclusions and only the first is evidence.
-
-    The first is info and the other two are warnings, so a reader filtering the
-    job event log on level sees the ones that need an action.
-    """
-    mde, effect = panel["minimum_detectable_effect"], panel.get("effect_of_interest")
-    if panel["status"] == "underpowered" and mde is not None:
-        emit(
-            "compare_paired_panels.underpowered",
-            f"{key} could not have resolved an effect smaller than {mde:.4f} on "
-            f"{panel['n_paired']} proteins, and the effect of interest is {effect}; the "
-            "interval covering zero here is about power, not about the two systems being "
-            "the same",
-            {
-                "panel": key,
-                "minimum_detectable_effect": mde,
-                "effect_of_interest": effect,
-                "n_paired": panel["n_paired"],
-            },
-            "warning",
-        )
-    elif panel["status"] == "null_unread" and mde is not None:
-        emit(
-            "compare_paired_panels.null_unread",
-            f"{key} covers zero and could have resolved {mde:.4f}, but no effect_of_interest "
-            "was declared, so nothing here says whether that is evidence of sameness or "
-            "evidence of nothing. Declare the smallest difference worth detecting and re-run; "
-            "this operation will not pick the campaign's standard for it",
-            {"panel": key, "minimum_detectable_effect": mde},
-            "warning",
-        )
-    elif panel["status"] == "null_with_power":
-        emit(
-            "compare_paired_panels.null_with_power",
-            f"{key} covers zero and could have resolved {mde:.4f}, which is at or below the "
-            f"declared effect of interest {effect}; this null is evidence of sameness down "
-            "to that size, and is not an unanswered question",
-            {"panel": key, "minimum_detectable_effect": mde, "effect_of_interest": effect},
-            "info",
-        )
 
 
 def _refuse_if_nothing_was_comparable(
@@ -613,88 +418,6 @@ def _refuse_if_nothing_was_comparable(
         "every panel would report a null and the job would succeed. Ask for panels both "
         "results were evaluated on."
     )
-
-
-def stratum_label(key: str, restrict: dict[str, str] | None) -> str:
-    """``NK:MFO`` unrestricted, ``NK:MFO@length=512-1024`` restricted.
-
-    Axes are sorted so the same restriction always produces the same string:
-    a key that varied with dict order would file one stratum under two names.
-    """
-    if not restrict:
-        return key
-    inner = ",".join(f"{a}={restrict[a]}" for a in sorted(restrict))
-    return f"{key}@{inner}"
-
-
-def _stratum_population(
-    session: Session,
-    restrict: dict[str, str],
-    baseline_prediction_set_id: str,
-    emit: EmitFn,
-) -> frozenset[str]:
-    """The accessions that sit in the requested stratum, read off the BASELINE.
-
-    WHOSE NEIGHBOURHOOD DEFINES MEMBERSHIP. For the three sequence axes --
-    category, aspect, length -- the question does not arise: they are properties
-    of the query itself and both arms answer identically. The four donor axes
-    are properties of a RETRIEVAL, and the two arms retrieved different donors,
-    so the same protein can sit in ``<=30`` for one arm and ``30-50`` for the
-    other.
-
-    Membership is therefore always taken from the baseline, never from the arm
-    under test. "Among the proteins the baseline found hard, does the challenger
-    help?" is a question with an answer. "Among the proteins the challenger
-    placed in the twilight zone" is the challenger choosing its own population,
-    and a method that retrieves worse would be handed an easier stratum to be
-    measured on. The choice is recorded on the job so a reader is never left to
-    infer which arm the band came from.
-    """
-    needs_donor = bool(NEIGHBOURHOOD_AXES & set(restrict))
-    lengths = _protein_lengths(session)
-    hoods = neighbourhoods_for(session, baseline_prediction_set_id) if needs_donor else {}
-
-    keep: set[str] = set()
-    unplaceable = 0
-    for acc, residues in lengths.items():
-        if not residues:
-            continue
-        hood = hoods.get(acc)
-        if hood is None:
-            if needs_donor:
-                unplaceable += 1
-                continue
-            hood = _NO_DONOR_READ
-        # category and aspect vary per row of the artefact, not per protein, so
-        # they are matched downstream against the panel key rather than here.
-        st = stratum_for(
-            category=Category.NO_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION,
-            residues=residues, neighbourhood=hood,
-        )
-        if all(getattr(st, axis) == band for axis, band in restrict.items()
-               if axis in NEIGHBOURHOOD_AXES or axis == "length"):
-            keep.add(acc)
-
-    emit(
-        "compare_paired_panels.stratum",
-        f"population restricted to {restrict}",
-        {
-            "restrict_to_stratum": dict(restrict),
-            "membership_from": "baseline",
-            "baseline_prediction_set_id": baseline_prediction_set_id,
-            "n_in_stratum": len(keep),
-            "n_unplaceable": unplaceable,
-            "reads_a_donor": needs_donor,
-        },
-        "info",
-    )
-    if not keep:
-        raise PanelComparabilityError(
-            f"no protein sits in stratum {restrict}: the restriction selects an empty "
-            "population, so there is nothing to resample. That is a refusal and not a "
-            "zero delta."
-        )
-    return frozenset(keep)
 
 
 class ComparePairedPanelsOperation(Operation):
@@ -747,7 +470,7 @@ class ComparePairedPanelsOperation(Operation):
             # surface as an off-grid tau, the right refusal under a wrong name.
             cfg = self._config(sides, p)
             keep = (
-                _stratum_population(
+                stratum_population(
                     session, p.restrict_to_stratum, prov_b["prediction_set_id"], emit
                 )
                 if p.restrict_to_stratum
@@ -885,9 +608,8 @@ class ComparePairedPanelsOperation(Operation):
             # and the whole panel's delta cannot be filed under one key and
             # later read as two measurements of the same thing.
             reported = stratum_label(key, p.restrict_to_stratum)
-            panel = panel_result(
-                sides, key, cfg, ALL_PANELS.index(key), rule, keep=keep, label=reported
-            )
+            narrow = Restriction(keep, reported) if keep is not None else None
+            panel = panel_result(sides, key, cfg, ALL_PANELS.index(key), rule, narrow)
             _emit_panel(panel, reported, p, cfg, emit)
             out[reported] = panel
         return out

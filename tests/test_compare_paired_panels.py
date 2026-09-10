@@ -2122,3 +2122,73 @@ class TestRestrictingThePanelToOneStratum:
             {"evaluation_result_id": "a", "baseline_evaluation_result_id": "b"}
         )
         assert p.restrict_to_stratum is None
+
+
+class TestTheRestrictionReachesTheArrays:
+    """The seam between "a restriction was asked for" and "the arrays were narrowed".
+
+    Written because it was missing. The first version of these tests exercised
+    ``restrict`` and ``stratum_label`` directly and both passed, but wiring the
+    narrowing out of ``_raw_pair`` altogether broke NO test: the pieces were
+    covered and the join between them was not. A restriction that never reaches
+    the arrays produces a whole-panel delta reported under a stratum's name,
+    which is the one outcome the whole feature exists to prevent.
+    """
+
+    @staticmethod
+    def _side(accs: tuple[str, ...], present: bool = True):
+        from protea.core.operations import _paired_panels_bootstrap as boot
+
+        n = len(accs)
+        arrays = boot.PanelArrays(
+            accs,
+            np.tile(np.linspace(0.9, 0.1, 5), (n, 1)),
+            np.tile(np.linspace(1.0, 0.2, 5), (n, 1)),
+            np.full(n, 2.0),
+        )
+
+        class _Grid:
+            panels = {"molecular_function": arrays} if present else {}
+
+        class _Side:
+            grids = {"NK": _Grid()}
+
+            def panel(self, setting, namespace):
+                grid = self.grids.get(setting)
+                return None if grid is None else grid.panels.get(namespace)
+
+        return _Side()
+
+    def test_without_a_restriction_both_arms_keep_every_protein(self):
+        from protea.core.operations._paired_panels_panel import _raw_pair
+
+        sides = (self._side(("P0", "P1", "P2")), self._side(("P0", "P1", "P2")))
+        a, b = _raw_pair(sides, "NK:MFO", None)
+        assert a.accessions == b.accessions == ("P0", "P1", "P2")
+
+    def test_a_restriction_narrows_both_arms_to_the_stratum(self):
+        """Can act, and through the seam rather than beside it."""
+        from protea.core.operations._paired_panels_panel import _raw_pair
+        from protea.core.operations._paired_panels_stratum import Restriction
+
+        sides = (self._side(("P0", "P1", "P2")), self._side(("P0", "P1", "P2")))
+        narrow = Restriction(frozenset({"P1"}), "NK:MFO@length=<=512")
+        a, b = _raw_pair(sides, "NK:MFO", narrow)
+        assert a.accessions == b.accessions == ("P1",)
+
+    def test_a_stratum_no_protein_falls_in_is_named_as_such(self):
+        """Distinct from an absent artefact: one is a population that does not
+        exist, the other a run that did not happen, and they call for different
+        actions."""
+        from protea.core.operations._paired_panels_panel import _raw_pair
+        from protea.core.operations._paired_panels_stratum import Restriction
+
+        sides = (self._side(("P0",)), self._side(("P0",)))
+        out = _raw_pair(sides, "NK:MFO", Restriction(frozenset({"NOBODY"}), "x"))
+        assert out == "stratum_empty_for_panel"
+
+    def test_an_absent_artefact_keeps_its_own_name(self):
+        from protea.core.operations._paired_panels_panel import _raw_pair
+
+        sides = (self._side(("P0",), present=False), self._side(("P0",)))
+        assert _raw_pair(sides, "NK:MFO", None) == "artefact_absent_for_panel"
