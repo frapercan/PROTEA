@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import signal
+import time
 from typing import Any, NamedTuple
 from uuid import UUID
 
@@ -293,8 +294,15 @@ class QueueConsumer(Stoppable):
             # F-OPS-JOBS.1: track in-flight + start the lease heartbeat.
             self._guard.track(job_id)
             self._heartbeat.start(job_id)
+            # Symmetric with OperationConsumer: without this line the ABSENCE of
+            # "Job failed" was a remote node's entire evidence of success.
+            started = time.monotonic()
             try:
                 self._worker.handle_job(job_id)
+                logger.info(
+                    "Job finished. job_id=%s queue=%s elapsed_seconds=%.1f",
+                    job_id, self._queue_name, time.monotonic() - started,
+                )
             except RetryLaterError as exc:
                 delay = exc.delay_seconds
                 logger.info("Job will retry in %ss. job_id=%s reason=%s", delay, job_id, exc)
