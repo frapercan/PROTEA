@@ -41,6 +41,18 @@ class _Anc2VecPhases:
     def __init__(self, runner: _KnnTransferRunner) -> None:
         self.runner = runner
 
+    def run_all(self) -> None:
+        """The three phases, in the only order they work in.
+
+        Grouped here rather than spelled out by the caller because they are one
+        step with one prerequisite: :meth:`build_index` resolves the npz on its
+        first statement, and the two centroid passes read what it built. A caller
+        that ran one without the others would get an empty mask and no error.
+        """
+        self.build_index()
+        self.compute_neighbor_centroids()
+        self.compute_query_centroids()
+
     def build_index(self) -> None:
         """Build the unit-normed Anc2Vec matrix shared across queries.
 

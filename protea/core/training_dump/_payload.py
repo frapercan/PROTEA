@@ -64,6 +64,14 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc
     # Feature computation
     compute_alignments: bool = False
     compute_taxonomy: bool = False
+    #: Compute the two anc2vec families. False by default, and that default is
+    #: a record rather than a choice: the index they need is produced by no
+    #: registered operation, so on a host without the npz the phases raised
+    #: FileNotFoundError at phase five, after the KNN and three feature passes
+    #: had run. With the index absent the columns were never produced anyway.
+    #: Asking for them without the artefact still raises -- the flag gates the
+    #: attempt, it does not invent the data.
+    compute_anc2vec: bool = False
 
     # lafa-integrate INT-6: train/serve feature parity. When set, the export
     # computes the SAME real self_prior / association / classifier feature
