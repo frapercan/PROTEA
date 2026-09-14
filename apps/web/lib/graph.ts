@@ -8,10 +8,11 @@
 // The graph model asks a different question of the record. A NODE is one
 // decision over a field or a group of inseparable fields. The EDGE into a
 // node carries a STRENGTH saying what the record can support about that
-// decision, and the five values are exhaustive and mutually exclusive:
-// a comparison that separated, a comparison that ran and did not, a value
-// nobody ever chose, a comparison that could not have resolved anything,
-// and a level that cannot be produced at all.
+// decision, and the six values are exhaustive and mutually exclusive:
+// a comparison that separated, a comparison that could have separated and
+// did not, a value picked with nothing established about it, a value nobody
+// ever chose, a comparison that could not have resolved anything, and a
+// level that cannot be produced at all.
 //
 // Nothing here derives, filters or repairs the payload. Every number on
 // the page is the number the endpoint returned, so a reader chasing a
@@ -23,16 +24,28 @@ import { ApiError, baseUrl } from "@/lib/api";
  * What the record supports about one decision.
  *
  * - `measured`   a declared comparison separated against its floor.
- * - `chosen`     the comparison ran with power, did not separate, and the
- *                value was picked and recorded.
+ * - `indistinguishable`
+ *                a declared comparison was read with the power to resolve the
+ *                difference this project acts on, and its levels came back
+ *                inside each other's noise. A null that was measured, which is
+ *                a finding and not the absence of one.
+ * - `chosen`     a level was picked and recorded and nothing was established
+ *                about it: no floor declared, the comparison refused, no panel
+ *                able to answer it, or panels too thin to.
  * - `inherited`  nobody ever decided; the value is the one it always was.
  * - `unpowered`  the comparison could not have resolved anything. Known
  *                from the design, before the comparison ran.
  * - `blocked`    a level cannot be produced because its artifact has no
  *                producer.
+ *
+ * Six and not five because the instrument reads every panel into one of six
+ * buckets and two of them are different nulls. Until the sixth word existed a
+ * null the campaign measured arrived here as `chosen`, which is also what a
+ * node nobody ever declared a comparison for reads as.
  */
 export type EdgeStrength =
   | "measured"
+  | "indistinguishable"
   | "chosen"
   | "inherited"
   | "unpowered"
@@ -41,6 +54,7 @@ export type EdgeStrength =
 /** Declaration order, which is also pipeline order on the page. */
 export const EDGE_STRENGTHS: EdgeStrength[] = [
   "measured",
+  "indistinguishable",
   "chosen",
   "inherited",
   "unpowered",

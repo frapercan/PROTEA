@@ -44,11 +44,17 @@ from sqlalchemy.engine import Connection
 from protea.api.routers._graph_edges import (
     BLOCKED,
     CHOSEN,
+    INDISTINGUISHABLE,
     INHERITED,
     MEASURED,
+    NULL_UNREAD,
+    NULL_WITH_POWER,
+    RESOLVED,
     SPECS,
+    STRENGTH_OF_READING,
     UNPOWERED,
     Edge,
+    refuse_unstateable_readings,
     strength_of,
 )
 from protea.api.routers._graph_panels import (
@@ -56,7 +62,9 @@ from protea.api.routers._graph_panels import (
     PANEL_KEYS,
     CrossedDepthAxes,
     build_panels,
+    contrast_floors,
     panel_units_from_groundtruth,
+    reading_against_floor,
     separated_from_floor,
 )
 from protea.api.routers._graph_reads import (
@@ -69,10 +77,11 @@ from protea.api.routers._graph_reads import (
     standing_floor_statuses,
 )
 from protea.api.routers.graph import build_graph, router
+from protea.core.operations._paired_panels_panel import TALLY_KEYS
 from protea.infrastructure.orm.models.experiment_run import ExperimentRun, ExperimentRunStatus
 from protea.infrastructure.settings import load_settings
 
-_STRENGTHS = {MEASURED, CHOSEN, INHERITED, UNPOWERED, BLOCKED}
+_STRENGTHS = {MEASURED, INDISTINGUISHABLE, CHOSEN, INHERITED, UNPOWERED, BLOCKED}
 
 
 # ── A fake session that cannot be written to ──────────────────────────────────
@@ -1112,3 +1121,307 @@ class TestTheComparisonBehindTheStrengthIsPublished:
                 refusal=refusal,
             )
             assert strength_of(edge) in _STRENGTHS
+
+
+# ── The sixth word ────────────────────────────────────────────────────────────
+
+
+def _traded_panels(floor: str, rival: str) -> list[dict[str, Any]]:
+    """Nine panels where two levels trade the lead, and no two panels agree.
+
+    HETEROGENEOUS ON PURPOSE, because the defect this fixture has to be able to
+    show hides inside a uniform one. A fixture that gave every panel the same
+    pair of numbers would read as a tie whether the surface tested nine panels,
+    one panel, or the first row it found, and a reading computed off a single
+    panel would pass it. Here every panel carries its own pair, the rival wins
+    four of the nine and loses five, and the populations and thresholds differ
+    panel by panel, so a reading that skipped a panel or pooled them gets a
+    different answer than one that walked all nine.
+
+    The rival winning somewhere and losing somewhere else is what makes this a
+    NULL rather than a separation: a separation has to hold on every panel that
+    carries both sides.
+    """
+    rows = []
+    for index, (category, aspect) in enumerate(PANEL_KEYS):
+        base = round(0.10 + 0.03 * index, 4)
+        lead = 0.02 if index % 2 else -0.02
+        for name, value in ((floor, base), (rival, round(base + lead, 4))):
+            rows.append(
+                {
+                    "result_id": f"r-{name}-{category}-{aspect}",
+                    "frame_digest": "f-one-frame",
+                    "scoring_name": name,
+                    "embedding_name": "esm2_650m",
+                    "depth": "10",
+                    "category": category,
+                    "aspect": aspect,
+                    "f_micro_w": value,
+                    "tau": round(0.30 + 0.05 * index, 4),
+                    "n_at_tau": 700 + 37 * index,
+                    "coverage_at_tau": round(0.80 + 0.01 * index, 4),
+                }
+            )
+    return rows
+
+
+class TestTheScaleCanReceiveEveryWordTheInstrumentEmits:
+    """Six buckets go into the panel tally and five words came out of this scale.
+
+    ``compare_paired_panels`` reads every panel into one of ``TALLY_KEYS`` and
+    keeps them six because they are six facts. Two are nulls and they are not
+    the same null: ``null_with_power`` looked with the power to resolve the
+    declared effect and found none, ``null_unread`` had no declared effect to
+    look for. The firmness scale had five words, so both came out ``chosen`` --
+    together with a refusal and a comparison no panel could answer -- and a null
+    the campaign MEASURED was published in the same word as a question nobody
+    asked. Over the whole-panel readings in ``job_event`` that is 23 of the first
+    against 2,299 of the second.
+
+    Nothing here withdraws what publishing the comparison established. ``floor``,
+    ``separated`` and ``floor_refusal`` still say WHY a node stands where it
+    does; this is about the one distinction the word itself had to carry and
+    could not.
+
+    These tests are structural for the reason the floors ones above are:
+    asserting the strength of a fixture passes again the moment somebody adds a
+    seventh bucket to the instrument and forgets this surface, and walking the
+    instrument's own tuple cannot.
+    """
+
+    #: The shape each reading actually arrives in, which is what makes the walk
+    #: below a test of ``strength_of`` and not of a lookup table read twice. A
+    #: reading is not free of the rest of the edge: ``resolved`` comes with a
+    #: verdict that says the floor was cleared, ``null_unread`` with no floor at
+    #: all, ``refused`` with the text of the refusal and no verdict.
+    _EDGE_FOR_READING: dict[str, dict[str, Any]] = {
+        RESOLVED: {"floor": "a-floor", "separated": True},
+        NULL_WITH_POWER: {"floor": "a-floor", "separated": False},
+        "underpowered": {"floor": "a-floor", "separated": False},
+        "not_computed": {"floor": "a-floor", "separated": False},
+        NULL_UNREAD: {"floor": None, "separated": None},
+        "refused": {"floor": "a-floor", "separated": None, "refusal": "crossed"},
+    }
+
+    def _edge(self, reading: str) -> Edge:
+        """A powered, contrasted edge carrying one reading in the shape it comes in."""
+        return Edge(
+            instantiated=2,
+            available=2,
+            scored=2,
+            results=2,
+            reading=reading,
+            **self._EDGE_FOR_READING[reading],
+        )
+
+    def test_every_word_the_tally_counts_publishes_as_exactly_one_strength(self) -> None:
+        """The correspondence is a total function, walked from the tally's end.
+
+        A seventh bucket fails here instead of reaching a reader relabelled,
+        which is what happened to the sixth. Walked from ``TALLY_KEYS`` rather
+        than from the table, because the table is this surface's own statement
+        and a statement cannot be its own witness.
+        """
+        for reading in TALLY_KEYS:
+            assert reading in STRENGTH_OF_READING, (
+                f"the tally counts {reading!r} and the scale has no word to publish it as"
+            )
+            strength = STRENGTH_OF_READING[reading]
+            assert strength in _STRENGTHS, (
+                f"{reading!r} publishes as {strength!r}, which no surface renders"
+            )
+            # The table is what `strength_of` publishes from, not a document
+            # beside it: a comparison that came back in this word comes out in
+            # that one.
+            assert strength_of(self._edge(reading)) == strength
+        assert set(STRENGTH_OF_READING) == set(TALLY_KEYS)
+        # The defect, stated as the one inequality that was false before: a null
+        # that was read and a null that could not be are not the same word.
+        assert STRENGTH_OF_READING[NULL_WITH_POWER] != STRENGTH_OF_READING[NULL_UNREAD]
+
+    def test_a_word_the_tally_does_not_count_is_refused_and_not_rounded(self) -> None:
+        """A word from nowhere must not be answered with the nearest one to hand.
+
+        Returning a default there does not lose a reading, it relabels it, and a
+        relabelled reading is indistinguishable from a decision somebody took,
+        which is this whole change's subject.
+        """
+        with pytest.raises(ValueError, match="null_with_teeth"):
+            Edge(instantiated=2, scored=2, reading="null_with_teeth")
+
+    def test_a_scale_that_cannot_state_the_whole_tally_refuses_to_load(self) -> None:
+        """The other guard, the one that runs at import, asked to raise and to pass.
+
+        The walk above fails when a seventh bucket appears, but it fails the same
+        way whether the import check exists or not, so nothing there pins the
+        check itself: deleting it would leave every test green. Calling it is the
+        only way to see it refuse, and both directions are asked because each is
+        a different defect.
+        """
+        with pytest.raises(ValueError, match="seventh_bucket"):
+            refuse_unstateable_readings(STRENGTH_OF_READING, (*TALLY_KEYS, "seventh_bucket"))
+        with pytest.raises(ValueError, match="invented_reading"):
+            refuse_unstateable_readings(
+                {**STRENGTH_OF_READING, "invented_reading": MEASURED}, TALLY_KEYS
+            )
+        # And it passes on the pair the module actually loaded with, which is the
+        # half that would be missing if this only ever raised.
+        assert refuse_unstateable_readings(STRENGTH_OF_READING, TALLY_KEYS) is None
+
+    def test_the_word_and_the_verdict_cannot_contradict_each_other(self) -> None:
+        """The guard that refuses a verdict beside a refusal, extended, not replaced.
+
+        ``resolved`` and ``null_with_power`` each state what verdict the floor
+        got. An edge carrying one of them beside the opposite verdict, or beside
+        no declared floor at all, publishes a finding the rest of its own payload
+        denies, which is the same unreadable answer in a third key.
+        """
+        with pytest.raises(ValueError, match="two reports of one comparison"):
+            Edge(instantiated=2, scored=2, floor="a-floor", separated=False, reading=RESOLVED)
+        with pytest.raises(ValueError, match="two reports of one comparison"):
+            Edge(
+                instantiated=2, scored=2, floor="a-floor", separated=True, reading=NULL_WITH_POWER
+            )
+        with pytest.raises(ValueError, match="two reports of one comparison"):
+            Edge(instantiated=2, scored=2, separated=False, reading=NULL_WITH_POWER)
+        # And the shapes the builders actually hand it are still accepted, so the
+        # guard is not a function that always raises.
+        for reading in TALLY_KEYS:
+            assert strength_of(self._edge(reading)) in _STRENGTHS
+
+    def test_no_builder_constructs_an_edge_that_drops_the_reading(self) -> None:
+        """Structural over the builders, because the wiring is per node.
+
+        Nine of the ten splat ``_floor_for``, which cannot hand back the floor
+        without the reading. ``_scoring_node`` fetches its own, for the prose it
+        prints, and is therefore the one that can silently fall back to the
+        default -- ``null_unread``, which publishes as ``chosen``. That is the
+        exact failure this change exists to end, re-created in one node.
+        """
+        import ast
+        import inspect
+
+        from protea.api.routers import _graph_nodes
+
+        tree = ast.parse(inspect.getsource(_graph_nodes))
+        edges = [
+            call
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "Edge"
+        ]
+        assert len(edges) == 10, f"expected one Edge per node, found {len(edges)}"
+        for call in edges:
+            splatted = any(keyword.arg is None for keyword in call.keywords)
+            named = any(keyword.arg == "reading" for keyword in call.keywords)
+            assert splatted or named, "a builder constructs an Edge with no reading in it"
+
+    def _tied(self) -> dict[str, list[dict[str, Any]]]:
+        """Two weightings that traded the lead, with a floor declared on one."""
+        record = populated_record({"floor-level": 0.21, "rival": 0.19})
+        record["panels"] = _traded_panels("floor-level", "rival")
+        record["floors"] = [{"node": "scoring", "floor": "floor-level", "name": "run-1"}]
+        return record
+
+    def _scoring(
+        self, record: dict[str, list[dict[str, Any]]], units: Any = None
+    ) -> dict[str, Any]:
+        return next(n for n in build_graph(record, units)["nodes"] if n["key"] == "scoring")
+
+    @staticmethod
+    def _reporting_floor() -> int:
+        """The population this surface itself publishes as enough to report on.
+
+        Read from ``contrast_floors``, which is what the page prints beside a
+        thin cell, rather than restated here: a test that hardcodes the number
+        stops agreeing with the page the day the measured sigma moves.
+        """
+        return {c["key"]: c["population"] for c in contrast_floors()["classes"]}["reporting"]
+
+    def test_a_measured_null_and_a_comparison_nobody_could_read_publish_differently(self) -> None:
+        """The pair. Same levels, same populations; only the testimony differs.
+
+        In the first record every panel carries both levels and every population
+        is large enough to resolve the two points this project acts on, so the
+        levels trading the lead is a measured null. In the second the floor and
+        its rival never meet in a panel, so nothing was compared at all. The old
+        scale called both of them ``chosen``, which is also what it called a node
+        nobody declared a floor for.
+        """
+        counted = dict.fromkeys(PANEL_KEYS, self._reporting_floor() * 4)
+        read = self._scoring(self._tied(), counted)
+
+        apart = self._tied()
+        apart["panels"] = [
+            row
+            for row in apart["panels"]
+            if (row["scoring_name"] == "floor-level") == (row["category"] == "NK")
+        ]
+        unanswered = self._scoring(apart, counted)
+
+        assert read["strength"] == INDISTINGUISHABLE
+        assert unanswered["strength"] == CHOSEN
+        assert read["strength"] != unanswered["strength"]
+
+    def test_the_comparison_behind_the_sixth_word_is_still_published(self) -> None:
+        """What publishing the refusal established is not withdrawn by this one.
+
+        A measured null is still an account a node owes the reader: the word says
+        the levels were inside each other's noise and does not say which floor
+        they were read against, or that the best of the rest failed to clear it.
+        Those are the keys the change before this one added, and they have to
+        survive a node arriving at the new word.
+        """
+        counted = dict.fromkeys(PANEL_KEYS, self._reporting_floor() * 4)
+        node = self._scoring(self._tied(), counted)
+        assert node["strength"] == INDISTINGUISHABLE
+        assert node["floor"] == "floor-level"
+        assert node["separated"] is False
+        assert node["floor_refusal"] is None
+        assert "does not clear" in node["blocked_reason"]
+        assert "floor-level" in node["blocked_reason"]
+
+    def test_a_null_over_an_uncounted_population_is_never_called_a_measured_one(self) -> None:
+        """Power is claimed from a counted population or it is not claimed.
+
+        Same levels, same panels, and the window's ground truth unreadable, so no
+        panel has a detectable effect. The instrument reports ``underpowered``
+        when its minimum detectable effect is unknown, and this surface publishes
+        that as the word it already published, because the one word it must never
+        reach by default is the one a reader is entitled to read as evidence of
+        sameness.
+        """
+        assert self._scoring(self._tied())["strength"] == CHOSEN
+
+    def test_a_null_over_a_population_below_the_published_floor_is_not_a_measured_one(
+        self,
+    ) -> None:
+        """Counted is not the same as enough, and only one of the two was tested.
+
+        The test above covers an UNCOUNTED population, so the whole power test
+        could be cut down to its ``effect is None`` half and every test here
+        still passed: a panel with a population this surface itself publishes as
+        too thin to resolve the target would then have read ``null_with_power``,
+        which is the one word a reader may treat as evidence of sameness.
+        """
+        floor = self._reporting_floor()
+        assert self._scoring(self._tied(), dict.fromkeys(PANEL_KEYS, floor // 2))["strength"] == (
+            CHOSEN
+        )
+        assert self._scoring(self._tied(), dict.fromkeys(PANEL_KEYS, floor * 4))["strength"] == (
+            INDISTINGUISHABLE
+        )
+
+    def test_a_node_with_no_floor_declared_reads_the_null_it_cannot_read(self) -> None:
+        """The other half of the pair, at the panels rather than at the node.
+
+        No floor is no declared effect, which is the instrument's ``null_unread``
+        and this scale's ``chosen``. It is the answer the whole record gives
+        today, and it has to stay distinct from the two above.
+        """
+        rows = _traded_panels("floor-level", "rival")
+        counted = dict.fromkeys(PANEL_KEYS, self._reporting_floor() * 4)
+        assert reading_against_floor(rows, None) == NULL_UNREAD
+        assert reading_against_floor(rows, "floor-level", counted) == NULL_WITH_POWER
+        assert STRENGTH_OF_READING[NULL_UNREAD] == CHOSEN
