@@ -335,7 +335,18 @@ class Neighbourhood(NamedTuple):
 
 
 class Stratum(NamedTuple):
-    """One point on the six axes. The unit every result is reported for."""
+    """One point on the seven axes. The unit every result is reported for.
+
+    Said explicitly because this docstring read "six" while the tuple carried
+    seven fields, and ``__str__`` printed all seven. The definition of the unit
+    every result is reported for miscounted what it names, which is the defect
+    this class exists to prevent applied to the class itself.
+
+    The seven are not interchangeable, and :data:`NEIGHBOURHOOD_AXES` records the
+    split that matters: ``category``, ``aspect`` and ``length`` are properties of
+    the query, and the other four are properties of a RETRIEVAL, so they need an
+    aligned donor before they can be read.
+    """
 
     category: Category
     aspect: Aspect
