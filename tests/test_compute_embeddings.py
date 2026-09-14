@@ -780,7 +780,9 @@ class TestComputeEmbeddingsBatchExecute:
         queue, msg = result.publish_operations[0]
         assert queue == "protea.embeddings.write"
         assert msg["operation"] == "store_embeddings"
-        assert len(msg["payload"]["sequences"]) == 2
+        # One message carrying the whole group, so the write is one transaction.
+        assert [g["embedding_config_id"] for g in msg["payload"]["groups"]] == [str(cfg.id)]
+        assert len(msg["payload"]["groups"][0]["sequences"]) == 2
 
     def test_chunking_serializes_all_chunks(self) -> None:
         op = self._op()
@@ -802,7 +804,7 @@ class TestComputeEmbeddingsBatchExecute:
             result = op.execute(session, self._base_payload(cfg), emit=_noop_emit)
 
         _, msg = result.publish_operations[0]
-        assert len(msg["payload"]["sequences"][0]["chunks"]) == 3
+        assert len(msg["payload"]["groups"][0]["sequences"][0]["chunks"]) == 3
 
 
 # ---------------------------------------------------------------------------

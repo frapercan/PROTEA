@@ -5,9 +5,8 @@ import uuid
 from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import Field, field_validator
-from sqlalchemy import exists, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from pydantic import BeforeValidator, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload, RetryLaterError
@@ -25,14 +24,25 @@ from protea.core.operations._compute_embeddings_backends import (
     _validate_layers,
 )
 from protea.core.operations._compute_embeddings_helpers import (
+    _residue_budget,
     build_batch_dispatch_messages,
-    build_embedding_rows,
     build_store_message,
+    clean_config_ids,
+    fold_legacy_store_groups,
+    missing_for_any_config,
+    normalise_config_ids,
     serialize_inferred_chunks,
+    store_group_rows,
+)
+from protea.core.operations._embedding_pass_group import (
+    assert_layers_available,
+    load_pass_group,
+    run_group_inference,
+    shared_pass_emitter,
+    warn_if_pass_not_shared,
 )
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
-from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySetEntry
@@ -58,9 +68,8 @@ __all__ = [
 ]
 
 PositiveInt = Annotated[int, Field(gt=0)]
-
-_BATCH_QUEUE = "protea.embeddings.batch"
-_WRITE_QUEUE = "protea.embeddings.write"
+#: A config group, accepting the one-config payload shape (see ``clean_config_ids``).
+ConfigIdGroup = Annotated[list[str], BeforeValidator(clean_config_ids)]
 
 
 # ---------------------------------------------------------------------------
@@ -68,38 +77,24 @@ _WRITE_QUEUE = "protea.embeddings.write"
 # ---------------------------------------------------------------------------
 
 
-def _residue_budget(sequences: list[Sequence], config: EmbeddingConfig) -> dict[str, int]:
-    """What the forward pass actually consumed, so cost has a comparable unit.
+class _ConfigGroupPayload(ProteaPayload, frozen=True):
+    """Base for the payloads that carry a group of configs sharing one forward pass."""
 
-    The event carried a clock and no residues, and the backends carried residues
-    and no clock, so residues per second could not be formed from either. It is
-    the unit that matters here because the corpus is heavy-tailed -- median 318
-    residues against a maximum of 35,991 -- and the layer grid compares four
-    lineages with different tokenizers. A batch of 256 short sequences and a
-    batch of 256 long ones are two different jobs under one name, so sequences
-    per second is not comparable across them.
+    embedding_config_ids: ConfigIdGroup
 
-    Two numbers rather than one, because they differ and the difference is
-    itself unmeasured. ``residues_available`` is what the corpus holds;
-    ``residues_processed`` is what the model saw. Without chunking a sequence
-    longer than ``max_length`` is truncated, so the second is the cost driver
-    and the gap between them says how much of the corpus never reaches the
-    model at all.
-    """
-    lengths = [len(s.sequence) for s in sequences]
-    available = sum(lengths)
-    if config.use_chunking:
-        processed = available
-    else:
-        processed = sum(min(n, config.max_length) for n in lengths)
-    return {
-        "residues_available": available,
-        "residues_processed": processed,
-        "residues_truncated": available - processed,
-    }
+    _accept_legacy = model_validator(mode="before")(normalise_config_ids)
+
+    @property
+    def embedding_config_id(self) -> str:
+        """The group's first config, for callers that only ever meant one.
+
+        A read-only view, not a second stored field: two fields holding one fact
+        drift, and the one that drifts is whichever a reader happened to pick.
+        """
+        return self.embedding_config_ids[0]
 
 
-class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
+class ComputeEmbeddingsPayload(_ConfigGroupPayload, frozen=True):
     """Coordinator payload: decides *which* sequences to embed and how to batch.
 
     The coordinator publishes N ephemeral operation messages to
@@ -109,8 +104,12 @@ class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
 
     Fields
     ------
-    embedding_config_id : str
-        UUID of the EmbeddingConfig row that defines the model and strategy.
+    embedding_config_ids : list[str]
+        UUIDs of the EmbeddingConfig rows to compute from ONE forward pass, in
+        practice a layer grid over one model.  The group is checked by
+        ``_embedding_pass_group``.  A payload written in the one-config shape
+        (``embedding_config_id`` as a string, as the twelve historical jobs are)
+        is folded into this field and behaves exactly as it did.
     accessions : list[str] | None
         Restrict to proteins with these UniProt accessions.  None = all.
     sequences_per_job : int
@@ -118,7 +117,9 @@ class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
     device : str
         Device passed down to each batch worker (``"cuda"`` or ``"cpu"``).
     skip_existing : bool
-        Skip sequences that already have an embedding for this config.
+        Skip sequences that already have an embedding for EVERY config in the
+        group.  A sequence one config is missing is still inferred, and the
+        configs that already hold it skip it again at write time.
     batch_size : int
         Model forward-pass batch size inside each batch worker.  Defaults to
         ``1`` because the largest supported backend (``prot_t5_xl_uniref50``
@@ -126,7 +127,6 @@ class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
         Callers running smaller models on roomier GPUs can raise it explicitly.
     """
 
-    embedding_config_id: str
     accessions: list[str] | None = None
     query_set_id: str | None = None
     sequences_per_job: PositiveInt = 64
@@ -134,18 +134,10 @@ class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
     skip_existing: bool = True
     batch_size: PositiveInt = 1
 
-    @field_validator("embedding_config_id", mode="before")
-    @classmethod
-    def must_be_non_empty(cls, v: str) -> str:
-        if not isinstance(v, str) or not v.strip():
-            raise ValueError("embedding_config_id must be a non-empty string")
-        return v.strip()
 
+class ComputeEmbeddingsBatchPayload(_ConfigGroupPayload, frozen=True):
+    """Payload for a batch message: one forward pass serving the whole config group."""
 
-class ComputeEmbeddingsBatchPayload(ProteaPayload, frozen=True):
-    """Payload for a single batch operation message published by the coordinator."""
-
-    embedding_config_id: str
     sequence_ids: list[int]
     parent_job_id: str
     device: str = "cuda"
@@ -214,7 +206,12 @@ class ComputeEmbeddingsOperation:
         p = payload or {}
         bits: list[str] = []
 
-        cfg_id_raw = p.get("embedding_config_id")
+        # Both shapes read straight from the raw payload: summaries render for
+        # jobs already on record, so nothing here can assume the model saw it.
+        cfg_ids_raw = p.get("embedding_config_ids") or (
+            [p["embedding_config_id"]] if p.get("embedding_config_id") else []
+        )
+        cfg_id_raw = cfg_ids_raw[0] if cfg_ids_raw else None
         if cfg_id_raw and session is not None:
             try:
                 cfg = session.get(EmbeddingConfig, uuid.UUID(str(cfg_id_raw)))
@@ -232,6 +229,8 @@ class ComputeEmbeddingsOperation:
                     bits.append(f"chunk={cfg.chunk_size}/{cfg.chunk_overlap}")
         elif cfg_id_raw:
             bits.append(f"cfg={str(cfg_id_raw)[:8]}")
+        if len(cfg_ids_raw) > 1:
+            bits.append(f"{len(cfg_ids_raw)} configs/pass")
 
         if p.get("query_set_id"):
             bits.append(f"qs={str(p['query_set_id'])[:8]}")
@@ -252,13 +251,50 @@ class ComputeEmbeddingsOperation:
         """Coordinator: partition sequences into child jobs and dispatch them."""
         p = ComputeEmbeddingsPayload.model_validate(contract_payload(payload))
         parent_job_id = UUID(payload["_job_id"])
-        config_id = uuid.UUID(p.embedding_config_id)
 
-        config = session.get(EmbeddingConfig, config_id)
-        if config is None:
-            raise ValueError(f"EmbeddingConfig {p.embedding_config_id} not found")
+        # Refused here as well as in the batch worker so a group that does not
+        # share a pass costs no GPU time at all, rather than one batch's worth.
+        configs = load_pass_group(session, p.embedding_config_ids)
 
-        # Only one compute_embeddings job at a time — the GPU is a shared resource.
+        self._refuse_if_gpu_busy(session, parent_job_id)
+
+        config_ids = [cfg.id for cfg in configs]
+        sequence_ids = self._load_sequence_ids(session, p, config_ids, emit)
+        n_configs = len(configs)
+        if not sequence_ids:
+            emit("compute_embeddings.no_sequences", None, {}, "warning")
+            return OperationResult(result={"batches": 0, "sequences": 0, "configs": n_configs})
+
+        operations = build_batch_dispatch_messages(p, parent_job_id, sequence_ids)
+        n_batches = len(operations)
+        result = {
+            "batches": n_batches,
+            "sequences": len(sequence_ids),
+            "configs": n_configs,
+        }
+
+        emit(
+            "compute_embeddings.dispatching",
+            None,
+            {
+                "total_sequences": len(sequence_ids),
+                "sequences_per_job": p.sequences_per_job,
+                "batches": n_batches,
+                "configs": n_configs,
+            },
+            "info",
+        )
+
+        return OperationResult(
+            result=result,
+            progress_current=0,
+            progress_total=n_batches,
+            deferred=True,
+            publish_operations=operations,
+        )
+
+    def _refuse_if_gpu_busy(self, session: Session, parent_job_id: UUID) -> None:
+        """Only one compute_embeddings job at a time: the GPU is a shared resource."""
         conflict = (
             session.query(Job)
             .filter(
@@ -268,47 +304,21 @@ class ComputeEmbeddingsOperation:
             )
             .first()
         )
-        if conflict is not None:
-            from protea.config.tuning import get_tuning
+        if conflict is None:
+            return
+        from protea.config.tuning import get_tuning
 
-            raise RetryLaterError(
-                f"GPU busy: compute_embeddings job {conflict.id} is already running. "
-                f"Will retry automatically.",
-                delay_seconds=get_tuning().operation.gpu_busy_retry_seconds,
-            )
-
-        sequence_ids = self._load_sequence_ids(session, p, config_id, emit)
-        if not sequence_ids:
-            emit("compute_embeddings.no_sequences", None, {}, "warning")
-            return OperationResult(result={"batches": 0, "sequences": 0})
-
-        operations = build_batch_dispatch_messages(p, parent_job_id, sequence_ids)
-        n_batches = len(operations)
-
-        emit(
-            "compute_embeddings.dispatching",
-            None,
-            {
-                "total_sequences": len(sequence_ids),
-                "sequences_per_job": p.sequences_per_job,
-                "batches": n_batches,
-            },
-            "info",
-        )
-
-        return OperationResult(
-            result={"batches": n_batches, "sequences": len(sequence_ids)},
-            progress_current=0,
-            progress_total=n_batches,
-            deferred=True,
-            publish_operations=operations,
+        raise RetryLaterError(
+            f"GPU busy: compute_embeddings job {conflict.id} is already running. "
+            f"Will retry automatically.",
+            delay_seconds=get_tuning().operation.gpu_busy_retry_seconds,
         )
 
     def _load_sequence_ids(
         self,
         session: Session,
         p: ComputeEmbeddingsPayload,
-        config_id: uuid.UUID,
+        config_ids: list[uuid.UUID],
         emit: EmitFn,
     ) -> list[int]:
         emit("compute_embeddings.load_sequences_start", None, {}, "info")
@@ -335,11 +345,7 @@ class ComputeEmbeddingsOperation:
             q = session.query(Sequence.id)
 
         if p.skip_existing:
-            already_embedded = exists().where(
-                SequenceEmbedding.sequence_id == Sequence.id,
-                SequenceEmbedding.embedding_config_id == config_id,
-            )
-            q = q.filter(~already_embedded)
+            q = q.filter(missing_for_any_config(config_ids))
 
         ids = [row[0] for row in q.all()]
         emit(
@@ -396,7 +402,6 @@ class ComputeEmbeddingsBatchOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = ComputeEmbeddingsBatchPayload.model_validate(contract_payload(payload))
-        config_id = uuid.UUID(p.embedding_config_id)
         parent_job_id = UUID(p.parent_job_id)
 
         parent = session.get(Job, parent_job_id)
@@ -409,32 +414,32 @@ class ComputeEmbeddingsBatchOperation:
             )
             return OperationResult(result={"skipped": True})
 
-        config = session.get(EmbeddingConfig, config_id)
-        if config is None:
-            raise ValueError(f"EmbeddingConfig {p.embedding_config_id} not found")
+        configs = load_pass_group(session, p.embedding_config_ids)
 
         sequences = session.query(Sequence).filter(Sequence.id.in_(p.sequence_ids)).all()
         t0 = time.perf_counter()
         emit(
             "compute_embeddings_batch.start",
             None,
-            {"sequences": len(sequences), "parent_job_id": str(parent_job_id)},
+            {
+                "sequences": len(sequences),
+                "configs": len(configs),
+                "parent_job_id": str(parent_job_id),
+            },
             "info",
         )
 
-        from protea.core.operations._learned_code_embed import is_learned_code_config
-
-        if is_learned_code_config(config):
-            write_sequences = self._infer_all_learned_code(session, config, sequences, p, emit)
-        else:
-            write_sequences = self._infer_all(config, sequences, p, emit)
+        per_config = self._infer_group(session, configs, sequences, p, emit)
 
         total_s = time.perf_counter() - t0
         phases = getattr(self, "_last_phase_timings", None) or {}
+        inferred = len(per_config[0][1]) if per_config else 0
         fields: dict[str, Any] = {
-            "sequences_inferred": len(write_sequences),
+            "sequences_inferred": inferred,
+            "configs_written": len(per_config),
             "elapsed_seconds": total_s,
-            **_residue_budget(sequences, config),
+            # First config, and exact: the guard pinned ``max_length`` group-wide.
+            **_residue_budget(sequences, configs[0]),
             **phases,
         }
         # The fraction the substrate plan turns on. Reported per batch so it can
@@ -446,49 +451,46 @@ class ComputeEmbeddingsBatchOperation:
             fields["unaccounted_s"] = round(total_s - accounted, 3)
         emit("compute_embeddings_batch.done", None, fields, "info")
         return OperationResult(
-            result={"sequences_inferred": len(write_sequences)},
-            publish_operations=[build_store_message(parent_job_id, p, write_sequences)],
+            result={"sequences_inferred": inferred, "configs_written": len(per_config)},
+            publish_operations=[build_store_message(parent_job_id, p, per_config)],
         )
 
-    def _infer_all(
+    def _infer_group(
         self,
-        config: EmbeddingConfig,
+        session: Session,
+        configs: list[EmbeddingConfig],
         sequences: list[Sequence],
         p: ComputeEmbeddingsBatchPayload,
         emit: EmitFn,
-    ) -> list[dict]:
-        """Run model inference over ``sequences`` in batches of ``p.batch_size``.
+    ) -> list[tuple[str, list[dict]]]:
+        """Infer the whole group as ``(config_id, write_sequences)`` pairs.
 
-        Phase timings are accumulated into ``self._last_phase_timings`` so the
-        caller can report them. They answer one question the substrate plan
-        rests on and nobody had measured on this hardware: what fraction of a
-        job is the forward pass. The multi-configuration emitter
-        (``embed_chunks_multi``) is only worth building if that fraction
-        dominates, because what it saves is exactly the redundant passes.
+        The model is loaded from the group's first config because the guard has
+        pinned ``model_name`` and ``model_backend``, and with them the
+        ``(name, backend, device)`` cache key: every config in the group resolves
+        the same weights. The learned-code path is reached only for a group of
+        one, because ``assert_shared_forward_pass`` refuses to group a learned
+        config: its pass is a base config's, which the group does not describe.
         """
+        from protea.core.operations._learned_code_embed import is_learned_code_config
+
+        if len(configs) == 1 and is_learned_code_config(configs[0]):
+            rows = self._infer_all_learned_code(session, configs[0], sequences, p, emit)
+            return [(str(configs[0].id), rows)]
+
         t_load0 = time.perf_counter()
-        model, tokenizer = self._load_model(config, p.device, emit)
+        model, tokenizer = self._load_model(configs[0], p.device, emit)
         load_s = time.perf_counter() - t_load0
+        assert_layers_available(configs, model)
+        warn_if_pass_not_shared(configs, emit)
 
-        write_sequences: list[dict] = []
-        infer_s = 0.0
-        serialize_s = 0.0
-        for i in range(0, len(sequences), p.batch_size):
-            batch = sequences[i : i + p.batch_size]
-            seq_strs = [s.sequence for s in batch]
-            t = time.perf_counter()
-            batch_chunks = self._embed_batch(model, tokenizer, seq_strs, config, p.device)
-            infer_s += time.perf_counter() - t
-            t = time.perf_counter()
-            write_sequences.extend(serialize_inferred_chunks(batch, batch_chunks))
-            serialize_s += time.perf_counter() - t
+        def embed_group(seq_strs: list[str]) -> list[list[list[ChunkEmbedding]]]:
+            return self._embed_batch_group(model, tokenizer, seq_strs, configs, p.device)
 
-        self._last_phase_timings = {
-            "model_load_s": round(load_s, 3),
-            "inference_s": round(infer_s, 3),
-            "serialize_s": round(serialize_s, 3),
-        }
-        return write_sequences
+        per_config, self._last_phase_timings = run_group_inference(
+            embed_group, configs, sequences, p.batch_size, load_s
+        )
+        return per_config
 
     def _infer_all_learned_code(
         self,
@@ -539,19 +541,54 @@ class ComputeEmbeddingsBatchOperation:
         """Per-batch dispatch shim; delegates to ``_dispatch_embed`` (T2A.5b)."""
         return _dispatch_embed(model, tokenizer, sequences, config, device)
 
+    def _embed_batch_group(
+        self,
+        model: Any,
+        tokenizer: Any,
+        sequences: list[str],
+        configs: list[EmbeddingConfig],
+        device: str,
+    ) -> list[list[list[ChunkEmbedding]]]:
+        """Per-batch group dispatch: one chunk-list-per-sequence per config, in group order.
+
+        ``embed_chunks_multi`` when the backend offers it (the route the saved
+        hours live on); one ``self._embed_batch`` per config otherwise, correct
+        and N passes. See ``shared_pass_emitter`` and ``warn_if_pass_not_shared``.
+        Routing through ``self._embed_batch`` keeps the documented
+        ``patch.object(op, "_embed_batch")`` seam covering the group path too.
+        """
+        shared = shared_pass_emitter(configs[0])
+        if shared is not None:
+            return shared(model, tokenizer, sequences, configs, _effective_device(device))
+        return [self._embed_batch(model, tokenizer, sequences, cfg, device) for cfg in configs]
+
 
 # ---------------------------------------------------------------------------
 # Write operation (CPU worker — no GPU required)
 # ---------------------------------------------------------------------------
 
 
+class StoredConfigEmbeddings(ProteaPayload, frozen=True):
+    """One config's share of a batch's vectors inside a store message."""
+
+    embedding_config_id: str
+    sequences: list[dict[str, Any]]  # [{"sequence_id": int, "chunks": [...]}]
+
+
 class StoreEmbeddingsPayload(ProteaPayload, frozen=True):
-    """Payload published by ComputeEmbeddingsBatchOperation after inference."""
+    """Payload published by ComputeEmbeddingsBatchOperation after inference.
+
+    One message per batch carrying every config the pass served, so the write is
+    all or nothing; see :func:`~protea.core.operations
+    ._compute_embeddings_helpers.build_store_message`. A message in the
+    one-config shape is folded into a single group and behaves as it did.
+    """
 
     parent_job_id: str
-    embedding_config_id: str
     skip_existing: bool = True
-    sequences: list[dict[str, Any]]  # [{"sequence_id": int, "chunks": [...]}]
+    groups: list[StoredConfigEmbeddings]
+
+    _accept_legacy = model_validator(mode="before")(fold_legacy_store_groups)
 
 
 class StoreEmbeddingsOperation:
@@ -569,14 +606,17 @@ class StoreEmbeddingsOperation:
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         p = payload or {}
-        n = len(p.get("sequences") or [])
-        return f"n={n}" if n else ""
+        groups = p.get("groups") or [p]
+        n = sum(len(g.get("sequences") or []) for g in groups if isinstance(g, dict))
+        bits = [f"n={n}"] if n else []
+        if len(groups) > 1:
+            bits.append(f"{len(groups)} configs")
+        return " · ".join(bits)
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = StoreEmbeddingsPayload.model_validate(contract_payload(payload))
-        config_id = uuid.UUID(p.embedding_config_id)
         parent_job_id = UUID(p.parent_job_id)
 
         parent = session.get(Job, parent_job_id)
@@ -589,44 +629,25 @@ class StoreEmbeddingsOperation:
             )
             return OperationResult(result={"skipped": True})
 
-        rows_to_insert, embeddings_stored, sequences_skipped, components_clipped = (
-            build_embedding_rows(session, p, config_id)
-        )
-        if components_clipped:
+        # Every config in one call, so every config lands in one transaction.
+        counts = store_group_rows(session, p)
+        if counts["components_clipped"]:
             emit(
                 "store_embeddings.halfvec_clipped",
                 None,
                 {
-                    "components_clipped": components_clipped,
+                    "components_clipped": counts["components_clipped"],
                     "reason": "embedding_scale too small; values exceeded fp16 range "
                     "and were clipped to [-65504, 65504]",
                 },
                 "warning",
             )
-        if rows_to_insert:
-            session.execute(
-                pg_insert(SequenceEmbedding).on_conflict_do_nothing(),
-                rows_to_insert,
-            )
 
-        emit(
-            "store_embeddings.done",
-            None,
-            {
-                "embeddings_stored": embeddings_stored,
-                "sequences_skipped": sequences_skipped,
-            },
-            "info",
-        )
+        emit("store_embeddings.done", None, counts, "info")
 
         self._update_parent_progress(session, parent_job_id, emit)
 
-        return OperationResult(
-            result={
-                "embeddings_stored": embeddings_stored,
-                "sequences_skipped": sequences_skipped,
-            }
-        )
+        return OperationResult(result=counts)
 
     def _update_parent_progress(self, session: Session, parent_job_id: UUID, emit: EmitFn) -> None:
         update_parent_progress(
