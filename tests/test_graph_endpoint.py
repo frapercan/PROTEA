@@ -17,17 +17,19 @@ from a table whose evidence had been deleted.
 No test here opens a database, with one exception. Whether a declared floor is
 still standing is a claim about SQL, and a string assertion on a query cannot
 tell a predicate that filters from one that matches nothing, so
-``TestAWithdrawnDeclarationGovernsNothing`` runs that one statement against an
-empty, disposable Postgres inside a transaction it rolls back, and skips when no
-such target is configured. Everywhere else the session is a fake that answers
-the endpoint's statements by identity, which also means a statement the endpoint
-did not declare up front cannot be answered at all.
+``TestAWithdrawnDeclarationGovernsNothing`` runs that one statement against the
+suite's own Postgres inside a transaction it rolls back. It is marked
+``integration`` and takes ``conftest``'s ``postgres_url``, which is what the
+integration workflow's ``pytest --with-postgres`` fills; keyed on its own env
+var instead, both halves of that pair skipped in every workflow and said
+nothing. Everywhere else the session is a fake that answers the endpoint's
+statements by identity, which also means a statement the endpoint did not
+declare up front cannot be answered at all.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -824,6 +826,7 @@ class TestASeparationHappensInsideOneFrame:
             separated_from_floor(rows, "floor-level")
 
 
+@pytest.mark.integration
 class TestAWithdrawnDeclarationGovernsNothing:
     """A floor is a declaration, and a declaration can be taken back.
 
@@ -841,34 +844,32 @@ class TestAWithdrawnDeclarationGovernsNothing:
     declared floor cannot be governed by a declaration somebody took back.
     """
 
-    _USER_TABLES = (
-        "SELECT count(*) FROM information_schema.tables "
-        "WHERE table_schema NOT IN ('pg_catalog', 'information_schema')"
-    )
-
     @pytest.fixture()
-    def disposable_conn(self) -> Iterator[Connection]:
-        """A connection to an EMPTY Postgres, in a transaction that is rolled back.
+    def disposable_conn(self, postgres_url: str) -> Iterator[Connection]:
+        """A connection to the suite's own Postgres, in a transaction rolled back.
 
-        The schema it needs is the ORM's own ``experiment_run`` table, created
-        inside that transaction and discarded with it, so the target is left
-        exactly as it was found. It refuses one that already holds tables for
-        conftest's reason, which has five wipes behind it: a database that
-        already carries a schema is, by construction, not the disposable one.
+        On ``postgres_url`` and not on a target of its own, because a target of
+        its own is one no workflow fills. Keyed on ``PROTEA_DB_URL`` this pair
+        skipped in BOTH: the unit workflow runs ``pytest`` with no Postgres at
+        all, and the integration workflow supplies ``PROTEA_PG_*`` and never
+        ``PROTEA_DB_URL``. Two tests that skip are two tests that do not exist,
+        and they report green while doing it. ``postgres_url`` is the plumbing
+        every other Postgres test here already uses, and ``pytest
+        --with-postgres`` is what the integration workflow already runs.
+
+        The schema is the ORM's own ``experiment_run`` table, created inside the
+        transaction and discarded with it, so the target is left as it was
+        found. The table and its enum type are dropped first, also inside the
+        transaction: this Postgres is shared with every other module in the
+        session and one of them may have left the table behind, and a
+        ``CREATE TABLE`` that fails is a test that errors instead of a test that
+        answers. The rollback puts back whatever was there.
         """
-        url = os.getenv("PROTEA_DB_URL", "")
-        if not url.startswith("postgresql"):
-            pytest.skip("Point PROTEA_DB_URL at an empty, disposable Postgres to run this.")
-        engine = create_engine(url, connect_args={"connect_timeout": 3}, future=True)
+        engine = create_engine(postgres_url, future=True)
+        conn = engine.connect()
         try:
-            conn = engine.connect()
-        except Exception as exc:  # a target we cannot reach is one we cannot ask
-            engine.dispose()
-            pytest.skip(f"PROTEA_DB_URL is not reachable: {exc}")
-        try:
-            held = conn.execute(text(self._USER_TABLES)).scalar_one()
-            if held:
-                pytest.skip(f"PROTEA_DB_URL holds {held} table(s), so it is not disposable")
+            conn.execute(text("DROP TABLE IF EXISTS experiment_run CASCADE"))
+            conn.execute(text("DROP TYPE IF EXISTS experiment_run_status CASCADE"))
             ExperimentRun.__table__.create(conn)
             yield conn
         finally:

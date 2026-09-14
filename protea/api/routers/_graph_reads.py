@@ -371,11 +371,19 @@ _FLOOR_WITHDRAWN_IN: frozenset[str] = frozenset({"abandoned"})
 def standing_floor_statuses(lifecycle: Iterable[str]) -> tuple[str, ...]:
     """The states a declared floor still governs from, sorted.
 
-    Takes the lifecycle from the typed column's own enum rather than from a list
-    repeated here, and refuses in both directions of drift: a state the column
-    can hold that nobody classified, and a state this module honours that the
-    column cannot hold, which would otherwise put a literal in the SQL below
-    that Postgres rejects halfway through serving a request.
+    Takes the lifecycle from ``ExperimentRunStatus`` rather than from a list
+    repeated here, and refuses in both directions of drift: a state that enum
+    holds and nobody classified, and a state this module honours that the enum
+    does not hold, which would otherwise put a literal in the SQL below that
+    Postgres rejects halfway through serving a request.
+
+    What it compares against is the ORM enum, not the ``experiment_run_status``
+    type in the database. Those two have drifted before -- the ``values_callable``
+    hint on the column exists because SQLAlchemy was persisting member NAMES
+    against a type holding lowercase labels -- and this guard cannot see that
+    happen, because it runs while the module is built and a round trip to the
+    server is not available to it. ``tests/test_experiment_run_enum_pg.py`` is
+    what pins the enum to the column; this pins the policy to the enum.
     """
     states = {str(s) for s in lifecycle}
     unclassified = states - _FLOOR_STANDS_IN - _FLOOR_WITHDRAWN_IN
