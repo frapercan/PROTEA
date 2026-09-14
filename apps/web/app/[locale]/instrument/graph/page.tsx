@@ -46,6 +46,7 @@ import {
   CircleCheckBig,
   EqualApproximately,
   Gauge,
+  Lock,
   RotateCcw,
   ChevronRight,
   RefreshCw,
@@ -71,14 +72,19 @@ import {
   type GraphResponse,
 } from "@/lib/graph";
 
-// ── Presentation of the six edge strengths ───────────────────────────────
+// ── Presentation of the seven edge strengths ───────────────────────────────
 //
 // Colour alone is not a channel. An operator scanning a pipeline for the
 // one node that cannot answer has to find it without resolving hue, so
 // every strength also carries its own SHAPE (square with a heavy left bar,
-// pill, dashed, diagonally striped, double-weight rectangle, double-ruled)
-// and its own icon, and the word itself is always printed beside them. Four
-// redundant channels, any one of which is enough.
+// pill, dashed, diagonally striped, double-weight rectangle, double-ruled,
+// doubled outline) and its own icon, and the word itself is always printed
+// beside them. Four redundant channels, any one of which is enough.
+//
+// `Record<EdgeStrength, ...>` and not a partial map, so a word added to the
+// endpoint's vocabulary fails the typecheck here instead of reaching a
+// reader through UNKNOWN_STYLE: the grey chip this build reserves for words
+// it cannot draw, with the icon `chosen` also uses and no legend line.
 //
 // `indistinguishable` is drawn NEXT TO `measured` and not next to `chosen`,
 // here and in the legend below, because the position is part of the claim:
@@ -131,6 +137,17 @@ const STRENGTH_STYLE: Record<EdgeStrength, StrengthStyle> = {
     icon: Ban,
     striped: false,
     rail: "bg-rose-600",
+  },
+  // A stop like `blocked`, drawn as a heavier one: the doubled outline and
+  // the lock say the way through is a migration and not a run. Sharing the
+  // rose family is deliberate, since both words mean the node cannot
+  // answer; shape and icon are what tell a reader which errand it is being
+  // sent on, and neither is lost when the hue is.
+  inexpressible: {
+    chip: "rounded-none border-4 border-double border-rose-700 bg-rose-100 text-rose-900",
+    icon: Lock,
+    striped: false,
+    rail: "bg-rose-800",
   },
 };
 

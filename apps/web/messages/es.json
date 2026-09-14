@@ -370,7 +370,8 @@
       "chosen": "Un valor se eligió y se registró y no se estableció nada sobre él: no hay suelo declarado, o la comparación se rechazó, o ningún panel pudo responderla, o los paneles eran demasiado finos para hacerlo.",
       "inherited": "Nadie decidió nunca. El valor es el que siempre fue.",
       "unpowered": "La comparación no podría haber resuelto nada. Se sabe por el diseño, antes de correr.",
-      "blocked": "Un nivel no se puede producir porque su artefacto no tiene productor."
+      "blocked": "Un nivel no se puede producir porque su artefacto no tiene productor.",
+      "inexpressible": "La forma del registro no puede contener el artefacto, así que nada de lo que llegue a contener mueve el nodo. Primero tiene que moverse una migración, no una ejecución."
     },
     "panelsHeading": "Paneles",
     "panelsHint": "Nueve regiones: categoría de conocimiento por aspecto. Nunca se suman ni se promedian. La cardinalidad es un vector sobre los nueve, no un número.",

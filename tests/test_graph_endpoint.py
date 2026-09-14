@@ -30,6 +30,7 @@ declare up front cannot be answered at all.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -42,9 +43,11 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection
 
 from protea.api.routers._graph_edges import (
+    BLOCK_WORDS,
     BLOCKED,
     CHOSEN,
     INDISTINGUISHABLE,
+    INEXPRESSIBLE,
     INHERITED,
     MEASURED,
     NULL_UNREAD,
@@ -54,6 +57,7 @@ from protea.api.routers._graph_edges import (
     STRENGTH_OF_READING,
     UNPOWERED,
     Edge,
+    StaleStructuralBlock,
     refuse_unstateable_readings,
     strength_of,
 )
@@ -81,7 +85,7 @@ from protea.core.operations._paired_panels_panel import TALLY_KEYS
 from protea.infrastructure.orm.models.experiment_run import ExperimentRun, ExperimentRunStatus
 from protea.infrastructure.settings import load_settings
 
-_STRENGTHS = {MEASURED, INDISTINGUISHABLE, CHOSEN, INHERITED, UNPOWERED, BLOCKED}
+_STRENGTHS = {MEASURED, INDISTINGUISHABLE, CHOSEN, INHERITED, UNPOWERED, BLOCKED, INEXPRESSIBLE}
 
 
 # ── A fake session that cannot be written to ──────────────────────────────────
@@ -393,11 +397,16 @@ def test_every_blocked_node_carries_a_reason_on_an_empty_record() -> None:
 
 
 def test_every_blocked_node_carries_a_reason_on_a_populated_record() -> None:
-    """The rule is about the strength, not about the record being empty."""
+    """The rule is about the strength, not about the record being empty.
+
+    Both block words, because a node whose artifact the record cannot express
+    owes a reader an account of itself exactly as much as one waiting for rows,
+    and more: what it is waiting for is a migration.
+    """
     client, _ = _client(populated_record({"a": 0.1, "b": 0.2}))
     body = client.get("/v1/graph").json()
     for node in body["nodes"]:
-        if node["strength"] == BLOCKED:
+        if node["strength"] in BLOCK_WORDS:
             assert node["blocked_reason"], f"{node['key']} is blocked with no reason"
 
 
@@ -411,7 +420,7 @@ def test_the_blocked_list_mirrors_the_blocked_nodes_exactly() -> None:
     for record in (empty_record(), populated_record({"a": 0.1, "b": 0.2})):
         body = build_graph(record)
         listed = {b["node"] for b in body["blocked"]}
-        blocked = {n["key"] for n in body["nodes"] if n["strength"] == BLOCKED}
+        blocked = {n["key"] for n in body["nodes"] if n["strength"] in BLOCK_WORDS}
         assert listed == blocked
         for entry in body["blocked"]:
             assert entry["why"] and entry["what"] and entry["precondition"]
@@ -1425,3 +1434,341 @@ class TestTheScaleCanReceiveEveryWordTheInstrumentEmits:
         assert reading_against_floor(rows, None) == NULL_UNREAD
         assert reading_against_floor(rows, "floor-level", counted) == NULL_WITH_POWER
         assert STRENGTH_OF_READING[NULL_UNREAD] == CHOSEN
+
+
+# -- The seventh word --------------------------------------------------------
+
+
+def a_record_that_can_hold_every_artifact() -> dict[str, list[dict[str, Any]]]:
+    """A record with a row behind every artifact the last four nodes ask about.
+
+    A donor column that can hold a row without a donor, both InterPro tables
+    loaded, consumers that record the schema they were fitted against, a second
+    corpus so a second flow exists, and published results that name a model.
+
+    This is not a state the record is in. It is the state it would have to reach
+    for these nodes to have anything to say, which is what makes it the fixture
+    for asking whether they CAN say it: a builder that prints the same word here
+    as on an empty record is printing a constant.
+
+    HETEROGENEOUS WHERE IT COUNTS, which for these nodes is the feature
+    selections. Four rows, three consumers, two distinct digests and one
+    consumer that recorded none: a builder reading the row count says four, one
+    reading the model count says three, one keeping the unnamed row says three,
+    and only the digest read says two. The SQL already distinguishes and drops
+    the nulls, so the rows the endpoint sees are cleaner than these; the fixture
+    carries the duplicates and the null so that the Python half cannot be the
+    one that quietly stops agreeing with the query.
+    """
+    record = populated_record({"a": 0.1, "b": 0.2})
+    record["donor_column"] = [{"is_nullable": "YES"}]
+    record["artifacts"] = [
+        {
+            "reranker_model": 3,
+            "interpro_annotation": 91_244,
+            "interpro_go_mapping": 31_002,
+            "reranked_results": 2,
+        }
+    ]
+    record["feature_selections"] = [
+        {"schema_sha": "9f2c1ab44c10"},
+        {"schema_sha": "9f2c1ab44c10"},
+        {"schema_sha": "3e77b0d5a218"},
+        {"schema_sha": None},
+    ]
+    record["banks"].append(
+        {"id": "bank-2", "source": "goa_uniprot", "source_version": "221", "in_use": True}
+    )
+    record["prediction_sets"].append(
+        {
+            **record["prediction_sets"][0],
+            "id": "ps-2",
+            "annotation_set_id": "bank-2",
+            "bank_source": "goa_uniprot",
+            "bank_version": "221",
+        }
+    )
+    for index, row in enumerate(record["results"]):
+        row["reranker_model_id"] = f"rm-{index}"
+    return record
+
+
+class TestAWordNoRecordCanMoveIsNotAReport:
+    """Four builders reported a blocked edge from a literal zero.
+
+    Until 2026-09-14 ``_generator_node``, ``_features_node``,
+    ``_combination_node`` and ``_routing_node`` each constructed their Edge with
+    ``instantiated=0`` written in, so ``strength_of`` answered on its first test
+    and returned ``blocked`` before it read anything. Their reasons printed live
+    counts beside it -- interpro rows, feature families, flows -- and the word
+    would have printed the same with a million rows behind every one of them. A
+    reader could not tell NO DATA YET from NO DATA WOULD DO, and none of the
+    four could be shown to act on the record at all. It is this surface's own
+    defect class read backwards: not a claim that cannot be refused, a claim
+    that cannot be shown to fire.
+
+    One of the four had a level to count and now counts it. A feature selection
+    is named by the schema digest its booster was fitted against, which is the
+    one place in the schema where a selection is named at all, so a row in
+    ``reranker_model`` moves the features node and ``blocked`` becomes true of
+    it. The other three have no row to count and say so in a different word
+    instead of borrowing that one: while ``go_prediction.ref_protein_accession``
+    is NOT NULL their artifact has nowhere to be written, which is read from the
+    catalog like every other fact here and moves when a migration moves.
+    """
+
+    def test_every_node_has_a_record_that_moves_the_word_it_prints(self) -> None:
+        """The property the four failed, swept over all ten.
+
+        Three records: nothing, what the record holds today, and a row behind
+        every artifact. A node whose word is the same in all three cannot be
+        shown to read anything, whatever its reason string prints beside it.
+        Structural on purpose, so an eleventh node added tomorrow has to prove
+        the same thing without anybody remembering to add it here.
+        """
+        bodies = [
+            build_graph(record)
+            for record in (
+                empty_record(),
+                populated_record({"a": 0.1, "b": 0.2}),
+                a_record_that_can_hold_every_artifact(),
+            )
+        ]
+        for spec in SPECS:
+            words = {
+                next(n for n in body["nodes"] if n["key"] == spec.key)["strength"]
+                for body in bodies
+            }
+            assert len(words) > 1, f"{spec.key} prints {words} whatever the record holds"
+
+    def test_a_structural_block_does_not_print_the_evidential_word(self) -> None:
+        """The record as it stands: three nodes the shape forbids, two waiting on rows.
+
+        The donor column is NOT NULL here, which is what the catalog says today.
+        Both kinds of block reach the reader and both bring a reason, and they
+        are two words because they ask for two different things.
+        """
+        body = build_graph(populated_record({"a": 0.1, "b": 0.2}))
+        nodes = {n["key"]: n for n in body["nodes"]}
+        for key in ("generator", "combination", "routing"):
+            assert nodes[key]["strength"] == INEXPRESSIBLE, key
+        # Empty tables, and rows in them would end it. That is the other word.
+        for key in ("features", "reranking"):
+            assert nodes[key]["strength"] == BLOCKED, key
+        listed = {b["node"]: b for b in body["blocked"]}
+        assert set(listed) == {"generator", "features", "reranking", "combination", "routing"}
+        # A structural block must not send a reader to load a table: what it is
+        # waiting for is a column, and the precondition has to say so or the
+        # reader goes and produces data that could not show up here.
+        for key in ("generator", "combination", "routing"):
+            assert "candidate column" in listed[key]["precondition"], key
+        assert "interpro" in listed["generator"]["precondition"]
+
+    def test_the_same_three_read_blocked_once_the_shape_allows_the_artifact(self) -> None:
+        """The word is a function of one catalog row, and this is what says so.
+
+        Nothing changes here except ``is_nullable`` on the column that names the
+        donor. The three stop reporting a structural block and report an
+        ordinary one, because that is now what it is: the artifact could be
+        written and nothing has written one.
+        """
+        record = populated_record({"a": 0.1, "b": 0.2})
+        record["donor_column"] = [{"is_nullable": "YES"}]
+        nodes = {n["key"]: n for n in build_graph(record)["nodes"]}
+        for key in ("generator", "combination", "routing"):
+            assert nodes[key]["strength"] == BLOCKED, key
+        assert "nullable" in nodes["generator"]["blocked_reason"]
+
+    def test_a_selection_that_reached_a_consumer_instantiates_a_level(self) -> None:
+        """The features node acts: the digests in the record are its levels.
+
+        Two distinct digests out of four rows and three consumers, so the count
+        is the one read off the digests and not off either of the other two.
+        ``unpowered`` and not ``blocked``, which is the honest word: two
+        selections exist and neither has been scored against the other.
+        """
+        nodes = {n["key"]: n for n in build_graph(a_record_that_can_hold_every_artifact())["nodes"]}
+        features = nodes["features"]
+        assert features["levels_instantiated"] == 2
+        assert features["strength"] == UNPOWERED
+        assert "schema digest" in features["blocked_reason"]
+
+    def test_a_consumer_that_records_no_schema_instantiates_nothing(self) -> None:
+        """And the refusal: a model count is not a level count.
+
+        Two consumers exist and neither says what it consumed. Reading the model
+        count as the level count would have reported two feature selections
+        nobody can name, and a contrast between them that never happened.
+        """
+        record = populated_record({"a": 0.1, "b": 0.2})
+        record["artifacts"] = [
+            {
+                "reranker_model": 2,
+                "interpro_annotation": 0,
+                "interpro_go_mapping": 0,
+                "reranked_results": 0,
+            }
+        ]
+        features = next(n for n in build_graph(record)["nodes"] if n["key"] == "features")
+        assert features["levels_instantiated"] == 0
+        assert features["strength"] == BLOCKED
+        assert "none records the feature schema" in features["blocked_reason"]
+
+    def test_a_structural_block_the_rows_contradict_raises(self) -> None:
+        """The next mistake in this area, refused before it can be published.
+
+        A migration makes the artifact storable, a builder starts counting the
+        rows, and the structural claim beside it is the one nobody re-read. The
+        node would print ``inexpressible`` next to a live count of the thing it
+        says cannot exist, which is the original defect one field along.
+        """
+        with pytest.raises(StaleStructuralBlock, match="outlived the schema"):
+            strength_of(Edge(produced=True, instantiated=1, available=1, expressible=False))
+
+    def test_a_structural_block_the_rows_agree_with_is_a_word_and_not_a_raise(self) -> None:
+        """The other half: the guard is not a function that always refuses.
+
+        Zero levels under a shape that forbids them is the coherent case and
+        answers with the word, and an expressible edge with a real contrast is
+        untouched by the new test at the top of ``strength_of``.
+        """
+        assert strength_of(Edge(produced=False, expressible=False)) == INEXPRESSIBLE
+        assert strength_of(Edge(instantiated=2, available=2, scored=2)) == CHOSEN
+
+
+# -- The surface can draw every word the endpoint sends ----------------------
+
+
+_WEB = Path(__file__).resolve().parents[1] / "apps" / "web"
+_GRAPH_PAGE = _WEB / "app" / "[locale]" / "instrument" / "graph" / "page.tsx"
+
+
+def _published_words() -> set[str]:
+    """Every word ``strength_of`` can return, read off the module itself.
+
+    Reflected and not listed, because a word listed here would have to be
+    remembered and forgetting is the whole defect below.
+
+    Two sources, because that function answers in two ways: with a constant it
+    names, and with one it looks up in ``STRENGTH_OF_READING``. The names alone
+    would miss ``indistinguishable``, which no ``return`` there spells.
+
+    Every name UNDER a return and not only the returned expression itself, since
+    one of them is a conditional: ``inherited`` is reachable only through
+    ``CHOSEN if edge.forced else INHERITED`` and an extraction that read the top
+    of each return would drop it. Non-string constants are dropped, which is how
+    the lookup table's own name gets out of the way.
+
+    Sweeping the module's uppercase constants instead is not an option: it also
+    names the panel tally's READINGS, and those are not strengths, so six words
+    no surface should draw would arrive here as words it must.
+    """
+    import ast
+    import inspect
+
+    from protea.api.routers import _graph_edges
+
+    tree = ast.parse(inspect.getsource(_graph_edges.strength_of))
+    named = {
+        name.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Return) and node.value is not None
+        for name in ast.walk(node.value)
+        if isinstance(name, ast.Name) and name.id.isupper()
+    }
+    assert named, "no strength is returned by name; this extraction has stopped working"
+    values = [getattr(_graph_edges, name, None) for name in named]
+    return {v for v in values if isinstance(v, str)} | set(
+        _graph_edges.STRENGTH_OF_READING.values()
+    )
+
+
+def _block(source: str, pattern: str) -> str:
+    """The body of one declaration in a TypeScript file, or a loud failure.
+
+    A regex over source is only worth trusting if it cannot come back empty and
+    be read as agreement, so a pattern that stops matching fails here instead of
+    turning the checks below into ones that pass on nothing.
+    """
+    found = re.search(pattern, source, re.S)
+    assert found, f"{pattern} no longer matches; the check below cannot read the surface"
+    return found.group(1)
+
+
+class TestTheSurfaceCanDrawEveryWordTheEndpointSends:
+    """A word the page cannot draw is not a word the reader can read.
+
+    The endpoint's vocabulary has grown twice in two weeks, and both times the
+    page is where the growth has to land or the repair stops one surface short.
+    ``styleFor`` resolves a strength through ``STRENGTH_STYLE[s] ?? UNKNOWN_STYLE``
+    and ``UNKNOWN_STYLE`` is documented there as the chip for "a strength the
+    endpoint sent that this build does not know how to draw": grey, with the
+    icon ``chosen`` also uses. ``StrengthLegend`` iterates ``EDGE_STRENGTHS``, so
+    a word missing from that array gets no line explaining it at all.
+
+    A reader would then be told a node cannot answer and not told which of the
+    two kinds of nothing it is, which is the difference between waiting for rows
+    and waiting for a migration -- the same defect the word was introduced to
+    end, arriving one surface along. Nothing fails loudly when it happens: the
+    per-node reason still says it in prose, and the legend, which is where the
+    vocabulary is explained, quietly does not.
+
+    Read off the sources rather than restated here, since a restated vocabulary
+    is just a fourth place to forget.
+    """
+
+    def test_the_page_names_a_style_for_each_and_the_legend_explains_each(self) -> None:
+        words = _published_words()
+        # The extraction is neither empty nor partial: every word this file
+        # imports by name is in it, and so is any word added to the module
+        # without touching this file, which is the case that matters.
+        assert _STRENGTHS <= words
+
+        declared = set(
+            re.findall(
+                r'"([a-z]+)"',
+                _block(
+                    (_WEB / "lib" / "graph.ts").read_text(encoding="utf-8"),
+                    r"export const EDGE_STRENGTHS: EdgeStrength\[\] = \[(.*?)\];",
+                ),
+            )
+        )
+        assert declared == words, f"the surface names {sorted(declared)}, the endpoint sends {sorted(words)}"
+
+        page = _GRAPH_PAGE.read_text(encoding="utf-8")
+        drawn = set(
+            re.findall(
+                r"^  ([a-z]+): \{",
+                _block(
+                    page,
+                    r"const STRENGTH_STYLE: Record<EdgeStrength, StrengthStyle> = \{(.*?)\n\};",
+                ),
+                re.M,
+            )
+        )
+        assert drawn == words, f"the page draws {sorted(drawn)}, the endpoint sends {sorted(words)}"
+
+        # Every catalogue, not only the one the page tests load. A reader on a
+        # locale nobody renders in a test gets the raw key, or an error, where
+        # the account of the word belongs.
+        for catalogue in sorted((_WEB / "messages").glob("*.json")):
+            legend = json.loads(catalogue.read_text(encoding="utf-8"))["graph"]["legend"]
+            assert set(legend) == words, f"{catalogue.name} explains {sorted(legend)}"
+            for word, text_of in legend.items():
+                assert text_of.strip(), f"{catalogue.name} carries an empty legend for {word}"
+
+    def test_a_word_the_page_cannot_draw_is_a_word_the_reader_cannot_read(self) -> None:
+        """The other half: the page still needs its fallback, and it still has one.
+
+        ``UNKNOWN_STYLE`` is not the defect -- an older build serving a newer API
+        has to draw something -- so this pins that it is there, and that it is
+        reached only by a word outside the vocabulary and never by one inside it.
+        """
+        page = _GRAPH_PAGE.read_text(encoding="utf-8")
+        assert "const UNKNOWN_STYLE: StrengthStyle" in page
+        assert "STRENGTH_STYLE[strength as EdgeStrength] ?? UNKNOWN_STYLE" in page
+        fallback = _block(
+            page,
+            r"/\*\* A strength the endpoint sent that this build does not know how to draw\. \*/(.*?)\n\}",
+        )
+        assert not _published_words() & set(re.findall(r"[a-z]+", fallback))

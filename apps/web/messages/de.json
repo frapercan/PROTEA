@@ -371,7 +371,8 @@
       "chosen": "Ein Wert wurde gewählt und festgehalten, und nichts wurde über ihn belegt: keine Schwelle deklariert, der Vergleich verweigert, kein Panel konnte ihn beantworten, oder die Panels waren dafür zu dünn.",
       "inherited": "Niemand hat je entschieden. Der Wert ist der, der er immer war.",
       "unpowered": "Der Vergleich hätte nichts auflösen können. Aus dem Aufbau bekannt, bevor er lief.",
-      "blocked": "Eine Stufe kann nicht erzeugt werden, weil ihr Artefakt keinen Erzeuger hat."
+      "blocked": "Eine Stufe kann nicht erzeugt werden, weil ihr Artefakt keinen Erzeuger hat.",
+      "inexpressible": "Die Form des Datenbestands kann das Artefakt gar nicht aufnehmen, also bewegt nichts, was er später enthält, den Knoten. Zuerst muss eine Migration kommen, kein Lauf."
     },
     "panelsHeading": "Panels",
     "panelsHint": "Neun Regionen: Wissenskategorie mal Aspekt. Nie summiert und nie gemittelt. Die Kardinalität ist ein Vektor über die neun, keine einzelne Zahl.",

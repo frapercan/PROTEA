@@ -37,7 +37,41 @@ INDISTINGUISHABLE = "indistinguishable"
 CHOSEN = "chosen"
 INHERITED = "inherited"
 UNPOWERED = "unpowered"
+#: A level with no producer. What ends it is rows.
 BLOCKED = "blocked"
+#: A node whose artifact the SHAPE of the record forbids, so nothing the record
+#: comes to hold moves it.
+#:
+#: THE SEVENTH WORD, AND WHY IT IS A WORD. Four builders printed ``blocked``
+#: while meaning this. Their edges were constructed with ``instantiated=0``
+#: written in, so ``strength_of`` answered on its first test and returned
+#: ``blocked`` before it read anything, and the reasons printed beside it
+#: carried live counts -- interpro rows, feature families, flows -- that the
+#: word would have printed the same beside a million of. A reader could not tell
+#: NO DATA YET from NO DATA WOULD DO, and the two send them to different work:
+#: one to run something, the other to write a migration.
+#:
+#: It is ONE END of that repair and not the whole of it. Where a node has a row
+#: it can count, the fix is to count it and let ``blocked`` mean what it says;
+#: this word is for the nodes whose artifact has nowhere to be written at all,
+#: where there is no row to count and never will be until the schema moves.
+INEXPRESSIBLE = "inexpressible"
+
+#: The two words that say a node has no artifact to show. Together because every
+#: surface that lists what cannot answer has to list both, and two words because
+#: they ask the reader for two different things.
+BLOCK_WORDS: tuple[str, ...] = (BLOCKED, INEXPRESSIBLE)
+
+
+class StaleStructuralBlock(ValueError):
+    """A node says its artifact cannot be written while the record holds one.
+
+    Raised rather than rendered. The whole point of ``expressible`` is that it
+    is READ from the catalog and never asserted; the moment a builder claims the
+    shape forbids an artifact and hands over instantiated levels of it, one of
+    the two came from a constant that outlived the schema, and publishing either
+    is the defect the field was added to end.
+    """
 
 # ── The reading a declared comparison came back with ──────────────────────────
 #
@@ -160,6 +194,15 @@ class Edge:
     fields: ``separated`` false is a yes-or-no, and its no is several facts that
     only the tally tells apart. It sits BESIDE the three above and does not
     replace any of them. They report the comparison; it reports the answer.
+
+    ``expressible`` is the one field here about the SHAPE of the record rather
+    than its content, and the only one no key of the response carries: nothing
+    reads it but :func:`strength_of`. It is false only where the catalog
+    positively forbids the artifact -- a NOT NULL column that leaves it nowhere
+    to be written -- and it exists because four nodes reported a blocked edge
+    from a literal zero, printing live counts beside a word no number of rows
+    could have changed. It must be READ, never asserted: a builder that
+    hardcodes it is back to the same defect one field along.
     """
 
     produced: bool = True
@@ -172,6 +215,7 @@ class Edge:
     separated: bool | None = None
     refusal: str | None = None
     reading: str = NULL_UNREAD
+    expressible: bool = True
 
     def __post_init__(self) -> None:
         """Refuse an edge that carries a verdict and a refusal at the same time.
@@ -234,16 +278,27 @@ class Edge:
 def strength_of(edge: Edge) -> str:
     """The one word that says how firmly a decision is held.
 
-    The order of the tests is the argument. Production comes first, because an
+    The order of the tests is the argument. Expressibility comes first, ahead
+    even of production, because it is the only test about the SHAPE of the
+    record instead of its content: a node whose artifact has nowhere to be
+    written is not waiting for a producer to be run, and telling a reader it is
+    sends them after work no run can do. Production comes next, because an
     artifact with no producer cannot have levels to compare. A single level
-    comes next and can never reach a measurement whatever it scored: with
+    comes after that and can never reach a measurement whatever it scored: with
     nothing to contrast against, a number is a reading and not a separation.
     Power comes before evidence, since whether a comparison could resolve
     anything is a fact about its shape and is settled before a metric is read.
 
+    The refusal at the top fires before any word is produced. The next mistake
+    here is a migration that makes an artifact storable, a builder that counts
+    the rows, and a structural claim beside it nobody re-read: that would print
+    ``inexpressible`` next to a live count of the thing it says cannot exist. It
+    sits here rather than in :meth:`Edge.__post_init__` beside the other three
+    because ``expressible`` reaches no key of the response: this is its reader.
+
     WHERE THE SIXTH WORD ENTERS, AND WHY IT LEAVES THAT ORDER MEANING WHAT IT
     MEANT. It enters LAST, on the no side of the threshold test, and nowhere
-    earlier. The four tests ahead of it are unchanged and still settle
+    earlier. The tests ahead of it are unchanged and still settle shape,
     production, contrast and power before any metric is read, and the reading is
     never consulted until they have all passed and the floor has been asked and
     answered. So it cannot move a node that has no producer, no contrast, no
@@ -261,6 +316,14 @@ def strength_of(edge: Edge) -> str:
     publishes as what, and it is the authority rather than a document beside one:
     this line is the only place a strength is read out of it.
     """
+    if edge.instantiated and not edge.expressible:
+        raise StaleStructuralBlock(
+            f"{edge.instantiated} level(s) are instantiated under a node that says the record "
+            "cannot express one. The structural claim outlived the schema it was read from; "
+            "re-read it from the catalog rather than publishing a word the rows contradict."
+        )
+    if not edge.expressible:
+        return INEXPRESSIBLE
     if not edge.produced or edge.instantiated == 0:
         return BLOCKED
     if edge.instantiated == 1:
@@ -316,12 +379,15 @@ def _node(
     """Assemble one node of the response.
 
     ``blocked_reason`` carries the reason the node stands where it does, not
-    only the reason it is blocked. It is always present when the strength is
-    ``blocked``, which is the contract a reader depends on, and it is null only
-    for a node that reached ``measured`` and therefore needs no account of
-    itself beyond the measurement. A node that reached ``indistinguishable``
-    still owes one: a measured null is a finding about two named levels, and
-    which floor it was read against is not in the word.
+    only the reason it is blocked. It is always present when the strength is one
+    of ``BLOCK_WORDS``, which is the contract a reader depends on, and it is
+    null only for a node that reached ``measured`` and therefore needs no
+    account of itself beyond the measurement. A node the record cannot express
+    owes one most of all: what it is waiting for is a migration, and a reader
+    not told that goes and produces rows that could not be stored. A node that
+    reached ``indistinguishable`` still owes one too: a measured null is a
+    finding about two named levels, and which floor it was read against is not
+    in the word.
 
     ``held`` is the value the node currently stands at, named field by field.
     A strength says how firmly a decision is held and says nothing about what

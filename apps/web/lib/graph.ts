@@ -8,11 +8,12 @@
 // The graph model asks a different question of the record. A NODE is one
 // decision over a field or a group of inseparable fields. The EDGE into a
 // node carries a STRENGTH saying what the record can support about that
-// decision, and the six values are exhaustive and mutually exclusive:
+// decision, and the seven values are exhaustive and mutually exclusive:
 // a comparison that separated, a comparison that could have separated and
 // did not, a value picked with nothing established about it, a value nobody
-// ever chose, a comparison that could not have resolved anything, and a
-// level that cannot be produced at all.
+// ever chose, a comparison that could not have resolved anything, a level
+// that cannot be produced at all, and a level the record's shape cannot
+// hold at all.
 //
 // Nothing here derives, filters or repairs the payload. Every number on
 // the page is the number the endpoint returned, so a reader chasing a
@@ -36,12 +37,21 @@ import { ApiError, baseUrl } from "@/lib/api";
  * - `unpowered`  the comparison could not have resolved anything. Known
  *                from the design, before the comparison ran.
  * - `blocked`    a level cannot be produced because its artifact has no
- *                producer.
+ *                producer. Rows would end it.
+ * - `inexpressible`
+ *                the record's shape cannot hold the artifact, so nothing it
+ *                comes to hold moves the node. A migration has to move first,
+ *                not a run.
  *
  * Six and not five because the instrument reads every panel into one of six
  * buckets and two of them are different nulls. Until the sixth word existed a
  * null the campaign measured arrived here as `chosen`, which is also what a
  * node nobody ever declared a comparison for reads as.
+ *
+ * Seven and not six because `blocked` was carrying two errands. Four nodes
+ * built their edge from a literal zero and printed it beside live counts no
+ * number of rows could have changed, so a reader could not tell a table
+ * waiting to be filled from a node no table could move.
  */
 export type EdgeStrength =
   | "measured"
@@ -49,7 +59,8 @@ export type EdgeStrength =
   | "chosen"
   | "inherited"
   | "unpowered"
-  | "blocked";
+  | "blocked"
+  | "inexpressible";
 
 /** Declaration order, which is also pipeline order on the page. */
 export const EDGE_STRENGTHS: EdgeStrength[] = [
@@ -59,6 +70,7 @@ export const EDGE_STRENGTHS: EdgeStrength[] = [
   "inherited",
   "unpowered",
   "blocked",
+  "inexpressible",
 ];
 
 export function isEdgeStrength(v: unknown): v is EdgeStrength {
@@ -262,7 +274,13 @@ export type GraphRepresentations = {
   rows: GraphRepresentation[];
 };
 
-/** A level that cannot be produced, and what would unblock it. */
+/**
+ * A level that cannot be produced, and what would unblock it.
+ *
+ * Carries both block words. `precondition` on an `inexpressible` node names a
+ * column and never a table, because a reader sent to load one would be
+ * producing rows that could not be stored.
+ */
 export type GraphBlocked = {
   node: string;
   what: string;
