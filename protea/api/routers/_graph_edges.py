@@ -8,14 +8,138 @@ scrolling past ten builders to find it.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+# The reading vocabulary is the instrument's, taken from where it is defined
+# rather than respelled here, for the reason the panel keys are taken from the
+# enums that own them: a surface keeping its own copy of somebody else's words
+# drifts from them silently. The served process already holds this module, since
+# the operation catalog imports it, so the reach costs nothing at import.
+from protea.core.operations._paired_panels_panel import TALLY_KEYS
+
 MEASURED = "measured"
+#: A comparison that was read with the power to resolve the difference this
+#: project acts on, and came back with its levels inside each other's noise.
+#:
+#: THE SIXTH WORD, AND WHY IT IS A WORD. ``compare_paired_panels`` keeps two
+#: nulls apart because they are two facts: ``null_with_power`` looked, could
+#: have seen the declared effect, and found none, while ``null_unread`` had no
+#: declared effect to look for. This scale had five words and both nulls landed
+#: on ``chosen``, so a null the campaign MEASURED read exactly like a question
+#: nobody asked. Over the whole-panel readings in ``job_event`` that is 23
+#: measured nulls published in the same word as 2,299 unasked questions.
+#:
+#: A flag beside ``chosen`` would have left the word itself wrong, and the word
+#: is what every surface renders: the page prints it, styles it and legends it.
+INDISTINGUISHABLE = "indistinguishable"
 CHOSEN = "chosen"
 INHERITED = "inherited"
 UNPOWERED = "unpowered"
 BLOCKED = "blocked"
+
+# ── The reading a declared comparison came back with ──────────────────────────
+#
+# The instrument's vocabulary, named here so that a producer which misspells one
+# is an import-time NameError rather than a word no strength answers to, and
+# checked against the instrument's own tuple below so that a bucket added there
+# cannot be silently missing here.
+RESOLVED = "resolved"
+NULL_WITH_POWER = "null_with_power"
+NULL_UNREAD = "null_unread"
+UNDERPOWERED = "underpowered"
+REFUSED = "refused"
+NOT_COMPUTED = "not_computed"
+
+#: What each reading publishes as. Exactly one strength per reading, which is
+#: what makes this a table a test can walk: add a seventh bucket to the tally and
+#: the walk over ``TALLY_KEYS`` fails instead of the surface inventing a word for
+#: it.
+#:
+#: FOUR READINGS PUBLISH AS ``chosen`` AND THAT IS NOT THE COLLAPSE THIS FIXES.
+#: A strength says how firmly a decision is held. A comparison nobody declared,
+#: one whose precondition was refused, one no panel could answer and one whose
+#: panels were too thin to answer all leave a level standing with nothing
+#: established about it, which is what ``chosen`` means; what separates them is
+#: WHY nothing was established, and that is the node's reason to give, and the
+#: business of ``floor``, ``separated`` and ``floor_refusal``, not the scale's.
+#: The distinction the scale itself had to carry is the one it could not: a null
+#: read against declared power is a finding about two levels, and
+#: ``indistinguishable`` is that finding.
+STRENGTH_OF_READING: dict[str, str] = {
+    RESOLVED: MEASURED,
+    NULL_WITH_POWER: INDISTINGUISHABLE,
+    NULL_UNREAD: CHOSEN,
+    UNDERPOWERED: CHOSEN,
+    REFUSED: CHOSEN,
+    NOT_COMPUTED: CHOSEN,
+}
+
+#: The two readings that state what verdict the floor got, and the verdict each
+#: one states. The other four say the comparison was never read against a floor
+#: at all, so they constrain nothing. Used by :meth:`Edge.__post_init__` to
+#: refuse an edge whose word and whose verdict disagree.
+_VERDICT_OF_READING: dict[str, bool] = {RESOLVED: True, NULL_WITH_POWER: False}
+
+
+def refuse_unstateable_readings(table: Mapping[str, str], counted: Iterable[str]) -> None:
+    """Refuse a scale that cannot state every reading the instrument counts.
+
+    Called at import below, so a seventh bucket in the tally stops this module
+    loading rather than reaching a reader relabelled: a scale that cannot state
+    its own vocabulary has no business serving it.
+
+    It is a NAMED FUNCTION and not the bare ``if`` it could have been because a
+    refusal that only ever happens at import is a refusal no test has seen raise.
+    Reproducing it needs a fabricated tally and a module reload, so the check
+    would go untested while reading as though it were covered, which is the same
+    trap as a guard that logs. Called with the real pair one line below, so the
+    happy path is not a claim either.
+
+    Both directions, because each is a different defect. A counted reading with
+    no strength is the one that relabels a finding. A strength named for a
+    reading nothing counts is a word this surface can never be asked for, and it
+    would sit in the table looking like coverage.
+    """
+    tally, scale = set(counted), set(table)
+    if scale == tally:
+        return
+    raise ValueError(
+        "the panel tally and the firmness scale disagree about which readings exist. "
+        f"Counted with no strength to publish as: {sorted(tally - scale)}. "
+        f"Named here and never counted: {sorted(scale - tally)}. "
+        "A reading with no strength is published as the strength that happens to be left, "
+        "which is how a measured null became a recorded choice."
+    )
+
+
+refuse_unstateable_readings(STRENGTH_OF_READING, TALLY_KEYS)
+
+
+@dataclass(frozen=True)
+class DeclaredFloor:
+    """A floor the record declares, and the word the panels answered it in.
+
+    Two fields and not four. The VERDICT and the REFUSAL are not here because
+    they are still read per node by ``_graph_nodes._separation``, exactly where
+    the change that published them put them; what has to be computed once, by
+    the caller, is the READING, because deciding whether a panel had the power to
+    resolve the declared effect needs the panel populations and those are counted
+    from the window's own ground truth by the endpoint. Handing them to ten
+    builders instead would be one more argument a future node can be written
+    without, and a node that cannot see a declared floor is how nine of these ten
+    published ``chosen`` with one declared for them until 2026-09-02.
+    """
+
+    floor: str | None = None
+    reading: str = NULL_UNREAD
+
+
+#: Where a node with nothing declared for it stands. Its reading is the
+#: instrument's word for a null nobody can read, which is the honest report: the
+#: record holds no statement of what this node's levels were supposed to beat.
+UNDECLARED = DeclaredFloor()
 
 
 @dataclass(frozen=True)
@@ -30,6 +154,12 @@ class Edge:
     comparison could not be asked at all. The three travel together because a
     ``separated`` of None means two different things -- nothing was declared, or
     what was declared was refused -- and only the third says which.
+
+    ``reading`` is the word the panel tally answered the declared comparison in,
+    and it is the one thing here the strength cannot be derived from the other
+    fields: ``separated`` false is a yes-or-no, and its no is several facts that
+    only the tally tells apart. It sits BESIDE the three above and does not
+    replace any of them. They report the comparison; it reports the answer.
     """
 
     produced: bool = True
@@ -41,6 +171,7 @@ class Edge:
     floor: str | None = None
     separated: bool | None = None
     refusal: str | None = None
+    reading: str = NULL_UNREAD
 
     def __post_init__(self) -> None:
         """Refuse an edge that carries a verdict and a refusal at the same time.
@@ -56,6 +187,17 @@ class Edge:
         A refusal with no floor is refused for the same reason: a refusal is an
         account of one declared comparison, and where nothing was declared there
         is no comparison for it to be an account of.
+
+        THE READING IS HELD TO THE SAME RULE, which is why this guard was
+        extended rather than joined by a second one. ``resolved`` and
+        ``null_with_power`` are the two words that state what verdict the floor
+        got, so an edge carrying either of them alongside a floor that was never
+        declared, or a verdict that says the opposite, is the same unreadable
+        payload in a third key: it would publish a finding about a comparison
+        whose own record denies it. A word the tally does not count is refused
+        here too, so ``strength_of`` never has to answer one with the nearest
+        strength to hand -- a default there does not lose a reading, it relabels
+        it, and a relabelled reading is exactly the sixth word's original defect.
         """
         if self.refusal is not None and self.separated is not None:
             raise ValueError(
@@ -70,6 +212,23 @@ class Edge:
                 "an account of one declared comparison, so with no floor declared there "
                 "is nothing it can be an account of."
             )
+        if self.reading not in STRENGTH_OF_READING:
+            raise ValueError(
+                f"reading {self.reading!r} is not one of the panel tally's words "
+                f"({', '.join(TALLY_KEYS)}), so no strength states it. Publishing the "
+                "nearest one would report a comparison that was never read as one that was."
+            )
+        stated = _VERDICT_OF_READING.get(self.reading)
+        if stated is not None and (
+            self.floor is None or self.separated is None or bool(self.separated) is not stated
+        ):
+            raise ValueError(
+                f"an edge reads {self.reading!r}, which states that a declared floor was "
+                f"{'cleared' if stated else 'not cleared'}, and reports floor="
+                f"{self.floor!r} separated={self.separated}. The word and the verdict are "
+                "two reports of one comparison; an edge that lets them disagree publishes "
+                "a finding the rest of its own payload denies."
+            )
 
 
 def strength_of(edge: Edge) -> str:
@@ -81,6 +240,26 @@ def strength_of(edge: Edge) -> str:
     nothing to contrast against, a number is a reading and not a separation.
     Power comes before evidence, since whether a comparison could resolve
     anything is a fact about its shape and is settled before a metric is read.
+
+    WHERE THE SIXTH WORD ENTERS, AND WHY IT LEAVES THAT ORDER MEANING WHAT IT
+    MEANT. It enters LAST, on the no side of the threshold test, and nowhere
+    earlier. The four tests ahead of it are unchanged and still settle
+    production, contrast and power before any metric is read, and the reading is
+    never consulted until they have all passed and the floor has been asked and
+    answered. So it cannot move a node that has no producer, no contrast, no
+    second scored level or no declared floor, and it cannot turn a separation
+    into anything but ``measured``: it is a different answer to the last question
+    asked here, not a new question inserted before it.
+
+    What it refines is the NO of that last test. ``separated`` false was the
+    whole of it, and its no was several facts the panel tally has told apart
+    since it was written: the panels could have shown the difference this project
+    acts on and did not, they could not have shown it, or no panel carried both
+    sides. All of them published as ``chosen``, which is also what a node nobody
+    declared a floor for publishes as, so a null the campaign measured was
+    indistinguishable from a question nobody asked. The table says which reading
+    publishes as what, and it is the authority rather than a document beside one:
+    this line is the only place a strength is read out of it.
     """
     if not edge.produced or edge.instantiated == 0:
         return BLOCKED
@@ -90,7 +269,9 @@ def strength_of(edge: Edge) -> str:
         return UNPOWERED
     if edge.floor is None or edge.separated is None:
         return CHOSEN
-    return MEASURED if edge.separated else CHOSEN
+    if edge.separated:
+        return MEASURED
+    return STRENGTH_OF_READING[edge.reading]
 
 
 @dataclass(frozen=True)
@@ -138,7 +319,9 @@ def _node(
     only the reason it is blocked. It is always present when the strength is
     ``blocked``, which is the contract a reader depends on, and it is null only
     for a node that reached ``measured`` and therefore needs no account of
-    itself beyond the measurement.
+    itself beyond the measurement. A node that reached ``indistinguishable``
+    still owes one: a measured null is a finding about two named levels, and
+    which floor it was read against is not in the word.
 
     ``held`` is the value the node currently stands at, named field by field.
     A strength says how firmly a decision is held and says nothing about what
