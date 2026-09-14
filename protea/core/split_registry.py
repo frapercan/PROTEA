@@ -115,6 +115,13 @@ class Release:
 RELEASES: tuple[Release, ...] = tuple(
     sorted(
         (
+            # v220 is the campaign's selection lower endpoint and the only
+            # annotation set a donor may come from without reading the future.
+            # It was absent from this table while the tune window was 226->227,
+            # which is why ``release("v220")`` raised and the campaign's own
+            # window could not be named here. Published date read from
+            # ``annotation_set.source_published_at``, not inferred.
+            Release(date(2024, 4, 16), "v220"),
             Release(date(2025, 5, 3), "v226"),
             Release(date(2025, 9, 4), "v227"),
             Release(date(2025, 11, 10), "v228"),
@@ -267,6 +274,18 @@ _SPLITS: dict[SplitName, Split] = {
             {"model_fitting", "hyperparameters", "thresholds", "design", "champion_choice"}
         ),
         balanced=True,
+        # SUPERSEDED BY THE AUTHOR 2026-09-14: the adjustment window is
+        # 220 -> 227. The 2026-07-27 decision below stands as history and its
+        # reasoning is still the reasoning; what changed is the fact it rested
+        # on. GOA 226 is not loaded, while 220 -> 227 carries the 315 results,
+        # both scoring-side evaluation sets and every frame seal the campaign
+        # has produced, so 226 -> 227 named a window with no data behind it.
+        # The caution that follows still applies and is why the menu matters:
+        # 220 -> 227 spans seven releases, so it is a wider and less
+        # representative window than an adjacent pair, and a decision selected
+        # on it should be checked against an earlier window once the recency
+        # ladder is ingested.
+        #
         # DECIDED BY THE AUTHOR 2026-07-27, in E2E-CANONICAL-RUN.md section 3:
         # "TUNE window: 226 -> 227. Every parameter, threshold and design
         # decision is selected here. Nothing after 227 informs a choice."
@@ -284,7 +303,7 @@ _SPLITS: dict[SplitName, Split] = {
         # holds on an earlier window is better evidence than one selected on a
         # single contraction, and the menu says which earlier windows the
         # release table can currently offer. Today it offers none.
-        windows=(ReleaseWindow("v226", "v227"),),
+        windows=(ReleaseWindow("v220", "v227"),),
     ),
     SplitName.VALIDATION: Split(
         name=SplitName.VALIDATION,
@@ -362,14 +381,14 @@ def adjustment_candidates() -> tuple[ReleaseWindow, ...]:
     window starting at the mark does not. This used to cut off one window
     earlier, which excluded the tune window from its own menu.
 
-    The menu now holds exactly **one** window, 226->227, which is the tune
-    window itself, so it offers no second window to check a decision against.
-    That is the finding rather than a defect here: the release table begins at
-    v226, so **there is nothing earlier in it to widen the tune set with**, and
-    a decision selected on 226->227 cannot currently be shown to hold anywhere
-    else. Since 226->227 is itself one of the two roughly thirty percent
-    contractions, that is a real exposure and not a formality. Releases
-    preceding v226 have to be ingested to close it.
+    The menu holds **two** windows since v220 entered the table on 2026-09-14,
+    220->226 and 226->227, and neither is the adjustment window itself, which is
+    now 220->227. The exposure the previous note described is narrowed but not
+    closed: 226->227 is still one of the two roughly thirty percent corpus
+    contractions, and 220->226 **cannot be scored at all today because GOA 226
+    is not ingested**. So the menu names two windows and the store can serve
+    neither as a check. Ingesting the releases between v160 and v220 is what
+    closes it, and that is the recency ladder.
     :func:`menu_is_sufficient` is the check to gate on rather than this
     docstring.
     """
@@ -392,9 +411,17 @@ def menu_is_sufficient() -> bool:
     tuned on an anomalous release transition, and nothing in the table can
     currently show whether it survives a normal one.
 
-    This does not block the campaign, which the author fixed on 226->227
-    knowingly. It records what that fixing costs, so the cost is visible rather
-    than discovered later.
+    This does not block the campaign. It records what the choice of window
+    costs, so the cost is visible rather than discovered later. Nothing calls
+    it: it is a reading, not a gate.
+
+    **It answers about the release TABLE and not about the store.** Since v220
+    entered the table on 2026-09-14 the menu holds two windows and this returns
+    True, but one of the two is 220->226 and **GOA 226 is not ingested**, so the
+    second window cannot be scored today. A caller that reads True as "a
+    decision can be checked against a second window" is reading more than this
+    function knows. Closing that gap means checking ingestion, which this module
+    deliberately cannot see, and it is the reason the recency ladder exists.
     """
     return len(adjustment_candidates()) >= 2
 
