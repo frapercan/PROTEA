@@ -40,18 +40,25 @@ def _window_span(head: dict[str, Any]) -> dict[str, Any] | None:
 
 def _floor_for(
     key: str, record: dict[str, list[dict[str, Any]]], floors: dict[str, str]
-) -> tuple[str | None, bool | None, str | None]:
+) -> dict[str, Any]:
     """The floor declared for this node, whether it was cleared, and why it was not asked.
 
-    One line at each call site rather than three, which is what keeps the
-    builders inside the smell budget, but it also puts the pairing in one place:
-    a floor, the verdict on it and the account of there being no verdict are
-    never read apart, and a builder that fetched one without the others would be
-    exactly the half-wiring this helper was written to end. :func:`_scoring_node`
-    still reads them itself because it also needs the crossed-ladder reason in
-    its own prose.
+    Returned as the keyword arguments an :class:`Edge` takes, so a builder spends
+    one line on the whole comparison. Three named locals unpacked into three
+    keyword lines is four lines per builder, which put ``_frame_node`` and
+    ``_bank_node`` one line over the 60-LOC smell budget the moment the refusal
+    joined the pair -- the budget this helper existed to protect.
 
-    The third element used to be dropped right here. :func:`_separation` catches
+    Handing back one object is the pairing argument rather than a dodge of it: a
+    floor, the verdict on it and the account of there being no verdict are never
+    read apart, and a builder that fetched one without the others would be
+    exactly the half-wiring this helper was written to end. Splatted, it cannot
+    fetch one without the others at all. :func:`_scoring_node` still reads them
+    itself because it also needs the crossed-ladder reason in its own prose,
+    which is why what reaches the payload is pinned node by node and not once
+    over this helper.
+
+    The refusal used to be dropped right here. :func:`_separation` catches
     CrossedFrames and CrossedDepthAxes so the page still serves, and this helper
     threw the caught text away, so for nine of the ten nodes a comparison whose
     floor REFUSED came out of ``strength_of`` as a bare ``chosen`` -- the same
@@ -60,7 +67,7 @@ def _floor_for(
     """
     floor = floors.get(key)
     separated, refusal = _separation(record["panels"], floor)
-    return floor, separated, refusal
+    return {"floor": floor, "separated": separated, "refusal": refusal}
 
 
 def _frame_node(
@@ -82,7 +89,6 @@ def _frame_node(
     used = [a for a in record["accretion"] if a["in_use"]]
     pool = eligible or record["accretion"]
     results = [r for r in record["results"] if head and r["evaluation_set_id"] == head["id"]]
-    floor, separated, refusal = _floor_for("frame", record, floors)
     edge = Edge(
         produced=head is not None,
         instantiated=len(used),
@@ -90,9 +96,7 @@ def _frame_node(
         scored=len(used) if results else 0,
         results=len(results),
         forced=len(eligible) == 1 and bool(used) and used[0]["id"] == eligible[0]["id"],
-        floor=floor,
-        separated=separated,
-        refusal=refusal,
+        **_floor_for("frame", record, floors),
     )
     if head is None:
         reason = "No evaluation set exists, so there is no window for a number to be read in."
@@ -154,7 +158,6 @@ def _substrate_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     producible = [r for r in rows if r["producible"]]
     used_ids = {r["id"] for r in used}
     results = [r for r in record["results"] if r["embedding_config_id"] in used_ids]
-    floor, separated, refusal = _floor_for("substrate", record, floors)
     edge = Edge(
         produced=bool(producible),
         instantiated=len(used),
@@ -166,9 +169,7 @@ def _substrate_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
         # single instantiated level here is a value nobody chose rather than one
         # the frame fixed.
         forced=False,
-        floor=floor,
-        separated=separated,
-        refusal=refusal,
+        **_floor_for("substrate", record, floors),
     )
     if not used:
         reason = "No prediction set names a representation, so nothing has been retrieved against."
@@ -239,7 +240,6 @@ def _bank_node(
     used_ids = {p["annotation_set_id"] for p in sets}
     pinned = bool(eligible) and used_ids <= {b["id"] for b in eligible}
     policy_set = bool(sets) and not all(_policy_is_empty(p) for p in sets)
-    floor, separated, refusal = _floor_for("bank", record, floors)
     edge = Edge(
         produced=bool(record["banks"]),
         instantiated=len(levels),
@@ -247,9 +247,7 @@ def _bank_node(
         scored=len({r["annotation_set_id"] for r in record["results"]}),
         results=len(record["results"]),
         forced=pinned and policy_set,
-        floor=floor,
-        separated=separated,
-        refusal=refusal,
+        **_floor_for("bank", record, floors),
     )
     if not sets:
         reason = "No prediction set names a corpus, so no bank has been drawn from."
@@ -323,7 +321,6 @@ def _retriever_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     levels = {tuple(repr(p.get(f)) for f in _RETRIEVER_FIELDS) for p in sets}
     candidates = sum(int(c["candidates"]) for c in record["candidates"])
     depths = sorted({p["depth"] for p in sets if p["depth"]})
-    floor, separated, refusal = _floor_for("retriever", record, floors)
     edge = Edge(
         produced=bool(sets),
         instantiated=len(levels),
@@ -331,9 +328,7 @@ def _retriever_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
         scored=len({r["prediction_set_id"] for r in record["results"]}),
         results=len(record["results"]),
         forced=False,
-        floor=floor,
-        separated=separated,
-        refusal=refusal,
+        **_floor_for("retriever", record, floors),
     )
     if not sets:
         reason = "No prediction set exists, so nothing has been retrieved."
@@ -382,14 +377,11 @@ def _generator_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     interpro = int(art.get("interpro_annotation") or 0)
     mappings = int(art.get("interpro_go_mapping") or 0)
     models = int(art.get("reranker_model") or 0)
-    floor, separated, refusal = _floor_for("generator", record, floors)
     edge = Edge(
         produced=bool(interpro and mappings),
         instantiated=0,
         available=0,
-        floor=floor,
-        separated=separated,
-        refusal=refusal,
+        **_floor_for("generator", record, floors),
     )
     schema = (
         "the candidate column naming the donor is NOT NULL, so a term that arrived without one "
@@ -528,14 +520,11 @@ def _features_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, st
             if f.strip()
         }
     )
-    floor, separated, refusal = _floor_for("features", record, floors)
     edge = Edge(
         produced=models > 0,
         instantiated=0,
         available=len(families),
-        floor=floor,
-        separated=separated,
-        refusal=refusal,
+        **_floor_for("features", record, floors),
     )
     named = ", ".join(families) if families else "none"
     reason = (
@@ -556,15 +545,12 @@ def _reranking_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     models = int(art.get("reranker_model") or 0)
     reranked = int(art.get("reranked_results") or 0)
     used = len({r["reranker_model_id"] for r in record["results"] if r["reranker_model_id"]})
-    floor, separated, refusal = _floor_for("reranking", record, floors)
     edge = Edge(
         produced=models > 0,
         instantiated=used,
         available=models,
         results=reranked,
-        floor=floor,
-        separated=separated,
-        refusal=refusal,
+        **_floor_for("reranking", record, floors),
     )
     reason = (
         f"No model exists to reorder with: reranker_model holds {models} rows and {reranked} "
@@ -595,14 +581,11 @@ def _combination_node(record: dict[str, list[dict[str, Any]]], floors: dict[str,
     """How two or more flows are merged into one answer."""
     flows = _flow_count(record)
     sources = sorted({p["bank_source"] for p in record["prediction_sets"] if p["bank_source"]})
-    floor, separated, refusal = _floor_for("combination", record, floors)
     edge = Edge(
         produced=flows >= 2,
         instantiated=0,
         available=flows,
-        floor=floor,
-        separated=separated,
-        refusal=refusal,
+        **_floor_for("combination", record, floors),
     )
     reason = (
         f"{flows} {'flow is' if flows == 1 else 'flows are'} instantiated, so there is nothing "
@@ -620,14 +603,11 @@ def _combination_node(record: dict[str, list[dict[str, Any]]], floors: dict[str,
 def _routing_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """Which flow answers which panel."""
     flows = _flow_count(record)
-    floor, separated, refusal = _floor_for("routing", record, floors)
     edge = Edge(
         produced=flows >= 2,
         instantiated=0,
         available=flows,
-        floor=floor,
-        separated=separated,
-        refusal=refusal,
+        **_floor_for("routing", record, floors),
     )
     reason = (
         f"Routing picks a flow per panel and there {'is' if flows == 1 else 'are'} {flows} of "

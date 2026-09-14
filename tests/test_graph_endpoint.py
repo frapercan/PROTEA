@@ -1036,6 +1036,49 @@ class TestTheComparisonBehindTheStrengthIsPublished:
         # refusal is published, not acted on.
         assert node["strength"] == without["strength"]
 
+    @pytest.mark.parametrize("sealed", [True, False])
+    def test_the_answer_reaches_whichever_node_declared_the_floor(self, sealed: bool) -> None:
+        """Structural over SPECS, because the wiring is per builder and not shared.
+
+        `test_every_node_publishes_the_three` can only see the dict literal in
+        `_node`, which all ten nodes share, so it passes whether or not a builder
+        ever hands what it fetched to its own `Edge`. The retriever case above
+        pins one node. Deleting the refusal from the other nine left this whole
+        file green, and `substrate` -- the only node the live record declares a
+        floor for -- was among the nine.
+
+        Swept over both answers a declared floor can have, because a builder that
+        drops either one re-creates the same silent None in a different key: a
+        dropped refusal reads as nothing declared, and a dropped verdict reads as
+        a comparison that was refused.
+        """
+        for spec in SPECS:
+            record = populated_record({"floor-level": 0.10, "rival": 0.30})
+            if not sealed:
+                # The shape `seal_evaluation_frames` refuses on, which is what
+                # makes the declared floor unanswerable rather than merely lost.
+                for row in record["panels"]:
+                    row.pop("frame_digest", None)
+            before = {n["key"]: n["strength"] for n in build_graph(record)["nodes"]}
+            record["floors"] = [{"node": spec.key, "floor": "floor-level", "name": "run-1"}]
+            node = next(n for n in build_graph(record)["nodes"] if n["key"] == spec.key)
+            assert node["floor"] == "floor-level", f"{spec.key} drops the floor declared for it"
+            if sealed:
+                assert node["separated"] is True, f"{spec.key} drops the verdict it was handed"
+                assert node["floor_refusal"] is None, f"{spec.key} invents a refusal"
+            else:
+                assert node["separated"] is None, f"{spec.key} answers a refused comparison"
+                assert "frame seal" in (node["floor_refusal"] or ""), (
+                    f"{spec.key} fetched the refusal and published nothing"
+                )
+                # A refusal is published, never acted on. Not vacuous here the way
+                # it is on a one-level node, which `strength_of` answers before it
+                # ever reads a floor: `scoring` has two levels and two scored, so
+                # it reaches the floor branch and this pins what it finds there.
+                assert node["strength"] == before[spec.key], (
+                    f"{spec.key} let a refused comparison move its strength"
+                )
+
     def test_an_edge_cannot_hold_a_verdict_and_a_refusal_at_once(self) -> None:
         """A refused comparison has no verdict, so an edge holding both is unreadable.
 
