@@ -25,8 +25,11 @@ class Edge:
     ``produced`` is false when the node's artifact has no producer at all.
     ``forced`` is true when the frame's own definition fixes the level, which is
     what separates a recorded choice from a value nobody ever chose. ``floor``
-    is the level a declared comparison measures against, and ``separated``
-    whether the comparison cleared it.
+    is the level a declared comparison measures against, ``separated`` whether
+    the comparison cleared it, and ``refusal`` the text of the refusal when the
+    comparison could not be asked at all. The three travel together because a
+    ``separated`` of None means two different things -- nothing was declared, or
+    what was declared was refused -- and only the third says which.
     """
 
     produced: bool = True
@@ -37,6 +40,36 @@ class Edge:
     forced: bool = False
     floor: str | None = None
     separated: bool | None = None
+    refusal: str | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse an edge that carries a verdict and a refusal at the same time.
+
+        Raised rather than reconciled, because there is nothing to reconcile: a
+        comparison that was refused HAS no verdict, and a verdict means nothing
+        refused, so an edge holding both asks a reader to choose which half of
+        its own payload to believe. Checked at construction because that is the
+        last point before ``strength_of`` reads the pair and ``_node`` publishes
+        it, and a node that reached the response holding both would be the same
+        unreadable answer that publishing the refusal was written to end.
+
+        A refusal with no floor is refused for the same reason: a refusal is an
+        account of one declared comparison, and where nothing was declared there
+        is no comparison for it to be an account of.
+        """
+        if self.refusal is not None and self.separated is not None:
+            raise ValueError(
+                f"an edge cannot hold both a verdict ({self.separated}) and a refusal "
+                f"({self.refusal!r}). A refused comparison has no verdict and a verdict "
+                "means nothing was refused; publishing both leaves a reader to guess "
+                "which of the two the number behind this node came from."
+            )
+        if self.refusal is not None and self.floor is None:
+            raise ValueError(
+                f"an edge holds the refusal {self.refusal!r} and no floor. A refusal is "
+                "an account of one declared comparison, so with no floor declared there "
+                "is nothing it can be an account of."
+            )
 
 
 def strength_of(edge: Edge) -> str:
@@ -112,6 +145,16 @@ def _node(
     was decided, and a reader who cannot see the value cannot tell an inherited
     default from a deliberate choice that happens to be unmeasured. Both read
     ``inherited`` and only one of them is a surprise.
+
+    ``floor``, ``separated`` and ``floor_refusal`` are the comparison the
+    strength was decided on, which the strength itself cannot report. ``chosen``
+    is a sink of four situations: a single level the frame's own definition
+    fixed, a powered contrast with no floor declared for it, one whose declared
+    floor REFUSED to be compared, and one that was compared and did not
+    separate. Until these three keys existed the response held nothing that told
+    them apart, and the refusal in particular reached nobody: it is caught so
+    the page keeps serving, and a caught refusal that is not published is a
+    silent None, which is the failure this surface has already been burnt by.
     """
     spec = _SPEC_BY_KEY[key]
     strength = strength_of(edge)
@@ -128,6 +171,9 @@ def _node(
         "varying_fields": varying,
         "constant_fields": constant,
         "blocked_reason": None if strength == MEASURED else reason,
+        "floor": edge.floor,
+        "separated": edge.separated,
+        "floor_refusal": edge.refusal,
         "results": edge.results,
     }
 
