@@ -44,6 +44,7 @@ import {
   Ban,
   Circle,
   CircleCheckBig,
+  EqualApproximately,
   Gauge,
   RotateCcw,
   ChevronRight,
@@ -70,14 +71,18 @@ import {
   type GraphResponse,
 } from "@/lib/graph";
 
-// ── Presentation of the five edge strengths ──────────────────────────────
+// ── Presentation of the six edge strengths ───────────────────────────────
 //
 // Colour alone is not a channel. An operator scanning a pipeline for the
 // one node that cannot answer has to find it without resolving hue, so
 // every strength also carries its own SHAPE (square with a heavy left bar,
-// pill, dashed, diagonally striped, double-weight rectangle) and its own
-// icon, and the word itself is always printed beside them. Four redundant
-// channels, any one of which is enough.
+// pill, dashed, diagonally striped, double-weight rectangle, double-ruled)
+// and its own icon, and the word itself is always printed beside them. Four
+// redundant channels, any one of which is enough.
+//
+// `indistinguishable` is drawn NEXT TO `measured` and not next to `chosen`:
+// it is an answer the comparison gave, not the absence of one, and a reader
+// scanning for what the record establishes has to find it in that half.
 
 type StrengthStyle = {
   chip: string;
@@ -94,6 +99,12 @@ const STRENGTH_STYLE: Record<EdgeStrength, StrengthStyle> = {
     icon: CircleCheckBig,
     striped: false,
     rail: "bg-emerald-600",
+  },
+  indistinguishable: {
+    chip: "rounded-md border-[3px] border-double border-teal-600 bg-teal-50 text-teal-900",
+    icon: EqualApproximately,
+    striped: false,
+    rail: "bg-teal-600",
   },
   chosen: {
     chip: "rounded-full border border-blue-400 bg-blue-50 text-blue-900",

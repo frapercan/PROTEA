@@ -23,16 +23,29 @@ import { ApiError, baseUrl } from "@/lib/api";
  * What the record supports about one decision.
  *
  * - `measured`   a declared comparison separated against its floor.
- * - `chosen`     the comparison ran with power, did not separate, and the
- *                value was picked and recorded.
+ * - `indistinguishable`
+ *                a declared comparison was read with the power to resolve the
+ *                difference this project acts on, and its levels came back
+ *                inside each other's noise. A null that was measured, which is
+ *                a finding and not the absence of one.
+ * - `chosen`     a level was selected and recorded and nothing was established
+ *                about it: no floor declared, or the comparison refused, or no
+ *                panel able to answer it.
  * - `inherited`  nobody ever decided; the value is the one it always was.
  * - `unpowered`  the comparison could not have resolved anything. Known
- *                from the design, before the comparison ran.
+ *                from the design, or from the populations that testified,
+ *                before any metric is believed.
  * - `blocked`    a level cannot be produced because its artifact has no
  *                producer.
+ *
+ * Six and not five because the instrument reads every panel into one of six
+ * buckets and two of them are different nulls. Until the sixth word existed,
+ * a null the campaign measured arrived here as `chosen`, which is also what a
+ * node nobody ever declared a comparison for reads as.
  */
 export type EdgeStrength =
   | "measured"
+  | "indistinguishable"
   | "chosen"
   | "inherited"
   | "unpowered"
@@ -41,6 +54,7 @@ export type EdgeStrength =
 /** Declaration order, which is also pipeline order on the page. */
 export const EDGE_STRENGTHS: EdgeStrength[] = [
   "measured",
+  "indistinguishable",
   "chosen",
   "inherited",
   "unpowered",

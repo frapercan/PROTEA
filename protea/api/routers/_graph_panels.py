@@ -18,12 +18,19 @@ from __future__ import annotations
 
 import io
 import math
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 import pandas as pd
 
 from protea.api.routers._arm_identity import depth_kind
+from protea.api.routers._graph_edges import (
+    NOT_COMPUTED,
+    NULL_UNREAD,
+    NULL_WITH_POWER,
+    RESOLVED,
+    UNDERPOWERED,
+)
 from protea.core.domain.aspect import Aspect
 from protea.core.domain.category import Category
 
@@ -388,39 +395,57 @@ def _within_the_floors_frame(
     return [r for r in rows if r.get("frame_digest") == seal]
 
 
-def separated_from_floor(rows: list[dict[str, Any]], floor: str) -> bool:
-    """Whether some level clears the floor on every panel that carries both.
+def _best(rows: list[dict[str, Any]]) -> float:
+    """The best weighted micro F in one panel, with an unscored row counting zero."""
+    return max(r.get("f_micro_w") or 0.0 for r in rows)
+
+
+def _clears(at_floor: list[dict[str, Any]], rivals: list[dict[str, Any]]) -> bool:
+    """Whether the best rival in one panel beats the best row at the floor.
+
+    One expression, read by both the separation and the reading below, so that
+    the word a comparison is reported in and the yes-or-no it is reported beside
+    cannot drift into disagreeing about what clearing a floor is.
+    """
+    return _best(rivals) > _best(at_floor)
+
+
+def _testimony(
+    rows: list[dict[str, Any]], floor: str
+) -> Iterator[tuple[tuple[str, str], list[dict[str, Any]], list[dict[str, Any]]]]:
+    """Every panel that can testify about the floor, with both sides of it.
 
     Panels are never pooled, so a separation has to hold panel by panel. A panel
-    holding only the floor, or only its rivals, cannot testify either way and is
-    skipped; if no panel can testify, nothing separated.
+    holding only the floor, or only its rivals, cannot testify either way and
+    never appears here.
+
+    THE COMPARISON IS INSIDE ONE FRAME OR IT IS NOT A COMPARISON.
+
+    This used to test the floor against every level that happened to land in the
+    same panel, which is every arm the record holds regardless of the window, the
+    corpus or the accretion table it was scored under. On 2026-09-02 a retriever
+    floor on the 226->227 tune frame was being compared against arms from
+    220->227, and the rivals that beat it in all nine panels were from the other
+    window. A panel key is a category and an aspect; it is not a frame.
+
+    The seal is the project's own answer to when two numbers may be compared, and
+    this comparison was the one place that asked the question and did not consult
+    it. An unsealed row is EXCLUDED rather than treated as matching: an unstamped
+    marker is not a matching one, which is the rule seal_evaluation_frames states
+    and refuses on.
+
+    Yielded panel by panel rather than collected, so a caller that already has
+    its answer stops asking. That is what keeps the crossed-depth refusal firing
+    where a comparison was about to be made, and not merely because the record
+    happens to contain both kinds of depth somewhere.
 
     Raises:
+        CrossedFrames: when the floor carries no seal, or more than one.
         CrossedDepthAxes: when a panel that would have testified holds a floor
-            and a rival whose depths are different quantities. Checked inside
-            the loop rather than once over every row, so the refusal fires
-            exactly where a comparison was about to be made and not merely
-            because the record happens to contain both kinds somewhere.
+            and a rival whose depths are different quantities.
     """
     fields = level_fields(rows)
-    # THE COMPARISON IS INSIDE ONE FRAME OR IT IS NOT A COMPARISON.
-    #
-    # This used to test the floor against every level that happened to land in
-    # the same panel, which is every arm the record holds regardless of the
-    # window, the corpus or the accretion table it was scored under. On
-    # 2026-09-02 a retriever floor on the 226->227 tune frame was being compared
-    # against arms from 220->227, and the rivals that beat it in all nine panels
-    # were from the other window. A panel key is a category and an aspect; it is
-    # not a frame.
-    #
-    # The seal is the project's own answer to when two numbers may be compared,
-    # and this function was the one place that asked the question and did not
-    # consult it. An unsealed row is EXCLUDED rather than treated as matching:
-    # an unstamped marker is not a matching one, which is the rule
-    # seal_evaluation_frames states and refuses on.
     comparable = _within_the_floors_frame(rows, floor, fields)
-
-    tested = 0
     for key in PANEL_KEYS:
         here = [r for r in comparable if (str(r.get("category")), str(r.get("aspect"))) == key]
         at_floor = [r for r in here if _level_name(r, fields) == floor]
@@ -428,9 +453,70 @@ def separated_from_floor(rows: list[dict[str, Any]], floor: str) -> bool:
         if not at_floor or not rivals:
             continue
         _refuse_crossed_depths(floor, at_floor, rivals)
+        yield key, at_floor, rivals
+
+
+def separated_from_floor(rows: list[dict[str, Any]], floor: str) -> bool:
+    """Whether some level clears the floor on every panel that carries both.
+
+    If no panel can testify, nothing separated. The frame rule and the
+    crossed-depth refusal are :func:`_testimony`'s, which is also where the
+    reasons they exist are written down.
+    """
+    tested = 0
+    for _key, at_floor, rivals in _testimony(rows, floor):
         tested += 1
-        if max(r.get("f_micro_w") or 0.0 for r in rivals) <= max(
-            r.get("f_micro_w") or 0.0 for r in at_floor
-        ):
+        if not _clears(at_floor, rivals):
             return False
     return tested > 0
+
+
+def reading_against_floor(
+    rows: list[dict[str, Any]],
+    floor: str | None,
+    units: Mapping[tuple[str, str], int] | None = None,
+) -> str:
+    """The declared comparison's answer, in the panel tally's six words.
+
+    WHY SIX WORDS AND NOT THE BOOLEAN ABOVE. :func:`separated_from_floor`
+    answers yes or no, and its no is three different facts: the panels that
+    testified could have shown the difference this project acts on and did not,
+    they could not have shown it, or no panel carried both sides and nothing was
+    compared at all. ``compare_paired_panels`` has told those apart since it was
+    written -- ``null_with_power``, ``underpowered``, ``not_computed`` -- and
+    this surface published all three, together with a node that declared no
+    floor, as ``chosen``. A null the campaign measured was indistinguishable
+    from a question nobody asked.
+
+    THE POWER QUESTION IS THE PANEL'S OWN ARITHMETIC. A panel resolves
+    :func:`detectable_effect` of its population and nothing finer. The
+    comparison had power when every panel that testified could have resolved
+    ``_TARGET_EFFECT``, the smallest gap this project has ever been willing to
+    act on, which is the statement :func:`population_floor` makes from the other
+    end. A panel whose population could not be counted has no detectable effect
+    and so no claim to power: it reads ``underpowered``, which is what the
+    instrument reports when its minimum detectable effect is unknown, and never
+    ``null_with_power``. The conservative direction is the only safe one, because
+    ``null_with_power`` is the word a reader is entitled to treat as evidence of
+    sameness.
+
+    WHAT THIS DELIBERATELY DOES NOT CHANGE. A separation is still the point
+    comparison above, cleared by any margin at all. Requiring a separation to
+    clear the panel's own detectable effect would change what ``measured`` means
+    on this surface; that is a different decision and is not smuggled in here.
+    This reading refines the NULL side of an answer the record already gave.
+    """
+    if not floor:
+        return NULL_UNREAD
+    if not rows:
+        return NOT_COMPUTED
+    testimony = list(_testimony(rows, floor))
+    if not testimony:
+        return NOT_COMPUTED
+    if all(_clears(at_floor, rivals) for _key, at_floor, rivals in testimony):
+        return RESOLVED
+    counted = units or {}
+    effects = [detectable_effect(counted.get(key)) for key, _at_floor, _rivals in testimony]
+    if any(effect is None or effect > _TARGET_EFFECT for effect in effects):
+        return UNDERPOWERED
+    return NULL_WITH_POWER

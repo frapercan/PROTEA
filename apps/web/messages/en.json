@@ -366,9 +366,10 @@
     "noNodes": "The graph carries no nodes.",
     "legend": {
       "measured": "A declared comparison separated against its floor.",
-      "chosen": "The comparison ran with power, did not separate, and the value was picked and recorded.",
+      "indistinguishable": "The comparison ran with the power to resolve the difference this project acts on, and the levels came back inside each other's noise. A null that was measured, which is a finding.",
+      "chosen": "A level was picked and recorded and nothing was established about it: no floor was declared, or the comparison was refused, or no panel could answer it.",
       "inherited": "Nobody ever decided. The value is the one it always was.",
-      "unpowered": "The comparison could not have resolved anything. Known from the design, before it ran.",
+      "unpowered": "The comparison could not have resolved anything. Known from the design, or from the populations that testified, before any metric is believed.",
       "blocked": "A level cannot be produced, because its artifact has no producer."
     },
     "panelsHeading": "Panels",

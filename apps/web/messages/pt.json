@@ -367,9 +367,10 @@
     "noNodes": "O grafo não traz nós.",
     "legend": {
       "measured": "Uma comparação declarada separou contra o seu piso.",
-      "chosen": "A comparação correu com poder, não separou, e o valor foi escolhido e registado.",
+      "indistinguishable": "A comparação correu com poder para resolver a diferença sobre a qual este projeto age, e os níveis voltaram dentro do ruído um do outro. Um nulo que foi medido, o que é um achado.",
+      "chosen": "Um valor foi escolhido e registado e nada foi estabelecido sobre ele: nenhum piso declarado, ou a comparação foi recusada, ou nenhum painel a pôde responder.",
       "inherited": "Ninguém decidiu alguma vez. O valor é o que sempre foi.",
-      "unpowered": "A comparação não poderia ter resolvido nada. Sabe-se pelo desenho, antes de correr.",
+      "unpowered": "A comparação não poderia ter resolvido nada. Sabe-se pelo desenho, ou pelas populações que testemunharam, antes de acreditar em qualquer métrica.",
       "blocked": "Um nível não pode ser produzido porque o seu artefacto não tem produtor."
     },
     "panelsHeading": "Painéis",

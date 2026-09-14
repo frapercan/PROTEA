@@ -367,9 +367,10 @@
     "noNodes": "Der Graph enthält keine Knoten.",
     "legend": {
       "measured": "Ein deklarierter Vergleich hat sich gegen seine Schwelle abgesetzt.",
-      "chosen": "Der Vergleich lief mit Trennschärfe, setzte sich nicht ab, und der Wert wurde gewählt und festgehalten.",
+      "indistinguishable": "Der Vergleich lief mit der Trennschärfe für den Unterschied, auf den dieses Projekt reagiert, und die Stufen lagen im Rauschen der jeweils anderen. Ein gemessenes Nullergebnis, also ein Befund.",
+      "chosen": "Ein Wert wurde gewählt und festgehalten, und nichts wurde über ihn belegt: keine Schwelle deklariert, der Vergleich verweigert, oder kein Panel konnte ihn beantworten.",
       "inherited": "Niemand hat je entschieden. Der Wert ist der, der er immer war.",
-      "unpowered": "Der Vergleich hätte nichts auflösen können. Aus dem Aufbau bekannt, bevor er lief.",
+      "unpowered": "Der Vergleich hätte nichts auflösen können. Aus dem Aufbau bekannt oder aus den Populationen, die aussagen konnten, bevor einer Metrik geglaubt wird.",
       "blocked": "Eine Stufe kann nicht erzeugt werden, weil ihr Artefakt keinen Erzeuger hat."
     },
     "panelsHeading": "Panels",

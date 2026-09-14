@@ -366,9 +366,10 @@
     "noNodes": "El grafo no trae nodos.",
     "legend": {
       "measured": "Una comparación declarada separó contra su suelo.",
-      "chosen": "La comparación corrió con potencia, no separó, y el valor se eligió y se registró.",
+      "indistinguishable": "La comparación corrió con potencia para resolver la diferencia sobre la que este proyecto actúa, y los niveles volvieron dentro del ruido del otro. Un nulo que sí se midió, que es un hallazgo.",
+      "chosen": "Un valor se eligió y se registró y no se estableció nada sobre él: no hay suelo declarado, o la comparación se rechazó, o ningún panel pudo responderla.",
       "inherited": "Nadie decidió nunca. El valor es el que siempre fue.",
-      "unpowered": "La comparación no podría haber resuelto nada. Se sabe por el diseño, antes de correr.",
+      "unpowered": "La comparación no podría haber resuelto nada. Se sabe por el diseño, o por las poblaciones que testificaron, antes de creer ninguna métrica.",
       "blocked": "Un nivel no se puede producir porque su artefacto no tiene productor."
     },
     "panelsHeading": "Paneles",

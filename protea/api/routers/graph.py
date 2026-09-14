@@ -14,20 +14,36 @@ it is the same flow configured differently. A NODE is one decision over a field,
 or over a group of fields that cannot be decided apart. The nodes are, in
 pipeline order: frame, substrate, bank, retriever, generator, scoring, features,
 re-ranking, combination, routing. The EDGE into a node says how firmly that
-decision is held and takes one of five values:
+decision is held and takes one of six values:
 
 ``measured``
     a declared comparison separated against its floor.
+``indistinguishable``
+    a declared comparison was read with the power to resolve the difference this
+    project acts on, and its levels came back inside each other's noise. A null
+    that was measured, which is a finding and not an absence of one.
 ``chosen``
-    the comparison ran with power and did not separate; a level was selected and
-    recorded.
+    a level was selected and recorded and nothing was established about it:
+    either no floor was declared, or the comparison was refused, or no panel
+    could answer it.
 ``inherited``
     nobody ever decided. The value is the one it has always been.
 ``unpowered``
     the comparison could not have resolved anything. Settled from the shape of
-    the comparison, before any metric is read.
+    the comparison, or from the populations that testified, before any metric is
+    believed.
 ``blocked``
     a level cannot be produced at all, because its artifact has no producer.
+
+WHY THERE ARE SIX AND NOT FIVE. ``compare_paired_panels`` reads every panel into
+one of six buckets and keeps them six because they are six facts, two of which
+are different nulls: one had the power to resolve the declared effect and found
+nothing, the other had no declared effect to look for. The scale had five words,
+so both arrived as ``chosen``, and a reader could not tell a measured null from a
+question nobody asked. The correspondence is now a table, ``STRENGTH_OF_READING``
+in ``_graph_edges``, with exactly one strength per reading, so a seventh bucket
+in the instrument is a refusal at import instead of a word published as
+``chosen``.
 
 A PANEL is one of nine regions, a knowledge category (NK, LK, PK) crossed with
 an aspect (BPO, MFO, CCO). Panels are never pooled and never summed: the
@@ -85,6 +101,7 @@ from protea.api.routers._graph_nodes import (
     _scoring_node,
     _substrate_node,
     _window_span,
+    declared_comparisons,
 )
 from protea.api.routers._graph_panels import (
     build_panels,
@@ -101,8 +118,9 @@ from protea.infrastructure.storage.factory import (
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 
-# The edge vocabulary, closed at five. Spelled once so a typo in a builder is an
-# import-time NameError rather than a word nobody downstream recognises.
+# The edge vocabulary lives in _graph_edges, closed against the panel tally's own
+# words. Spelled once so a typo in a builder is an import-time NameError rather
+# than a word nobody downstream recognises.
 
 # ── The frame ─────────────────────────────────────────────────────────────────
 
@@ -237,7 +255,7 @@ def build_graph(
     carries. The two say the same thing because they are built from one source.
     """
     head = record["evaluation_sets"][0] if record["evaluation_sets"] else None
-    floors = {f["node"]: f["floor"] for f in record["floors"] if f["node"] and f["floor"]}
+    floors = declared_comparisons(record["floors"], record["panels"], units)
     # EVERY builder gets the floors. Until 2026-09-02 this list handed the dict
     # to _scoring_node alone, so nine of the ten nodes could not see a declared
     # floor and `strength_of` returned CHOSEN for them whatever was declared.

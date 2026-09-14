@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
 from protea.api.routers._graph_edges import (
+    REFUSED,
+    UNDECLARED,
     Built,
+    Declared,
     Edge,
     _node,
     held_values,
@@ -15,6 +19,7 @@ from protea.api.routers._graph_edges import (
 from protea.api.routers._graph_panels import (
     CrossedDepthAxes,
     CrossedFrames,
+    reading_against_floor,
     separated_from_floor,
 )
 
@@ -38,25 +43,20 @@ def _window_span(head: dict[str, Any]) -> dict[str, Any] | None:
     return {"from": start, "to": end, "days": days, "months": round(days / 30.44, 1)}
 
 
-def _floor_for(
-    key: str, record: dict[str, list[dict[str, Any]]], floors: dict[str, str]
-) -> tuple[str | None, bool | None]:
-    """The floor declared for this node, and whether it was cleared.
+def _floor_for(key: str, floors: dict[str, Declared]) -> Declared:
+    """The comparison this node declared, or the one that says none was declared.
 
-    One line at each call site rather than two, which is what keeps the builders
-    inside the smell budget, but it also puts the pairing in one place: a floor
-    and the verdict on it are never read apart, and a builder that fetched one
-    without the other would be exactly the half-wiring this helper was written
-    to end. :func:`_scoring_node` still reads them itself because it also needs
-    the crossed-ladder reason.
+    One line at each call site rather than three, which is what keeps the
+    builders inside the smell budget, but it also puts the pairing in one place:
+    a floor, the yes-or-no on it and the word it was read in are never fetched
+    apart, and a builder that fetched one without the others would be exactly
+    the half-wiring this helper was written to end.
     """
-    floor = floors.get(key)
-    separated, _ = _separation(record["panels"], floor)
-    return floor, separated
+    return floors.get(key) or UNDECLARED
 
 
 def _frame_node(
-    record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None, floors: dict[str, str]
+    record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None, floors: dict[str, Declared]
 ) -> Built:
     """The frame's own decision: which accretion regime weights the terms.
 
@@ -74,7 +74,7 @@ def _frame_node(
     used = [a for a in record["accretion"] if a["in_use"]]
     pool = eligible or record["accretion"]
     results = [r for r in record["results"] if head and r["evaluation_set_id"] == head["id"]]
-    floor, separated = _floor_for("frame", record, floors)
+    declared = _floor_for("frame", floors)
     edge = Edge(
         produced=head is not None,
         instantiated=len(used),
@@ -82,8 +82,7 @@ def _frame_node(
         scored=len(used) if results else 0,
         results=len(results),
         forced=len(eligible) == 1 and bool(used) and used[0]["id"] == eligible[0]["id"],
-        floor=floor,
-        separated=separated,
+        reading=declared.reading,
     )
     if head is None:
         reason = "No evaluation set exists, so there is no window for a number to be read in."
@@ -132,7 +131,7 @@ _SUBSTRATE_FIELDS: tuple[str, ...] = (
 )
 
 
-def _substrate_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
+def _substrate_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, Declared]) -> Built:
     """Which representation the neighbourhood is computed in.
 
     Available counts the configurations that hold stored embeddings, not the
@@ -145,7 +144,7 @@ def _substrate_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     producible = [r for r in rows if r["producible"]]
     used_ids = {r["id"] for r in used}
     results = [r for r in record["results"] if r["embedding_config_id"] in used_ids]
-    floor, separated = _floor_for("substrate", record, floors)
+    declared = _floor_for("substrate", floors)
     edge = Edge(
         produced=bool(producible),
         instantiated=len(used),
@@ -157,8 +156,7 @@ def _substrate_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
         # single instantiated level here is a value nobody chose rather than one
         # the frame fixed.
         forced=False,
-        floor=floor,
-        separated=separated,
+        reading=declared.reading,
     )
     if not used:
         reason = "No prediction set names a representation, so nothing has been retrieved against."
@@ -211,7 +209,7 @@ _BANK_FIELDS: tuple[str, ...] = (
 
 
 def _bank_node(
-    record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None, floors: dict[str, str]
+    record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None, floors: dict[str, Declared]
 ) -> Built:
     """Which corpus the donors come from, under which donor policy.
 
@@ -229,7 +227,7 @@ def _bank_node(
     used_ids = {p["annotation_set_id"] for p in sets}
     pinned = bool(eligible) and used_ids <= {b["id"] for b in eligible}
     policy_set = bool(sets) and not all(_policy_is_empty(p) for p in sets)
-    floor, separated = _floor_for("bank", record, floors)
+    declared = _floor_for("bank", floors)
     edge = Edge(
         produced=bool(record["banks"]),
         instantiated=len(levels),
@@ -237,8 +235,7 @@ def _bank_node(
         scored=len({r["annotation_set_id"] for r in record["results"]}),
         results=len(record["results"]),
         forced=pinned and policy_set,
-        floor=floor,
-        separated=separated,
+        reading=declared.reading,
     )
     if not sets:
         reason = "No prediction set names a corpus, so no bank has been drawn from."
@@ -297,7 +294,7 @@ def _donor_required(record: dict[str, list[dict[str, Any]]]) -> bool:
     return any(row.get("is_nullable") == "NO" for row in record["donor_column"])
 
 
-def _retriever_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
+def _retriever_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, Declared]) -> Built:
     """How candidates are drawn from the bank, and how deep.
 
     There is no catalogue of retrievers to choose from. Unlike a representation
@@ -312,7 +309,7 @@ def _retriever_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     levels = {tuple(repr(p.get(f)) for f in _RETRIEVER_FIELDS) for p in sets}
     candidates = sum(int(c["candidates"]) for c in record["candidates"])
     depths = sorted({p["depth"] for p in sets if p["depth"]})
-    floor, separated = _floor_for("retriever", record, floors)
+    declared = _floor_for("retriever", floors)
     edge = Edge(
         produced=bool(sets),
         instantiated=len(levels),
@@ -320,8 +317,7 @@ def _retriever_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
         scored=len({r["prediction_set_id"] for r in record["results"]}),
         results=len(record["results"]),
         forced=False,
-        floor=floor,
-        separated=separated,
+        reading=declared.reading,
     )
     if not sets:
         reason = "No prediction set exists, so nothing has been retrieved."
@@ -357,7 +353,7 @@ def _artifacts(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     return record["artifacts"][0] if record["artifacts"] else {}
 
 
-def _generator_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
+def _generator_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, Declared]) -> Built:
     """Whether any candidate arrives without a donor.
 
     A generator is the second half of a second flow: a source that proposes a
@@ -370,13 +366,12 @@ def _generator_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     interpro = int(art.get("interpro_annotation") or 0)
     mappings = int(art.get("interpro_go_mapping") or 0)
     models = int(art.get("reranker_model") or 0)
-    floor, separated = _floor_for("generator", record, floors)
+    declared = _floor_for("generator", floors)
     edge = Edge(
         produced=bool(interpro and mappings),
         instantiated=0,
         available=0,
-        floor=floor,
-        separated=separated,
+        reading=declared.reading,
     )
     schema = (
         "the candidate column naming the donor is NOT NULL, so a term that arrived without one "
@@ -399,32 +394,52 @@ def _generator_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
 _SCORING_FIELDS: tuple[str, ...] = ("formula", "weights", "evidence_weights", "params")
 
 
-def _separation(
-    panels: list[dict[str, Any]], floor: str | None
-) -> tuple[bool | None, str | None]:
-    """Whether the declared floor was cleared, or why it could not be asked.
+def declared_comparisons(
+    floors: list[dict[str, Any]],
+    panels: list[dict[str, Any]],
+    units: Mapping[tuple[str, str], int] | None = None,
+) -> dict[str, Declared]:
+    """Every floor the record declares, answered once, where the populations are.
+
+    Answered here rather than inside the builders because the power half of the
+    answer needs the panel populations, and those are counted from the window's
+    ground truth by the caller. Handing them to ten builders instead would be one
+    more argument a future node can be written without, and a node that cannot
+    see a declared floor is how nine of these ten published ``chosen`` with one
+    declared for them until 2026-09-02.
+
+    A row declares a comparison only when it names both the node and the level:
+    an ``experiment_run`` that names one without the other says which question
+    it meant to ask and never asks it, and answering it anyway would invent the
+    half it left out.
 
     A refusal is caught rather than allowed to escape, and it is caught on this
     side of the node because this is the only place that can show it. Letting it
     reach the endpoint would turn a comparison nobody should have declared into
     a 500 on a page that is otherwise entirely readable, and the reader would
-    learn nothing about why. Returned as a reason instead, with the separation
-    at None, which already means the record established nothing.
+    learn nothing about why. It is kept as the reason, with the reading at
+    ``refused``, which already means the record established nothing.
     """
-    if not floor or not panels:
-        return None, None
-    try:
-        return separated_from_floor(panels, floor), None
-    except (CrossedDepthAxes, CrossedFrames) as refusal:
-        return None, str(refusal)
+    out: dict[str, Declared] = {}
+    for key, floor in ((f["node"], f["floor"]) for f in floors if f["node"] and f["floor"]):
+        try:
+            out[key] = Declared(
+                floor=floor,
+                # A record with no panel rows cannot be asked whether a floor was
+                # cleared; asking anyway raises on the missing seal, which would
+                # report a refusal where there is simply nothing to read yet.
+                separated=separated_from_floor(panels, floor) if panels else None,
+                reading=reading_against_floor(panels, floor, units),
+            )
+        except (CrossedDepthAxes, CrossedFrames) as refusal:
+            out[key] = Declared(floor=floor, reading=REFUSED, refusal=str(refusal))
+    return out
 
 
 def _scoring_reason(
     configs: list[dict[str, Any]],
     used: list[dict[str, Any]],
-    floor: str | None,
-    separated: bool | None,
-    crossed: str | None,
+    declared: Declared,
 ) -> str:
     """Why the scoring node stands where it does, in one sentence.
 
@@ -439,23 +454,23 @@ def _scoring_reason(
             f"One of {len(configs)} registered weightings carries a result. With nothing to "
             "contrast it against, its numbers are a reading and not a separation."
         )
-    if floor is None:
+    if declared.floor is None:
         return (
             f"{len(used)} weightings scored the same candidates in the same frame, so the "
             "contrast is real and its spread is in the panels below. No floor is declared for "
             "it anywhere in the record, so the spread cannot be called a separation."
         )
-    if crossed is not None:
-        return crossed
-    verdict = "clears" if separated else "does not clear"
+    if declared.refusal is not None:
+        return declared.refusal
+    verdict = "clears" if declared.separated else "does not clear"
     return (
         f"{len(used)} weightings scored the same candidates in the same frame against the "
-        f"declared floor '{floor}', and the best of them {verdict} it on every panel that "
-        "carries both."
+        f"declared floor '{declared.floor}', and the best of them {verdict} it on every panel "
+        "that carries both."
     )
 
 
-def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
+def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, Declared]) -> Built:
     """Which weighting turns a candidate into a score.
 
     This is the one node in the record with a live contrast, and it is still not
@@ -468,8 +483,7 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
     """
     configs = record["scoring"]
     used = [c for c in configs if int(c["results"] or 0) > 0]
-    floor = floors.get("scoring")
-    separated, crossed = _separation(record["panels"], floor)
+    declared = _floor_for("scoring", floors)
     edge = Edge(
         produced=bool(configs),
         instantiated=len(used),
@@ -479,14 +493,13 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
         # Never forced, for the same reason the substrate is not: the frame says
         # nothing about which weighting a candidate is scored under.
         forced=False,
-        floor=floor,
-        separated=separated,
+        reading=declared.reading,
     )
     return (
         _node(
             "scoring",
             edge,
-            _scoring_reason(configs, used, floor, separated, crossed),
+            _scoring_reason(configs, used, declared),
             split_fields(used, _SCORING_FIELDS),
             held_values(used, _SCORING_FIELDS),
         ),
@@ -495,7 +508,7 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
     )
 
 
-def _features_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
+def _features_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, Declared]) -> Built:
     """Which per-candidate features enter a model.
 
     The features exist. Every candidate row carries the families the run asked
@@ -514,13 +527,12 @@ def _features_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, st
             if f.strip()
         }
     )
-    floor, separated = _floor_for("features", record, floors)
+    declared = _floor_for("features", floors)
     edge = Edge(
         produced=models > 0,
         instantiated=0,
         available=len(families),
-        floor=floor,
-        separated=separated,
+        reading=declared.reading,
     )
     named = ", ".join(families) if families else "none"
     reason = (
@@ -535,20 +547,19 @@ def _features_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, st
     )
 
 
-def _reranking_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
+def _reranking_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, Declared]) -> Built:
     """Whether a model reorders the candidates."""
     art = _artifacts(record)
     models = int(art.get("reranker_model") or 0)
     reranked = int(art.get("reranked_results") or 0)
     used = len({r["reranker_model_id"] for r in record["results"] if r["reranker_model_id"]})
-    floor, separated = _floor_for("reranking", record, floors)
+    declared = _floor_for("reranking", floors)
     edge = Edge(
         produced=models > 0,
         instantiated=used,
         available=models,
         results=reranked,
-        floor=floor,
-        separated=separated,
+        reading=declared.reading,
     )
     reason = (
         f"No model exists to reorder with: reranker_model holds {models} rows and {reranked} "
@@ -575,17 +586,16 @@ def _flow_count(record: dict[str, list[dict[str, Any]]]) -> int:
     return len({p["bank_source"] for p in record["prediction_sets"] if p["bank_source"]})
 
 
-def _combination_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
+def _combination_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, Declared]) -> Built:
     """How two or more flows are merged into one answer."""
     flows = _flow_count(record)
     sources = sorted({p["bank_source"] for p in record["prediction_sets"] if p["bank_source"]})
-    floor, separated = _floor_for("combination", record, floors)
+    declared = _floor_for("combination", floors)
     edge = Edge(
         produced=flows >= 2,
         instantiated=0,
         available=flows,
-        floor=floor,
-        separated=separated,
+        reading=declared.reading,
     )
     reason = (
         f"{flows} {'flow is' if flows == 1 else 'flows are'} instantiated, so there is nothing "
@@ -600,16 +610,15 @@ def _combination_node(record: dict[str, list[dict[str, Any]]], floors: dict[str,
     )
 
 
-def _routing_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
+def _routing_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, Declared]) -> Built:
     """Which flow answers which panel."""
     flows = _flow_count(record)
-    floor, separated = _floor_for("routing", record, floors)
+    declared = _floor_for("routing", floors)
     edge = Edge(
         produced=flows >= 2,
         instantiated=0,
         available=flows,
-        floor=floor,
-        separated=separated,
+        reading=declared.reading,
     )
     reason = (
         f"Routing picks a flow per panel and there {'is' if flows == 1 else 'are'} {flows} of "
