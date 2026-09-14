@@ -293,6 +293,15 @@ def _donor_required(record: dict[str, list[dict[str, Any]]]) -> bool:
     Read from the catalog rather than from a row count. A NOT NULL column says
     the shape of the record forbids the other mechanism; an all-donor sample
     says only that nobody ran it.
+
+    It is also the only affordable way to ask. ``go_prediction`` carries no
+    column naming the mechanism behind a row, so counting the donorless ones
+    means ``WHERE ref_protein_accession IS NULL``, which the planner does not
+    fold against the constraint: it plans a parallel sequential scan of the
+    largest table in the schema (47M planner units, measured 2026-09-14) to
+    return the zero the constraint already states. Three nodes downstream read
+    this instead, and the migration that makes the column nullable is the one
+    that has to bring the count with it.
     """
     return any(row.get("is_nullable") == "NO" for row in record["donor_column"])
 
@@ -357,6 +366,31 @@ def _artifacts(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     return record["artifacts"][0] if record["artifacts"] else {}
 
 
+def _generator_reason(expressible: bool, interpro: int, mappings: int, models: int) -> str:
+    """Why no candidate arrives without a donor, in the kind of sentence it is.
+
+    Two sentences and not one with a clause in it, because the difference
+    between them is the difference the node exists to report: in the first the
+    counts are beside the point and say so, in the second they are the point.
+    """
+    counts = (
+        f"interpro_annotation holds {interpro} rows, interpro_go_mapping {mappings}, "
+        f"reranker_model {models}."
+    )
+    if not expressible:
+        return (
+            "No candidate can arrive without a donor: the candidate column naming the donor is "
+            "NOT NULL, so a term that arrived without one has nowhere to be written. That is a "
+            "fact about the shape of the record and not about what it holds, and the artifacts a "
+            f"second source would draw on would not move it if every one were full. {counts}"
+        )
+    return (
+        "No candidate arrives without a donor. The candidate column naming the donor is "
+        "nullable, so one could be stored, and the artifacts a second source would draw on are "
+        f"absent. {counts}"
+    )
+
+
 def _generator_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """Whether any candidate arrives without a donor.
 
@@ -365,34 +399,49 @@ def _generator_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, s
     decide this node and both are read rather than assumed: whether the
     candidate column that names the donor still forbids a donorless row, and
     whether the tables a domain-based generator would draw on hold anything.
+
+    The two are not the same kind of fact, and this node no longer prints one
+    word for both. While the donor column is NOT NULL the artifact has nowhere
+    to be written, so nothing the database holds moves this node and it says
+    ``inexpressible``; filling interpro_annotation would change the sentence and
+    nothing else. With that column nullable the block is an ordinary
+    ``blocked``, and rows in those tables are what would end it. No count of
+    donorless candidates is read, for the reason ``_donor_required`` gives.
     """
     art = _artifacts(record)
     interpro = int(art.get("interpro_annotation") or 0)
     mappings = int(art.get("interpro_go_mapping") or 0)
     models = int(art.get("reranker_model") or 0)
     floor, separated = _floor_for("generator", record, floors)
+    # One second source is designed for: InterPro domains carried onto GO terms
+    # through the mapping table. It counts as available only when both halves
+    # hold rows, because a domain table with nothing to map through proposes
+    # nothing. Read off the artifacts rather than written in, so the denominator
+    # beside this node moves the moment either table is loaded.
+    available = int(bool(interpro and mappings))
+    expressible = not _donor_required(record)
     edge = Edge(
-        produced=bool(interpro and mappings),
+        produced=available > 0,
+        expressible=expressible,
+        # See the docstring: there is no affordable read behind this one, and
+        # while the edge is inexpressible there could be no row to read either.
         instantiated=0,
-        available=0,
+        available=available,
         floor=floor,
         separated=separated,
     )
-    schema = (
-        "the candidate column naming the donor is NOT NULL, so a term that arrived without one "
-        "has nowhere to be written, and "
-        if _donor_required(record)
-        else ""
-    )
-    reason = (
-        f"No candidate arrives without a donor: {schema}the artifacts a second source would "
-        f"draw on are absent. interpro_annotation holds {interpro} rows, interpro_go_mapping "
-        f"{mappings}, reranker_model {models}."
-    )
     return (
-        _node("generator", edge, reason, ([], [])),
+        _node(
+            "generator", edge, _generator_reason(expressible, interpro, mappings, models), ([], [])
+        ),
         "a candidate that owes nothing to a donor",
-        "rows in interpro_annotation and interpro_go_mapping",
+        # A structural block must not send a reader to load a table. Nothing
+        # they could put in one would show up here until the column that
+        # forbids the row is the one that changes.
+        "rows in interpro_annotation and interpro_go_mapping"
+        if expressible
+        else "a candidate column that can hold a row with no donor, and then rows in "
+        "interpro_annotation and interpro_go_mapping",
     )
 
 
@@ -495,17 +544,58 @@ def _scoring_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str
     )
 
 
+def _features_reason(models: int, selections: list[str], families: list[str]) -> str:
+    """Where the features node stands, in one sentence.
+
+    Three branches in the order the questions arise in: whether any consumer
+    exists, whether one of them recorded what it consumed, and only then how
+    many selections that comes to. The middle branch is the one worth having --
+    a consumer that names no schema leaves a level unrecoverable rather than
+    uninstantiated, and reporting the model count as a level count would have
+    turned that into a decision nobody took.
+    """
+    named = ", ".join(families) if families else "none"
+    if not models:
+        return (
+            f"Candidates carry the feature families their run asked for ({named}), but choosing "
+            "among them is a decision only a consumer makes and there is none: reranker_model "
+            f"holds {models} rows."
+        )
+    if not selections:
+        return (
+            f"{models} consumers exist and none of them records the feature schema it was fitted "
+            f"against, so no selection can be named from the record. The candidates carry {named}."
+        )
+    return (
+        f"{len(selections)} feature selection(s) reached a consumer, each named by the schema "
+        f"digest its booster was fitted against, out of the families the candidates carry "
+        f"({named})."
+    )
+
+
 def _features_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
     """Which per-candidate features enter a model.
 
     The features exist. Every candidate row carries the families the run asked
     for, and they are stored, not derived at read time. What does not exist is a
     consumer, and a feature selection is a decision only a consumer can make:
-    with no model to feed, no subset has ever been chosen over another, so the
-    node has zero instantiated levels rather than one.
+    with no model to feed, no subset has ever been chosen over another.
+
+    A level here is one such selection, and the record names one in exactly one
+    place: the schema digest the booster was fitted against. Until 2026-09-14
+    this node passed a literal zero instead, so it printed ``blocked`` beside a
+    live family list whatever ``reranker_model`` held, and a reader could not
+    tell an empty table from a node no table could move. The digests are the row
+    that moves it, and they are read rather than inferred from the model count:
+    a booster that does not record the schema it consumed has not instantiated a
+    level of this node, it has left one unrecoverable, and those two are
+    different reports.
     """
     art = _artifacts(record)
     models = int(art.get("reranker_model") or 0)
+    selections = sorted(
+        {str(r["schema_sha"]) for r in record["feature_selections"] if r.get("schema_sha")}
+    )
     families = sorted(
         {
             f.strip()
@@ -517,21 +607,15 @@ def _features_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, st
     floor, separated = _floor_for("features", record, floors)
     edge = Edge(
         produced=models > 0,
-        instantiated=0,
+        instantiated=len(selections),
         available=len(families),
         floor=floor,
         separated=separated,
     )
-    named = ", ".join(families) if families else "none"
-    reason = (
-        f"Candidates carry the feature families their run asked for ({named}), but choosing "
-        f"among them is a decision only a consumer makes and there is none: reranker_model "
-        f"holds {models} rows."
-    )
     return (
-        _node("features", edge, reason, ([], [])),
+        _node("features", edge, _features_reason(models, selections, families), ([], [])),
         "a selection of features to feed a model",
-        "a row in reranker_model to consume them",
+        "a row in reranker_model to consume them, recording the schema it consumed",
     )
 
 
@@ -575,13 +659,44 @@ def _flow_count(record: dict[str, list[dict[str, Any]]]) -> int:
     return len({p["bank_source"] for p in record["prediction_sets"] if p["bank_source"]})
 
 
+#: Why a merged answer has nowhere to live while every candidate needs a donor.
+#: Written once because the combination and the routing node make the same
+#: argument from the same catalog row, and a second copy of it would be the one
+#: that went stale.
+_ONE_FLOW_PER_ANSWER = (
+    "A merged answer has nowhere to be written either: a published result names one prediction "
+    "set, that set names one corpus, and the candidate column requires a donor on every row, so "
+    "one answer carries one flow whatever the record holds. That is the shape of the record "
+    "rather than its contents, and no run changes it."
+)
+
+
 def _combination_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
-    """How two or more flows are merged into one answer."""
+    """How two or more flows are merged into one answer.
+
+    Two facts stand between this node and a level and only one of them is about
+    what the record holds. A single flow is instantiated, so there is nothing to
+    merge today, and a second corpus would change that. But a merged answer also
+    has nowhere to be written, for the reason spelled out in
+    ``_ONE_FLOW_PER_ANSWER``, and while that holds the merge is not a decision
+    nobody has taken yet: it is one the record cannot express. The two must not
+    print the same word, because the first sends a reader to run something and
+    the second to write a migration.
+    """
     flows = _flow_count(record)
     sources = sorted({p["bank_source"] for p in record["prediction_sets"] if p["bank_source"]})
     floor, separated = _floor_for("combination", record, floors)
+    expressible = not _donor_required(record)
     edge = Edge(
         produced=flows >= 2,
+        expressible=expressible,
+        # The one number on this node that is not read, and it is worth saying
+        # why rather than leaving a zero that reads as decided. Nothing in the
+        # schema names a merge rule, so there is no row to count; what settles
+        # this node is the line above. The migration that makes the candidate
+        # column nullable is the one that makes a merge storable -- one answer
+        # holding candidates from both mechanisms -- and the count of them has to
+        # arrive with it, or this node is back to a word no data can move.
         instantiated=0,
         available=flows,
         floor=floor,
@@ -593,31 +708,68 @@ def _combination_node(record: dict[str, list[dict[str, Any]]], floors: dict[str,
         f"({', '.join(sources) or 'none'}) through a single propagation mechanism, donor "
         "transfer, which is the only one the candidate schema can express."
     )
+    if not expressible:
+        reason = f"{reason} {_ONE_FLOW_PER_ANSWER}"
     return (
         _node("combination", edge, reason, ([], [])),
         "a rule for merging two flows",
-        "a second flow, which the generator node has to produce first",
+        "a second flow, which the generator node has to produce first"
+        if expressible
+        else "a candidate column that can hold a row with no donor, so that one answer can "
+        "carry two flows at all",
     )
 
 
 def _routing_node(record: dict[str, list[dict[str, Any]]], floors: dict[str, str]) -> Built:
-    """Which flow answers which panel."""
+    """Which flow answers which panel.
+
+    The one node here with nothing to count. A per-panel choice of flow has to
+    be recorded somewhere a panel can be seen -- a column on the published
+    result naming the flow that answered it -- and no table this endpoint reads
+    carries one, so there is no row behind an instantiated level and counting
+    prediction sets instead would be counting something else. Naming the gap
+    rather than filling it with a plausible number is the whole of the choice
+    made here.
+
+    What can be read is whether the record's shape allows the artifact at all,
+    and that is what decides the word. While every candidate carries a donor
+    every panel is answered by the one flow there is, so no panel ever had a
+    choice to make: not "no data yet" but "no data would do".
+    """
     flows = _flow_count(record)
     floor, separated = _floor_for("routing", record, floors)
+    expressible = not _donor_required(record)
     edge = Edge(
         produced=flows >= 2,
+        expressible=expressible,
+        # Zero because nothing in the record names the flow behind a panel's
+        # answer, not because a count came back empty. See the docstring: the
+        # read this node needs does not exist yet, and a column on the result
+        # naming its flow is what would create it.
         instantiated=0,
         available=flows,
         floor=floor,
         separated=separated,
     )
-    reason = (
+    # One opener, two tails. The sentence turns on the same word the node does,
+    # and writing it out twice is how the two halves drift apart.
+    opener = (
         f"Routing picks a flow per panel and there {'is' if flows == 1 else 'are'} {flows} of "
-        "them, so no panel has a choice to make. It is downstream of combination, which is "
-        "blocked for the same reason."
+        "them, so no panel has a choice to make. It is downstream of combination, which "
     )
+    if expressible:
+        reason = f"{opener}is blocked for the same reason."
+    else:
+        reason = (
+            f"{opener}cannot be expressed for the same reason. {_ONE_FLOW_PER_ANSWER} No column "
+            "on a published result names the flow that answered a panel either, so even two "
+            "flows would leave this node with nothing to count."
+        )
     return (
         _node("routing", edge, reason, ([], [])),
         "a per-panel choice of flow",
-        "a combination of two or more flows",
+        "a combination of two or more flows"
+        if expressible
+        else "a candidate column that can hold a row with no donor, and a column on the "
+        "published result naming the flow that answered each panel",
     )

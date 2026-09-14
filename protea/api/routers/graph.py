@@ -14,7 +14,7 @@ it is the same flow configured differently. A NODE is one decision over a field,
 or over a group of fields that cannot be decided apart. The nodes are, in
 pipeline order: frame, substrate, bank, retriever, generator, scoring, features,
 re-ranking, combination, routing. The EDGE into a node says how firmly that
-decision is held and takes one of five values:
+decision is held and takes one of six values:
 
 ``measured``
     a declared comparison separated against its floor.
@@ -28,6 +28,16 @@ decision is held and takes one of five values:
     the comparison, before any metric is read.
 ``blocked``
     a level cannot be produced at all, because its artifact has no producer.
+    Rows would end it.
+``inexpressible``
+    the record's shape cannot hold the artifact, so nothing it comes to hold
+    moves the node: a migration has to move first. Apart from ``blocked``
+    because the two send a reader to different work, and because four nodes
+    printed the first while meaning the second -- their edges were built from a
+    literal zero, so they reported the same word beside live counts that could
+    never change it. Both words are listed in ``blocked``: a node the record
+    cannot express still has a precondition, and it is the one a reader most
+    needs, because it is a migration and not a run.
 
 A PANEL is one of nine regions, a knowledge category (NK, LK, PK) crossed with
 an aspect (BPO, MFO, CCO). Panels are never pooled and never summed: the
@@ -72,7 +82,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory, get_settings
-from protea.api.routers._graph_edges import BLOCKED, Built
+from protea.api.routers._graph_edges import BLOCK_WORDS, Built
 from protea.api.routers._graph_nodes import (
     _bank_node,
     _combination_node,
@@ -101,7 +111,7 @@ from protea.infrastructure.storage.factory import (
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 
-# The edge vocabulary, closed at five. Spelled once so a typo in a builder is an
+# The edge vocabulary, closed at six. Spelled once so a typo in a builder is an
 # import-time NameError rather than a word nobody downstream recognises.
 
 # ── The frame ─────────────────────────────────────────────────────────────────
@@ -280,7 +290,7 @@ def build_graph(
                 "precondition": precondition,
             }
             for node, what, precondition in built
-            if node["strength"] == BLOCKED
+            if node["strength"] in BLOCK_WORDS
         ],
     }
 
