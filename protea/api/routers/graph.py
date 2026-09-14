@@ -14,7 +14,7 @@ it is the same flow configured differently. A NODE is one decision over a field,
 or over a group of fields that cannot be decided apart. The nodes are, in
 pipeline order: frame, substrate, bank, retriever, generator, scoring, features,
 re-ranking, combination, routing. The EDGE into a node says how firmly that
-decision is held and takes one of six values:
+decision is held and takes one of seven values:
 
 ``measured``
     a declared comparison separated against its floor.
@@ -31,8 +31,18 @@ decision is held and takes one of six values:
     the comparison, before any metric is read.
 ``blocked``
     a level cannot be produced at all, because its artifact has no producer.
+    Rows would end it.
+``inexpressible``
+    the record's SHAPE cannot hold the artifact, so nothing the record comes to
+    hold moves the node: a migration has to move first. Apart from ``blocked``
+    because the two send a reader to different work, and because four nodes
+    printed the first while meaning the second -- their edges were built from a
+    literal zero, so they published one word beside live counts that could never
+    change it. Both are listed under ``blocked``: a node the record cannot
+    express still has a precondition, and it is the one a reader most needs,
+    because it is a migration and not a run.
 
-WHY THERE ARE SIX AND NOT FIVE. ``compare_paired_panels`` reads every panel into
+WHY THE SIXTH WORD EXISTS. ``compare_paired_panels`` reads every panel into
 one of six buckets and keeps them six because they are six facts, two of which
 are different nulls: one had the power to resolve the declared effect and found
 nothing, the other had no declared effect to look for. The scale had five words,
@@ -97,7 +107,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory, get_settings
-from protea.api.routers._graph_edges import BLOCKED, Built
+from protea.api.routers._graph_edges import BLOCK_WORDS, Built
 from protea.api.routers._graph_nodes import (
     _bank_node,
     _combination_node,
@@ -307,7 +317,7 @@ def build_graph(
                 "precondition": precondition,
             }
             for node, what, precondition in built
-            if node["strength"] == BLOCKED
+            if node["strength"] in BLOCK_WORDS
         ],
     }
 

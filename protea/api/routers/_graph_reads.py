@@ -330,6 +330,27 @@ _Q_DONOR_COLUMN = text(
     """
 )
 
+#: Every feature selection that ever reached a consumer, named by the schema
+#: digest the booster was fitted against. It is the only place in this schema
+#: where a selection of features is named at all: a candidate carries the
+#: families its run computed, but a family is not a selection, and choosing
+#: among them is a decision only a model can make. ``schema_sha_v2`` is the
+#: canonical digest and ``feature_schema_sha`` the one rows written before it
+#: carry, so the coalesce is a fallback to the older column and not a guess.
+#:
+#: Rows with neither are dropped rather than counted as one nameless selection.
+#: A consumer that does not record what it consumed has not instantiated a level
+#: of that node, it has left one UNRECOVERABLE, and reading the model count as a
+#: level count would publish selections nobody can name and a contrast between
+#: them that never happened.
+_Q_FEATURE_SELECTIONS = text(
+    """
+    SELECT DISTINCT COALESCE(rm.schema_sha_v2, rm.feature_schema_sha) AS schema_sha
+    FROM reranker_model rm
+    WHERE COALESCE(rm.schema_sha_v2, rm.feature_schema_sha) IS NOT NULL
+    """
+)
+
 _Q_ARTIFACTS = text(
     """
     SELECT (SELECT count(*) FROM reranker_model)      AS reranker_model,
@@ -478,6 +499,7 @@ QUERIES: dict[str, TextClause] = {
     "candidates": _Q_CANDIDATES,
     "donor_column": _Q_DONOR_COLUMN,
     "artifacts": _Q_ARTIFACTS,
+    "feature_selections": _Q_FEATURE_SELECTIONS,
     "floors": _Q_FLOORS,
 }
 
