@@ -209,12 +209,12 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         {"embedding_config_id": "cfg", "per_band": 0},
         ("per_band",),
     ),
-    # missing-required: embedding_config_id
+    # missing-required: embedding_config_ids
     (
         "compute_embeddings",
         ComputeEmbeddingsPayload,
         {"accessions": ["P12345"]},
-        ("embedding_config_id",),
+        ("embedding_config_ids",),
     ),
     # wrong-type: sequence_ids must be list[int], not list[str]
     (
@@ -227,12 +227,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         },
         ("sequence_ids", 0),
     ),
-    # missing-required: sequences
+    # missing-required: sequences (in the legacy one-config shape, which folds
+    # into a single group and must still report the field it is missing)
     (
         "store_embeddings",
         StoreEmbeddingsPayload,
         {"parent_job_id": "job", "embedding_config_id": "cfg"},
-        ("sequences",),
+        ("groups", 0, "sequences"),
     ),
     # missing-required: output_name (one of many required fields)
     (

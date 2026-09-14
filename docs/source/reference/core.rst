@@ -705,6 +705,9 @@ not part of the public API.
   dispatch logic for the ``compute_embeddings`` coordinator.
 - ``protea.core.operations._compute_embeddings_helpers``: batch
   construction and progress helpers for ``compute_embeddings``.
+- ``protea.core.operations._embedding_pass_group``: decides which embedding
+  configs may be computed from ONE forward pass, and refuses the groups that
+  may not.
 - ``protea.core.operations._load_ontology_helpers``: OBO parsing helpers
   used by ``load_ontology_snapshot``.
 - ``protea.core.operations._predict_go_terms_adapter``: adapter that
@@ -864,6 +867,12 @@ not part of the public API.
    :noindex:
 
 .. automodule:: protea.core.operations._compute_embeddings_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations._embedding_pass_group
    :members:
    :undoc-members:
    :show-inheritance:
