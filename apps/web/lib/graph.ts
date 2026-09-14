@@ -29,14 +29,25 @@ import { ApiError, baseUrl } from "@/lib/api";
  * - `unpowered`  the comparison could not have resolved anything. Known
  *                from the design, before the comparison ran.
  * - `blocked`    a level cannot be produced because its artifact has no
- *                producer.
+ *                producer. Rows would end it.
+ * - `inexpressible`
+ *                the record's shape cannot hold the artifact at all, so
+ *                nothing it comes to hold moves the node: a migration has
+ *                to move first.
+ *
+ * The last two are both listed in `blocked`, and they are two words because
+ * they send a reader to different work. Keep this union equal to the one the
+ * endpoint can publish: a word the API sends and this file does not name
+ * renders through `UNKNOWN_STYLE` with no legend line, which is the reader
+ * being told a node cannot answer and not told which kind of nothing it is.
  */
 export type EdgeStrength =
   | "measured"
   | "chosen"
   | "inherited"
   | "unpowered"
-  | "blocked";
+  | "blocked"
+  | "inexpressible";
 
 /** Declaration order, which is also pipeline order on the page. */
 export const EDGE_STRENGTHS: EdgeStrength[] = [
@@ -45,6 +56,7 @@ export const EDGE_STRENGTHS: EdgeStrength[] = [
   "inherited",
   "unpowered",
   "blocked",
+  "inexpressible",
 ];
 
 export function isEdgeStrength(v: unknown): v is EdgeStrength {

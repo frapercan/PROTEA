@@ -45,6 +45,7 @@ import {
   Circle,
   CircleCheckBig,
   Gauge,
+  Lock,
   RotateCcw,
   ChevronRight,
   RefreshCw,
@@ -70,14 +71,19 @@ import {
   type GraphResponse,
 } from "@/lib/graph";
 
-// ── Presentation of the five edge strengths ──────────────────────────────
+// ── Presentation of the six edge strengths ───────────────────────────────
 //
 // Colour alone is not a channel. An operator scanning a pipeline for the
 // one node that cannot answer has to find it without resolving hue, so
 // every strength also carries its own SHAPE (square with a heavy left bar,
-// pill, dashed, diagonally striped, double-weight rectangle) and its own
-// icon, and the word itself is always printed beside them. Four redundant
-// channels, any one of which is enough.
+// square with a doubled outline, pill, dashed, diagonally striped,
+// double-weight rectangle) and its own icon, and the word itself is always
+// printed beside them. Four redundant channels, any one of which is enough.
+//
+// `Record<EdgeStrength, ...>` and not a partial map, so a word added to the
+// endpoint's vocabulary fails the typecheck here instead of reaching a
+// reader through UNKNOWN_STYLE, which is what `inexpressible` did on the
+// day the API started sending it for three of the ten nodes.
 
 type StrengthStyle = {
   chip: string;
@@ -118,6 +124,17 @@ const STRENGTH_STYLE: Record<EdgeStrength, StrengthStyle> = {
     icon: Ban,
     striped: false,
     rail: "bg-rose-600",
+  },
+  // A stop like `blocked`, drawn as a heavier one: the doubled outline and
+  // the lock say the way through is a migration and not a run. Sharing the
+  // rose family is deliberate, since both words mean the node cannot
+  // answer; the shape and the icon are what tell a reader which errand it
+  // is being sent on, and neither survives being resolved by hue alone.
+  inexpressible: {
+    chip: "rounded-none border-4 border-double border-rose-700 bg-rose-100 text-rose-900",
+    icon: Lock,
+    striped: false,
+    rail: "bg-rose-800",
   },
 };
 

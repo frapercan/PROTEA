@@ -369,7 +369,8 @@
       "chosen": "The comparison ran with power, did not separate, and the value was picked and recorded.",
       "inherited": "Nobody ever decided. The value is the one it always was.",
       "unpowered": "The comparison could not have resolved anything. Known from the design, before it ran.",
-      "blocked": "A level cannot be produced, because its artifact has no producer."
+      "blocked": "A level cannot be produced, because its artifact has no producer.",
+      "inexpressible": "The record's shape cannot hold the artifact at all, so nothing it comes to hold moves the node. A migration has to move first, not a run."
     },
     "panelsHeading": "Panels",
     "panelsHint": "Nine regions: knowledge category by aspect. Never summed and never averaged. Cardinality is a vector over the nine, not one number.",

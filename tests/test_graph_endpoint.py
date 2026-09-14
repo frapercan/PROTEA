@@ -21,6 +21,8 @@ declare up front cannot be answered at all.
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -997,3 +999,111 @@ class TestAWordNoRecordCanMoveIsNotAReport:
         """
         assert strength_of(Edge(produced=False, expressible=False)) == INEXPRESSIBLE
         assert strength_of(Edge(instantiated=2, available=2, scored=2)) == CHOSEN
+
+
+# ── The surface can draw every word the endpoint sends ────────────────────────
+
+
+_WEB = Path(__file__).resolve().parents[1] / "apps" / "web"
+_GRAPH_PAGE = _WEB / "app" / "[locale]" / "instrument" / "graph" / "page.tsx"
+
+
+def _published_words() -> set[str]:
+    """Every word ``strength_of`` can return, read off the module's constants.
+
+    Reflected rather than listed, because a word listed here would have to be
+    remembered, and forgetting is the whole defect below.
+    """
+    from protea.api.routers import _graph_edges
+
+    return {
+        value
+        for name, value in vars(_graph_edges).items()
+        if name.isupper() and not name.startswith("_") and isinstance(value, str)
+    }
+
+
+def _block(source: str, pattern: str) -> str:
+    """The body of one declaration in a TypeScript file, or a loud failure.
+
+    A regex over source is only worth trusting if it cannot come back empty and
+    be read as agreement, so a pattern that stops matching fails here instead of
+    turning the test below into one that passes on nothing.
+    """
+    found = re.search(pattern, source, re.S)
+    assert found, f"{pattern} no longer matches; the check below cannot read the surface"
+    return found.group(1)
+
+
+class TestTheSurfaceCanDrawEveryWordTheEndpointSends:
+    """A sixth word reached the reader as one the page could not draw.
+
+    `inexpressible` was added to `strength_of` on 2026-09-14 and the endpoint
+    began publishing it for generator, combination and routing -- three of the
+    ten nodes -- while `apps/web/lib/graph.ts` still named five. The page falls
+    back to `UNKNOWN_STYLE` for a word it does not know, so those three rendered
+    in the grey chip reserved for "a strength this build cannot draw", with the
+    `Circle` icon `chosen` also uses and no line in the legend.
+
+    That is the defect the word was introduced to fix, arriving one surface
+    along: the reader is told a node cannot answer and is not told which of the
+    two kinds of nothing it is, which is the difference between waiting for rows
+    and waiting for a migration.
+
+    Read off the sources rather than restated, since a restated vocabulary is a
+    third place to forget.
+    """
+
+    def test_the_page_names_a_style_for_each_and_the_legend_explains_each(self) -> None:
+        words = _published_words()
+        # The extraction is not empty and not partial: every word this file
+        # imports by name is in it, and so is any word added to the module
+        # without touching this file, which is the case that matters.
+        assert _STRENGTHS <= words
+
+        declared = set(
+            re.findall(
+                r'"([a-z]+)"',
+                _block(
+                    (_WEB / "lib" / "graph.ts").read_text(encoding="utf-8"),
+                    r"export const EDGE_STRENGTHS: EdgeStrength\[\] = \[(.*?)\];",
+                ),
+            )
+        )
+        assert declared == words, f"the surface names {sorted(declared)}, the endpoint sends {sorted(words)}"
+
+        page = _GRAPH_PAGE.read_text(encoding="utf-8")
+        drawn = set(
+            re.findall(
+                r"^  ([a-z]+): \{",
+                _block(
+                    page,
+                    r"const STRENGTH_STYLE: Record<EdgeStrength, StrengthStyle> = \{(.*?)\n\};",
+                ),
+                re.M,
+            )
+        )
+        assert drawn == words, f"the page draws {sorted(drawn)}, the endpoint sends {sorted(words)}"
+
+        # Every catalogue, not only the one the page tests load. A reader on a
+        # locale nobody rendered in a test gets the raw key or an error where
+        # the account of the word should be.
+        for catalogue in sorted((_WEB / "messages").glob("*.json")):
+            legend = json.loads(catalogue.read_text(encoding="utf-8"))["graph"]["legend"]
+            assert set(legend) == words, f"{catalogue.name} explains {sorted(legend)}"
+            for word, text in legend.items():
+                assert text.strip(), f"{catalogue.name} carries an empty legend for {word}"
+
+    def test_a_word_the_page_cannot_draw_is_a_word_the_reader_cannot_read(self) -> None:
+        """The other half: the page still needs its fallback, and it still has one.
+
+        `UNKNOWN_STYLE` is not the defect -- an older build serving a newer API
+        has to draw something -- so this pins that it is there and that it is
+        reached only by a word outside the vocabulary, never by one inside it.
+        """
+        page = _GRAPH_PAGE.read_text(encoding="utf-8")
+        assert "const UNKNOWN_STYLE: StrengthStyle" in page
+        assert "STRENGTH_STYLE[strength as EdgeStrength] ?? UNKNOWN_STYLE" in page
+        assert "inexpressible" not in _block(
+            page, r"/\*\* A strength the endpoint sent that this build does not know how to draw\. \*/(.*?)\n\}"
+        )

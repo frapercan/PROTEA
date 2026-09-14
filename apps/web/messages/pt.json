@@ -370,7 +370,8 @@
       "chosen": "A comparação correu com poder, não separou, e o valor foi escolhido e registado.",
       "inherited": "Ninguém decidiu alguma vez. O valor é o que sempre foi.",
       "unpowered": "A comparação não poderia ter resolvido nada. Sabe-se pelo desenho, antes de correr.",
-      "blocked": "Um nível não pode ser produzido porque o seu artefacto não tem produtor."
+      "blocked": "Um nível não pode ser produzido porque o seu artefacto não tem produtor.",
+      "inexpressible": "A forma do registo não consegue conter o artefacto, por isso nada do que venha a conter move o nó. Primeiro tem de se mover uma migração, não uma execução."
     },
     "panelsHeading": "Painéis",
     "panelsHint": "Nove regiões: categoria de conhecimento por aspeto. Nunca somadas nem promediadas. A cardinalidade é um vetor sobre os nove, não um número.",
