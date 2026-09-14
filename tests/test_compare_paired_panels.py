@@ -69,13 +69,25 @@ class _StubResult:
 
 
 class _StubSession:
-    """The two ``evaluation_result`` rows the provenance gate reads, and nothing else."""
+    """The rows the two provenance gates read: two results and their prediction sets.
 
-    def __init__(self, rows: dict[str, dict[str, Any]]) -> None:
+    Keyed by the bind parameter each gate uses, because they read different
+    tables. ``id`` is the evaluation result the frame gate wants; ``psid`` is the
+    prediction set the method seal wants. A stub that answered both from one
+    dictionary would let a gate read the wrong table and still pass.
+    """
+
+    def __init__(
+        self, rows: dict[str, dict[str, Any]], psets: dict[str, dict[str, Any]] | None = None
+    ) -> None:
         self._rows = rows
+        self._psets = psets or {}
 
     def execute(self, statement: Any, params: dict[str, Any] | None = None) -> _StubResult:
-        return _StubResult(self._rows.get((params or {}).get("id", "")))
+        bound = params or {}
+        if "psid" in bound:
+            return _StubResult(self._psets.get(bound["psid"]))
+        return _StubResult(self._rows.get(bound.get("id", "")))
 
 
 def _row(result_id: str, **overrides: Any) -> dict[str, Any]:
@@ -98,12 +110,61 @@ def _row(result_id: str, **overrides: Any) -> dict[str, Any]:
     return row
 
 
+#: One prediction set, deliberately not a row of defaults.
+#:
+#: Every field carries a value a careless seal could not have guessed: the
+#: booleans are not both False, the depth is not zero, the feature list is not
+#: empty and the donor policy is not the permissive one. Two sides built from
+#: this template are identical in method, which is what most of this file wants,
+#: but a comparison that only ever saw blank rows would pass a seal that read
+#: the wrong keys entirely -- and this project has shipped a uniform fixture
+#: past a real defect twice.
+def _pset(pset_id: str, **overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": pset_id,
+        "embedding_config_id": "emb-9",
+        "annotation_set_id": "bank-220",
+        "ontology_snapshot_id": "onto-2026-05",
+        "query_set_id": "queries-select",
+        "limit_per_entry": 200,
+        "distance_threshold": 0.35,
+        "created_at": "2026-08-01T00:00:00Z",
+        "meta": {
+            "job_id": f"job-{pset_id}",
+            "batch_size": 1024,
+            "code_revision": "8699bfd7eec382aadd03f471b127f8be6f71cffd",
+            "dependency_revisions": {"protea-method": "a120f613"},
+            "search_backend": "numpy",
+            "metric": "cosine",
+            "donor_policy": {"reviewed_only": True, "evidence_codes": ["EXP", "IDA"]},
+            "exclude_self_neighbour": True,
+            "aspect_separated_knn": True,
+            "expand_votes_to_ancestors": False,
+            "features": ["compute_alignments"],
+        },
+    }
+    meta = overrides.pop("meta", None)
+    row.update(overrides)
+    if meta:
+        row["meta"] = {**row["meta"], **meta}
+    return row
+
+
 def _session(**overrides: Any) -> _StubSession:
+    rows = {
+        _A_ID: _row(_A_ID, **overrides.get("a", {})),
+        _B_ID: _row(_B_ID, **overrides.get("b", {})),
+    }
     return _StubSession(
+        rows,
         {
-            _A_ID: _row(_A_ID, **overrides.get("a", {})),
-            _B_ID: _row(_B_ID, **overrides.get("b", {})),
-        }
+            rows[_A_ID]["prediction_set_id"]: _pset(
+                rows[_A_ID]["prediction_set_id"], **overrides.get("a_pset", {})
+            ),
+            rows[_B_ID]["prediction_set_id"]: _pset(
+                rows[_B_ID]["prediction_set_id"], **overrides.get("b_pset", {})
+            ),
+        },
     )
 
 
