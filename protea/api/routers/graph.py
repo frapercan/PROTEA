@@ -29,6 +29,14 @@ decision is held and takes one of five values:
 ``blocked``
     a level cannot be produced at all, because its artifact has no producer.
 
+``chosen`` is a sink. Four different situations arrive at that one word: a single
+level the frame's own definition fixed, a powered contrast with no floor declared
+for it, a declared floor that REFUSED to be compared, and a comparison that was
+made and did not separate. So every node also publishes ``floor``, ``separated``
+and ``floor_refusal``, which is where those four part company. A refusal is
+caught rather than allowed to escape, so this page keeps serving, and its text is
+published because a caught refusal nobody sees is a silent None.
+
 A PANEL is one of nine regions, a knowledge category (NK, LK, PK) crossed with
 an aspect (BPO, MFO, CCO). Panels are never pooled and never summed: the
 cardinality of this record is a vector over the nine, not a scalar.

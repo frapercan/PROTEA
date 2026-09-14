@@ -954,3 +954,118 @@ class TestAWithdrawnDeclarationGovernsNothing:
         clause = "er.status IN (" + ", ".join(f"'{state}'" for state in standing) + ")"
         assert clause in str(_Q_FLOORS)
         assert str(ExperimentRunStatus.ABANDONED) not in str(_Q_FLOORS)
+class TestTheComparisonBehindTheStrengthIsPublished:
+    """`chosen` is a sink, and until now the response held nothing that drained it.
+
+    Four situations came out as that one word -- a single level the frame fixed,
+    a powered contrast with no floor declared, a declared floor that REFUSED the
+    comparison, and a comparison that was made and lost -- and a reader had no
+    way to tell which one they were looking at.
+
+    The third was the worst of them. `_floor_for` called `_separation`, which
+    catches CrossedFrames and CrossedDepthAxes so the page keeps serving, and
+    then threw the caught text away. Nine of the ten nodes turned a refusal into
+    a bare `chosen`, and no field anywhere in the response said a refusal had
+    happened. A caught refusal nobody sees is a silent None.
+
+    Nothing here changes a strength. The three keys report the comparison the
+    strength was already decided on.
+    """
+
+    _KEYS = ("floor", "separated", "floor_refusal")
+
+    def test_every_node_publishes_the_three(self) -> None:
+        """Structural over SPECS, and over a blocked record as well as a live one.
+
+        Asserting it of one fixture's scoring node would pass again the moment an
+        eleventh node was added and forgotten, and a blocked node needs the keys
+        as much as any other: a floor can be declared for a node whose artifact
+        has no producer, and that is worth seeing.
+        """
+        for record in (empty_record(), populated_record({"a": 0.1, "b": 0.2})):
+            nodes = {n["key"]: n for n in build_graph(record)["nodes"]}
+            assert set(nodes) == {spec.key for spec in SPECS}
+            for key, node in nodes.items():
+                missing = [f for f in self._KEYS if f not in node]
+                assert not missing, f"{key} publishes no {missing}"
+
+    def test_a_floor_that_was_asked_publishes_the_answer_it_got(self) -> None:
+        """Both answers, because a key that only ever holds None is not published.
+
+        The cleared floor is the case
+        `test_a_declared_floor_that_is_cleared_reaches_measured` already pins on
+        the strength; what it could not show is that the verdict itself reaches a
+        reader. The floor that was NOT cleared is the one that matters here: it
+        reads `chosen`, exactly as a contrast with no floor at all does, and only
+        `separated` false says a comparison was made and lost.
+        """
+        asked = (("floor-level", MEASURED, True), ("rival", CHOSEN, False))
+        for floor, strength, verdict in asked:
+            record = populated_record({"floor-level": 0.10, "rival": 0.30})
+            record["floors"] = [{"node": "scoring", "floor": floor, "name": "run-1"}]
+            client, _ = _client(record)
+            node = next(n for n in client.get("/v1/graph").json()["nodes"] if n["key"] == "scoring")
+            assert node["strength"] == strength
+            assert node["floor"] == floor
+            assert node["separated"] is verdict
+            assert node["floor_refusal"] is None
+
+    def test_a_crossed_frames_refusal_reaches_the_payload_instead_of_vanishing(self) -> None:
+        """The refusal the helper used to drop, on a node that is not scoring.
+
+        `_scoring_node` reads the refusal itself and prints it in its own prose,
+        so it never showed the defect. Every other node went through
+        `_floor_for`, which dropped it. This declares a retriever floor on
+        unsealed panels -- the shape `seal_evaluation_frames` refuses on -- and
+        asks the endpoint for the retriever node.
+        """
+        record = populated_record({"floor-level": 0.10, "rival": 0.30})
+        for row in record["panels"]:
+            row.pop("frame_digest", None)
+        without = next(n for n in build_graph(record)["nodes"] if n["key"] == "retriever")
+        record["floors"] = [{"node": "retriever", "floor": "floor-level", "name": "run-1"}]
+        client, _ = _client(record)
+        response = client.get("/v1/graph")
+        assert response.status_code == 200
+        node = next(n for n in response.json()["nodes"] if n["key"] == "retriever")
+        assert node["floor"] == "floor-level"
+        assert node["separated"] is None
+        assert "frame seal" in node["floor_refusal"]
+        assert "floor-level" in node["floor_refusal"]
+        # Declaring the floor decided nothing it had not already decided. The
+        # refusal is published, not acted on.
+        assert node["strength"] == without["strength"]
+
+    def test_an_edge_cannot_hold_a_verdict_and_a_refusal_at_once(self) -> None:
+        """A refused comparison has no verdict, so an edge holding both is unreadable.
+
+        It would leave a reader to pick which half of one node's payload to
+        believe, which is the state this change exists to end rather than to
+        re-create in a new pair of keys.
+        """
+        with pytest.raises(ValueError, match="both a verdict"):
+            Edge(instantiated=2, scored=2, floor="a-floor", separated=False, refusal="crossed")
+        with pytest.raises(ValueError, match="no floor"):
+            Edge(instantiated=2, scored=2, refusal="crossed")
+
+    def test_the_edges_the_builders_actually_construct_are_accepted(self) -> None:
+        """The guard must not refuse any shape the builders can hand it.
+
+        A guard tested only on what it rejects can be a function that always
+        raises, and this one sits in front of every node on the page.
+        """
+        for floor, separated, refusal in (
+            (None, None, None),  # nothing declared
+            ("a-floor", True, None),  # asked and cleared
+            ("a-floor", False, None),  # asked and lost
+            ("a-floor", None, "crossed"),  # refused
+            ("a-floor", None, None),  # declared, no panel could testify
+        ):
+            edge = Edge(
+                instantiated=2,
+                scored=2,
+                floor=floor,
+                separated=separated,
+                refusal=refusal,
+            )
+            assert strength_of(edge) in _STRENGTHS
