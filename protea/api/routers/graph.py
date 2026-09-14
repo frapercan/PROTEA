@@ -42,9 +42,11 @@ knowable before reading a single metric. Two or more scored levels reach
 ``measured`` only when a floor is declared for the comparison and some level
 clears it on every panel that carries both. No table in this schema has a column
 for a floor, so the one place a floor can be declared is an ``experiment_run``
-whose ``config`` names ``graph_node`` and ``floor``. Until such a row exists no
-node here can be a measurement, and that is the honest report rather than a
-defect in the endpoint.
+whose ``config`` names ``graph_node`` and ``floor`` AND whose ``status`` still
+stands behind it: a run that went ``abandoned`` withdrew its own plan, and its
+floor is read no further (see ``_graph_reads.standing_floor_statuses``). Until
+such a row exists no node here can be a measurement, and that is the honest
+report rather than a defect in the endpoint.
 
 WHERE THE PANEL POPULATIONS COME FROM. Not from the ground-truth parquet, which
 this endpoint never opens, and not from ``evaluation_set.stats``, which counts

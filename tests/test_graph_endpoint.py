@@ -14,19 +14,32 @@ from a table whose evidence had been deleted.
    is a SELECT, the session handed to it fails loudly on every write method, and
    the modules never reach for the committing session helper.
 
-No test here opens a database. The session is a fake that answers the endpoint's
+No test here opens a database, with one exception. Whether a declared floor is
+still standing is a claim about SQL, and a string assertion on a query cannot
+tell a predicate that filters from one that matches nothing, so
+``TestAWithdrawnDeclarationGovernsNothing`` runs that one statement against the
+suite's own Postgres inside a transaction it rolls back. It is marked
+``integration`` and takes ``conftest``'s ``postgres_url``, which is what the
+integration workflow's ``pytest --with-postgres`` fills; keyed on its own env
+var instead, both halves of that pair skipped in every workflow and said
+nothing. Everywhere else the session is a fake that answers the endpoint's
 statements by identity, which also means a statement the endpoint did not
 declare up front cannot be answered at all.
 """
 
 from __future__ import annotations
 
+import json
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection
 
 from protea.api.routers._graph_edges import (
     BLOCKED,
@@ -48,11 +61,15 @@ from protea.api.routers._graph_panels import (
 )
 from protea.api.routers._graph_reads import (
     _PIVOT_ASPECTS,
+    _Q_FLOORS,
     PARAM_QUERIES,
     QUERIES,
+    UnclassifiedRunStatus,
     read_record,
+    standing_floor_statuses,
 )
 from protea.api.routers.graph import build_graph, router
+from protea.infrastructure.orm.models.experiment_run import ExperimentRun, ExperimentRunStatus
 from protea.infrastructure.settings import load_settings
 
 _STRENGTHS = {MEASURED, CHOSEN, INHERITED, UNPOWERED, BLOCKED}
@@ -807,3 +824,133 @@ class TestASeparationHappensInsideOneFrame:
         )
         with pytest.raises(CrossedFrames, match="different frame"):
             separated_from_floor(rows, "floor-level")
+
+
+@pytest.mark.integration
+class TestAWithdrawnDeclarationGovernsNothing:
+    """A floor is a declaration, and a declaration can be taken back.
+
+    Until 2026-09-14 the floors query read ``graph_node`` and ``floor`` off any
+    ``experiment_run`` whatever state it was in. The single row in the store
+    carrying both keys is `campana-limpia-eje-A-sustrato-220-227`: its status is
+    `abandoned` and its own findings say it was never dispatched and that its
+    floor stops being a starting point. The retraction sat one column away from
+    the two the query read, and nothing read it, so a run that had withdrawn its
+    floor still handed that floor to the substrate node.
+
+    These are prophylaxis and not a repair. That comparison does not clear the
+    floor, and `strength_of` answers `chosen` both with a floor a node fails and
+    with no floor at all, so no published word moves. They are here so the next
+    declared floor cannot be governed by a declaration somebody took back.
+    """
+
+    @pytest.fixture()
+    def disposable_conn(self, postgres_url: str) -> Iterator[Connection]:
+        """A connection to the suite's own Postgres, in a transaction rolled back.
+
+        On ``postgres_url`` and not on a target of its own, because a target of
+        its own is one no workflow fills. Keyed on ``PROTEA_DB_URL`` this pair
+        skipped in BOTH: the unit workflow runs ``pytest`` with no Postgres at
+        all, and the integration workflow supplies ``PROTEA_PG_*`` and never
+        ``PROTEA_DB_URL``. Two tests that skip are two tests that do not exist,
+        and they report green while doing it. ``postgres_url`` is the plumbing
+        every other Postgres test here already uses, and ``pytest
+        --with-postgres`` is what the integration workflow already runs.
+
+        The schema is the ORM's own ``experiment_run`` table, created inside the
+        transaction and discarded with it, so the target is left as it was
+        found. The table and its enum type are dropped first, also inside the
+        transaction: this Postgres is shared with every other module in the
+        session and one of them may have left the table behind, and a
+        ``CREATE TABLE`` that fails is a test that errors instead of a test that
+        answers. The rollback puts back whatever was there.
+        """
+        engine = create_engine(postgres_url, future=True)
+        conn = engine.connect()
+        try:
+            conn.execute(text("DROP TABLE IF EXISTS experiment_run CASCADE"))
+            conn.execute(text("DROP TYPE IF EXISTS experiment_run_status CASCADE"))
+            ExperimentRun.__table__.create(conn)
+            yield conn
+        finally:
+            conn.rollback()
+            conn.close()
+            engine.dispose()
+
+    @staticmethod
+    def _declare_floor(conn: Connection, *, name: str, status: str, floor: str) -> None:
+        """One run declaring a floor for the substrate node, in the given state."""
+        conn.execute(
+            text(
+                "INSERT INTO experiment_run"
+                " (id, name, status, config, provenance, tags, created_at)"
+                " VALUES (CAST(:id AS uuid), :name,"
+                " CAST(:status AS experiment_run_status), CAST(:config AS jsonb),"
+                " '{}'::jsonb, '{}'::text[], now())"
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "status": status,
+                "config": json.dumps({"graph_node": "substrate", "floor": floor}),
+            },
+        )
+
+    def test_a_floor_declared_by_a_withdrawn_run_is_not_read(
+        self, disposable_conn: Connection
+    ) -> None:
+        """The defect itself: the run took its floor back and the query kept it."""
+        self._declare_floor(
+            disposable_conn,
+            name="campana-limpia-eje-A-sustrato-220-227",
+            status=str(ExperimentRunStatus.ABANDONED),
+            floor="esm2_8m",
+        )
+        assert disposable_conn.execute(_Q_FLOORS).mappings().all() == []
+
+    def test_a_floor_declared_by_a_standing_run_is_read(self, disposable_conn: Connection) -> None:
+        """The other half, and it is not optional.
+
+        Read alone, the refusal above is also what a predicate matching nothing
+        would produce, and a floor that never reaches the graph makes every node
+        `chosen` for a reason the reader cannot see. So every standing state is
+        declared here beside the withdrawn one, and only the withdrawn one is
+        missing from the answer.
+        """
+        for state in standing_floor_statuses(ExperimentRunStatus):
+            self._declare_floor(
+                disposable_conn, name=f"declared-{state}", status=state, floor=f"floor-{state}"
+            )
+        self._declare_floor(
+            disposable_conn,
+            name="declared-abandoned",
+            status=str(ExperimentRunStatus.ABANDONED),
+            floor="floor-abandoned",
+        )
+        rows = [dict(r) for r in disposable_conn.execute(_Q_FLOORS).mappings().all()]
+        standing = standing_floor_statuses(ExperimentRunStatus)
+        assert {r["name"] for r in rows} == {f"declared-{state}" for state in standing}
+        assert {r["floor"] for r in rows} == {f"floor-{state}" for state in standing}
+        assert all(r["node"] == "substrate" for r in rows)
+
+    def test_a_lifecycle_state_nobody_classified_refuses_the_read(self) -> None:
+        """Drift in either direction is refused where it can still be read.
+
+        A state added to `ExperimentRunStatus` would otherwise decide whether a
+        declaration governs by whichever way the two sets happen to be written,
+        which is the same silence this change is about; and a state classified
+        here that the column cannot hold would put a literal in the query that
+        Postgres rejects halfway through serving a request.
+        """
+        with pytest.raises(UnclassifiedRunStatus, match="superseded"):
+            standing_floor_statuses([*ExperimentRunStatus, "superseded"])
+        with pytest.raises(UnclassifiedRunStatus, match="cannot hold it"):
+            standing_floor_statuses(["planned", "done", "abandoned"])
+
+    def test_the_states_this_column_can_hold_are_classified_end_to_end(self) -> None:
+        """And the query is generated from that classification, not beside it."""
+        standing = standing_floor_statuses(ExperimentRunStatus)
+        assert set(standing) == {"planned", "running", "done"}
+        clause = "er.status IN (" + ", ".join(f"'{state}'" for state in standing) + ")"
+        assert clause in str(_Q_FLOORS)
+        assert str(ExperimentRunStatus.ABANDONED) not in str(_Q_FLOORS)
