@@ -19,12 +19,14 @@ held earlier.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import TextClause, text
 from sqlalchemy.orm import Session
 
 from protea.api.routers._arm_identity import with_arm_identity
+from protea.infrastructure.orm.models.experiment_run import ExperimentRunStatus
 
 _Q_EVALUATION_SETS = text(
     """
@@ -338,18 +340,91 @@ _Q_ARTIFACTS = text(
     """
 )
 
+
+class UnclassifiedRunStatus(ValueError):
+    """A lifecycle state that the floor policy neither honours nor withdraws.
+
+    Raised while this module is built, before any floor can be read, because the
+    alternative is silence: an unclassified state would decide whether a
+    declaration governs a published word by whichever way the sets below happen
+    to be written, and both ways are wrong for the same reason.
+    """
+
+
+#: Which states of an ``experiment_run`` leave a floor it declared STANDING, and
+#: which withdraw it. Written as two sets rather than as one ``<> 'abandoned'``
+#: test so a state added to the lifecycle cannot fall into either half by
+#: default: the guard below refuses to build the read at all until somebody says
+#: which it is.
+#:
+#: ``planned`` stands. A floor is a declaration, not a result, and the floors of
+#: this campaign are declared before their comparison is dispatched, so a
+#: predicate that demanded a finished run would stop the next declared floor
+#: from governing anything at all. ``running`` and ``done`` stand for the same
+#: reason: the declaration is still owned. ``abandoned`` is the withdrawal
+#: itself, and it is the only one of the four that a run uses to take its own
+#: plan back.
+_FLOOR_STANDS_IN: frozenset[str] = frozenset({"planned", "running", "done"})
+_FLOOR_WITHDRAWN_IN: frozenset[str] = frozenset({"abandoned"})
+
+
+def standing_floor_statuses(lifecycle: Iterable[str]) -> tuple[str, ...]:
+    """The states a declared floor still governs from, sorted.
+
+    Takes the lifecycle from the typed column's own enum rather than from a list
+    repeated here, and refuses in both directions of drift: a state the column
+    can hold that nobody classified, and a state this module honours that the
+    column cannot hold, which would otherwise put a literal in the SQL below
+    that Postgres rejects halfway through serving a request.
+    """
+    states = {str(s) for s in lifecycle}
+    unclassified = states - _FLOOR_STANDS_IN - _FLOOR_WITHDRAWN_IN
+    unknown = (_FLOOR_STANDS_IN | _FLOOR_WITHDRAWN_IN) - states
+    if unclassified or unknown:
+        drift: list[str] = []
+        if unclassified:
+            drift.append(f"{sorted(unclassified)} is a state nothing here classifies")
+        if unknown:
+            drift.append(f"{sorted(unknown)} is classified here and the column cannot hold it")
+        raise UnclassifiedRunStatus(
+            "the floor policy and experiment_run.status disagree about the run lifecycle: "
+            + "; ".join(drift)
+            + ". A floor is read off a run's config, so a state nobody classified either "
+            "lets a withdrawn declaration govern a published word or silently stops a "
+            "live one from governing."
+        )
+    return tuple(sorted(states & _FLOOR_STANDS_IN))
+
+
+#: The standing states as SQL literals. Interpolated and not bound because
+#: ``read_record`` runs everything in ``QUERIES`` without arguments; the values
+#: are this codebase's own enum members, checked by the guard above, and never
+#: anything a request can reach.
+_STANDING_FLOOR_STATUSES = ", ".join(
+    f"'{state}'" for state in standing_floor_statuses(ExperimentRunStatus)
+)
+
 #: The only place in this schema where a comparison can name its floor. An
 #: experiment run already carries a declared intent, so a floor rides on its
 #: config rather than on a column invented for the purpose. A run declares one
 #: with ``config`` holding ``graph_node`` (the node key the comparison is about)
 #: and ``floor`` (the level it is measured against).
+#:
+#: A declaration can also be TAKEN BACK, and the state predicate is what reads
+#: the retraction. Without it this query selected the two keys off any run in any
+#: state, and the one row in the store that carries both is
+#: ``campana-limpia-eje-A-sustrato-220-227``: status ``abandoned``, findings
+#: saying it was never dispatched and that its floor stops being a starting
+#: point. The retraction was in the database and nothing read it, so a run that
+#: had withdrawn its own floor still handed that floor to the substrate node.
 _Q_FLOORS = text(
-    """
+    f"""
     SELECT er.config ->> 'graph_node' AS node,
            er.config ->> 'floor'      AS floor,
            er.name                    AS name
     FROM experiment_run er
     WHERE er.config ? 'graph_node' AND er.config ? 'floor'
+      AND er.status IN ({_STANDING_FLOOR_STATUSES})
     """
 )
 
