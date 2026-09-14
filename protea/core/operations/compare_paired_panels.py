@@ -46,6 +46,17 @@ as free when it was not. ``_paired_panels_bootstrap`` argues why both are
 correct procedures for different published quantities, the payload below argues
 why the vocabulary is closed, and the result records which one ran.
 
+**The comparison declares its axis.** Two evaluation results sit behind two
+prediction sets, and a delta between them is a delta in whatever those two
+methods differ in. ``method_axis`` names the field the comparison claims to be
+varying, and ``_paired_panels_method`` refuses unless every other field of the
+method agrees, naming the ones that do not with both their values. The empty
+default is the claim that the method was held still. This is the upstream half
+of what ``_frame_gate`` does downstream, and it is the half that was missing
+when two arms believed to differ in the donor bank alone also differed in
+ancestor expansion, aspect-separated retrieval, the code revision and the
+ontology snapshot, and nine deltas were published off them.
+
 **What it does not do.** It does not report a mean over the nine panels or an
 interval for one. The nine panels are nine populations, since an aspect scores
 only the proteins that gained in that aspect, so a mean over them is a different
@@ -69,6 +80,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
+from protea.core.method_seal import METHOD_IDENTITY_FIELDS
 from protea.core.operations._paired_panels_artifact import (
     SETTINGS,
     GridMeta,
@@ -77,6 +89,7 @@ from protea.core.operations._paired_panels_artifact import (
     assert_comparable,
 )
 from protea.core.operations._paired_panels_events import _emit_panel
+from protea.core.operations._paired_panels_method import _method_gate
 from protea.core.operations._paired_panels_panel import (
     PanelConfig,
     Side,
@@ -234,6 +247,20 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
         ),
     ]
     allow_frame_mismatch: bool = False
+    method_axis: Annotated[
+        list[str],
+        Field(
+            default_factory=list,
+            description=(
+                "the prediction_set fields this comparison claims to be varying, e.g. "
+                "['annotation_set_id'] for a bank contrast. Everything else in the method "
+                "must agree, field by field, and a field that moved and was not named here "
+                "is a refusal that names it with both its values. The empty default is the "
+                "claim that the method is held entirely still, which is what a comparison "
+                "of two scoring configs or two rerankers over one prediction method asserts."
+            ),
+        ),
+    ]
     artifacts_root: str | None = None
     baseline_artifacts_root: str | None = None
 
@@ -264,6 +291,32 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
                 "them is a different estimator needing a joint resample over the union with "
                 "per-panel membership tracked, which this operation does not compute."
             )
+        return value
+
+    @field_validator("method_axis")
+    @classmethod
+    def _known_axis(cls, value: list[str]) -> list[str]:
+        """An axis field that is not method identity is refused here, not later.
+
+        There is no ``allow_method_mismatch`` to pair with ``allow_frame_mismatch``,
+        and that is the design. A frame mismatch is waived because the two numbers
+        were measured differently and somebody may still want to look; a method
+        mismatch has a waiver already, and it is to NAME the field, which costs one
+        list entry and makes the job row say what the comparison was of. A boolean
+        that waived the whole seal at once would put the campaign back where D2
+        found it, with a delta attributable to nothing.
+        """
+        unknown = sorted(set(value) - set(METHOD_IDENTITY_FIELDS))
+        if unknown:
+            raise ValueError(
+                f"method_axis names {unknown}, which is not method identity. The fields "
+                f"that can be an axis are {list(METHOD_IDENTITY_FIELDS)}. A misspelled "
+                "axis declares nothing and would be refused one gate later under the "
+                "wrong name."
+            )
+        repeated = sorted({key for key in value if value.count(key) > 1})
+        if repeated:
+            raise ValueError(f"method_axis lists {repeated} more than once")
         return value
 
     @field_validator("restrict_to_stratum")
@@ -456,8 +509,36 @@ class ComparePairedPanelsOperation(Operation):
         a = str(payload.get("evaluation_result_id", "?"))[:8]
         b = str(payload.get("baseline_evaluation_result_id", "?"))[:8]
         panels = payload.get("panels") or list(ALL_PANELS)
+        # The axis is in the one-line summary because that is the line a reader
+        # scanning a job list sees. "31dd3eb8 against 0e076cb3" says which rows
+        # were compared and not what the comparison was OF, which is the sentence
+        # the nine invalid deltas were filed under.
+        #
+        # PRESENCE FIRST, which is the rule ``_frame_gate`` applies to its
+        # markers and ``method_seal.MUST_BE_RECORDED`` to its revisions. This
+        # line is rendered over the STORED payload of every job the list holds,
+        # including every job that ran before this field existed: job 96e1942d,
+        # the one the nine invalid deltas were published from, carries no
+        # ``method_axis`` key at all. Reading that absence as the empty axis
+        # would print "one method held still" across exactly the comparison in
+        # which four method fields moved, which is this operation asserting the
+        # false claim it exists to refuse, about itself, on the surface a reader
+        # scans. An absent declaration is not a declaration that nothing varied.
+        axis = payload.get("method_axis")
+        if axis is None:
+            varying = "no method axis declared"
+        elif not isinstance(axis, list):
+            # ``POST /jobs`` stores the payload blob unvalidated and the model
+            # only sees it on dequeue, so a bare string is reachable here, and
+            # joining one renders it one character at a time as though
+            # seventeen fields had varied.
+            varying = f"method axis {axis!r} is not a list of fields"
+        elif axis:
+            varying = "varying " + ", ".join(str(field) for field in axis)
+        else:
+            varying = "one method held still"
         return (
-            f"{a} against {b} on {len(panels)} panels, "
+            f"{a} against {b}, {varying}, on {len(panels)} panels, "
             f"{payload.get('n_resamples', 2000)} resamples, seed {payload.get('seed', 0)}"
         )
 
@@ -467,6 +548,11 @@ class ComparePairedPanelsOperation(Operation):
         p = ComparePairedPanelsPayload.model_validate(contract_payload(payload))
         self._emit_start(p, emit)
         prov_a, prov_b, mismatch = _frame_gate(session, p, emit)
+        # After the frame gate and before a single byte of artefact is read.
+        # The two gates ask different questions -- were these numbers MEASURED
+        # the same way, and were they PRODUCED by methods that differ in one
+        # named way -- and the second is the one the bank comparison needed.
+        axis = _method_gate(session, p, (prov_a, prov_b), emit)
         wanted = {key.split(":")[0] for key in p.panels}
         settings = tuple(s for s in SETTINGS if s in wanted)
         with contextlib.ExitStack() as stack:
@@ -498,6 +584,10 @@ class ComparePairedPanelsOperation(Operation):
             panels = self._panels(sides, p, cfg, emit, keep=keep)
             _refuse_if_nothing_was_comparable(sides, panels)
             result = self._result(sides, p, cfg, panels, mismatch, artifact_mismatch)
+            # Recorded beside the number, not only emitted. A delta whose stored
+            # result does not say which field it is a delta IN is the shape the
+            # nine invalid deltas had, and an event is not in the result.
+            result["method_axis"] = list(axis)
         emit("compare_paired_panels.verdict", None, result["verdict"], "info")
         return OperationResult(
             result=result, progress_current=len(panels), progress_total=len(p.panels)
