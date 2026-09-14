@@ -2,7 +2,14 @@ name: Integration Tests
 
 on:
   push:
-    branches: [main]
+    # develop is the trunk: PROTEA integrates here and main only receives
+    # releases. Without develop this suite validated a pull request and then
+    # never ran again when that request landed, so two requests that each
+    # passed integration alone could break the trunk between them and nothing
+    # would say so -- only the unit suite runs here. This repository has
+    # auto-merge enabled, so a green request does not wait, and two can land
+    # minutes apart without anything ever seeing them together.
+    branches: [develop, main]
   pull_request:
 
 concurrency:
