@@ -482,10 +482,51 @@ class TestTheJobListSaysWhatWasCompared:
         assert "varying annotation_set_id" in line
 
     def test_the_summary_line_says_so_when_nothing_varies(self) -> None:
+        # An axis declared and empty. The caller said the method does not move,
+        # and the gate held them to it.
         line = ComparePairedPanelsOperation().summarize_payload(
-            {"evaluation_result_id": _A_RESULT, "baseline_evaluation_result_id": _B_RESULT}
+            {
+                "evaluation_result_id": _A_RESULT,
+                "baseline_evaluation_result_id": _B_RESULT,
+                "method_axis": [],
+            }
         )
         assert "one method held still" in line
+
+    def test_a_job_that_predates_the_seal_is_not_reported_as_held_still(self) -> None:
+        # The stored payload of job 96e1942d, byte for byte, which is the job
+        # the nine invalid deltas were published from. It carries no method_axis
+        # key because it ran before there was one, and its two arms differ in
+        # four method fields. Rendering that absence as the empty axis would put
+        # "one method held still" on the job list row of exactly the comparison
+        # that did not, which is this operation making the D2 claim itself. The
+        # jobs endpoint renders summarize_payload over every historical row, so
+        # this is the live reading, not a hypothetical one.
+        line = ComparePairedPanelsOperation().summarize_payload(
+            {
+                "seed": 0,
+                "n_resamples": 2000,
+                "evaluation_result_id": "8a17d0e2-28ca-4d59-bf1f-4fc251a4941e",
+                "baseline_evaluation_result_id": "10535ac0-24af-4df2-9ef7-57c1e9fdffc8",
+            }
+        )
+        assert "one method held still" not in line
+        assert "no method axis declared" in line
+
+    def test_an_axis_that_is_not_a_list_is_named_rather_than_spelled_out(self) -> None:
+        # POST /jobs stores the payload blob unvalidated and the operation model
+        # only sees it on dequeue, so the job list renders strings the contract
+        # would have refused. Joined character by character, one field name
+        # reads as seventeen fields varying.
+        line = ComparePairedPanelsOperation().summarize_payload(
+            {
+                "evaluation_result_id": _A_RESULT,
+                "baseline_evaluation_result_id": _B_RESULT,
+                "method_axis": "annotation_set_id",
+            }
+        )
+        assert "varying a, n, n, o" not in line
+        assert "is not a list of fields" in line
 
 
 class TestTheClassificationIsAPartition:

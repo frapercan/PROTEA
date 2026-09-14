@@ -513,8 +513,30 @@ class ComparePairedPanelsOperation(Operation):
         # scanning a job list sees. "31dd3eb8 against 0e076cb3" says which rows
         # were compared and not what the comparison was OF, which is the sentence
         # the nine invalid deltas were filed under.
-        axis = payload.get("method_axis") or []
-        varying = f"varying {', '.join(axis)}" if axis else "one method held still"
+        #
+        # PRESENCE FIRST, which is the rule ``_frame_gate`` applies to its
+        # markers and ``method_seal.MUST_BE_RECORDED`` to its revisions. This
+        # line is rendered over the STORED payload of every job the list holds,
+        # including every job that ran before this field existed: job 96e1942d,
+        # the one the nine invalid deltas were published from, carries no
+        # ``method_axis`` key at all. Reading that absence as the empty axis
+        # would print "one method held still" across exactly the comparison in
+        # which four method fields moved, which is this operation asserting the
+        # false claim it exists to refuse, about itself, on the surface a reader
+        # scans. An absent declaration is not a declaration that nothing varied.
+        axis = payload.get("method_axis")
+        if axis is None:
+            varying = "no method axis declared"
+        elif not isinstance(axis, list):
+            # ``POST /jobs`` stores the payload blob unvalidated and the model
+            # only sees it on dequeue, so a bare string is reachable here, and
+            # joining one renders it one character at a time as though
+            # seventeen fields had varied.
+            varying = f"method axis {axis!r} is not a list of fields"
+        elif axis:
+            varying = "varying " + ", ".join(str(field) for field in axis)
+        else:
+            varying = "one method held still"
         return (
             f"{a} against {b}, {varying}, on {len(panels)} panels, "
             f"{payload.get('n_resamples', 2000)} resamples, seed {payload.get('seed', 0)}"
