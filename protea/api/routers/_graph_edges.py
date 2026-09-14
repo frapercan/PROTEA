@@ -8,6 +8,7 @@ scrolling past ten builders to find it.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -95,19 +96,39 @@ class UnpublishableReading(ValueError):
     """
 
 
-#: Every word the tally counts has a strength, and every strength named here
-#: answers to a word the tally counts. Checked at import: a seventh bucket in
-#: the instrument stops this module loading rather than reaching a reader
-#: relabelled, because a scale that cannot state its own vocabulary has no
-#: business serving it.
-if set(STRENGTH_OF_READING) != set(TALLY_KEYS):
+def refuse_unstateable_readings(table: Mapping[str, str], counted: Iterable[str]) -> None:
+    """Refuse a scale that cannot state every reading the instrument counts.
+
+    Called at import below, so a seventh bucket in the tally stops this module
+    loading rather than reaching a reader relabelled: a scale that cannot state
+    its own vocabulary has no business serving it.
+
+    It is a NAMED FUNCTION and not the bare ``if`` it used to be because a
+    refusal that only ever happens at import is a refusal no test has seen
+    raise. Reproducing it needs a fabricated tally and a module reload, so the
+    check went untested while reading as though it were covered, which is the
+    same trap as a guard that logs: the rule looks guarded and nothing pins the
+    guard. Called with the real pair one line below, so the happy path is not a
+    claim either.
+
+    Both directions, because each is a different defect. A counted reading with
+    no strength is the one that relabels a finding. A strength named for a
+    reading nothing counts is a word this surface can never be asked for, and it
+    would sit in the table looking like coverage.
+    """
+    tally, scale = set(counted), set(table)
+    if scale == tally:
+        return
     raise UnpublishableReading(
         "the panel tally and the firmness scale disagree about which readings exist. "
-        f"Counted with no strength to publish as: {sorted(set(TALLY_KEYS) - set(STRENGTH_OF_READING))}. "
-        f"Named here and never counted: {sorted(set(STRENGTH_OF_READING) - set(TALLY_KEYS))}. "
+        f"Counted with no strength to publish as: {sorted(tally - scale)}. "
+        f"Named here and never counted: {sorted(scale - tally)}. "
         "A reading with no strength is published as the strength that happens to be left, "
         "which is how a measured null became a recorded choice."
     )
+
+
+refuse_unstateable_readings(STRENGTH_OF_READING, TALLY_KEYS)
 
 
 def strength_of_reading(reading: str) -> str:
@@ -197,6 +218,7 @@ def strength_of(edge: Edge) -> str:
     if edge.scored < 2:
         return UNPOWERED
     return strength_of_reading(edge.reading)
+
 
 @dataclass(frozen=True)
 class Spec:

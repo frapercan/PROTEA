@@ -39,6 +39,7 @@ from protea.api.routers._graph_edges import (
     UNPOWERED,
     Edge,
     UnpublishableReading,
+    refuse_unstateable_readings,
     strength_of,
     strength_of_reading,
 )
@@ -47,6 +48,7 @@ from protea.api.routers._graph_panels import (
     CrossedDepthAxes,
     CrossedFrames,
     build_panels,
+    contrast_floors,
     panel_units_from_groundtruth,
     reading_against_floor,
     separated_from_floor,
@@ -695,7 +697,6 @@ def test_a_crossed_ladder_reaches_the_reader_as_a_reason_and_not_a_500() -> None
     assert "truncat" in node["blocked_reason"]
 
 
-
 class TestEveryNodeCanReachAMeasurement:
     """The vocabulary promised `measured` and nine of ten nodes could not reach it.
 
@@ -808,6 +809,25 @@ class TestTheScaleCanReceiveEveryWordTheInstrumentEmits:
         with pytest.raises(UnpublishableReading, match="null_with_teeth"):
             strength_of(Edge(instantiated=2, available=2, scored=2, reading="null_with_teeth"))
 
+    def test_a_scale_that_cannot_state_the_whole_tally_refuses_to_load(self) -> None:
+        """The other guard, the one that runs at import, asked to raise and to pass.
+
+        The walk above fails when a seventh bucket appears, but it fails the same
+        way whether the import check exists or not, so nothing here pinned the
+        check itself: deleting it left every test green. Calling it is the only
+        way to see it refuse, and both directions are asked because each is a
+        different defect.
+        """
+        with pytest.raises(UnpublishableReading, match="seventh_bucket"):
+            refuse_unstateable_readings(STRENGTH_OF_READING, (*TALLY_KEYS, "seventh_bucket"))
+        with pytest.raises(UnpublishableReading, match="invented_reading"):
+            refuse_unstateable_readings(
+                {**STRENGTH_OF_READING, "invented_reading": MEASURED}, TALLY_KEYS
+            )
+        # And it passes on the pair the module actually loaded with, which is the
+        # half that would be missing if this only ever raised.
+        assert refuse_unstateable_readings(STRENGTH_OF_READING, TALLY_KEYS) is None
+
     def _tied(self) -> dict[str, list[dict[str, Any]]]:
         """Two weightings that scored identically, with a floor declared on one."""
         record = populated_record({"floor-level": 0.20, "rival": 0.20})
@@ -857,6 +877,29 @@ class TestTheScaleCanReceiveEveryWordTheInstrumentEmits:
         entitled to read as evidence of sameness.
         """
         assert self._scoring(self._tied())["strength"] == UNPOWERED
+
+    def test_a_null_over_a_population_below_the_published_floor_is_not_a_measured_one(
+        self,
+    ) -> None:
+        """Counted is not the same as enough, and only one of the two was tested.
+
+        The test above covers an UNCOUNTED population, so the whole power test
+        could be cut down to its ``effect is None`` half and every test here
+        still passed: a panel with a population the surface itself publishes as
+        too thin to resolve the target would have read ``indistinguishable``,
+        which is the one word a reader is entitled to treat as evidence of
+        sameness. The floor is read from ``contrast_floors``, which is what the
+        page prints beside a thin cell, rather than restated here.
+        """
+        floor = {c["key"]: c["population"] for c in contrast_floors()["classes"]}["reporting"]
+        assert (
+            self._scoring(self._tied(), dict.fromkeys(PANEL_KEYS, floor // 2))["strength"]
+            == UNPOWERED
+        )
+        assert (
+            self._scoring(self._tied(), dict.fromkeys(PANEL_KEYS, floor * 4))["strength"]
+            == INDISTINGUISHABLE
+        )
 
     def test_a_node_with_no_floor_declared_reads_the_null_it_cannot_read(self) -> None:
         """The other half of the pair, at the panels rather than at the node.
