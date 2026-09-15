@@ -1,7 +1,21 @@
 services:
 
   postgres:
-    image: pgvector/pgvector:pg16
+    # PINNED BY DIGEST, NOT BY TAG. The tag says which release this is; the
+    # digest says which image. A campaign whose comparisons are sealed cannot
+    # rest on a tag that can be repointed under a restart, and the minio entry
+    # below shows what that costs when it happens.
+    image: pgvector/pgvector:pg18@sha256:1d50c689b0a6511b9ea0a15615281c81a59fd04a08eb35057ec8646fb3a2118a
+    # Moved from pg16 to pg18 on 2026-09-14, during the clean-campaign rebuild,
+    # because the database was empty: no pg_upgrade, no dump, no restore. The
+    # same jump over a populated instance would have meant migrating 27M
+    # annotations and 7.6M halfvec rows. The window does not come back.
+    #
+    # pgvector rides the image and stays at 0.8.5. Nothing to rebuild: the
+    # schema stores halfvec and carries NO ANN index, because neighbour search
+    # happens outside the database. So the extension upgrade cannot move a
+    # recall number, which is the only reason it is safe to do at the same time.
+    restart: unless-stopped
     shm_size: 2gb
     # WHY THESE NUMBERS. Measured 2026-08-29 with the container capped at 2G:
     # memory.current sat at 2026 MiB of 2048, the cgroup had hit its ceiling
@@ -34,7 +48,16 @@ services:
       POSTGRES_PASSWORD: protea
       POSTGRES_DB: protea
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # MOUNT POINT CHANGED FOR 18+. Up to pg17 this was
+      # `postgres_data:/var/lib/postgresql/data`. The 18+ images refuse to start
+      # against that layout and say so plainly: they keep data in a
+      # major-version-specific subdirectory (`/var/lib/postgresql/18/docker`) so
+      # that `pg_upgrade --link` never has to cross a mount boundary. Mounting
+      # the volume one level up is the whole fix.
+      #
+      # Carrying a populated pg16 volume across this would have needed a dump
+      # and restore; the volume was empty on 2026-09-14, so it cost a restart.
+      - postgres_data:/var/lib/postgresql
       - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
@@ -50,7 +73,23 @@ services:
           memory: 8G
 
   minio:
-    image: minio/minio:latest
+    # THE REGISTRY CHANGED, AND THE OLD ONE IS GONE. This was
+    # `minio/minio:latest` on Docker Hub until 2026-09-14, when that repository
+    # stopped existing: `docker pull` answers "pull access denied ... repository
+    # does not exist", while other Docker Hub images pull normally, so it is not
+    # a rate limit and not authentication. Had the stack been restarted with a
+    # cold image cache at any point, storage would simply not have come up.
+    #
+    # That is the concrete cost of a floating tag. `latest` did not merely fail
+    # to pin a version: it pointed at something that has since vanished, and
+    # nothing in the file said which image had been running.
+    #
+    # quay.io is MinIO's own registry. Pinned by digest. Note the community
+    # release line stops at 2025-09-07 (the image itself was rebuilt 2026-04),
+    # so this dependency is not receiving feature work; whether to stay on it
+    # is a decision for the campaign, not for this file.
+    image: quay.io/minio/minio@sha256:cf3dadcfa1fb0324f43958bad1abba986d53c4ecc04d4d50b46c7dcda28bd3cd
+    restart: unless-stopped
     profiles: ["storage"]
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -72,7 +111,17 @@ services:
           memory: 512M
 
   rabbitmq:
-    image: rabbitmq:3-management
+    # Moved from the floating `3-management` to 4.3.5, pinned by digest, on
+    # 2026-09-14. A major version normally means enabling every 3.x feature flag
+    # before the upgrade and hoping mnesia comes across; here the volume was
+    # destroyed the same day, so a 4.x broker starts fresh with its flags
+    # already on and there is nothing to migrate. Same window as postgres.
+    #
+    # `enabled_plugins` and `rabbitmq.conf` carry over unchanged:
+    # `vm_memory_high_watermark.absolute` and `disk_free_limit.absolute` are
+    # still the spelling in 4.x.
+    image: rabbitmq:4.3.5-management@sha256:6e83d26931219c9e088e6eefcc877bcca2adc3690c7603f24f4ece8968b13262
+    restart: unless-stopped
     # WHY hostname AND a named volume, together. The broker kept /var/lib
     # /rabbitmq on an ANONYMOUS volume that this file never mentioned, and
     # named its node rabbit@<container id>. Either one alone loses the
@@ -96,9 +145,9 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
-      # rabbitmq_prometheus plugin metrics endpoint (enabled by default in
-      # rabbitmq:3-management; the enabled_plugins file in docker/ makes it
-      # explicit so a plain rabbitmq:3 image also works).
+      # rabbitmq_prometheus plugin metrics endpoint (enabled by default in the
+      # -management images; the enabled_plugins file in docker/ makes it
+      # explicit so a plain rabbitmq image also works).
       - "15692:15692"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
