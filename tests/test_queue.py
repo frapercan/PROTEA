@@ -755,12 +755,22 @@ class TestOperationConsumerEmit:
         assert len(sessions) >= 2
         # Across all sessions, the JobEvent add for ``child.failed`` must
         # have happened exactly once and have been committed.
-        adds_with_commit = [s for s in sessions if s.add.called and s.commit.called]
-        assert len(adds_with_commit) == 1, (
-            f"expected exactly one session with .add()+.commit() (the "
-            f"child.failed event session), got {len(adds_with_commit)}"
+        #
+        # Asserted on the EVENT and not on a count of sessions: the consumer
+        # also stamps one ``child.provenance.libraries`` event per job, so a
+        # count of committing sessions stopped meaning "the failure was written
+        # once" the moment a second event existed. What this test is about is
+        # named in its own comment; the count was only ever a proxy for it.
+        failed = [
+            (session, call.args[0])
+            for session in sessions
+            if session.commit.called
+            for call in session.add.call_args_list
+            if getattr(call.args[0], "event", None) == "child.failed"
+        ]
+        assert len(failed) == 1, (
+            f"expected exactly one committed child.failed event, got {len(failed)}"
         )
-        adds_with_commit[0].add.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1054,14 +1064,19 @@ class TestOperationConsumerOnMessage:
         consumer._on_message(channel, method, MagicMock(), self._body(job_id=parent_id))
 
         # Identify the error-event session by the JobEvent it adds.
-        # The failure path may open additional sessions (e.g. the
-        # F-OPS-COORD-FAIL-PROPAGATE aggregate-failure probe), so we
-        # locate the writer rather than indexing by position.
-        err_sessions = [s for s in sessions if s.add.called]
-        assert len(err_sessions) == 1
-        err_session = err_sessions[0]
-        err_session.add.assert_called_once()
-        added_event = err_session.add.call_args[0][0]
+        # The path opens additional sessions that also write -- the
+        # F-OPS-COORD-FAIL-PROPAGATE aggregate-failure probe, and the
+        # per-job child.provenance.libraries stamp -- so locate the writer by
+        # the event it wrote, which is what the comment always claimed and what
+        # `len(...) == 1` only approximated while there was one writer.
+        added = [
+            call.args[0]
+            for session in sessions
+            for call in session.add.call_args_list
+            if getattr(call.args[0], "event", None) == "child.failed"
+        ]
+        assert len(added) == 1, f"expected one child.failed event, got {len(added)}"
+        added_event = added[0]
         assert added_event.job_id == parent_id
         assert added_event.event == "child.failed"
         assert added_event.level == "error"
@@ -1101,14 +1116,18 @@ class TestOperationConsumerOnMessage:
         def make_session():
             s = MagicMock()
             sessions_created.append(s)
-            # Sessions opened along the failure path:
-            #   [1] cancellation check (no add)
-            #   [2] execution (no add; raises)
-            #   [3] error-event session (calls .add(JobEvent) + .commit)
-            #   [4] F-OPS-COORD-FAIL-PROPAGATE aggregate-failure probe
-            # Trigger commit failure on the error-event session.
-            if len(sessions_created) == 3:
-                s.commit.side_effect = RuntimeError("DB gone")
+
+            def arm_commit_failure(obj, *args, **kwargs):
+                # The error-event session is the one that writes child.failed.
+                # Located by WHAT IT WRITES rather than by the order it was
+                # opened, because that order already moved once: the consumer
+                # now stamps child.provenance.libraries before executing, which
+                # shifted every ordinal after it. An index into the open
+                # sequence encodes an assumption the consumer never promised.
+                if getattr(obj, "event", None) == "child.failed":
+                    s.commit.side_effect = RuntimeError("DB gone")
+
+            s.add.side_effect = arm_commit_failure
             return s
 
         from protea.infrastructure.queue.consumer import OperationConsumer
@@ -1130,8 +1149,19 @@ class TestOperationConsumerOnMessage:
 
         consumer._on_message(channel, method, MagicMock(), self._body(job_id=parent_id))
 
-        # Error event session should have rollback called
-        err_session = sessions_created[2]
+        # Error event session should have rollback called. Located the same way
+        # the commit failure was armed -- by the event it wrote -- so the two
+        # halves of this test cannot drift apart when the session order moves.
+        err_sessions = [
+            session
+            for session in sessions_created
+            for call in session.add.call_args_list
+            if getattr(call.args[0], "event", None) == "child.failed"
+        ]
+        assert len(err_sessions) == 1, (
+            f"expected one session writing child.failed, got {len(err_sessions)}"
+        )
+        err_session = err_sessions[0]
         err_session.rollback.assert_called_once()
         err_session.close.assert_called_once()
 
