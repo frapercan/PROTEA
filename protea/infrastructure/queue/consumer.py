@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.provenance import stamp_library_provenance
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue import _failure_aggregation as _agg
 from protea.infrastructure.queue._deadletter import DLX_NAME, setup_dead_letter
@@ -527,6 +528,7 @@ class OperationConsumer(Stoppable):
             session = self._factory()
             try:
                 emit = make_safe_emit(self._make_raw_emit(decoded.parent_job_id))
+                stamp_library_provenance(emit)
                 result = op.execute(session, decoded.payload, emit=emit)
                 session.commit()
                 # Forward any downstream operation messages (e.g. GPU→write worker).
