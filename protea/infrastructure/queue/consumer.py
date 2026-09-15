@@ -13,9 +13,9 @@ from pika.spec import Basic, BasicProperties
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.config.tuning import get_tuning
-from protea.core.provenance import capture_provenance
 from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.provenance import capture_provenance
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue import _failure_aggregation as _agg
 from protea.infrastructure.queue._deadletter import DLX_NAME, setup_dead_letter
