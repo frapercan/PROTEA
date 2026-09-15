@@ -140,4 +140,18 @@ def capture_provenance(extra: dict[str, Any] | None = None) -> dict[str, Any]:
     return payload
 
 
-__all__ = ["capture_provenance"]
+def stamp_library_provenance(emit: Any) -> None:
+    """Record, through ``emit``, the library versions about to compute.
+
+    Called by the worker immediately before an operation executes. The job row
+    records WHAT ran and the revision guard records WHICH CODE; this is the
+    third quantity, and the one that decides the numbers.
+
+    Emitted from the worker and never from the server, because the two machines
+    run different ``torch`` builds by design: only the process that executes an
+    operation can say which build produced a given vector.
+    """
+    emit("provenance.libraries", None, capture_provenance()["libraries"], "info")
+
+
+__all__ = ["capture_provenance", "stamp_library_provenance"]

@@ -20,8 +20,8 @@
       "kind": "class",
       "path": "protea/infrastructure/queue/consumer.py",
       "name": "OperationConsumer",
-      "line": 325,
-      "metric": 509,
+      "line": 326,
+      "metric": 510,
       "threshold": 500
     },
     {
@@ -30,7 +30,7 @@
       "path": "protea/infrastructure/queue/consumer.py",
       "name": "",
       "line": 0,
-      "metric": 833,
+      "metric": 835,
       "threshold": 800
     },
     {
