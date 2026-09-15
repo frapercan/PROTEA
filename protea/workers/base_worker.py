@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.contracts.operation import OperationResult, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.provenance import stamp_library_provenance
 from protea.core.retry import RetryPolicy, is_retryable, with_retry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
@@ -216,6 +217,7 @@ class BaseWorker:
 
             op = self._registry.get(job.operation)
             emit = make_safe_emit(self._build_emit(job_id))
+            stamp_library_provenance(emit)
             enhanced_payload = {**job.payload, "_job_id": str(job.id)}
 
             try:

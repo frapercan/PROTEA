@@ -1161,11 +1161,19 @@ class TestBaseWorkerMaybeFailParent:
         with pytest.raises(RuntimeError, match="child failed"):
             worker.handle_job(job.id)
 
-        # Exactly 2 execute calls: claim UPDATE (session 1) + fallback UPDATE
-        # (_force_fail_job, session 3). No parent UPDATE because
-        # _maybe_fail_parent short-circuits when children are still running.
+        # 3 execute calls: claim UPDATE (session 1), the lease renewal that
+        # every emit performs (base_worker.py:273, extend_lease), and the
+        # fallback UPDATE (_force_fail_job, session 3). What this test is about
+        # is the one that is NOT there: no parent UPDATE, because
+        # _maybe_fail_parent short-circuits while children are still running.
+        #
+        # The count went from 2 to 3 when the worker began stamping one
+        # provenance event per job, and that is the shape of the change: one
+        # more emit is one more lease renewal. The count is a weak proxy for the
+        # claim above -- it moves whenever the number of emits moves -- and the
+        # assertion below on the LAST call is the one carrying the meaning.
         execute_calls = session.execute.call_args_list
-        assert len(execute_calls) == 2
+        assert len(execute_calls) == 3
 
         # The fallback UPDATE (last call) targets the in-flight job, not parent.
         fallback_stmt = execute_calls[-1].args[0]

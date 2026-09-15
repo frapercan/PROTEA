@@ -25,6 +25,15 @@
       "threshold": 500
     },
     {
+      "key": "class::protea/workers/base_worker.py::BaseWorker",
+      "kind": "class",
+      "path": "protea/workers/base_worker.py",
+      "name": "BaseWorker",
+      "line": 58,
+      "metric": 501,
+      "threshold": 500
+    },
+    {
       "key": "file::protea/infrastructure/queue/consumer.py::",
       "kind": "file",
       "path": "protea/infrastructure/queue/consumer.py",
