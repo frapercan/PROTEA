@@ -399,7 +399,16 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
     if not _docker_exists():
         pytest.skip("Docker is not available; cannot start Postgres container.")
 
-    image = os.getenv("PROTEA_PG_IMAGE", "pgvector/pgvector:pg16")
+    # Must track the engine the stack actually runs, not the one it used to.
+    # This said pg16 while docker-compose.yml moved to pg18 on 2026-09-14, and
+    # the gap is not cosmetic: the 18+ images changed where they keep data
+    # (a major-version subdirectory under /var/lib/postgresql, so that
+    # `pg_upgrade --link` never crosses a mount boundary), which crash-looped
+    # the real stack on first start. A suite pinned to pg16 would have stayed
+    # green through exactly that failure, because it never runs the engine that
+    # broke. Testing an older engine than production does not lower risk; it
+    # moves the risk to where nothing is watching.
+    image = os.getenv("PROTEA_PG_IMAGE", "pgvector/pgvector:pg18")
     if host_port is None:
         host_port = str(55000 + (uuid.uuid4().int % 1000))
 
