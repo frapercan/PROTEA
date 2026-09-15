@@ -24,8 +24,9 @@ dependencies = [
     "torch (>=2.0.0)",
     "torchvision (>=0.15.0)",
     "sentencepiece (>=0.2.1,<0.3.0)",
+    "protobuf (>=6.33.6,<7.0.0)",
     "esm (>=3.2.1)",
-    "python-multipart (>=0.0.22,<0.0.23)",
+    "python-multipart (>=0.0.32,<0.1.0)",
     "faiss-cpu (>=1.7.0)",
     "parasail (>=1.3.4)",
     "ete3 (>=3.1.3)",
@@ -46,17 +47,22 @@ dependencies = [
 
 
 [tool.poetry.dependencies]
-# Default torch + torchvision install the CPU wheels from the PyTorch CPU
-# index, dropping the ~6 GB NVIDIA/triton stack that the CI runners and the
-# slim production Docker image never use. GPU embedding workers override
-# torch post-install via ``scripts/install_gpu_torch.sh``
-# (see CLAUDE.md "GPU torch override"). torchvision is pulled in transitively
-# by ``esm``; pinning it to the same source keeps ABI parity with torch+cpu
-# (otherwise ``transformers`` errors out with ``operator torchvision::nms
-# does not exist``).
+# Default torch installs the CPU wheel from the PyTorch CPU index, dropping the
+# ~6 GB NVIDIA/triton stack that the CI runners and the slim production Docker
+# image never use. GPU embedding workers override torch post-install via
+# ``scripts/install_gpu_torch.sh`` (see CLAUDE.md "GPU torch override").
+#
+# ``torchvision``: nothing imports it -- not PROTEA, not the six sibling
+# packages, not ``esm`` itself (verified 2026-09-15) -- so it is a candidate for
+# removal. It CANNOT be removed yet: ``esm`` 3.2.1.post1 still pulls it in
+# transitively, and dropping the declaration only disables the source pin, which
+# puts a PyPI CUDA wheel against torch+cpu and produces exactly the ABI error
+# below. ``esm`` 3.4.1 dropped torchvision and torchtext, so this goes away with
+# whichever decision retires or upgrades ``esm`` -- not before.
+# Pinning it to the same source keeps ABI parity with torch+cpu (otherwise
+# ``transformers`` errors out with ``operator torchvision::nms does not exist``).
 torch = {source = "pytorch-cpu"}
 torchvision = {source = "pytorch-cpu"}
-uvicorn = ">=0.41.0,<0.42.0"
 
 [[tool.poetry.source]]
 name = "pytorch-cpu"
