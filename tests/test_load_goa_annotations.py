@@ -621,6 +621,15 @@ class TestExecute:
                 "protea.core.operations.load_goa_annotations.AnnotationSet",
                 return_value=ann_set_mock,
             ),
+            # These tests exercise the CREATE path, so they assume no earlier
+            # attempt left a set behind. That assumption was implicit while the
+            # load always created one; since it now reuses, it has to be said.
+            # Stubbing the lookup also keeps `select(AnnotationSet)` away from
+            # the MagicMock the line above puts in its place.
+            patch(
+                "protea.core.operations.load_goa_annotations._existing_annotation_set",
+                return_value=None,
+            ),
             patch.object(
                 self.op,
                 "_store_buffer",
@@ -1112,3 +1121,62 @@ class TestMaybeEnqueueAtomicEval:
 class TestOperationName:
     def test_name(self):
         assert LoadGOAAnnotationsOperation.name == "load_goa_annotations"
+
+
+class TestARetryDoesNotForkTheCorpus:
+    """A second attempt at the same load writes into the set the first opened.
+
+    WHY THIS TEST EXISTS. The load always inserted a new AnnotationSet, so
+    every re-attempt of a partial load created another one for the same
+    release. GOA 184 ended with FOUR, holding 36,076 annotations between them
+    and none of them complete. The retries were correct -- the stale-job reaper
+    re-enqueued a job whose lease had expired, which is what it is for -- and
+    the operation turned each correct retry into another fork of the corpus.
+
+    It is not only waste. ``_select_prior_annotation_set`` picks the previous
+    corpus by source_version, so with four candidates for one release the
+    choice stops being defined, and an ambiguous ``.one_or_none()`` on exactly
+    this shape is how the LB.1 incident of 2026-05-12 read from outside.
+
+    Reuse is also what makes the load resumable rather than merely restartable:
+    ``uq_pga_set_protein_term_evidence`` includes annotation_set_id, so the same
+    set lets ``on_conflict_do_nothing`` skip what the first attempt wrote.
+    """
+
+    def test_an_existing_set_for_the_same_release_and_snapshot_is_reused(self):
+        from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
+
+        existing = MagicMock(id=uuid.uuid4())
+        snapshot_id = uuid.uuid4()
+        payload = MagicMock(source_version="184", gaf_url="https://example.test/gaf.gz")
+        session, emitted = MagicMock(), []
+
+        with patch(
+            "protea.core.operations.load_goa_annotations._existing_annotation_set",
+            return_value=existing,
+        ):
+            got = LoadGOAAnnotationsOperation()._create_annotation_set(
+                session, payload, snapshot_id, lambda *a, **k: emitted.append(a[0])
+            )
+
+        assert got is existing, "a retry forked the corpus instead of resuming it"
+        session.add.assert_not_called()
+        assert "load_goa_annotations.annotation_set_reused" in emitted
+
+    def test_the_snapshot_is_part_of_the_identity(self):
+        """Same release against a DIFFERENT ontology is a different corpus.
+
+        Reuse keyed on source_version alone would silently merge two corpora
+        that were resolved under different graphs, which is the defect this
+        project already paid for once with GOA 220.
+        """
+        from protea.core.operations import load_goa_annotations as mod
+
+        session = MagicMock()
+        mod._existing_annotation_set(session, "184", uuid.uuid4())
+        where = session.scalars.call_args[0][0].whereclause
+        rendered = str(where.compile(compile_kwargs={"literal_binds": True}))
+        assert "ontology_snapshot_id" in rendered, (
+            "the lookup ignores the snapshot, so one release loaded against two "
+            "ontologies would collapse into a single set"
+        )
