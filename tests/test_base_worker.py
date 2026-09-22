@@ -1943,8 +1943,91 @@ class TestStaleJobReaperEventGrace:
                 event_grace_seconds=2700,
             ),
         )
-        with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
+        # The broker has to agree that nothing is waiting. "Orphaned in QUEUED"
+        # is a fact about the broker, and since 2026-09-22 the sweep asks it
+        # instead of inferring it from how long the row has sat there.
+        with (
+            patch("protea.workers.stale_job_reaper.publish_job") as mock_publish,
+            patch(
+                "protea.workers.stale_job_reaper.pending_message_count",
+                return_value=0,
+            ),
+        ):
             count = reaper._reap()
 
         assert count == 1
         mock_publish.assert_called_once()
+
+    def test_a_deep_queue_is_not_a_queue_full_of_orphans(self):
+        """Jobs waiting their turn are not republished, however long they wait.
+
+        WHY THIS TEST EXISTS. The sweep called a row orphaned on two pieces of
+        evidence -- QUEUED for longer than queued_stall, and no recent event --
+        and never asked the broker, although its own docstring said "with no
+        live broker message". A job waiting behind a long one satisfies both.
+
+        It cost seventeen loads in a night. Twenty-two GOA releases were queued
+        against a single consumer at prefetch 1, each averaging 1.7 hours;
+        everything behind the head was flagged within ten minutes, republished
+        five times, and then CANCELLED. Nothing was orphaned. The queue was
+        deep, which is what a queue is for.
+        """
+        job = MagicMock(spec=Job)
+        job.id = uuid4()
+        job.status = JobStatus.QUEUED
+        job.operation = "load_goa_annotations"
+        job.created_at = datetime.now(UTC) - timedelta(hours=11)
+        job.queue_name = "protea.jobs"
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.side_effect = [[], [job]]
+        reaper = StaleJobReaper(
+            MagicMock(return_value=session),
+            amqp_url="amqp://test/",
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600, queued_stall_seconds=600, event_grace_seconds=2700
+            ),
+        )
+
+        with (
+            patch("protea.workers.stale_job_reaper.publish_job") as mock_publish,
+            patch(
+                "protea.workers.stale_job_reaper.pending_message_count",
+                return_value=21,
+            ),
+        ):
+            count = reaper._reap()
+
+        assert count == 0, "a job waiting its turn was republished as an orphan"
+        mock_publish.assert_not_called()
+
+    def test_a_broker_that_cannot_be_asked_is_not_a_broker_that_said_zero(self):
+        """None is not zero. Not knowing must not authorise destroying work."""
+        job = MagicMock(spec=Job)
+        job.id = uuid4()
+        job.status = JobStatus.QUEUED
+        job.operation = "load_goa_annotations"
+        job.created_at = datetime.now(UTC) - timedelta(hours=11)
+        job.queue_name = "protea.jobs"
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.side_effect = [[], [job]]
+        reaper = StaleJobReaper(
+            MagicMock(return_value=session),
+            amqp_url="amqp://test/",
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600, queued_stall_seconds=600, event_grace_seconds=2700
+            ),
+        )
+
+        with (
+            patch("protea.workers.stale_job_reaper.publish_job") as mock_publish,
+            patch(
+                "protea.workers.stale_job_reaper.pending_message_count",
+                return_value=None,
+            ),
+        ):
+            count = reaper._reap()
+
+        assert count == 0
+        mock_publish.assert_not_called()
