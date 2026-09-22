@@ -15,6 +15,7 @@ import pytest
 import requests
 
 from protea.core.operations._gaf_header import (
+    HeaderUnreadableError,
     assert_not_newer_than_declared,
     declared_release,
     fetch_header,
@@ -189,9 +190,30 @@ class TestFetchHeader:
         ):
             assert declared_release(fetch_header(_URL[:-3], 30)) is None
 
-    def test_network_failure_reads_as_unverified_not_as_valid(self):
+    def test_network_failure_is_not_read_as_a_file_that_declares_nothing(self):
+        """The intent of the old test, with the mechanism that actually holds it.
+
+        It used to assert ``fetch_header(...) == ""``, which kept a network
+        failure from being mistaken for a VALID header -- but made it
+        indistinguishable from a file that declares no ontology, and that is
+        the confusion that cost twenty releases on 2026-09-21. They failed
+        permanently with "declares no !go-version header" while the headers
+        were there; the archive had refused twenty ranged requests in two
+        minutes. Raising keeps a transport failure from passing as either
+        answer, and lets the caller retry instead of blaming the file.
+        """
         with patch(
             "protea.core.operations._gaf_header.requests.get",
             side_effect=requests.RequestException("boom"),
         ):
-            assert fetch_header(_URL, 30) == ""
+            with pytest.raises(HeaderUnreadableError, match="was never answered"):
+                fetch_header(_URL, 30, attempts=2)
+
+    def test_a_file_that_declares_nothing_is_not_an_unreadable_header(self):
+        """The other half: the two cases must not collapse back into one."""
+        sin_version = b"!gaf-version: 2.2\n!generated-by: UniProt\nUniProtKB\tA0A000\n"
+        with patch(
+            "protea.core.operations._gaf_header.requests.get",
+            return_value=self._response(sin_version),
+        ):
+            assert declared_release(fetch_header(_URL[:-3], 30)) is None

@@ -11,8 +11,14 @@ from pydantic import Field, field_validator
 from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
 
-from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.contracts.operation import (
+    EmitFn,
+    OperationResult,
+    ProteaPayload,
+    RetryLaterError,
+)
 from protea.core.operations._gaf_header import (
+    HeaderUnreadableError,
     assert_not_newer_than_declared,
     declared_release,
     fetch_header,
@@ -181,7 +187,18 @@ class LoadGOAAnnotationsOperation:
         Runs before any row is read or written, so a mismatch costs a few
         kilobytes rather than a full stream. See ``_gaf_header`` for the rule.
         """
-        declared = declared_release(fetch_header(p.gaf_url, p.timeout_seconds))
+        # A transport failure is not a statement about the file. Until
+        # 2026-09-22 both arrived here as an empty header and twenty releases
+        # failed permanently with a message saying they declared no ontology,
+        # when the archive had simply refused twenty ranged requests in two
+        # minutes. RetryLaterError puts it back on the queue, which is what a
+        # transient refusal deserves; a file that genuinely declares nothing
+        # still reaches the refusal below.
+        try:
+            header = fetch_header(p.gaf_url, p.timeout_seconds)
+        except HeaderUnreadableError as exc:
+            raise RetryLaterError(str(exc)) from exc
+        declared = declared_release(header)
         checked = assert_not_newer_than_declared(
             gaf_url=p.gaf_url,
             obo_version=snapshot.obo_version,
