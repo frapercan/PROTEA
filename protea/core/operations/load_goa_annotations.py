@@ -34,6 +34,50 @@ from protea.infrastructure.orm.models.protein.protein import Protein
 
 _AUTO_EVAL_QUEUE = "protea.jobs"
 
+
+def _existing_annotation_set(
+    session: Session, source_version: str, snapshot_id: uuid.UUID
+) -> AnnotationSet | None:
+    """The set a previous attempt at this same load already opened, if any.
+
+    Until 2026-09-22 the load always inserted a new row, so every
+    re-attempt of a partial load created another AnnotationSet for the same
+    release: GOA 184 ended with FOUR, holding 36.076 annotations between
+    them and none of them complete.
+
+    That is not only waste. ``_select_prior_annotation_set`` picks the
+    previous corpus by source_version, so with four candidates for one
+    release the choice stops being defined -- and an ambiguous
+    ``.one_or_none()`` on exactly this shape is how the LB.1 incident of
+    2026-05-12 read from outside.
+
+    The identity is (source, source_version, ontology_snapshot_id). The
+    snapshot belongs in it: loading one release against a DIFFERENT
+    ontology is a different corpus and must stay a different set.
+
+    Reusing it is what makes the operation resumable rather than merely
+    restartable. ``uq_pga_set_protein_term_evidence`` includes
+    annotation_set_id, so writing into the SAME set lets
+    ``on_conflict_do_nothing`` skip what a previous attempt already wrote;
+    a new one re-inserts everything and orphans the old rows under an id
+    nobody will select.
+
+    NOT ENFORCED IN THE SCHEMA, deliberately and for now. A unique
+    constraint on those three columns is the stronger fix and belongs in a
+    migration, but it cannot be applied while GOA 184 still holds its four
+    rows, so the cleanup has to land first. Without it this is racy in
+    principle; in practice protea.jobs runs one consumer at prefetch 1.
+    """
+    return session.scalars(
+        select(AnnotationSet)
+        .where(
+            AnnotationSet.source == "goa",
+            AnnotationSet.source_version == source_version,
+            AnnotationSet.ontology_snapshot_id == snapshot_id,
+        )
+        .order_by(AnnotationSet.created_at)
+    ).first()
+
 PositiveInt = Annotated[int, Field(gt=0)]
 
 
@@ -220,6 +264,20 @@ class LoadGOAAnnotationsOperation:
         snapshot_id: uuid.UUID,
         emit: EmitFn,
     ) -> AnnotationSet:
+        """Return the set this load writes into, reusing one an earlier attempt left.
+
+        A retry must not fork the corpus. See :meth:`_existing_annotation_set`
+        for why the lookup exists and what its key is.
+        """
+        existing = _existing_annotation_set(session, p.source_version, snapshot_id)
+        if existing is not None:
+            emit(
+                "load_goa_annotations.annotation_set_reused",
+                None,
+                {"annotation_set_id": str(existing.id), "source_version": p.source_version},
+                "info",
+            )
+            return existing
         annotation_set = AnnotationSet(
             source="goa",
             source_version=p.source_version,
