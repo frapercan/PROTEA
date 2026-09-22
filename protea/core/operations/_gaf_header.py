@@ -18,6 +18,7 @@ Parsing is separated from HTTP so the rule can be tested without a server.
 from __future__ import annotations
 
 import re
+import time
 import zlib
 from datetime import date
 
@@ -58,27 +59,63 @@ def declared_release(header_text: str) -> date | None:
     return None
 
 
-def fetch_header(gaf_url: str, timeout_seconds: int) -> str:
+class HeaderUnreadableError(Exception):
+    """The header could not be FETCHED. Distinct from a header that says nothing.
+
+    These are two different facts and were one return value until 2026-09-22:
+    ``fetch_header`` answered ``""`` both when the file declared no
+    ``!go-version`` and when the request never arrived. The caller could only
+    see the empty string, so a transport failure was reported as
+    "<url> declares no !go-version header" -- a claim about the FILE that the
+    code had not established.
+
+    It cost twenty releases in one run. Twenty ranged requests to the EBI
+    archive in two minutes were refused, every job read that refusal as an
+    absent header, and every one failed permanently with a message blaming the
+    file. The headers were there: 233 declares 2026-05-31 and 235 declares
+    2026-07-05, both read on the next attempt with a pause between them.
+
+    A transport failure is transient and belongs in a retry; an absent header
+    is a property of the file and belongs in a refusal. Collapsing them turns
+    a network blip into a wrong statement about data.
+    """
+
+
+def fetch_header(gaf_url: str, timeout_seconds: int, *, attempts: int = 3) -> str:
     """Download and decode just the leading header block of a GAF.
 
     Uses a ranged request so a 19 GB file costs a few kilobytes.  A truncated
     gzip stream is expected and not an error: ``decompressobj`` returns what it
-    could inflate and the tail is discarded.  Returns ``""`` when the header
-    cannot be read, which the caller treats as unverified rather than valid.
+    could inflate and the tail is discarded.
+
+    Returns the header text, which may legitimately contain no ``!go-version``.
+    Raises :class:`HeaderUnreadableError` when the header could not be fetched
+    at all, so the caller can tell "the file says nothing" from "nobody asked
+    it". Retries ``attempts`` times with a widening pause, because the failure
+    this guards against is a burst of ranged requests being refused.
     """
-    try:
-        resp = requests.get(
-            gaf_url,
-            headers={"Range": f"bytes=0-{_HEADER_BYTES - 1}"},
-            timeout=timeout_seconds,
-        )
-        resp.raise_for_status()
-        raw = resp.content
-        if gaf_url.endswith(".gz"):
-            raw = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(raw)
-        return raw.decode("utf-8", errors="replace")
-    except (requests.RequestException, zlib.error, ValueError):
-        return ""
+    ultimo: Exception | None = None
+    for intento in range(attempts):
+        try:
+            resp = requests.get(
+                gaf_url,
+                headers={"Range": f"bytes=0-{_HEADER_BYTES - 1}"},
+                timeout=timeout_seconds,
+            )
+            resp.raise_for_status()
+            raw = resp.content
+            if gaf_url.endswith(".gz"):
+                raw = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(raw)
+            return raw.decode("utf-8", errors="replace")
+        except (requests.RequestException, zlib.error, ValueError) as exc:
+            ultimo = exc
+            if intento + 1 < attempts:
+                time.sleep(2.0 * (intento + 1))
+    raise HeaderUnreadableError(
+        f"could not read the header of {gaf_url} after {attempts} attempts: "
+        f"{type(ultimo).__name__}: {ultimo}. This says nothing about whether "
+        "the file declares an ontology; it says the question was never answered."
+    )
 
 
 def assert_not_newer_than_declared(
