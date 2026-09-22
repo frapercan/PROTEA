@@ -62,9 +62,9 @@ from protea.api.routers._graph_edges import (
     strength_of,
 )
 from protea.api.routers._graph_panels import (
-    CrossedFrames,
     PANEL_KEYS,
     CrossedDepthAxes,
+    CrossedFrames,
     build_panels,
     contrast_floors,
     panel_units_from_groundtruth,

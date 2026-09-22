@@ -47,6 +47,7 @@ from __future__ import annotations
 import logging
 import signal
 import time
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -55,7 +56,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
-from protea.infrastructure.queue.publisher import publish_job
+from protea.infrastructure.queue.publisher import pending_message_count, publish_job
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,60 @@ LEASE_EXPIRED_FAILED_EVENT = "job.lease_expired"
 #: (DB row QUEUED but no live broker message, e.g. a delayed-retry message
 #: lost when a worker was killed). Counted to honour ``max_queue_requeues``.
 QUEUE_STALL_REQUEUE_EVENT = "job.queue_stall_requeue"
+
+
+def _by_queue(jobs: list[Job]) -> dict[str, list[Job]]:
+    """Group candidates by the queue they were published to."""
+    agrupado: dict[str, list[Job]] = defaultdict(list)
+    for job in jobs:
+        agrupado[job.queue_name].append(job)
+    return dict(agrupado)
+
+
+def _queue_is_drained(amqp_url: str, queue_name: str, candidates: int) -> bool:
+    """True only when the broker holds NOTHING for this queue.
+
+    "Orphaned in QUEUED" is a fact about the BROKER, and until 2026-09-22 this
+    module asserted it without ever asking one. Its only evidence was a row
+    that had been QUEUED for ``queued_stall`` -- ten seconds short of eleven
+    minutes -- and had emitted no recent event. A job waiting its turn behind a
+    long one satisfies both.
+
+    It cost seventeen loads in a night. Twenty-two GOA releases were queued
+    against a single consumer at prefetch 1, each taking 1.7 hours on average;
+    everything behind the head was flagged within ten minutes, republished five
+    times and then CANCELLED. Nothing was orphaned. The queue was simply deep,
+    which is what a queue is for.
+
+    The check is cheap and exact where it matters: if the broker holds any
+    message for this queue, a QUEUED row may well be one of them and nothing is
+    republished. Only an empty queue proves that a QUEUED row has nothing to
+    pick it up.
+
+    ``None`` -- the broker could not be asked -- returns False, because not
+    knowing is not the same as knowing there is nothing, and the wrong guess
+    here destroys work.
+    """
+    pendientes = pending_message_count(amqp_url, queue_name)
+    if pendientes is None:
+        logger.warning(
+            "Skipping orphaned-QUEUED sweep for %s: the broker could not be asked "
+            "how many messages it holds, and %d candidate(s) cannot be judged without it.",
+            queue_name,
+            candidates,
+        )
+        return False
+    if pendientes > 0:
+        logger.info(
+            "Skipping orphaned-QUEUED sweep for %s: broker holds %d message(s), so the "
+            "%d QUEUED row(s) are waiting, not orphaned.",
+            queue_name,
+            pendientes,
+            candidates,
+        )
+        return False
+    return True
+
 
 
 class StaleJobReaper:
@@ -268,10 +323,14 @@ class StaleJobReaper:
             .filter(Job.status == JobStatus.QUEUED, Job.created_at < queued_cutoff)
             .all()
         )
-        recovered = sum(
-            self._try_republish_orphaned_queued_job(session, job, queued_cutoff, now)
-            for job in candidates
-        )
+        recovered = 0
+        for queue_name, jobs in _by_queue(candidates).items():
+            if not _queue_is_drained(self._amqp_url, queue_name, len(jobs)):
+                continue
+            recovered += sum(
+                self._try_republish_orphaned_queued_job(session, job, queued_cutoff, now)
+                for job in jobs
+            )
         return recovered
 
     def _queued_job_is_alive(
