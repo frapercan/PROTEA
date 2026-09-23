@@ -1146,7 +1146,7 @@ class TestARetryDoesNotForkTheCorpus:
     def test_an_existing_set_for_the_same_release_and_snapshot_is_reused(self):
         from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
 
-        existing = MagicMock(id=uuid.uuid4())
+        existing = MagicMock(id=uuid.uuid4(), job_id=uuid.uuid4(), meta={})
         snapshot_id = uuid.uuid4()
         payload = MagicMock(source_version="184", gaf_url="https://example.test/gaf.gz")
         session, emitted = MagicMock(), []
@@ -1156,7 +1156,7 @@ class TestARetryDoesNotForkTheCorpus:
             return_value=existing,
         ):
             got = LoadGOAAnnotationsOperation()._create_annotation_set(
-                session, payload, snapshot_id, lambda *a, **k: emitted.append(a[0])
+                session, payload, snapshot_id, {}, lambda *a, **k: emitted.append(a[0])
             )
 
         assert got is existing, "a retry forked the corpus instead of resuming it"
@@ -1180,3 +1180,89 @@ class TestARetryDoesNotForkTheCorpus:
             "the lookup ignores the snapshot, so one release loaded against two "
             "ontologies would collapse into a single set"
         )
+
+
+class TestAnAnnotationSetThatNamesNoJobIsUnattributable:
+    """Every GOA corpus in the database should say which job wrote it.
+
+    WHY THIS TEST EXISTS. On 2026-09-23 all 54 goa annotation sets held
+    ``job_id = NULL`` while all 45 evaluation sets held one, because
+    ``generate_evaluation_set`` stamps the column and this load never did. A
+    set with no job names no worker, no revision and -- since PROTEA#963 --
+    no library versions either, so nothing it contains can be attributed.
+
+    WHY A COLUMN IS NOT ENOUGH HERE. Since PROTEA#966 the load resumes into
+    the set an earlier attempt opened, and ``on_conflict_do_nothing`` means
+    the rows under one id can have been written across several jobs. So
+    ``job_id`` names the OPENER and nothing more, and the full chain lives in
+    ``meta["job_ids"]``. The distinction is the point: the opener is routinely
+    the attempt that failed, and reading its status as the set's status would
+    be a new way to be wrong about which release is complete.
+    """
+
+    @staticmethod
+    def _create(raw_payload, existing=None):
+        from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
+
+        parsed = MagicMock(source_version="184", gaf_url="https://example.test/gaf.gz")
+        session, emitted = MagicMock(), []
+        with patch(
+            "protea.core.operations.load_goa_annotations._existing_annotation_set",
+            return_value=existing,
+        ):
+            got = LoadGOAAnnotationsOperation()._create_annotation_set(
+                session,
+                parsed,
+                uuid.uuid4(),
+                raw_payload,
+                lambda *a, **k: emitted.append((a[0], a[2])),
+            )
+        return got, session, emitted
+
+    def test_a_new_set_carries_the_job_that_opened_it(self):
+        job_id = uuid.uuid4()
+
+        got, session, emitted = self._create({"_job_id": str(job_id)})
+
+        assert got.job_id == job_id, "the set does not name the job that created it"
+        assert got.meta["job_ids"] == [str(job_id)], "the opener did not open the chain"
+        created = dict(emitted)["load_goa_annotations.annotation_set_created"]
+        assert created["job_id"] == str(job_id)
+
+    def test_a_retry_is_appended_to_the_chain_and_does_not_reassign_the_column(self):
+        """The second attempt is recorded without rewriting who opened the set."""
+        opener, retry = uuid.uuid4(), uuid.uuid4()
+        existing = MagicMock(id=uuid.uuid4(), job_id=opener, meta={"job_ids": [str(opener)]})
+
+        got, _, emitted = self._create({"_job_id": str(retry)}, existing=existing)
+
+        assert got is existing
+        assert got.job_id == opener, "the retry overwrote the opener on the column"
+        assert got.meta["job_ids"] == [str(opener), str(retry)], (
+            "the retrying job is not recoverable from the set it wrote into"
+        )
+        assert dict(emitted)["load_goa_annotations.annotation_set_reused"]["attempts"] == 2
+
+    def test_the_same_job_retrying_itself_is_not_a_second_attempt(self):
+        """A RetryLaterError re-runs the SAME job, so its id is already last.
+
+        Appending it again would report attempts the load never made, which is
+        the kind of inflated count that later gets read as evidence of trouble.
+        """
+        job_id = uuid.uuid4()
+        existing = MagicMock(id=uuid.uuid4(), job_id=job_id, meta={"job_ids": [str(job_id)]})
+
+        got, _, _ = self._create({"_job_id": str(job_id)}, existing=existing)
+
+        assert got.meta["job_ids"] == [str(job_id)]
+
+    def test_a_dispatch_with_no_job_still_loads(self):
+        """A direct ``op.execute`` in a test carries no ``_job_id``.
+
+        It must leave the column NULL rather than refuse: the operation is
+        callable outside a job, and that path is how most of this file runs.
+        """
+        got, _, _ = self._create({})
+
+        assert got.job_id is None
+        assert got.meta["job_ids"] == []

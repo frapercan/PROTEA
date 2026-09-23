@@ -23,7 +23,7 @@ from protea.core.operations._gaf_header import (
     declared_release,
     fetch_header,
 )
-from protea.core.utils import contract_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -33,6 +33,31 @@ from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.protein.protein import Protein
 
 _AUTO_EVAL_QUEUE = "protea.jobs"
+
+
+def _append_attempt(annotation_set: AnnotationSet, job_id: uuid.UUID | None) -> None:
+    """Record ``job_id`` as the latest attempt to write into ``annotation_set``.
+
+    The chain lives in ``meta`` rather than in a column because a resumable
+    load has no single owning job; see :meth:`LoadGOAAnnotationsOperation.
+    _create_annotation_set` for why ``job_id`` keeps naming only the opener.
+
+    Two details this has to get right. A ``RetryLaterError`` re-runs the SAME
+    job, so the id it carries is often the one already at the end of the chain
+    and appending it again would inflate the attempt count without a second
+    attempt having happened; consecutive duplicates are dropped. And ``meta`` is
+    a plain JSONB dict, which SQLAlchemy does not track in place, so the list is
+    rebuilt and the attribute reassigned or the append never reaches the row.
+    """
+    if job_id is None:
+        return
+    meta = dict(annotation_set.meta or {})
+    chain = list(meta.get("job_ids") or [])
+    if chain and chain[-1] == str(job_id):
+        return
+    chain.append(str(job_id))
+    meta["job_ids"] = chain
+    annotation_set.meta = meta
 
 
 def _existing_annotation_set(
@@ -189,7 +214,7 @@ class LoadGOAAnnotationsOperation:
             return OperationResult(result={"annotations_inserted": 0})
 
         go_term_map = self._load_go_term_map(session, snapshot_id, emit)
-        annotation_set = self._create_annotation_set(session, p, snapshot_id, emit)
+        annotation_set = self._create_annotation_set(session, p, snapshot_id, payload, emit)
         store_ctx = _GoaStoreCtx(
             annotation_set_id=annotation_set.id,
             canonical_accessions=canonical_accessions,
@@ -262,19 +287,42 @@ class LoadGOAAnnotationsOperation:
         session: Session,
         p: LoadGOAAnnotationsPayload,
         snapshot_id: uuid.UUID,
+        payload: dict[str, Any],
         emit: EmitFn,
     ) -> AnnotationSet:
         """Return the set this load writes into, reusing one an earlier attempt left.
 
         A retry must not fork the corpus. See :meth:`_existing_annotation_set`
         for why the lookup exists and what its key is.
+
+        WHO THE ``job_id`` NAMES. The job that OPENED the set, and only that
+        one. Every other operation that persists a row stamps ``job_id`` at
+        creation and is done, because none of them resumes; this one does. Once
+        the lookup above reuses a set, ``on_conflict_do_nothing`` means the rows
+        under a single id can have been written across several attempts, so no
+        single column can name the load that produced them. Reading the STATUS
+        of ``job_id`` as the status of the set is therefore wrong: the opener is
+        routinely the attempt that failed, and a later one finished the work.
+
+        ``meta["job_ids"]`` carries the whole chain, in attempt order, opener
+        first. That is the field to read to ask which jobs wrote here; the last
+        entry is the one that got to the end. Keeping ``job_id`` pointing at the
+        opener keeps the column meaning the same thing it means everywhere else
+        in the schema, instead of a fourth variant nobody can compare against.
         """
+        job_id = job_id_from_payload(payload)
         existing = _existing_annotation_set(session, p.source_version, snapshot_id)
         if existing is not None:
+            _append_attempt(existing, job_id)
             emit(
                 "load_goa_annotations.annotation_set_reused",
                 None,
-                {"annotation_set_id": str(existing.id), "source_version": p.source_version},
+                {
+                    "annotation_set_id": str(existing.id),
+                    "source_version": p.source_version,
+                    "opened_by_job_id": str(existing.job_id) if existing.job_id else None,
+                    "attempts": len((existing.meta or {}).get("job_ids") or []),
+                },
                 "info",
             )
             return existing
@@ -282,14 +330,15 @@ class LoadGOAAnnotationsOperation:
             source="goa",
             source_version=p.source_version,
             ontology_snapshot_id=snapshot_id,
-            meta={"gaf_url": p.gaf_url},
+            job_id=job_id,
+            meta={"gaf_url": p.gaf_url, "job_ids": [str(job_id)] if job_id else []},
         )
         session.add(annotation_set)
         session.flush()
         emit(
             "load_goa_annotations.annotation_set_created",
             None,
-            {"annotation_set_id": str(annotation_set.id)},
+            {"annotation_set_id": str(annotation_set.id), "job_id": str(job_id) if job_id else None},
             "info",
         )
         return annotation_set

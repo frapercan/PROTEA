@@ -16,7 +16,7 @@ from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.utils import contract_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -137,7 +137,7 @@ class LoadQuickGOAnnotationsOperation:
         effective_gp_ids = list(canonical_accessions) if p.use_db_accessions else p.gene_product_ids
         go_term_map = self._load_go_term_map(session, snapshot_id, emit)
         eco_map = self._load_eco_mapping(p, emit)
-        annotation_set = self._create_annotation_set(session, p, snapshot_id, emit)
+        annotation_set = self._create_annotation_set(session, p, snapshot_id, payload, emit)
         store_ctx = _QuickGoStoreCtx(
             annotation_set_id=annotation_set.id,
             protein_accessions=protein_accessions,
@@ -162,20 +162,33 @@ class LoadQuickGOAnnotationsOperation:
         session: Session,
         p: LoadQuickGOAnnotationsPayload,
         snapshot_id: uuid.UUID,
+        payload: dict[str, Any],
         emit: EmitFn,
     ) -> AnnotationSet:
+        """Open the set this load writes into, naming the job that opened it.
+
+        Unlike the GOA load this one does not resume into an existing set, so
+        one job wrote every row under this id and ``job_id`` names it without
+        qualification. ``meta["job_ids"]`` is kept anyway so both sources
+        answer the same question in the same field.
+        """
+        job_id = job_id_from_payload(payload)
         annotation_set = AnnotationSet(
             source="quickgo",
             source_version=p.source_version,
             ontology_snapshot_id=snapshot_id,
-            meta={"quickgo_base_url": p.quickgo_base_url},
+            job_id=job_id,
+            meta={
+                "quickgo_base_url": p.quickgo_base_url,
+                "job_ids": [str(job_id)] if job_id else [],
+            },
         )
         session.add(annotation_set)
         session.flush()
         emit(
             "load_quickgo_annotations.annotation_set_created",
             None,
-            {"annotation_set_id": str(annotation_set.id)},
+            {"annotation_set_id": str(annotation_set.id), "job_id": str(job_id) if job_id else None},
             "info",
         )
         return annotation_set
