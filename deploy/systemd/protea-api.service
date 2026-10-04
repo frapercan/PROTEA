@@ -22,7 +22,14 @@ EnvironmentFile=/home/bioxaxi2/Thesis-laptop/PROTEA/.env
 # `poetry run uvicorn` -- that is exactly why this unit does not call it.
 ExecStart=/home/bioxaxi2/Thesis-laptop/PROTEA/.venv/bin/uvicorn \
     protea.api.app:create_app --factory \
-    --host 0.0.0.0 --port 8000 --root-path /api-proxy
+    --host 127.0.0.1 --port 8000 --root-path /api-proxy
+# --host 127.0.0.1, no 0.0.0.0. Las lecturas de la API no exigen credencial
+# -- GET /v1/jobs devuelve 200 sin clave y sirve el registro de trabajos con
+# sus payloads -- asi que con 0.0.0.0 cualquier red a la que se conecte el
+# portatil lo lee. La superficie publica no se pierde: ngrok tuneliza el
+# FRONTEND en el 3000, y el frontend reescribe /v1/ hacia la API por
+# localhost, asi que protea.ngrok.app sigue funcionando igual. El nodo de
+# computo llega por el reenvio de deploy/tailnet-expose.sh.
 
 Restart=on-failure
 RestartSec=5
