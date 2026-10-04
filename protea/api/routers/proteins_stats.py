@@ -25,7 +25,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import distinct, func
+from sqlalchemy import Integer, case, cast, distinct, func, literal
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached, invalidate
@@ -286,6 +286,64 @@ def _histogram_bins(session: Session, pmin: int, pmax: int) -> list[dict[str, An
 # ── GO term density per protein per aspect ───────────────────────────────────
 
 
+def _ultimo_set_goa(session: Session):
+    """El annotation_set de GOA mas reciente, por numero de release.
+
+    NO por ``created_at``. La campana de 2026-09 cargo las releases
+    desordenadas -- la 184 buena entro el dia 22 y la 185 el dia 18, entre
+    otras cinco inversiones -- asi que la fecha de creacion de la fila no
+    ordena las releases. El numero si, y el cast va guardado por el regex
+    porque ``source_version`` es texto y otras fuentes no lo usan numerico.
+    """
+    orden = case(
+        (AnnotationSet.source_version.op("~")(r"^[0-9]+$"), cast(AnnotationSet.source_version, Integer)),
+        else_=literal(-1),
+    )
+    return (
+        session.query(AnnotationSet)
+        .filter(AnnotationSet.source == "goa")
+        .order_by(orden.desc())
+        .first()
+    )
+
+
+def _terminos_por_proteina(session: Session, set_id):
+    """Subconsulta: terminos DISTINTOS por (aspecto, proteina) en UN set.
+
+    Las dos palabras en mayuscula son las dos correcciones.
+
+    UN SET. Antes esta consulta no filtraba por annotation_set, asi que
+    agregaba las 71 releases del corpus GOA a la vez y el recuento de una
+    proteina era la suma de sus terminos en todas las releases en que aparece.
+    El panel informaba 193,68 terminos de CCO por proteina cuando el valor de
+    una release es 2,27 -- factor 85 -- y un maximo de 7.228 frente a 61.
+    Ninguna proteina tiene 280 terminos de funcion molecular: el numero no
+    tenia lectura biologica.
+
+    Y peor que el factor: los percentiles mezclaban DOS cantidades -- cuantos
+    terminos tiene una proteina y cuantas releases ha sobrevivido -- asi que la
+    forma de la distribucion tampoco significaba nada.
+
+    DISTINTOS. El count no lo era, de modo que un par (proteina, termino) con
+    tres codigos de evidencia contaba tres veces. Eso solo ya infla un 34%
+    dentro de una sola release: 3,04 frente a 2,27 en CCO.
+
+    ``_compute_go_matrix``, en este mismo fichero, ya une AnnotationSet y
+    agrupa por source y source_version. Esto sigue ese patron.
+    """
+    return (
+        session.query(
+            GOTerm.aspect.label("aspect"),
+            ProteinGOAnnotation.protein_accession.label("acc"),
+            func.count(distinct(ProteinGOAnnotation.go_term_id)).label("n"),
+        )
+        .join(GOTerm, ProteinGOAnnotation.go_term_id == GOTerm.id)
+        .filter(ProteinGOAnnotation.annotation_set_id == set_id)
+        .group_by(GOTerm.aspect, ProteinGOAnnotation.protein_accession)
+        .subquery()
+    )
+
+
 def _compute_go_density(factory: sessionmaker[Session]) -> dict[str, Any]:
     """Per-aspect average + p50 / p90 of (#go_terms per protein).
 
@@ -295,16 +353,10 @@ def _compute_go_density(factory: sessionmaker[Session]) -> dict[str, Any]:
     """
     aspect_map = {"F": "MFO", "P": "BPO", "C": "CCO"}
     with session_scope(factory) as session:
-        sub = (
-            session.query(
-                GOTerm.aspect.label("aspect"),
-                ProteinGOAnnotation.protein_accession.label("acc"),
-                func.count(ProteinGOAnnotation.go_term_id).label("n"),
-            )
-            .join(GOTerm, ProteinGOAnnotation.go_term_id == GOTerm.id)
-            .group_by(GOTerm.aspect, ProteinGOAnnotation.protein_accession)
-            .subquery()
-        )
+        ultimo = _ultimo_set_goa(session)
+        if ultimo is None:
+            return {"items": [], "source": None, "source_version": None}
+        sub = _terminos_por_proteina(session, ultimo.id)
         rows = (
             session.query(
                 sub.c.aspect,
@@ -328,7 +380,11 @@ def _compute_go_density(factory: sessionmaker[Session]) -> dict[str, Any]:
             }
             for asp, pc, avg, p50, p90, mx in rows
         ]
-        return {"items": items}
+        return {
+            "items": items,
+            "source": ultimo.source,
+            "source_version": ultimo.source_version,
+        }
 
 
 # ── Pipeline activity ────────────────────────────────────────────────────────
