@@ -115,33 +115,42 @@ exactly, ``param_count`` and ``created_at`` included.
 application's, pins the roster to ``apps/lafa_knn_8plm`` ``PLM_SPECS``, and runs
 upgrade, downgrade and the guard against a live Postgres.
 
-**3. The stage-1 population is fixed and published by sha.** It is the
-experimental bank at the VALID cutoff together with the VALID deltas:
+**3. Stage 1 embeds the whole store once, and the donor bank is an axis.**
 
-- bank: proteins with a non-``NOT`` annotation in GOA 220 (``ba9f57f7``) whose
-  evidence code is in ``protea.core.evaluation._EXP_CODES`` (13 GO codes plus
-  their 13 ECO equivalents). That is 85,989 proteins and 84,702 sequences.
-- deltas: VALID-A ``fd0314d8`` (each side under its native DAG, the declared
-  frame) and VALID-B ``43b6b9e7`` (both sides under the t0 pivot, the
-  robustness check).
-- union: **88,404 accessions, 87,081 unique sequences**, against 528,545 in
-  the whole store. The canonical list (``sort -u`` in C locale, one accession
-  per line, trailing newline) has sha256
-  ``696496893bdc1450d9dd052026aec20b36ffcbe6b4762f57d584a4d9de375a39``. The
-  same sha comes out with the 13 GO codes alone, because GOA 220 carries no
-  annotation in ECO form.
-- It travels as a ``QuerySet``, never as ``accessions``. An ``IN`` list binds
-  one parameter per accession, and Postgres caps a statement at 65,535, so an
-  ``accessions`` payload of this size is accepted, queued and then fails at
-  execution. Without either field, ``compute_embeddings`` embeds the entire
-  ``sequence`` table.
-- The FASTA is written by ``export_evaluation_targets.format_fasta`` (WRAP 60,
-  canonical residues, bare-accession headers), so its bytes are those of the
-  evaluation targets by construction. FASTA sha256
-  ``3e5c3e7db61b246f28f2f303020cd39584a8fa15779ad1fcdbc9bdf083e7b2f7``.
-- ``predict_go_terms`` for stage 1 sets ``donor_policy.evidence_codes`` to
-  ``_EXP_CODES``. Donors carrying a ``NOT`` qualifier are already excluded by
-  the loaders.
+- Population: every row of ``sequence``, 528,545 unique sequences behind
+  617,103 proteins on 2026-10-05. It is dispatched with neither
+  ``query_set_id`` nor ``accessions``, which is the code path that selects every
+  sequence. It is written here as the decision so that it is not read as the
+  defect it would be anywhere else. At dispatch, the count and the sha256 of the
+  sorted sequence hashes are recorded, and a pass is closed only when its
+  coverage equals that set.
+- Why the whole store: embeddings are keyed by ``(sequence, config)`` and
+  ``compute_embeddings`` skips what already exists, so one pass serves VALID,
+  TEST, the TRAIN windows and SF-JEPA. A narrower population now would be a
+  second pass later. It is also a superset of both donor banks below, so the
+  bank question costs no embedding.
+- A narrower population, when one is needed, travels as a ``QuerySet``, never
+  as ``accessions``. An ``IN`` list binds one parameter per accession and
+  Postgres caps a statement at 65,535, so a large ``accessions`` payload is
+  accepted, queued and then fails at execution.
+- **Donor bank, an axis with two levels**, applied in the ``predict_go_terms``
+  payload. No extra embedding is needed:
+
+  - *permissive*: every annotation in GOA 220 (``ba9f57f7``), 556,468 proteins
+    and 471,238 sequences, with ``donor_policy`` unset;
+  - *experimental*: evidence in ``protea.core.evaluation._EXP_CODES`` (13 GO
+    codes plus their 13 ECO equivalents), 85,989 proteins and 84,702 sequences,
+    with ``donor_policy.evidence_codes`` set to ``_EXP_CODES``.
+
+  Donors carrying a ``NOT`` qualifier are excluded by the loaders in both.
+- **Prior, declared as a prior and not as a measurement.** The previous
+  campaign is remembered as favouring the permissive bank in every panel its
+  note lists, most strongly in NK. Its rows were destroyed on 2026-09-14, and the note
+  carrying the figures is undated, so it is not citable here. The mechanism is
+  plausible: restricting to experimental evidence keeps about one donor in six,
+  and the ones it keeps are well-studied proteins, so the nearest donor sits farther away
+  and transfers more terms. Stage 1 measures it, and its ``evaluation_result``
+  ids become the citable source.
 
 **4. The software regime of the compute node is part of the result.** It moves
 stored coordinates without moving any id. ``protea-node-sync`` governs only the
@@ -175,24 +184,35 @@ numeric path by hand and records it:
 
 **5. The selection rule is fixed before anything is measured.**
 
-- Metric: KNN-only ``f_micro_w`` on VALID-A (``fd0314d8``), repeated on VALID-B.
-- Estimand: the flat mean of the nine category by aspect cells. That is how LAFA
-  reports, and it keeps NK, the frontier of the project, from being outvoted by
-  PK, which holds 79.9% of the VALID-A proteins.
-- Uncertainty: a paired bootstrap stratified by cell, resampling proteins
-  within each cell (``compare_paired_panels`` machinery). No sigma constant
-  from outside the record is used.
-- Equivalence: a PLM is equivalent to the best when the lower bound of the 95%
-  interval of its difference exceeds -0.02. The 0.02 is a **practical margin**
-  (``_TARGET_EFFECT`` in ``_graph_panels.py``), not a derived quantity.
-  Projected from configuration-class sigmas, the minimum detectable effect of
-  the flat mean is about 0.0045, and about 0.0136 at three times those sigmas.
-  The variance of the aggregate is dominated by the small MFO cells (LK.MFO
-  and NK.MFO, about 58%), so all nine per-cell intervals are published with
-  it.
-- **heavy** = the highest ``f_micro_w``. **fast** = the cheapest model (GPU
-  hours per pass, then dimensions) that is equivalent to the best; if that is
-  the heavy one, the next model on the cost frontier.
+The rule has two steps, read in order.
+
+- **Step 1, bank.** Metric, estimand and uncertainty as in step 2. For each
+  PLM, take the paired difference permissive minus experimental, then its mean
+  over the eight PLMs. The experimental bank is chosen only if the 95% interval
+  of that mean lies entirely below -0.02, that is, only if it is better by more
+  than the margin. Otherwise the permissive bank, the prior, is kept. All
+  sixteen PLM by bank cells are published, so an interaction is visible rather
+  than averaged away.
+- **Step 2, PLM**, within the bank chosen in step 1:
+
+  - Metric: KNN-only ``f_micro_w`` on VALID-A (``fd0314d8``), repeated on VALID-B.
+  - Estimand: the flat mean of the nine category by aspect cells. That is how LAFA
+    reports, and it keeps NK, the frontier of the project, from being outvoted by
+    PK, which holds 79.9% of the VALID-A proteins.
+  - Uncertainty: a paired bootstrap stratified by cell, resampling proteins
+    within each cell (``compare_paired_panels`` machinery). No sigma constant
+    from outside the record is used.
+  - Equivalence: a PLM is equivalent to the best when the lower bound of the 95%
+    interval of its difference exceeds -0.02. The 0.02 is a **practical margin**
+    (``_TARGET_EFFECT`` in ``_graph_panels.py``), not a derived quantity.
+    Projected from configuration-class sigmas, the minimum detectable effect of
+    the flat mean is about 0.0045, and about 0.0136 at three times those sigmas.
+    The variance of the aggregate is dominated by the small MFO cells (LK.MFO
+    and NK.MFO, about 58%), so all nine per-cell intervals are published with
+    it.
+  - **heavy** = the highest ``f_micro_w``. **fast** = the cheapest model (GPU
+    hours per pass, then dimensions) that is equivalent to the best; if that is
+    the heavy one, the next model on the cost frontier.
 
 Consequences
 ~~~~~~~~~~~~
@@ -201,7 +221,8 @@ Consequences
   table are not revived: their recipes differed (ESM at 1024 tokens, an
   un-normalised ankh-base, a chunked esm2_3b). ADR-D35 keeps the roster; this
   record replaces the ids.
-- Stage 1 costs about 87k forward passes per PLM, not 528k.
+- Stage 1 costs 528,545 forward passes per PLM, once. Later windows and SF-JEPA
+  reuse them, and the bank axis adds prediction sets, not embeddings.
 - Every stage-1 number is read in one software regime, and that regime is
   written down where both machines read it.
 
@@ -217,8 +238,8 @@ What this record does not settle
   a duplicate in ``build_go_cooccurrence`` and a 6-code set in
   ``proteins_stats``.
 - ``query_set`` carries no content hash, so a QuerySet is referable but not
-  verifiable from inside the system. The shas above make it checkable from
-  outside.
+  verifiable from inside the system. Any narrower population used later needs
+  its sha recorded outside, as section 3 does for the whole store.
 
 References
 ~~~~~~~~~~
