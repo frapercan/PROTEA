@@ -48,6 +48,9 @@ from protea_contracts import (
 from pydantic import BaseModel, ValidationError
 
 from protea.core.operation_catalog import build_operation_registry
+from protea.core.operations.analyze_annotation_evolution import (
+    AnalyzeAnnotationEvolutionPayload,
+)
 from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderPayload
 from protea.core.operations.archive_ontology_snapshot import (
     ArchiveOntologySnapshotPayload,
@@ -436,6 +439,16 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ApplyLearnedEncoderPayload,
         {"encoder_artifact_path": "/tmp/enc.pt"},
         ("source_embedding_config_id",),
+    ),
+    # bad-type: source tiene que ser una cadena no vacia. Un source vacio
+    # seleccionaria cero releases y la operacion se negaria mas tarde con un
+    # mensaje sobre "al menos dos releases", que nombra el sintoma y no la
+    # causa.
+    (
+        "analyze_annotation_evolution",
+        AnalyzeAnnotationEvolutionPayload,
+        {"source": "   "},
+        ("source",),
     ),
     # bad-vocabulary: evidence_regime must name a known regime. Falling back to
     # a default here would silently widen the IA corpus (ADR-D46).

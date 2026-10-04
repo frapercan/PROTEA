@@ -113,6 +113,25 @@ class AnalyzeAnnotationEvolutionOperation:
             rels = [r for r in rels if r <= p.to_release]
         return rels
 
+    # ------------------------------------------------------------- resumen
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        """Una linea que nombra el recorrido, no solo la operacion.
+
+        El rango va primero porque es lo que distingue dos ejecuciones que por
+        lo demas son identicas: la misma operacion sobre 160..235 y sobre
+        220..227 mide cosas distintas, y un historial que omitiera el rango
+        haria parecer que el mismo trabajo se corrio dos veces.
+        """
+        p = payload or {}
+        desde = p.get("from_release")
+        hasta = p.get("to_release")
+        tramo = f"{desde or 'inicio'}..{hasta or 'fin'}"
+        bits = [f"source={p.get('source') or 'goa'}", f"releases={tramo}"]
+        fuera = list(RELEASES_DUPLICADAS) + list(p.get("skip_releases") or ())
+        if fuera:
+            bits.append("excluidas=" + ",".join(str(x) for x in fuera))
+        return " · ".join(bits)
+
     # ---------------------------------------------------------------- carga
     def _cargar(self, session: Session, p, rel: int, tabla: str) -> None:
         """Los pares experimentales positivos de una release, propagados."""
