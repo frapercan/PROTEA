@@ -378,3 +378,50 @@ class TestPrewarmAll:
 # Silence pyflakes unused-import warnings for symbols only referenced in
 # the body of test classes via patch() string literals.
 _ = (time,)
+
+
+class TestLaDensidadDescribeUnaReleaseYNoLaSuma:
+    """La densidad de terminos por proteina es de UN corpus, no de 71.
+
+    POR QUE ESTE TEST EXISTE. `_compute_go_density` no filtraba por
+    annotation_set, asi que agregaba las 71 releases de GOA a la vez: el
+    recuento de una proteina era la suma de sus terminos en todas las releases
+    en que aparece. Medido el 2026-10-04 con el corpus cargado, el endpoint
+    informaba 193,68 terminos de CCO por proteina cuando el valor de una
+    release es 2,27 -- factor 85 -- con un maximo de 7.228 frente a 61.
+
+    Y el dano no era solo la escala. Los percentiles mezclaban cuantos terminos
+    tiene una proteina con cuantas releases ha sobrevivido, asi que la forma de
+    la distribucion tampoco tenia lectura. El test mira el SQL porque el valor
+    no se puede comprobar sin una base cargada, y lo que hay que fijar es que
+    la consulta ACOTE y DEDUPLIQUE.
+    """
+
+    @staticmethod
+    def _sql():
+        from uuid import uuid4
+
+        from sqlalchemy.orm import Session
+
+        from protea.api.routers.proteins_stats import _terminos_por_proteina
+
+        sub = _terminos_por_proteina(Session(), uuid4())
+        return str(sub.original.compile(compile_kwargs={"literal_binds": True}))
+
+    def test_acota_a_un_annotation_set(self):
+        sql = self._sql()
+        assert "annotation_set_id" in sql, (
+            "la subconsulta no filtra por annotation_set: vuelve a sumar todas "
+            "las releases del corpus"
+        )
+
+    def test_cuenta_terminos_distintos(self):
+        sql = self._sql()
+        assert "count(DISTINCT" in sql, (
+            "el count no es DISTINCT: un par (proteina, termino) con tres "
+            "codigos de evidencia cuenta tres veces"
+        )
+
+    def test_agrupa_por_aspecto_y_proteina(self):
+        sql = self._sql().lower()
+        assert "group by" in sql and "aspect" in sql and "protein_accession" in sql
