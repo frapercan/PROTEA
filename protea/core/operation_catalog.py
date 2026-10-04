@@ -9,6 +9,9 @@ metadata looks like.
 from __future__ import annotations
 
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.operations.analyze_annotation_evolution import (
+    AnalyzeAnnotationEvolutionOperation,
+)
 from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderOperation
 from protea.core.operations.archive_ontology_snapshot import (
     ArchiveOntologySnapshotOperation,
@@ -116,6 +119,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(PredictGOTermsFromInterProOperation())
     registry.register(RefreshGoaReleaseDatesOperation())
     registry.register(BuildGoCooccurrenceOperation())
+    registry.register(AnalyzeAnnotationEvolutionOperation())
     registry.register(ComputeInformationAccretionOperation())
     registry.register(ArchiveOntologySnapshotOperation())
     registry.register(CountBackendParametersOperation())
