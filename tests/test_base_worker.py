@@ -2031,3 +2031,105 @@ class TestStaleJobReaperEventGrace:
 
         assert count == 0
         mock_publish.assert_not_called()
+
+
+class TestAPoisonedSessionDoesNotSwallowTheRealError:
+    """A failure during flush must not erase the reason for the failure.
+
+    WHY THIS TEST EXISTS. An exception raised inside ``flush`` leaves
+    SQLAlchemy refusing every further statement on that session until it is
+    rolled back. Both failure handlers start by touching the session --
+    ``_on_operation_failure`` calls ``_rebind_job``, which queries, and
+    ``_on_retry_later`` counts prior retry events -- so on a poisoned session
+    they raised ``PendingRollbackError`` before writing anything.
+
+    The damage was not the second exception but that it REPLACED the first.
+    The GOA campaign's 214->215 evaluation failed on 2026-09-22 with "This
+    Session's transaction has been rolled back due to a previous exception
+    during flush", which names the machinery and not the cause, and whatever
+    actually broke was never recorded. The retryable branch already rolled
+    back; the other two did not.
+
+    THE SESSION HAS TO GET POISONED WHERE IT REALLY DOES. It is clean when the
+    worker fetches the Job, and only the operation's own failed flush poisons
+    it. A double that refuses from the start would blow up on that first fetch
+    and never reach the branch under test -- which is how the first version of
+    this test fooled itself.
+    """
+
+    @staticmethod
+    def _sesion_y_operacion(job, exc):
+        """A session that the operation poisons on its way out.
+
+        Returns the session and an ``execute`` that raises ``exc`` after
+        flipping the session into the refusing state, which is the order
+        SQLAlchemy produces: the flush fails, then the exception propagates.
+        """
+        from sqlalchemy.exc import PendingRollbackError
+
+        s = MagicMock()
+        envenenada = [False]
+        orden = []
+
+        def _refuse(*_a, **_k):
+            if envenenada[0]:
+                raise PendingRollbackError(
+                    "This Session's transaction has been rolled back due to a "
+                    "previous exception during flush."
+                )
+            orden.append("consulta")
+            return job
+
+        def _rollback():
+            orden.append("rollback")
+            envenenada[0] = False
+
+        s.get.side_effect = _refuse
+        s.query.side_effect = _refuse
+        s.rollback.side_effect = _rollback
+
+        def _execute(*_a, **_k):
+            envenenada[0] = True
+            raise exc
+
+        return s, _execute, orden
+
+    def test_the_job_records_the_operation_error_and_not_the_rollback_one(self):
+        job = _make_job()
+        real = ValueError("lo que de verdad rompio")
+        sesion, ejecutar, orden = self._sesion_y_operacion(job, real)
+        factory = MagicMock(return_value=sesion)
+        registry, op = _make_registry()
+        op.execute.side_effect = ejecutar
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+
+        with pytest.raises(ValueError, match="lo que de verdad rompio"):
+            worker.handle_job(job.id)
+
+        assert "rollback" in orden, (
+            "no se limpio la sesion antes de grabar el fallo, asi que el "
+            "handler vuelve a chocar con ella"
+        )
+        assert job.error_code == "ValueError", (
+            f"el job guardo {job.error_code!r}; si es PendingRollbackError, el "
+            "error real se perdio"
+        )
+        assert "lo que de verdad rompio" in str(job.error_message)
+
+    def test_the_rollback_comes_before_the_handler_queries(self):
+        """Orden y no solo presencia: limpiar primero, consultar despues."""
+        job = _make_job()
+        sesion, ejecutar, orden = self._sesion_y_operacion(job, ValueError("boom"))
+        factory = MagicMock(return_value=sesion)
+        registry, op = _make_registry()
+        op.execute.side_effect = ejecutar
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+
+        with pytest.raises(ValueError):
+            worker.handle_job(job.id)
+
+        despues = orden[orden.index("rollback") + 1 :]
+        assert "consulta" in despues, (
+            f"orden observado {orden}: tras el rollback el handler tiene que "
+            "poder consultar; si no consulta, no grabo nada"
+        )
