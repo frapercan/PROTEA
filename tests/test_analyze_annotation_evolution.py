@@ -115,3 +115,72 @@ class TestLaClaveDelArtefactoLlevaElJob:
             "sin el job en la clave, dos ejecuciones se pisan el artefacto y "
             "ninguna cifra queda atribuible"
         )
+
+
+class TestElDetalleEsLoQueDeVerdadSeQuiere:
+    """Una fila por (transicion, proteina, aspecto, termino, evento).
+
+    Los agregados por aspecto dicen cuanto se movio; esto dice QUE se movio y
+    A QUIEN, que es el material sobre el que se puede trabajar despues. Son
+    5.148.173 filas sobre las 69 transiciones, con mediana de 54.350 por
+    transicion y un maximo de 375.372.
+    """
+
+    @staticmethod
+    def _sql():
+        s = MagicMock()
+        AnalyzeAnnotationEvolutionOperation._detalle(s, "viejo", "nuevo", 219, 220)
+        return str(s.execute.call_args[0][0])
+
+    def test_emite_los_cuatro_eventos(self):
+        sql = self._sql()
+        for ev in ("'nk'", "'pk'", "'lk'", "'quitado'"):
+            assert ev in sql, f"el detalle no clasifica {ev}"
+
+    def test_nk_se_decide_antes_de_mirar_el_aspecto(self):
+        """Igual que en los agregados: NK es global, no por aspecto."""
+        sql = self._sql()
+        i_nk = sql.index("then 'nk'")
+        i_pk = sql.index("then 'pk'")
+        assert i_nk < i_pk, (
+            "la rama de aspecto se evalua antes que la de proteina nueva, asi "
+            "que una proteina NK se clasificaria como LK o PK"
+        )
+
+    def test_no_acumula_en_memoria(self):
+        """yield_per, porque la transicion mayor aporta 375.372 filas.
+
+        Acumularlas para escribirlas luego es el patron que ya tumbo al worker
+        una vez: una sola estructura que crece con el corpus.
+        """
+        s = MagicMock()
+        AnalyzeAnnotationEvolutionOperation._detalle(s, "viejo", "nuevo", 219, 220)
+        assert s.execute.return_value.yield_per.called, (
+            "el detalle se materializa entero en lugar de recorrerse"
+        )
+
+
+class TestElArtefactoHasheaLoQueEscribe:
+    """El sha se calcula en el mismo recorrido que la escritura.
+
+    Hacerlo leyendo el fichero despues abre un hueco entre lo que se subio y
+    lo que se midio. Un artefacto cuyo sha no describe sus bytes no sirve para
+    comparar dos lecturas.
+    """
+
+    def test_el_sha_corresponde_al_contenido_y_cuenta_las_filas(self, tmp_path):
+        import hashlib
+
+        from protea.core.operations.analyze_annotation_evolution import _Artefacto
+
+        a = _Artefacto(tmp_path, "x.tsv", "a\tb")
+        a.anade([(1, 2), (3, 4)])
+        a.anade([(5, 6)])
+        esperado = hashlib.sha256(b"a\tb\n1\t2\n3\t4\n5\t6\n").hexdigest()
+        # cierra() sube el fichero; se comprueba el hash y el contador sin subir
+        assert a.filas == 3
+        a._fh.close()
+        assert a.ruta.read_text() == "a\tb\n1\t2\n3\t4\n5\t6\n"
+        assert a._h.hexdigest() == esperado, (
+            "el sha no describe los bytes escritos"
+        )

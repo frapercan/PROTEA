@@ -78,6 +78,41 @@ class AnalyzeAnnotationEvolutionPayload(ProteaPayload, frozen=True):
         return v.strip()
 
 
+
+class _Artefacto:
+    """Un TSV que se escribe en streaming y se hashea de paso.
+
+    No se acumula en memoria porque el detalle son 5.148.173 filas y la
+    transicion mayor aporta 375.372: una lista que crece con el corpus es el
+    patron que ya tumbo al worker una vez. El sha se calcula sobre lo que se
+    escribe, en el mismo recorrido, de modo que no hay una segunda lectura que
+    pudiera ver otra cosa.
+    """
+
+    def __init__(self, directorio: Path, nombre: str, cabecera: str) -> None:
+        self.nombre = nombre
+        self.ruta = directorio / nombre
+        self._h = hashlib.sha256()
+        self._fh = self.ruta.open("w", encoding="utf-8")
+        self.filas = 0
+        self._escribe(cabecera + "\n")
+
+    def _escribe(self, texto: str) -> None:
+        self._fh.write(texto)
+        self._h.update(texto.encode())
+
+    def anade(self, filas) -> None:
+        for f in filas:
+            self._escribe("\t".join(str(c) for c in f) + "\n")
+            self.filas += 1
+
+    def cierra(self, job_id: Any) -> dict[str, Any]:
+        self._fh.close()
+        store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
+        uri = store.put(evolution_key_for(job_id, self.nombre), self.ruta)
+        return {"uri": uri, "sha256": self._h.hexdigest(), "filas": self.filas}
+
+
 class AnalyzeAnnotationEvolutionOperation:
     name = "analyze_annotation_evolution"
     description = (
@@ -241,24 +276,47 @@ class AnalyzeAnnotationEvolutionOperation:
         ).fetchall()
         return [(ra, rb, a, e, int(p), int(t)) for a, e, p, t in filas]
 
-    # -------------------------------------------------------------- publicar
+    # -------------------------------------------------------------- detalle
     @staticmethod
-    def _publicar(job_id: Any, nombre: str, cabecera: str, filas: list[tuple]) -> tuple[str, str]:
-        """Escribe un TSV, lo sube, y devuelve (uri, sha256).
+    def _detalle(session: Session, viejo: str, nuevo: str, ra: int, rb: int):
+        """Una fila por (transicion, proteina, aspecto, termino, evento).
 
-        El sha va en el resultado del job porque un artefacto que nadie puede
-        verificar no es evidencia: sin el, dos lecturas del mismo uri no son
-        comparables si el almacen cambia por debajo.
+        Esto es el material de verdad: los agregados por aspecto dicen cuanto
+        se movio, y esto dice QUE se movio y A QUIEN. Son 5.148.173 filas sobre
+        las 69 transiciones, mediana de 54.350 por transicion.
+
+        Se devuelve como cursor y no como lista porque la transicion mayor
+        aporta 375.372 filas y acumularlas todas en memoria para escribirlas
+        luego es exactamente el patron que reventaba al worker: una sola
+        estructura que crece con el corpus.
+
+        Los cuatro eventos son los de ``_classify_protein_deltas``, y el orden
+        de las ramas importa igual que alli: NK se decide antes de repartir por
+        aspecto, porque es una propiedad global de la proteina.
         """
-        store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
-        cuerpo = cabecera + "\n" + "\n".join("\t".join(str(c) for c in f) for f in filas) + "\n"
-        digest = hashlib.sha256(cuerpo.encode()).hexdigest()
-        with tempfile.TemporaryDirectory(prefix="protea_evol_") as tmp:
-            local = Path(tmp) / nombre
-            local.write_text(cuerpo, encoding="utf-8")
-            uri = store.put(evolution_key_for(job_id, nombre), local)
-        return uri, digest
+        return session.execute(
+            text(
+                "with nueva_prot as ("
+                f"  select distinct n.prot from {nuevo} n "
+                f"  where not exists (select 1 from {viejo} v where v.prot = n.prot)) "
+                f"select {ra}, {rb}, n.prot, n.asp, n.go_id, "
+                "       case when s.prot is not null then 'nk' "
+                f"            when exists (select 1 from {viejo} v "
+                "                 where v.prot = n.prot and v.asp = n.asp) then 'pk' "
+                "            else 'lk' end as evento "
+                f"from {nuevo} n "
+                "left join nueva_prot s on s.prot = n.prot "
+                f"where not exists (select 1 from {viejo} v "
+                "                    where v.prot = n.prot and v.go_id = n.go_id) "
+                "union all "
+                f"select {ra}, {rb}, v.prot, v.asp, v.go_id, 'quitado' "
+                f"from {viejo} v "
+                f"where not exists (select 1 from {nuevo} n "
+                "                    where n.prot = v.prot and n.go_id = v.go_id)"
+            )
+        ).yield_per(50_000)
 
+    # -------------------------------------------------------------- publicar
     # --------------------------------------------------------------- execute
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -282,48 +340,41 @@ class AnalyzeAnnotationEvolutionOperation:
             },
             "info",
         )
-        comp: list[tuple] = []
-        est: list[tuple] = []
-        ant = nant = None
-        for i, rel in enumerate(rels):
-            act = "ev_b" if ant in (None, "ev_a") else "ev_a"
-            self._cargar(session, p, rel, act)
-            comp.extend(self._composicion(session, act, rel))
-            if ant is not None:
-                est.extend(self._estratos(session, ant, act, nant, rel))
-                session.execute(text(f"drop table if exists {ant}"))
-            emit(
-                "analyze_annotation_evolution.release_done",
-                None,
-                {"release": rel, "indice": i, "de": len(rels)},
-                "info",
-            )
-            ant, nant = act, rel
-        session.execute(text(f"drop table if exists {ant}"))
-        return self._resultado(payload, comp, est, rels, emit)
-
-    def _resultado(self, payload, comp, est, rels, emit: EmitFn) -> OperationResult:
-        """Sube los dos artefactos y resume lo medido."""
         job_id = payload.get("_job_id", "sin-job")
-        uri_c, sha_c = self._publicar(
-            job_id, "composicion.tsv", "release\taspecto\tpares\tproteinas\tterminos", comp
-        )
-        uri_e, sha_e = self._publicar(
-            job_id, "estratos.tsv", "de\ta\taspecto\testrato\tproteinas\tterminos", est
-        )
-        por_estrato: dict[str, int] = {}
-        for _de, _a, _asp, estrato, _pr, terms in est:
-            por_estrato[estrato] = por_estrato.get(estrato, 0) + terms
-        res = {
-            "releases": len(rels),
-            "primera": rels[0],
-            "ultima": rels[-1],
-            "transiciones": len(rels) - 1,
-            "composicion_uri": uri_c,
-            "composicion_sha256": sha_c,
-            "estratos_uri": uri_e,
-            "estratos_sha256": sha_e,
-            "terminos_por_estrato": por_estrato,
-        }
+        with tempfile.TemporaryDirectory(prefix="protea_evol_") as tmp:
+            d = Path(tmp)
+            arts = {
+                "composicion": _Artefacto(
+                    d, "composicion.tsv", "release\taspecto\tpares\tproteinas\tterminos"
+                ),
+                "estratos": _Artefacto(
+                    d, "estratos.tsv", "de\ta\taspecto\testrato\tproteinas\tterminos"
+                ),
+                "detalle": _Artefacto(
+                    d, "detalle.tsv", "de\ta\tproteina\taspecto\ttermino\tevento"
+                ),
+            }
+            ant = nant = None
+            for i, rel in enumerate(rels):
+                act = "ev_b" if ant in (None, "ev_a") else "ev_a"
+                self._cargar(session, p, rel, act)
+                arts["composicion"].anade(self._composicion(session, act, rel))
+                if ant is not None:
+                    arts["estratos"].anade(self._estratos(session, ant, act, nant, rel))
+                    arts["detalle"].anade(self._detalle(session, ant, act, nant, rel))
+                    session.execute(text(f"drop table if exists {ant}"))
+                emit(
+                    "analyze_annotation_evolution.release_done",
+                    None,
+                    {"release": rel, "indice": i, "de": len(rels),
+                     "detalle_filas": arts["detalle"].filas},
+                    "info",
+                )
+                ant, nant = act, rel
+            session.execute(text(f"drop table if exists {ant}"))
+            res = {a: art.cierra(job_id) for a, art in arts.items()}
+        res.update({"releases": len(rels), "primera": rels[0], "ultima": rels[-1],
+                    "transiciones": len(rels) - 1})
         emit("analyze_annotation_evolution.done", None, res, "info")
         return OperationResult(result=res)
+
