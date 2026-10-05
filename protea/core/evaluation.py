@@ -45,6 +45,8 @@ from typing import NamedTuple
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core._binding_rule import PROTEIN_BINDING, drop_binding_only_mfo
+
 # Re-exported so callers keep importing these from here. The routing branch
 # lives in its own module to keep this file inside the section 3 file-LOC
 # budget and to give the defect it closes room to be explained.
@@ -54,7 +56,6 @@ from protea.core._evaluation_snapshot_routing import (
 from protea.core._evaluation_snapshot_routing import (
     compute_evaluation_data_for_sets as compute_evaluation_data_for_sets,
 )
-from protea.core._binding_rule import PROTEIN_BINDING, drop_binding_only_mfo
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
 
 # Parquet column for the bucket each (protein, go_id) row belongs to.
