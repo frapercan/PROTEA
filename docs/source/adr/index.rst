@@ -338,3 +338,4 @@ later revision) or *Superseded* (a named later decision replaces it).
    D45-jsonb-blob-feature-governance
    D46-information-accretion-as-tracked-artifact
    D47-archive-the-obo-behind-every-snapshot
+   D48-stage1-standard-embedding-configs

@@ -1,7 +1,7 @@
 ADR-D35: Canonical 8-PLM embedding config IDs and orphan classification
 ========================================================================
 
-:Status: Accepted
+:Status: Accepted; the config ids are superseded by ADR-D48 (the roster stands)
 :Date: 2026-05-18
 
 Context
