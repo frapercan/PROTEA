@@ -459,7 +459,11 @@ class TestLoadAccessions:
         self.op._load_accessions(session, emit)
         done = [e for e in events if e["event"] == "load_goa_annotations.load_accessions_done"]
         assert len(done) == 1
-        assert done[0]["fields"]["canonical_accessions"] == 3
+        # Named ``accessions``, not ``canonical_accessions``: the gate reads
+        # ``protein.accession``, which is the column the foreign key names. The old
+        # field name was part of what made the mismatch read as intentional.
+        assert done[0]["fields"]["accessions"] == 3
+        assert "canonical_accessions" not in done[0]["fields"]
 
 
 # ---------------------------------------------------------------------------

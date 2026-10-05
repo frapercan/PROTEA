@@ -131,3 +131,50 @@ class TestElIndiceEsSobreCoalesce:
         assert len(del_modelo) == 6
         for campo in ("annotation_set_id", "protein_accession", "go_term_id"):
             assert campo in " ".join(del_modelo) and campo in mig._COLS, campo
+
+
+class TestTheGateMatchesTheForeignKey:
+    """``_load_accessions`` builds the set that decides which GAF rows may be
+    stored. The constraint that actually governs storage is
+    ``protein_go_annotation.protein_accession`` referencing ``protein.accession``.
+
+    Until 2026-10-05 the gate read ``canonical_accession``. The two coincide only
+    on canonical rows, so every row whose accession differs from its canonical was
+    refused by the gate although the foreign key would have taken it: isoforms, and
+    the merge aliases PROTEA#980 had just been built to admit. Nothing failed -- the
+    rows landed in ``skipped``, which also counts accessions genuinely outside the
+    corpus, so the number looked ordinary.
+    """
+
+    def test_the_gate_selects_accession_not_canonical_accession(self):
+        import inspect
+
+        from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
+
+        src = inspect.getsource(LoadGOAAnnotationsOperation._load_accessions)
+        assert "select(Protein.accession)" in src
+        assert "distinct(Protein.canonical_accession)" not in src, (
+            "the gate must name the column the foreign key names"
+        )
+
+    def test_the_context_field_is_not_called_canonical(self):
+        """The field was named ``canonical_accessions``, which is what made the
+        defect read as intentional for weeks."""
+        from protea.core.operations.load_goa_annotations import _GoaStoreCtx
+
+        assert "admissible_accessions" in _GoaStoreCtx._fields
+        assert "canonical_accessions" not in _GoaStoreCtx._fields
+
+    def test_an_alias_row_would_now_be_admitted(self):
+        """The end-to-end property: a GAF naming a merged secondary accession must
+        pass the gate when that accession exists in ``protein`` as an alias."""
+        from unittest.mock import MagicMock
+
+        from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
+
+        session = MagicMock()
+        # P30456 exists as an alias row; its canonical_accession is P04439.
+        session.scalars.return_value = ["P04439", "P30456", "P12345-2"]
+        got = LoadGOAAnnotationsOperation()._load_accessions(session, MagicMock())
+        assert "P30456" in got, "the merge alias has to be admissible"
+        assert "P12345-2" in got, "so does an isoform row"
