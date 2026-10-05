@@ -117,8 +117,10 @@ upgrade, downgrade and the guard against a live Postgres.
 
 **3. Stage 1 embeds the whole store once, and the donor bank is an axis.**
 
-- Population: every row of ``sequence``, 528,545 unique sequences behind
-  617,103 proteins on 2026-10-05. It is dispatched with neither
+- Population: every row of ``sequence`` at dispatch. The store is being
+  rebuilt to a GAF-derived universe (see below), so the count is recorded at
+  dispatch rather than here. Before the rebuild it held 528,545 unique
+  sequences behind 617,103 proteins. The pass is dispatched with neither
   ``query_set_id`` nor ``accessions``, which is the code path that selects every
   sequence. It is written here as the decision so that it is not read as the
   defect it would be anywhere else. At dispatch, the count and the sha256 of the
@@ -136,11 +138,14 @@ upgrade, downgrade and the guard against a live Postgres.
 - **Donor bank, an axis with two levels**, applied in the ``predict_go_terms``
   payload. No extra embedding is needed:
 
-  - *permissive*: every annotation in GOA 220 (``ba9f57f7``), 556,468 proteins
-    and 471,238 sequences, with ``donor_policy`` unset;
+  - *permissive*: every annotation in the cutoff release (GOA 220 for VALID),
+    with ``donor_policy`` unset;
   - *experimental*: evidence in ``protea.core.evaluation._EXP_CODES`` (13 GO
-    codes plus their 13 ECO equivalents), 85,989 proteins and 84,702 sequences,
-    with ``donor_policy.evidence_codes`` set to ``_EXP_CODES``.
+    codes plus their 13 ECO equivalents), with ``donor_policy.evidence_codes``
+    set to ``_EXP_CODES``.
+
+  On the pre-rebuild store the two banks at GOA 220 were 556,468 and 85,989
+  proteins. Their sizes on the rebuilt store are recorded with the run.
 
   Donors carrying a ``NOT`` qualifier are excluded by the loaders in both.
 - **Prior, declared as a prior and not as a measurement.** The previous
@@ -195,7 +200,10 @@ The rule has two steps, read in order.
   than averaged away.
 - **Step 2, PLM**, within the bank chosen in step 1:
 
-  - Metric: KNN-only ``f_micro_w`` on VALID-A (``fd0314d8``), repeated on VALID-B.
+  - Metric: KNN-only ``f_micro_w`` on VALID-A (220 -> 227, each side under its
+    native DAG, the declared frame), repeated on VALID-B (both sides under the
+    t0 pivot). Both are rebuilt after the binding rule of PROTEA#976 and the
+    universe rebuild, and their ids are recorded with the run.
   - Estimand: the flat mean of the nine category by aspect cells. That is how LAFA
     reports, and it keeps NK, the frontier of the project, from being outvoted by
     PK, which holds 79.9% of the VALID-A proteins.
@@ -221,14 +229,28 @@ Consequences
   table are not revived: their recipes differed (ESM at 1024 tokens, an
   un-normalised ankh-base, a chunked esm2_3b). ADR-D35 keeps the roster; this
   record replaces the ids.
-- Stage 1 costs 528,545 forward passes per PLM, once. Later windows and SF-JEPA
-  reuse them, and the bank axis adds prediction sets, not embeddings.
+- Stage 1 costs one forward pass per sequence of the rebuilt store and PLM,
+  once. Later windows and SF-JEPA reuse them, and the bank axis adds prediction
+  sets, not embeddings.
 - Every stage-1 number is read in one software regime, and that regime is
   written down where both machines read it.
 
 What this record does not settle
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+- The store it runs on. On 2026-10-05 the protein universe is being rebuilt
+  from the GAF history rather than from a present-day UniProt query: the
+  proteins with evidence in the 13 LAFA-regime codes in any release, any
+  taxonomy, isoforms kept. A present-day query would bias the historical
+  windows, because a protein that had evidence in 2018 and lost it would not
+  appear. The GAFs are reloaded after the universe, because the foreign key
+  silently drops every accession not in ``protein``. Every count in this
+  record that predates the rebuild is labelled as such.
+- The MFO ground truth. PROTEA#976 drops MFO from proteins whose direct F
+  annotations are all ``GO:0005515`` (protein binding) or its descendants,
+  which is about 31% of the proteins with any MFO in GOA 220. The VALID
+  evaluation sets are rebuilt after it, and three of the nine cells the
+  selection rule averages are MFO.
 - PLM-independent neighbourhood strata. The neighbourhood axes of
   ``protea.core.strata`` are read from each run's own retrieval, so a protein
   can fall in different strata under different PLMs. Their donor evidence is
@@ -247,6 +269,7 @@ References
 - Migration ``alembic/versions/3cd5f76d282f_stage1_standard_configs_replace_rung1.py``
 - ``tests/test_stage1_standard_configs.py``
 - ADR-D35 (roster), ADR-D40 (temporal protocol), ADR-D46 (IA as a corpus
-  artifact; the VALID IA is ``4346e676``)
+  artifact; the VALID IA is recomputed on the rebuilt corpus and recorded with
+  the run)
 - ``agent-farm/plans/DECLARED-REVISION.txt`` and
   ``agent-farm/scripts/services/protea-node-sync.sh``

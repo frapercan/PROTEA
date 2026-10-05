@@ -134,24 +134,65 @@ class TestTheGuardCoversEveryForeignKey:
 
 
 @pytest.fixture()
-def _alembic_config(postgres_url: str, monkeypatch: pytest.MonkeyPatch):
-    """Alembic pointed at the temporary Postgres, through the env knob env.py honours."""
+def _fresh_database(postgres_url: str):
+    """A database of its own, created empty and dropped afterwards.
+
+    The session database is shared: other integration tests reset it with
+    ``Base.metadata.drop_all()/create_all()`` and can leave ``alembic_version``
+    stamped at head over a schema that no longer matches it. ``upgrade head``
+    is then a no-op over missing tables. This test is about the migration chain
+    itself, so it builds that chain from an empty database it owns.
+    """
+    import uuid
+
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
+
+    base = make_url(postgres_url)
+    name = f"stage1_d48_{uuid.uuid4().hex[:12]}"
+    admin = create_engine(base.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as conn:
+        conn.execute(text(f'CREATE DATABASE "{name}"'))
+    url = base.set(database=name)
+    setup = create_engine(url)
+    with setup.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    setup.dispose()
+    try:
+        yield url.render_as_string(hide_password=False)
+    finally:
+        with admin.connect() as conn:
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+                    " WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": name},
+            )
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        admin.dispose()
+
+
+@pytest.fixture()
+def _alembic_config(_fresh_database: str, monkeypatch: pytest.MonkeyPatch):
+    """Alembic pointed at the fresh database, through the env knob env.py honours."""
     from alembic.config import Config
 
-    monkeypatch.setenv("PROTEA_DB_URL", postgres_url)
+    monkeypatch.setenv("PROTEA_DB_URL", _fresh_database)
     cfg = Config(str(_REPO_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_REPO_ROOT / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", postgres_url)
+    cfg.set_main_option("sqlalchemy.url", _fresh_database)
     return cfg
 
 
 def test_it_replaces_restores_and_refuses_against_postgres(
-    _alembic_config, postgres_url: str, migration
+    _alembic_config, _fresh_database: str, migration
 ) -> None:
     """Upgrade seeds the eight, downgrade restores the rung-1 rows exactly, and a
     dependent row turns the upgrade into a refusal instead of a cascade.
 
-    Skipped without ``--with-postgres``. Leaves the database at head.
+    Runs the whole chain from an empty database. Skipped without
+    ``--with-postgres``.
     """
     import uuid
 
@@ -161,7 +202,7 @@ def test_it_replaces_restores_and_refuses_against_postgres(
 
     new_ids = {row[0] for row in migration.NEW}
     old_ids = {row[0] for row in migration.OLD}
-    engine = create_engine(postgres_url)
+    engine = create_engine(_fresh_database)
 
     def present() -> set[str]:
         with engine.connect() as conn:
