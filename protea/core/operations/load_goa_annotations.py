@@ -8,7 +8,7 @@ from typing import Annotated, Any, NamedTuple
 
 from protea_contracts import GoaAnnotationRecord, GoaStreamPayload
 from pydantic import Field, field_validator
-from sqlalchemy import distinct, select
+from sqlalchemy import distinct, select, text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import (
@@ -104,6 +104,53 @@ def _existing_annotation_set(
     ).first()
 
 PositiveInt = Annotated[int, Field(gt=0)]
+
+
+#: Los ``index_elements`` de ``uq_pga_annotation_identity``, que es un indice
+#: unico sobre ``coalesce(col, '')`` y no una ``UniqueConstraint``.
+#:
+#: En Postgres ``NULL`` nunca entra en conflicto con ``NULL``, y el qualifier esta
+#: vacio en el 99,5% de las filas fiables de GOA 156. Una restriccion que
+#: incluyera ``qualifier`` dejaria de deduplicar justo ahi, y cada reintento de
+#: una carga interrumpida duplicaria el corpus en silencio -- comprobado contra
+#: Postgres. Sobre ``coalesce`` si deduplica, asi que la resumibilidad de la que
+#: depende esta operacion se conserva junto con la polaridad.
+#:
+#: HAY DOS CAPAS DE DEDUPLICADO Y TIENEN QUE DECIR LO MISMO. Esta, y el
+#: ``dedup_key`` de ``_store_buffer``, que filtra dentro del buffer antes de que
+#: la base opine. Si solo se ensancha una, la otra sigue colapsando y el cambio
+#: parece hecho sin estarlo -- la salida seguiria siendo correcta, solo
+#: incompleta, asi que nada mas lo notaria. ``None`` y ``""`` tienen que ser la
+#: misma cosa en las dos, porque en el indice lo son.
+#: ``tests/test_annotation_identity.py`` fija que coincidan, y una mutacion que
+#: quite un campo de cualquiera de las dos lo tumba.
+def _identity_key(
+    annotation_set_id: uuid.UUID, accession: str, go_term_id: int, rec: GoaAnnotationRecord
+) -> tuple[Any, ...]:
+    """La identidad de una anotacion, en la capa del buffer.
+
+    Es la segunda mitad de ``_IDENTITY_ELEMENTS``: los mismos seis campos con
+    ``None`` normalizado a ``""``, porque el indice los compara con ``coalesce``.
+    Existe como funcion para que las dos capas puedan apuntar a un solo sitio.
+    """
+    return (
+        annotation_set_id,
+        accession,
+        go_term_id,
+        rec.evidence_code or "",
+        rec.qualifier or "",
+        rec.db_reference or "",
+    )
+
+
+_IDENTITY_ELEMENTS = (
+    text("annotation_set_id"),
+    text("protein_accession"),
+    text("go_term_id"),
+    text("coalesce(evidence_code, '')"),
+    text("coalesce(qualifier, '')"),
+    text("coalesce(db_reference, '')"),
+)
 
 
 class _GoaStoreCtx(NamedTuple):
@@ -602,7 +649,7 @@ class LoadGOAAnnotationsOperation:
                 continue
 
             evidence_code = rec.evidence_code
-            dedup_key = (annotation_set_id, accession, go_term_id, evidence_code)
+            dedup_key = _identity_key(annotation_set_id, accession, go_term_id, rec)
             if dedup_key in seen:
                 skipped += 1
                 continue
@@ -629,7 +676,7 @@ class LoadGOAAnnotationsOperation:
             for i in range(0, len(to_add), chunk_size):
                 chunk = to_add[i : i + chunk_size]
                 stmt = pg_insert(ProteinGOAnnotation.__table__).values(chunk)
-                stmt = stmt.on_conflict_do_nothing(constraint="uq_pga_set_protein_term_evidence")
+                stmt = stmt.on_conflict_do_nothing(index_elements=_IDENTITY_ELEMENTS)
                 session.execute(stmt)
 
         return len(to_add), skipped
