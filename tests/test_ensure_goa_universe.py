@@ -38,6 +38,15 @@ _COLS = [
 ]
 
 
+def _con(cols, accession, code, qualifier=""):
+    """Una fila a partir de una plantilla de columnas ya modificada."""
+    out = list(cols)
+    out[1] = accession
+    out[3] = qualifier
+    out[_GAF_EVIDENCE] = code
+    return out
+
+
 def _line(accession, code, qualifier=""):
     cols = list(_COLS)
     cols[1] = accession
@@ -196,3 +205,167 @@ class TestPayload:
             out = op.execute(MagicMock(), delivered, emit=MagicMock())
         assert out.result["rows_scanned"] == 7
         assert out.result["dry_run"] is True
+
+
+class TestElTipoDelObjeto:
+    """El GAF dice en la columna 11 si la fila es una proteina, un complejo o un
+    RNA. Hasta ahora los no-proteina se caian por la regex de formato de accesion,
+    que acierta al 100% en GOA 156 (0 de 1.032 identificadores de IntAct y
+    RNAcentral la pasan) pero es acierto por accidente: un espacio de nombres
+    nuevo con ids que casaran el patron de UniProt entraria sin aviso. Y la serie
+    ya renombro uno a mitad, IntAct a ComplexPortal en la release 171."""
+
+    def test_un_complejo_no_entra(self):
+        cols = list(_COLS)
+        cols[11] = "complex"
+        wanted, _, rows = _scan(["\t".join(_con(cols, accession="P12345", code="IPI"))])
+        assert wanted == set()
+        assert rows == 1, "se ha visto, no se ha ignorado"
+
+    def test_un_rna_no_entra(self):
+        cols = list(_COLS)
+        cols[11] = "rna"
+        wanted, _, _ = _scan(["\t".join(_con(cols, accession="P12345", code="IDA"))])
+        assert wanted == set()
+
+    def test_una_proteina_si(self):
+        wanted, _, _ = _scan([_line("P12345", "IDA")])
+        assert wanted == {"P12345"}
+
+    def test_un_tipo_DESCONOCIDO_entra_y_se_cuenta(self):
+        """Deliberado: dejar fuera a una proteina de verdad es peor que dejar
+        entrar a un tipo nuevo, porque al tipo nuevo lo frena ademas la regex y
+        aparece en el histograma del resultado. Aceptar solo 'protein' convertiria
+        cualquier vocabulario nuevo de GOA en una perdida silenciosa."""
+        cols = list(_COLS)
+        cols[11] = "algo_que_goa_invente_en_2030"
+        op = EnsureGoaUniverseOperation()
+        p = EnsureGoaUniversePayload(gaf_url="http://x/g.gz")
+        text = "\t".join(_con(cols, accession="P12345", code="IDA"))
+
+        def fake_stream(_p, _emit, accept):
+            return parse_gaf_text(text, accept)
+
+        with patch.object(EnsureGoaUniverseOperation, "_stream_gaf", side_effect=fake_stream):
+            wanted, _, _ = op._reliable_accessions(p, MagicMock())
+        assert wanted == {"P12345"}, "un tipo desconocido no se descarta"
+        assert "algo_que_goa_invente_en_2030" in op._tipos_fiables, "y queda contado"
+
+
+class TestLasSecundarias:
+    """``/uniprotkb/accessions`` casa SOLO primarias: una accesion fusionada no se
+    devuelve, y UniProt la cuenta igual en X-Total-Results, asi que la respuesta
+    dice "7 resultados" con el cuerpo vacio. Sobre GOA 156 eso son 10.791
+    accesiones de las que el 18,2% son fusiones recuperables."""
+
+    _ENTRY = {
+        "primaryAccession": "P04439",
+        "secondaryAccessions": ["P30456", "P01892"],
+        "entryType": "UniProtKB reviewed (Swiss-Prot)",
+        "sequence": {"value": "MAVMAPRTLLLLLSG"},
+        "organism": {"scientificName": "Homo sapiens", "taxonId": 9606},
+        "genes": [{"geneName": {"value": "HLA-A"}}],
+    }
+
+    def _resolver(self, pedidas):
+        op = EnsureGoaUniverseOperation()
+        p = EnsureGoaUniversePayload(gaf_url="http://x/g.gz")
+        guardadas = []
+
+        def fake_store(_self, _session, records, _emit):
+            guardadas.extend(records)
+            return len(records), 0, 1, 0
+
+        from protea.core.operations.insert_proteins import InsertProteinsOperation
+
+        with (
+            patch.object(
+                EnsureGoaUniverseOperation, "_search_secondary", return_value={"results": [self._ENTRY]}
+            ),
+            patch.object(InsertProteinsOperation, "_store_records", fake_store),
+        ):
+            alias, _prot, _seq = op._resolve_secondary(MagicMock(), pedidas, p, MagicMock())
+        return alias, guardadas
+
+    def test_resuelve_la_secundaria_a_su_primaria(self):
+        alias, _ = self._resolver(["P30456"])
+        assert alias == {"P30456": "P04439"}
+
+    def test_guarda_la_primaria_Y_el_alias(self):
+        """Las dos filas hacen falta: la primaria es la proteina, y el alias es lo
+        que satisface la clave ajena cuando la fase 2 cargue la anotacion de 2016,
+        que viene con la accesion vieja."""
+        _, guardadas = self._resolver(["P30456"])
+        por_acc = {r.accession: r for r in guardadas}
+        assert set(por_acc) == {"P04439", "P30456"}
+        assert por_acc["P04439"].is_canonical is True
+        assert por_acc["P30456"].is_canonical is False
+        assert por_acc["P30456"].canonical_accession == "P04439"
+
+    def test_el_alias_no_es_una_isoforma(self):
+        """``isoform_index`` es lo que separa los dos casos: entero para una
+        isoforma, None para un alias de fusion. Sin eso, cualquier recuento de
+        isoformas por ``NOT is_canonical`` contaria fusiones."""
+        _, guardadas = self._resolver(["P30456"])
+        assert all(r.isoform_index is None for r in guardadas)
+
+    def test_las_dos_filas_comparten_la_secuencia(self):
+        """Mismo hash, asi que ``_store_records`` inserta UNA fila de sequence. Y
+        los embeddings se indexan por Sequence, no por Protein, de modo que esto
+        no mete un vecino duplicado en el banco KNN."""
+        _, guardadas = self._resolver(["P30456"])
+        assert len({r.sequence_hash for r in guardadas}) == 1
+        assert len({r.sequence for r in guardadas}) == 1
+
+    def test_solo_las_secundarias_pedidas_generan_alias(self):
+        """La entrada trae dos secundarias y solo se pidio una. Crear la otra
+        inventaria una proteina que ningun GAF anoto."""
+        alias, guardadas = self._resolver(["P30456"])
+        assert "P01892" not in alias
+        assert "P01892" not in {r.accession for r in guardadas}
+
+
+class TestLoQueNoSeResuelveQuedaConNombre:
+    """``not_retrievable: 10.791`` era un numero sin nombres: proteinas con
+    evidencia experimental curada que no entran al corpus y que no se podian
+    citar. Un numero no se audita; una lista si."""
+
+    def _guardar(self, alias, sin_resolver, job_id="11111111-2222-3333-4444-555555555555"):
+        op = EnsureGoaUniverseOperation()
+        puestos = {}
+
+        class _Store:
+            def put(self, key, path):
+                puestos[key] = open(path, encoding="utf-8").read()
+                return f"s3://artifacts/{key}"
+
+        with (
+            patch("protea.infrastructure.storage.get_artifact_store", return_value=_Store()),
+            patch("protea.infrastructure.settings.load_settings", return_value=MagicMock()),
+        ):
+            out = op._guardar_artefactos(job_id, alias, sin_resolver)
+        return out, puestos
+
+    def test_la_lista_de_no_resueltas_se_persiste(self):
+        out, puestos = self._guardar({}, ["Q11111", "Q22222"])
+        assert out["sin_resolver"]["filas"] == 2
+        clave = next(k for k in puestos if k.endswith("sin_resolver.txt"))
+        assert puestos[clave].split() == ["Q11111", "Q22222"]
+
+    def test_el_mapa_de_fusiones_se_persiste_con_las_dos_columnas(self):
+        """Sin el mapa no se puede canonicalizar despues, y canonicalizar es lo
+        que une la historia de una proteina que cambio de accesion a mitad de la
+        serie."""
+        out, puestos = self._guardar({"P30456": "P04439"}, [])
+        assert out["fusiones"]["filas"] == 1
+        clave = next(k for k in puestos if k.endswith("fusiones.tsv"))
+        filas = [l.split("\t") for l in puestos[clave].strip().split("\n")]
+        assert filas[0] == ["accesion_gaf", "accesion_primaria"]
+        assert filas[1] == ["P30456", "P04439"]
+
+    def test_sin_job_id_no_escribe_nada(self):
+        """El dry run y los tests llaman sin job: no hay donde colgar el
+        artefacto, y no es un error."""
+        out, puestos = self._guardar({"A": "B"}, ["C"], job_id=None)
+        assert out == {}
+        assert puestos == {}
