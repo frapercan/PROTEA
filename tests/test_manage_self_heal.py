@@ -145,3 +145,31 @@ def test_heal_leaves_live_worker_untouched(tmp_path: Path) -> None:
     finally:
         sleeper.terminate()
         sleeper.wait()
+
+
+def test_the_api_is_never_launched_on_every_interface() -> None:
+    """``manage.sh`` is what actually starts the API on the server.
+
+    PROTEA#974 closed the data ports and moved the API to loopback, but it did
+    so in ``deploy/systemd/protea-api.service`` and ``docker-compose.yml``. No
+    systemd unit is installed on the server -- the API runs from this script --
+    so both of its uvicorn launch sites kept ``--host 0.0.0.0`` and the next
+    ``start`` or probe-driven restart would have reopened port 8000 to whatever
+    network the laptop was on. The hardening measured clean only because nothing
+    had restarted the API since.
+
+    Reachability from the tailnet is ``deploy/tailnet-expose.sh``'s job, which
+    forwards explicitly. Binding wide is not a substitute for it.
+
+    The frontend on 3000 stays on ``0.0.0.0`` on purpose: it is the public demo
+    surface behind the ngrok tunnel.
+    """
+    launches = [
+        line.strip()
+        for line in MANAGE_SH.read_text().splitlines()
+        if "--port 8000" in line
+    ]
+    assert launches, "no API launch found; this guard has stopped guarding"
+    for line in launches:
+        assert "--host 127.0.0.1" in line, line
+        assert "0.0.0.0" not in line, line
