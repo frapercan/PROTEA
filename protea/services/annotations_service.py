@@ -205,7 +205,8 @@ def delete_annotation_set_data(
 ) -> dict[str, Any]:
     """Delete an annotation set and all its annotations.
 
-    Returns the deletion summary dict.
+    Returns the deletion summary dict, which carries ``source`` so the router
+    can invalidate the per-source list cache without a second query.
 
     Raises:
 
@@ -221,6 +222,9 @@ def delete_annotation_set_data(
         .filter(ProteinGOAnnotation.annotation_set_id == set_id)
         .scalar()
     )
+    # Read before the delete: the router needs it to invalidate the per-source
+    # list cache, and after the flush the instance is gone.
+    source = a.source
     try:
         session.delete(a)
         session.flush()
@@ -229,7 +233,11 @@ def delete_annotation_set_data(
             "This annotation set is referenced by one or more prediction "
             "sets. Delete those first."
         ) from exc
-    return {"deleted": str(set_id), "annotations_deleted": annotation_count or 0}
+    return {
+        "deleted": str(set_id),
+        "source": source,
+        "annotations_deleted": annotation_count or 0,
+    }
 
 
 def iter_groundtruth_tsv(

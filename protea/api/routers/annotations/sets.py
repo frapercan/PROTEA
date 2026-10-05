@@ -104,13 +104,32 @@ def delete_annotation_set(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Delete an annotation set and all its annotations. Returns 409 if referenced by a prediction set."""
+    # EL DOCSTRING DE UNA RUTA ES DOCUMENTACION PUBLICA: FastAPI lo publica como
+    # `description` del endpoint en docs/openapi.json, y el guardia de deriva
+    # compara ese fichero con el codigo. Asi que el razonamiento va aqui.
+    #
+    # La invalidacion de abajo es la razon de que esto no sea una sola linea.
+    # `GET /sets` esta cacheado cinco minutos porque su GROUP BY sobre
+    # protein_go_annotation tarda seis segundos, y nada soltaba esa entrada al
+    # borrar: medido el 2026-10-05, tras borrar los 71 conjuntos heredados la base
+    # contestaba 0 y la lista seguia contestando 71. Y la lectura usa
+    # `serve_stale_on_error=True`, asi que un tropiezo de la base dentro de la
+    # ventana alarga la respuesta vieja en vez de terminarla.
+    #
+    # Se sueltan las DOS claves, la sin filtrar y la del `source` del conjunto
+    # borrado, porque se cachean por separado.
     try:
         with session_scope(factory) as session:
-            return delete_annotation_set_data(session, set_id)
+            result = delete_annotation_set_data(session, set_id)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except AnnotationSetReferencedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # After the session closes, so the commit is already durable when the next
+    # reader recomputes.
+    invalidate(_annotation_sets_cache_key(None))
+    invalidate(_annotation_sets_cache_key(result["source"]))
+    return result
 
 
 @router.post(
