@@ -79,6 +79,7 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
 )
+from protea.core.operations.ensure_goa_universe import EnsureGoaUniversePayload
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsPayload,
 )
@@ -449,6 +450,16 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         AnalyzeAnnotationEvolutionPayload,
         {"source": "   "},
         ("source",),
+    ),
+    # blank-url: a whitespace gaf_url would reach the GOA plugin, which would
+    # build a request against nothing and fail with an HTTP error naming an empty
+    # host -- a symptom three layers from the cause. The universe pass is the
+    # first thing a release runs, so a bad url here must be refused at the door.
+    (
+        "ensure_goa_universe",
+        EnsureGoaUniversePayload,
+        {"gaf_url": "   "},
+        ("gaf_url",),
     ),
     # bad-vocabulary: evidence_regime must name a known regime. Falling back to
     # a default here would silently widen the IA corpus (ADR-D46).

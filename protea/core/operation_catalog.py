@@ -44,6 +44,7 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchOperation,
     EncodeResidueSparseOperation,
 )
+from protea.core.operations.ensure_goa_universe import EnsureGoaUniverseOperation
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsOperation,
 )
@@ -103,6 +104,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(FetchUniProtMetadataOperation())
     registry.register(LoadOntologySnapshotOperation())
     registry.register(LoadQuickGOAnnotationsOperation())
+    registry.register(EnsureGoaUniverseOperation())
     registry.register(LoadGOAAnnotationsOperation())
     registry.register(LoadInterProGoMappingOperation())
     registry.register(RunInterProScanBatchOperation())
