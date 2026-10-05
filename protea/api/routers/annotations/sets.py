@@ -103,14 +103,31 @@ def delete_annotation_set(
     set_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
-    """Delete an annotation set and all its annotations. Returns 409 if referenced by a prediction set."""
+    """Delete an annotation set and all its annotations. Returns 409 if referenced by a prediction set.
+
+    Invalidates the list cache, which is the whole reason this is not a
+    one-liner. ``GET /sets`` is cached for five minutes because its GROUP BY
+    over ``protein_go_annotation`` takes six seconds, and nothing used to drop
+    that entry on a delete: measured 2026-10-05, after deleting all 71 sets the
+    database answered 0 and the list kept answering 71. Worse, the cache is read
+    with ``serve_stale_on_error=True``, so a database blip during the window
+    extends the lie instead of ending it.
+
+    Both the unfiltered view and the deleted set's own ``source`` view are
+    dropped, because they are cached independently.
+    """
     try:
         with session_scope(factory) as session:
-            return delete_annotation_set_data(session, set_id)
+            result = delete_annotation_set_data(session, set_id)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except AnnotationSetReferencedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # After the session closes, so the commit is already durable when the next
+    # reader recomputes.
+    invalidate(_annotation_sets_cache_key(None))
+    invalidate(_annotation_sets_cache_key(result["source"]))
+    return result
 
 
 @router.post(
