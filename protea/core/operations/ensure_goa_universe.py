@@ -36,44 +36,43 @@ any annotation is stored, so each release loads against the final universe. It
 also restores the parallelism: embeddings can start once phase 1 closes, instead
 of waiting behind the loads.
 
-LAS ACCESIONES SECUNDARIAS, Y POR QUE NO BASTA PEDIRLAS. ``GET
-/uniprotkb/accessions`` casa SOLO accesiones primarias. Una accesion fusionada en
-otra entrada --una *secundaria*-- no se devuelve, y UniProt la cuenta de todas
-formas en ``X-Total-Results``, asi que la respuesta dice "7 resultados" con el
-cuerpo vacio y un 200. Medido el 2026-10-05 con siete accesiones, en fasta (0
-bytes) y en JSON (``{"results":[]}``). La consulta por entrada SI sigue la fusion
-y redirige, de modo que la misma accesion parece viva por un camino y borrada por
-el otro:
+SECONDARY ACCESSIONS, AND WHY ASKING FOR THEM IS NOT ENOUGH. ``GET
+/uniprotkb/accessions`` matches PRIMARY accessions only. An accession merged into
+another entry -- a *secondary* -- is not returned, and UniProt counts it in
+``X-Total-Results`` regardless, so the response reports "7 results" with an empty
+body and a 200. Measured 2026-10-05 over seven accessions, in FASTA (0 bytes) and
+in JSON (``{"results":[]}``). The single-entry route DOES follow the merge and
+redirects, so the same accession looks alive one way and deleted the other:
 
-    P30456  ->  secundaria de P04439 (HLA-A, que tiene 135 secundarias)
-    Q9NPA5  ->  secundaria de Q9NTW7
-    E1BZ05  ->  secundaria de P02542
+    P30456  ->  secondary of P04439 (HLA-A, which carries 135 secondaries)
+    Q9NPA5  ->  secondary of Q9NTW7
+    E1BZ05  ->  secondary of P02542
 
-CUANTO. Sobre GOA 156, de 10.791 accesiones fiables que el endpoint de lote no
-devolvio, una muestra sistematica de 600 resolvio el **18,2%** como fusiones; el
-resto esta DELETED sin sucesor. De las recuperables, el 72% tenia su primaria ya
-en ``protein`` y el 28% no. Extrapolado: ~1.960 recuperables, ~558 proteinas que
-faltaban de verdad y ~1.403 anotaciones que la clave ajena habria tirado aunque
-la proteina si estuviera bajo su primaria.
+HOW MUCH. On GOA 156, of 10,791 reliable accessions the batch endpoint did not
+return, a systematic sample of 600 resolved **18.2%** as merges; the rest are
+DELETED with no successor. Of the recoverable ones, 72% already had their primary
+in ``protein`` and 28% did not. Extrapolated: ~1,960 recoverable, ~558 proteins
+genuinely absent and ~1,403 annotations the foreign key would have dropped even
+though the protein was present under its primary accession.
 
-LO QUE ARREGLA ADEMAS DE LA COBERTURA. Si GOA usaba P30456 en 2016 y P04439 hoy,
-una serie sobre accesiones ve una desaparicion y una aparicion donde hay una sola
-proteina. Eso contamina el delta que mide la campana, y no lo arregla ningun
-recuento: lo arregla registrar el enlace.
+WHAT THIS FIXES BEYOND COVERAGE. If GOA used P30456 in 2016 and P04439 today, a
+series over accessions sees one disappearance and one appearance where there is a
+single protein. That contaminates the very delta the campaign measures, and no
+amount of counting fixes it -- only recording the link does.
 
-COMO SE GUARDA, Y POR QUE NO DUPLICA EMBEDDINGS. Se insertan DOS filas: la
-primaria normal, y la secundaria con ``canonical_accession`` apuntando a la
-primaria, ``is_canonical=False`` e ``isoform_index=None``. Las dos comparten
-``sequence_id``, porque ``_store_records`` deduplica secuencias por hash -- y los
-embeddings se indexan por ``Sequence``, no por ``Protein``
-(``compute_embeddings.py``), asi que dos accesiones sobre una secuencia dan UN
-embedding y UN vecino en el banco KNN.
+HOW IT IS STORED, AND WHY IT DOES NOT DUPLICATE EMBEDDINGS. Two rows are
+inserted: the primary as usual, and the secondary with ``canonical_accession``
+pointing at it, ``is_canonical=False`` and ``isoform_index=None``. Both share a
+``sequence_id``, because ``_store_records`` deduplicates sequences by hash -- and
+embeddings are keyed on ``Sequence`` rather than ``Protein``
+(``compute_embeddings.py``), so two accessions over one sequence yield ONE
+embedding and ONE neighbour in the KNN bank.
 
-``is_canonical`` es el filtro de poblacion en todo el codigo que cuenta proteinas
-(``proteins_stats``, ``proteins``, ``showcase``), y una secundaria fusionada no es
-una proteina distinta que contar, asi que el valor es el correcto. Lo que la
-distingue de una isoforma es ``isoform_index``: entero para una isoforma, ``None``
-para un alias de fusion.
+``is_canonical`` is the population filter in every code path that counts proteins
+(``proteins_stats``, ``proteins``, ``showcase``), and a merged secondary is not a
+distinct protein to count, so the value is the correct one. What distinguishes it
+from an isoform is ``isoform_index``: an integer for an isoform, ``None`` for a
+merge alias.
 
 WHAT CANNOT BE RESCUED, AND WHY IT IS NOW A NUMBER. An accession deleted from
 UniProt has no sequence to fetch, so it can never be embedded. Those are reported
@@ -87,14 +86,25 @@ import re
 import time
 from collections import Counter
 from collections.abc import Callable, Iterator
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from protea_contracts import GoaStreamPayload, UniProtProteinRecord
 from pydantic import Field, field_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
-from protea.core.evidence_codes import EXPERIMENTAL
+from protea.core.operations._universe_sources import (
+    _DATE_FIELDS,
+    _TSV_FIELDS,
+    _audit_dates_of,
+    _parse_dates_tsv,
+    _parse_tsv,
+    _store_dates,
+    candidates_from,
+    classify,
+    codes_for,
+)
 from protea.core.utils import chunks, contract_payload
 from protea.infrastructure.orm.models.protein.protein import Protein
 
@@ -108,26 +118,33 @@ _ACCESSION = re.compile(r"^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A
 #: "Only '1000' accessions are allowed in each request". Measured, not assumed.
 _BATCH = 1000
 
-#: Endpoint de busqueda, para resolver accesiones secundarias. Ver
-#: ``_resolve_secondary``: el endpoint de lote casa SOLO primarias.
+#: Search endpoint, used to resolve secondary accessions. See
+#: :meth:`EnsureGoaUniverseOperation._resolve_secondary`: the batch endpoint
+#: matches primary accessions ONLY.
 _SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
 
-#: Tope de condiciones OR por consulta, dicho por UniProt en el cuerpo del 400:
-#: "Too many OR conditions in query. Maximum allowed is 100." Medido, no supuesto.
+#: Cap on OR conditions per query, stated by UniProt in the body of its 400:
+#: "Too many OR conditions in query. Maximum allowed is 100." Measured, not
+#: assumed.
 _SEC_BATCH = 100
 
 #: 0-indexed GAF column holding the DB Object Type: ``protein``, ``complex``,
-#: ``rna``. Es la forma que el fichero tiene de decir lo que es cada fila, y
-#: sustituye al uso de la regex de accesion como filtro de tipo.
+#: ``rna``. This is how the file itself states what each row is, and it replaces
+#: the accession regex as the type filter -- the regex agreed with it on GOA 156
+#: but by coincidence, not by construction.
 _GAF_TYPE = 11
 
-#: Tipos que NO son una proteina con una cadena que embeder. Se RECHAZAN por
-#: nombre en vez de aceptar solo ``protein``, y la diferencia importa: un tipo
-#: nuevo que GOA empiece a publicar entra al corpus y aparece en el histograma
-#: del resultado, en vez de desaparecer en silencio. Dejar fuera a una proteina
-#: de verdad es peor que dejar entrar a un complejo, porque al complejo lo frena
-#: ademas la regex de accesion -- medido en GOA 156: 0 de 1.032 identificadores
-#: de IntAct y RNAcentral pasan la regex.
+#: Object types that are NOT a protein with a chain to embed. They are REJECTED
+#: by name rather than admitting ``protein`` alone, and the difference matters: a
+#: type GOA starts publishing enters the corpus and shows up in the result's
+#: ``tipos_fiables`` histogram instead of disappearing silently. Dropping a real
+#: protein is worse than admitting a complex, because the accession regex stops
+#: complexes anyway -- measured on GOA 156, 0 of 1,032 IntAct and RNAcentral
+#: identifiers match it.
+#:
+#: The vocabulary is not stable across the series: GOA 158 renames ``rna`` to
+#: ``ncrna`` and ``complex`` to ``protein_complex``. Both spellings are listed for
+#: that reason.
 _NOT_A_PROTEIN = frozenset({"complex", "protein_complex", "rna", "ncrna", "mrna",
                             "trna", "rrna", "snrna", "snorna", "lncrna",
                             "transcript", "gene", "small molecule"})
@@ -142,106 +159,6 @@ _GAF_EVIDENCE = 6
 _ACCESSIONS_URL = "https://rest.uniprot.org/uniprotkb/accessions"
 
 
-def _organism_of(entry: dict[str, Any]) -> str | None:
-    return ((entry.get("organism") or {}).get("scientificName")) or None
-
-
-def _taxon_of(entry: dict[str, Any]) -> str | None:
-    t = (entry.get("organism") or {}).get("taxonId")
-    return str(t) if t is not None else None
-
-
-def _gene_of(entry: dict[str, Any]) -> str | None:
-    genes = entry.get("genes") or []
-    if not genes:
-        return None
-    return ((genes[0].get("geneName") or {}).get("value")) or None
-
-
-def _records_for_merge(
-    entry: dict[str, Any], pedidas: set[str]
-) -> tuple[str, list[UniProtProteinRecord], list[str]] | None:
-    """Las filas que una entrada de UniProt aporta: la primaria y sus alias.
-
-    Solo genera alias para las secundarias que ALGUIEN PIDIO. Una entrada puede
-    traer decenas -- P04439 tiene 135 -- y crear las demas inventaria proteinas
-    que ningun GAF anoto.
-    """
-    from protea_contracts import compute_sequence_hash
-
-    primary = entry.get("primaryAccession")
-    seq = ((entry.get("sequence") or {}).get("value") or "").strip()
-    if not primary or not seq:
-        return None
-    encontradas = [sec for sec in (entry.get("secondaryAccessions") or []) if sec in pedidas]
-    if not encontradas:
-        return None
-    comun: dict[str, Any] = {
-        "organism": _organism_of(entry),
-        "taxonomy_id": _taxon_of(entry),
-        "gene_name": _gene_of(entry),
-        "reviewed": "reviewed" in (entry.get("entryType") or "").lower(),
-        "sequence": seq,
-        "length": len(seq),
-        "sequence_hash": compute_sequence_hash(seq),
-    }
-    filas = [
-        UniProtProteinRecord(
-            accession=primary,
-            canonical_accession=primary,
-            is_canonical=True,
-            isoform_index=None,
-            **comun,
-        )
-    ]
-    filas += [
-        UniProtProteinRecord(
-            accession=sec,
-            canonical_accession=primary,
-            is_canonical=False,
-            isoform_index=None,
-            **comun,
-        )
-        for sec in encontradas
-    ]
-    return primary, filas, encontradas
-
-
-def _decidir(
-    candidatos: dict[str, list[tuple[str, list[UniProtProteinRecord]]]],
-    alias: dict[str, str],
-    demerges: dict[str, list[str]],
-) -> list[UniProtProteinRecord]:
-    """Separa fusiones de demerges y devuelve las filas a guardar.
-
-    UN DEMERGE NO TIENE UNA IDENTIDAD. Si la accesion sale en varias entradas es
-    que se partio, asi que no hay UNA proteina a la que apunte: aliasarla a
-    cualquiera de ellas elige arbitrariamente, y la secuencia que heredaria seria
-    la de una de dos proteinas distintas. Se registra con sus destinos y se deja
-    sin resolver, porque elegir es una decision curatorial.
-
-    Y SE DEDUPLICA POR ACCESION. Una primaria puede venir en varios candidatos del
-    mismo lote. ``_store_records`` separa inserts de updates mirando lo que ya hay
-    en la base y NO deduplica su propia entrada, asi que una accesion repetida le
-    llega como dos INSERT y revienta con ``duplicate key``. Paso con C8VQ65 el
-    2026-10-05, tras 317 fusiones correctas.
-    """
-    records: list[UniProtProteinRecord] = []
-    vistas: set[str] = set()
-    for sec, opciones in candidatos.items():
-        destinos = {prim for prim, _ in opciones}
-        if len(destinos) > 1:
-            demerges[sec] = sorted(destinos)
-            continue
-        for fila in opciones[0][1]:
-            if fila.accession in vistas:
-                continue
-            vistas.add(fila.accession)
-            records.append(fila)
-        alias[sec] = opciones[0][0]
-    return records
-
-
 def universe_key_for(job_id: Any, nombre: str) -> str:
     """Clave de almacenamiento de un artefacto de esta operacion."""
     return f"goa_universe/{job_id}/{nombre}"
@@ -251,6 +168,25 @@ class EnsureGoaUniversePayload(ProteaPayload, frozen=True):
     gaf_url: str
     timeout_seconds: Annotated[int, Field(gt=0)] = 120
     dry_run: bool = False
+    #: What counts as an annotation for admission to the universe. This lives in
+    #: the PAYLOAD deliberately: it is the decision that defines the corpus scope,
+    #: and the previous version kept it hidden in a module constant -- which is
+    #: precisely how a ``reviewed:true`` search criterion fixed the scope of a
+    #: whole campaign on 2026-09-15 without anybody declaring it. Here it is on
+    #: the job row, queryable after the fact.
+    #:
+    #: ``curated``
+    #:     Any code other than ``IEA``, GO's only automatic category, so it reads
+    #:     as "a person assigned it". Measured on GOA 156: 554,328 proteins.
+    #: ``reliable``
+    #:     The thirteen LAFA codes: eleven experimental plus ``IC`` and ``TAS``.
+    #:     Measured on GOA 156: 117,136 proteins.
+    #:
+    #: The universe uses ``curated`` because breadth serves the retrieval bank and
+    #: because ``evidence_code`` is persisted per row, so the narrower tier stays
+    #: recoverable at analysis time. Evaluation truth remains the thirteen, and
+    #: that is the evaluation's decision, not this operation's.
+    evidence_scope: Literal["curated", "reliable"] = "curated"
 
     @field_validator("gaf_url", mode="before")
     @classmethod
@@ -315,12 +251,13 @@ class EnsureGoaUniverseOperation(Operation):
             "info",
         )
 
-        fetched = inserted = sequences = 0
+        fetched = inserted = sequences = sin_fechas = 0
         alias: dict[str, str] = {}
         sin_resolver: list[str] = []
         artefactos: dict[str, Any] = {}
         if missing and not p.dry_run:
             fetched, inserted, sequences = self._fetch_and_store(session, missing, p, emit)
+            sin_fechas = self._fill_dates(session, wanted, p, emit)
             alias, sin_resolver, mas_p, mas_s = self._segunda_pasada(session, missing, p, emit)
             inserted += mas_p
             sequences += mas_s
@@ -338,6 +275,7 @@ class EnsureGoaUniverseOperation(Operation):
             "resolved_as_merge": len(alias) if not p.dry_run else None,
             "not_retrievable": len(sin_resolver) if not p.dry_run else None,
             "demerged": len(getattr(self, "_demerges", {})) if not p.dry_run else None,
+            "dates_backfilled": sin_fechas if not p.dry_run else None,
             "tipos_fiables": getattr(self, "_tipos_fiables", {}),
             "artefactos": artefactos,
             "proteins_inserted": inserted,
@@ -446,7 +384,7 @@ class EnsureGoaUniverseOperation(Operation):
         'Experimental,IC,TAS'``). Not the eight of classic CAFA, which omit the
         five high-throughput codes, and not the six a stats router still uses.
         """
-        reliable = set(EXPERIMENTAL) | {"IC", "TAS"}
+        accepts = codes_for(p.evidence_scope)
         wanted: set[str] = set()
         malformed = 0
         rows = 0
@@ -467,7 +405,7 @@ class EnsureGoaUniverseOperation(Operation):
             """
             nonlocal rows
             rows += 1
-            if cols[_GAF_EVIDENCE].strip() not in reliable:
+            if not accepts(cols[_GAF_EVIDENCE].strip()):
                 return False
             tipo = cols[_GAF_TYPE].strip().lower()
             por_tipo[tipo or "(vacio)"] += 1
@@ -510,6 +448,72 @@ class EnsureGoaUniverseOperation(Operation):
             present.update(r[0] for r in rows)
         return sorted(wanted - present)
 
+    def _fill_dates(
+        self,
+        session: Session,
+        wanted: set[str],
+        p: EnsureGoaUniversePayload,
+        emit: EmitFn,
+    ) -> int:
+        """Fill the audit dates for universe members that still lack them.
+
+        WHY THIS IS A SEPARATE PASS. ``_fetch_and_store`` only ever sees
+        ``missing`` -- the accessions absent from ``protein`` -- so only those
+        would carry dates. Every protein already in the table keeps NULL in all
+        three columns, and that includes everything a prior release's pass
+        admitted and everything ``insert_proteins`` loaded. With the reviewed set
+        in place that is roughly 575,000 of some 680,000 rows, so a date filter
+        would silently exclude 85% of the corpus while looking like it worked.
+        Four independent reviewers flagged this on 2026-10-05 before it shipped.
+
+        Only ``date_created IS NULL`` rows are queried, so the pass is cheap after
+        the first release: steady state is zero requests. ``fields``-only TSV, no
+        sequence, so the responses are small.
+        """
+        # Chunked for the 65535 bind-parameter ceiling, same reason as ``_missing``.
+        pendientes: list[str] = []
+        for chunk in chunks(sorted(wanted), 20000):
+            pendientes.extend(
+                session.scalars(
+                    select(Protein.accession).where(
+                        Protein.accession.in_(chunk),
+                        Protein.date_created.is_(None),
+                    )
+                ).all()
+            )
+        if not pendientes:
+            return 0
+        escritas = 0
+        for batch in chunks(pendientes, _BATCH):
+            filas = _parse_dates_tsv(self._get_dates_tsv(batch, p.timeout_seconds))
+            if filas:
+                _store_dates(session, filas)
+                session.commit()
+                escritas += len(filas)
+        emit(
+            "ensure_goa_universe.dates_backfilled",
+            None,
+            {"pending": len(pendientes), "written": escritas},
+            "info",
+        )
+        return escritas
+
+    def _get_dates_tsv(self, accessions: list[str], timeout: int) -> str:
+        """Dates only, no sequence: these proteins already have theirs."""
+        from urllib import error, request
+
+        url = (
+            f"{_ACCESSIONS_URL}?accessions={','.join(accessions)}"
+            f"&fields={_DATE_FIELDS}&format=tsv"
+        )
+        req = request.Request(url, headers={"User-Agent": "PROTEA/ensure_goa_universe"})
+        try:
+            with request.urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("utf-8")
+        except error.HTTPError as exc:
+            body = exc.read().decode("utf-8", "replace")[:300]
+            raise RuntimeError(f"UniProt dates {exc.code}: {body}") from exc
+
     def _fetch_and_store(
         self,
         session: Session,
@@ -527,8 +531,6 @@ class EnsureGoaUniverseOperation(Operation):
         and do not exist now. That difference is the quantity the old silent
         filter threw away.
         """
-        from protea_sources.uniprot import parse_fasta_text
-
         from protea.core.operations.insert_proteins import InsertProteinsOperation
 
         # DELIBERATE COUPLING, PINNED BY A TEST. ``_store_records`` is private to
@@ -544,11 +546,12 @@ class EnsureGoaUniverseOperation(Operation):
         inserter = InsertProteinsOperation()
         fetched = proteins = sequences = 0
         for batch in chunks(missing, _BATCH):
-            text = self._get_fasta(batch, p.timeout_seconds)
-            records: list[UniProtProteinRecord] = list(parse_fasta_text(text))
+            parsed = _parse_tsv(self._get_tsv(batch, p.timeout_seconds))
+            records: list[UniProtProteinRecord] = [r for r, _d in parsed]
             fetched += len(records)
             if records:
                 ins_p, _upd, ins_s, _re = inserter._store_records(session, records, emit)
+                _store_dates(session, [(r.accession, d) for r, d in parsed])
                 proteins += ins_p
                 sequences += ins_s
                 session.commit()
@@ -569,8 +572,8 @@ class EnsureGoaUniverseOperation(Operation):
     ) -> tuple[dict[str, str], int, int]:
         """Rescata las accesiones FUSIONADAS que el endpoint de lote no devuelve.
 
-        El por que, el cuanto y el como se guardan estan en el docstring del
-        modulo, bajo LAS ACCESIONES SECUNDARIAS.
+        The why, the how much and the storage layout are in the module
+        docstring, under SECONDARY ACCESSIONS.
         """
         from protea.core.operations.insert_proteins import InsertProteinsOperation
 
@@ -584,18 +587,16 @@ class EnsureGoaUniverseOperation(Operation):
             pedidas = set(batch)
             # UNA ACCESION PUEDE SALIR EN VARIAS ENTRADAS, y entonces no es una
             # fusion. Se recoge todo primero y se decide despues, por accesion.
-            candidatos: dict[str, list[tuple[str, list[UniProtProteinRecord]]]] = {}
-            for entry in payload.get("results") or []:
-                hecho = _records_for_merge(entry, pedidas)
-                if hecho is None:
-                    continue
-                primary, filas, encontradas = hecho
-                for sec in encontradas:
-                    candidatos.setdefault(sec, []).append((primary, filas))
-
-            records = _decidir(candidatos, alias, demerges)
+            candidates, entry_by_acc = candidates_from(payload, pedidas)
+            records = classify(candidates, alias, demerges)
+            dates = [
+                (r.accession, _audit_dates_of(entry_by_acc[r.accession]))
+                for r in records
+                if r.accession in entry_by_acc
+            ]
             if records:
                 ins_p, _upd, ins_s, _re = inserter._store_records(session, records, emit)
+                _store_dates(session, dates)
                 proteins += ins_p
                 sequences += ins_s
                 session.commit()
@@ -614,12 +615,17 @@ class EnsureGoaUniverseOperation(Operation):
         return alias, proteins, sequences
 
     def _search_secondary(self, accessions: list[str], timeout: int) -> dict[str, Any]:
-        """Una consulta ``sec_acc:`` por lote. Sin ``fields``, a proposito.
+        """One ``sec_acc:`` query per batch. Without ``fields``, deliberately.
 
-        ``fields=accession,sec_acc`` da 400 ``Invalid fields parameter value
-        'sec_acc'``: vale como campo de CONSULTA y no de retorno. Y hace falta
-        ``secondaryAccessions`` en la respuesta para saber cual de las pedidas
-        resolvio cada entrada, asi que se pide la entrada completa.
+        ``fields=accession,sec_acc`` returns 400 ``Invalid fields parameter value
+        'sec_acc'``: it is a valid QUERY field but not a return field. And
+        ``secondaryAccessions`` is needed in the response to know which of the
+        requested accessions each entry resolved, so the whole entry is requested.
+
+        :raises RuntimeError: on any HTTP error, carrying UniProt's own message.
+            A batch that failed must not be counted as a batch that found nothing
+            -- an earlier measurement reported 0% recoverable merges because ten
+            batches had 400'd and the failures were tallied as zeroes.
         """
         import json
         from urllib import error, parse, request
@@ -637,10 +643,13 @@ class EnsureGoaUniverseOperation(Operation):
             body = exc.read().decode("utf-8", "replace")[:300]
             raise RuntimeError(f"UniProt sec_acc {exc.code}: {body}") from exc
 
-    def _get_fasta(self, accessions: list[str], timeout: int) -> str:
+    def _get_tsv(self, accessions: list[str], timeout: int) -> str:
         from urllib import error, request
 
-        url = f"{_ACCESSIONS_URL}?accessions={','.join(accessions)}&format=fasta"
+        url = (
+            f"{_ACCESSIONS_URL}?accessions={','.join(accessions)}"
+            f"&fields={_TSV_FIELDS}&format=tsv"
+        )
         req = request.Request(url, headers={"User-Agent": "PROTEA/ensure_goa_universe"})
         try:
             with request.urlopen(req, timeout=timeout) as resp:
