@@ -54,6 +54,7 @@ from protea.core._evaluation_snapshot_routing import (
 from protea.core._evaluation_snapshot_routing import (
     compute_evaluation_data_for_sets as compute_evaluation_data_for_sets,
 )
+from protea.core._binding_rule import PROTEIN_BINDING, drop_binding_only_mfo
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
 
 # Parquet column for the bucket each (protein, go_id) row belongs to.
@@ -511,6 +512,22 @@ def _load_not_raw_go_ids(session: Session, annotation_set_id: uuid.UUID) -> dict
     return dict(out)
 
 
+def _drop_binding_only(
+    session: Session, snapshot_id: uuid.UUID, raw: dict[str, set[str]]
+) -> int:
+    """Apply the protein-binding rule to one side's DIRECT annotations.
+
+    The binding subtree is resolved per snapshot rather than hardcoded, because
+    it is not a constant: 920 terms under the snapshot behind GOA 220, and the
+    ontology prunes and grows across the series this campaign spans.
+    """
+    binding = _bfs_closure(
+        {PROTEIN_BINDING}, _load_children_by_go_id(session, snapshot_id)
+    )
+    _, aspect_by_go_id = _load_pivot_term_universe(session, snapshot_id)
+    return drop_binding_only_mfo(raw, binding, aspect_by_go_id)
+
+
 def _reconcile_experimental_side(
     session: Session,
     annotation_set_id: uuid.UUID,
@@ -527,6 +544,7 @@ def _reconcile_experimental_side(
     """
     native_parents = _load_parents_by_go_id(session, native_snapshot_id)
     raw = _load_experimental_raw_go_ids(session, annotation_set_id)
+    _drop_binding_only(session, native_snapshot_id, raw)
 
     out: dict[str, dict[str, set[str]]] = {}
     for protein, go_ids in raw.items():
