@@ -8,7 +8,7 @@ from typing import Annotated, Any, NamedTuple
 
 from protea_contracts import GoaAnnotationRecord, GoaStreamPayload
 from pydantic import Field, field_validator
-from sqlalchemy import distinct, select, text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import (
@@ -48,7 +48,28 @@ def _append_attempt(annotation_set: AnnotationSet, job_id: uuid.UUID | None) -> 
     attempt having happened; consecutive duplicates are dropped. And ``meta`` is
     a plain JSONB dict, which SQLAlchemy does not track in place, so the list is
     rebuilt and the attribute reassigned or the append never reaches the row.
-    """
+
+THE GATE AND THE FOREIGN KEY HAVE TO NAME THE SAME COLUMN. ``_load_accessions``
+builds the set that ``_store_buffer`` uses to decide which GAF rows may be stored.
+The constraint that actually governs storage is
+``protein_go_annotation.protein_accession`` referencing ``protein.accession``. Until
+2026-10-05 the gate was built from ``canonical_accession`` instead, and the two
+coincide only on canonical rows -- so every row whose ``accession`` differs from its
+``canonical_accession`` was refused by the gate although the foreign key would have
+accepted it:
+
+* **isoforms** (``P12345-2``, canonical ``P12345``): the isoform exists in
+  ``protein`` but is never anyone's ``canonical_accession``, so its annotations were
+  dropped. Not collapsed onto the canonical -- dropped.
+* **merge aliases** (``P30456``, canonical ``P04439``): resolving secondary
+  accessions in ``ensure_goa_universe`` exists so that a 2016 GAF naming ``P30456``
+  loads. It did not. PROTEA#980 inserted those rows and this gate refused them, so
+  the ~1,403 annotations per release that work was measured to rescue were still
+  being skipped.
+
+Nothing announced it. The rows land in ``skipped``, which also counts GAF
+accessions genuinely outside the corpus, so the total looked ordinary.
+"""
     if job_id is None:
         return
     meta = dict(annotation_set.meta or {})
@@ -157,7 +178,7 @@ class _GoaStoreCtx(NamedTuple):
     """Immutable per-stream context handed to ``_store_buffer`` / ``_flush_page``."""
 
     annotation_set_id: uuid.UUID
-    canonical_accessions: set[str]
+    admissible_accessions: set[str]
     go_term_map: dict[str, int]
 
 
@@ -255,8 +276,8 @@ class LoadGOAAnnotationsOperation:
 
         ontology_check = self._check_declared_ontology(p, snapshot, emit)
 
-        canonical_accessions = self._load_accessions(session, emit)
-        if not canonical_accessions:
+        admissible_accessions = self._load_accessions(session, emit)
+        if not admissible_accessions:
             emit("load_goa_annotations.no_proteins", None, {}, "warning")
             return OperationResult(result={"annotations_inserted": 0})
 
@@ -264,7 +285,7 @@ class LoadGOAAnnotationsOperation:
         annotation_set = self._create_annotation_set(session, p, snapshot_id, payload, emit)
         store_ctx = _GoaStoreCtx(
             annotation_set_id=annotation_set.id,
-            canonical_accessions=canonical_accessions,
+            admissible_accessions=admissible_accessions,
             go_term_map=go_term_map,
         )
         totals = self._stream_and_store(session, p, store_ctx, emit)
@@ -439,7 +460,7 @@ class LoadGOAAnnotationsOperation:
             session,
             buffer,
             store_ctx.annotation_set_id,
-            store_ctx.canonical_accessions,
+            store_ctx.admissible_accessions,
             store_ctx.go_term_map,
         )
         totals.pages += 1
@@ -584,12 +605,17 @@ class LoadGOAAnnotationsOperation:
         return child.id
 
     def _load_accessions(self, session: Session, emit: EmitFn) -> set[str]:
+        """Which GAF accessions this load may store, read from ``protein.accession``.
+
+        See THE GATE AND THE FOREIGN KEY in the module docstring for why the column
+        matters.
+        """
         emit("load_goa_annotations.load_accessions_start", None, {}, "info")
-        accessions = set(session.scalars(select(distinct(Protein.canonical_accession))))
+        accessions = set(session.scalars(select(Protein.accession)))
         emit(
             "load_goa_annotations.load_accessions_done",
             None,
-            {"canonical_accessions": len(accessions)},
+            {"accessions": len(accessions)},
             "info",
         )
         return accessions
