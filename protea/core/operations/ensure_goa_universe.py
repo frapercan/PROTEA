@@ -207,6 +207,41 @@ def _records_for_merge(
     return primary, filas, encontradas
 
 
+def _decidir(
+    candidatos: dict[str, list[tuple[str, list[UniProtProteinRecord]]]],
+    alias: dict[str, str],
+    demerges: dict[str, list[str]],
+) -> list[UniProtProteinRecord]:
+    """Separa fusiones de demerges y devuelve las filas a guardar.
+
+    UN DEMERGE NO TIENE UNA IDENTIDAD. Si la accesion sale en varias entradas es
+    que se partio, asi que no hay UNA proteina a la que apunte: aliasarla a
+    cualquiera de ellas elige arbitrariamente, y la secuencia que heredaria seria
+    la de una de dos proteinas distintas. Se registra con sus destinos y se deja
+    sin resolver, porque elegir es una decision curatorial.
+
+    Y SE DEDUPLICA POR ACCESION. Una primaria puede venir en varios candidatos del
+    mismo lote. ``_store_records`` separa inserts de updates mirando lo que ya hay
+    en la base y NO deduplica su propia entrada, asi que una accesion repetida le
+    llega como dos INSERT y revienta con ``duplicate key``. Paso con C8VQ65 el
+    2026-10-05, tras 317 fusiones correctas.
+    """
+    records: list[UniProtProteinRecord] = []
+    vistas: set[str] = set()
+    for sec, opciones in candidatos.items():
+        destinos = {prim for prim, _ in opciones}
+        if len(destinos) > 1:
+            demerges[sec] = sorted(destinos)
+            continue
+        for fila in opciones[0][1]:
+            if fila.accession in vistas:
+                continue
+            vistas.add(fila.accession)
+            records.append(fila)
+        alias[sec] = opciones[0][0]
+    return records
+
+
 def universe_key_for(job_id: Any, nombre: str) -> str:
     """Clave de almacenamiento de un artefacto de esta operacion."""
     return f"goa_universe/{job_id}/{nombre}"
@@ -289,7 +324,9 @@ class EnsureGoaUniverseOperation(Operation):
             alias, sin_resolver, mas_p, mas_s = self._segunda_pasada(session, missing, p, emit)
             inserted += mas_p
             sequences += mas_s
-            artefactos = self._guardar_artefactos(payload.get("_job_id"), alias, sin_resolver)
+            artefactos = self._guardar_artefactos(
+                payload.get("_job_id"), alias, sin_resolver, getattr(self, "_demerges", {})
+            )
 
         result = {
             "rows_scanned": rows,
@@ -300,6 +337,7 @@ class EnsureGoaUniverseOperation(Operation):
             "fetched": fetched,
             "resolved_as_merge": len(alias) if not p.dry_run else None,
             "not_retrievable": len(sin_resolver) if not p.dry_run else None,
+            "demerged": len(getattr(self, "_demerges", {})) if not p.dry_run else None,
             "tipos_fiables": getattr(self, "_tipos_fiables", {}),
             "artefactos": artefactos,
             "proteins_inserted": inserted,
@@ -341,7 +379,11 @@ class EnsureGoaUniverseOperation(Operation):
         return alias, sin_resolver, mas_p, mas_s
 
     def _guardar_artefactos(
-        self, job_id: Any, alias: dict[str, str], sin_resolver: list[str]
+        self,
+        job_id: Any,
+        alias: dict[str, str],
+        sin_resolver: list[str],
+        demerges: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         """Persiste el mapa de fusiones y la lista de las que no se resolvieron.
 
@@ -377,6 +419,19 @@ class EnsureGoaUniverseOperation(Operation):
                 out["sin_resolver"] = {
                     "uri": store.put(universe_key_for(job_id, "sin_resolver.txt"), str(ruta)),
                     "filas": len(sin_resolver),
+                }
+            if demerges:
+                # Aparte de las borradas, y con sus destinos: una borrada no tiene
+                # a donde ir, un demerge tiene varios y elegir es una decision
+                # curatorial que esta operacion no puede tomar.
+                ruta = Path(tmp) / "demerges.tsv"
+                with ruta.open("w", encoding="utf-8", newline="") as fh:
+                    w = csv.writer(fh, delimiter="\t")
+                    w.writerow(["accesion_gaf", "destinos"])
+                    w.writerows((k, ",".join(v)) for k, v in sorted(demerges.items()))
+                out["demerges"] = {
+                    "uri": store.put(universe_key_for(job_id, "demerges.tsv"), str(ruta)),
+                    "filas": len(demerges),
                 }
         return out
 
@@ -512,7 +567,7 @@ class EnsureGoaUniverseOperation(Operation):
         p: EnsureGoaUniversePayload,
         emit: EmitFn,
     ) -> tuple[dict[str, str], int, int]:
-        """Rescata las accesiones que el endpoint de lote no devuelve.
+        """Rescata las accesiones FUSIONADAS que el endpoint de lote no devuelve.
 
         El por que, el cuanto y el como se guardan estan en el docstring del
         modulo, bajo LAS ACCESIONES SECUNDARIAS.
@@ -521,20 +576,24 @@ class EnsureGoaUniverseOperation(Operation):
 
         inserter = InsertProteinsOperation()
         alias: dict[str, str] = {}
+        demerges: dict[str, list[str]] = {}
         proteins = sequences = 0
 
         for batch in chunks(pending, _SEC_BATCH):
             payload = self._search_secondary(batch, p.timeout_seconds)
             pedidas = set(batch)
-            records: list[UniProtProteinRecord] = []
+            # UNA ACCESION PUEDE SALIR EN VARIAS ENTRADAS, y entonces no es una
+            # fusion. Se recoge todo primero y se decide despues, por accesion.
+            candidatos: dict[str, list[tuple[str, list[UniProtProteinRecord]]]] = {}
             for entry in payload.get("results") or []:
                 hecho = _records_for_merge(entry, pedidas)
                 if hecho is None:
                     continue
                 primary, filas, encontradas = hecho
-                records.extend(filas)
                 for sec in encontradas:
-                    alias[sec] = primary
+                    candidatos.setdefault(sec, []).append((primary, filas))
+
+            records = _decidir(candidatos, alias, demerges)
             if records:
                 ins_p, _upd, ins_s, _re = inserter._store_records(session, records, emit)
                 proteins += ins_p
@@ -543,9 +602,15 @@ class EnsureGoaUniverseOperation(Operation):
             emit(
                 "ensure_goa_universe.secondary_batch",
                 None,
-                {"requested": len(batch), "resolved": len(alias), "rows": len(records)},
+                {
+                    "requested": len(batch),
+                    "resolved": len(alias),
+                    "demerged": len(demerges),
+                    "rows": len(records),
+                },
                 "info",
             )
+        self._demerges = demerges
         return alias, proteins, sequences
 
     def _search_secondary(self, accessions: list[str], timeout: int) -> dict[str, Any]:
