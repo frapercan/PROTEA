@@ -36,6 +36,45 @@ any annotation is stored, so each release loads against the final universe. It
 also restores the parallelism: embeddings can start once phase 1 closes, instead
 of waiting behind the loads.
 
+LAS ACCESIONES SECUNDARIAS, Y POR QUE NO BASTA PEDIRLAS. ``GET
+/uniprotkb/accessions`` casa SOLO accesiones primarias. Una accesion fusionada en
+otra entrada --una *secundaria*-- no se devuelve, y UniProt la cuenta de todas
+formas en ``X-Total-Results``, asi que la respuesta dice "7 resultados" con el
+cuerpo vacio y un 200. Medido el 2026-10-05 con siete accesiones, en fasta (0
+bytes) y en JSON (``{"results":[]}``). La consulta por entrada SI sigue la fusion
+y redirige, de modo que la misma accesion parece viva por un camino y borrada por
+el otro:
+
+    P30456  ->  secundaria de P04439 (HLA-A, que tiene 135 secundarias)
+    Q9NPA5  ->  secundaria de Q9NTW7
+    E1BZ05  ->  secundaria de P02542
+
+CUANTO. Sobre GOA 156, de 10.791 accesiones fiables que el endpoint de lote no
+devolvio, una muestra sistematica de 600 resolvio el **18,2%** como fusiones; el
+resto esta DELETED sin sucesor. De las recuperables, el 72% tenia su primaria ya
+en ``protein`` y el 28% no. Extrapolado: ~1.960 recuperables, ~558 proteinas que
+faltaban de verdad y ~1.403 anotaciones que la clave ajena habria tirado aunque
+la proteina si estuviera bajo su primaria.
+
+LO QUE ARREGLA ADEMAS DE LA COBERTURA. Si GOA usaba P30456 en 2016 y P04439 hoy,
+una serie sobre accesiones ve una desaparicion y una aparicion donde hay una sola
+proteina. Eso contamina el delta que mide la campana, y no lo arregla ningun
+recuento: lo arregla registrar el enlace.
+
+COMO SE GUARDA, Y POR QUE NO DUPLICA EMBEDDINGS. Se insertan DOS filas: la
+primaria normal, y la secundaria con ``canonical_accession`` apuntando a la
+primaria, ``is_canonical=False`` e ``isoform_index=None``. Las dos comparten
+``sequence_id``, porque ``_store_records`` deduplica secuencias por hash -- y los
+embeddings se indexan por ``Sequence``, no por ``Protein``
+(``compute_embeddings.py``), asi que dos accesiones sobre una secuencia dan UN
+embedding y UN vecino en el banco KNN.
+
+``is_canonical`` es el filtro de poblacion en todo el codigo que cuenta proteinas
+(``proteins_stats``, ``proteins``, ``showcase``), y una secundaria fusionada no es
+una proteina distinta que contar, asi que el valor es el correcto. Lo que la
+distingue de una isoforma es ``isoform_index``: entero para una isoforma, ``None``
+para un alias de fusion.
+
 WHAT CANNOT BE RESCUED, AND WHY IT IS NOW A NUMBER. An accession deleted from
 UniProt has no sequence to fetch, so it can never be embedded. Those are reported
 as ``not_retrievable`` instead of vanishing: the quantity the old filter threw
@@ -46,6 +85,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections import Counter
 from collections.abc import Callable, Iterator
 from typing import Annotated, Any
 
@@ -68,6 +108,30 @@ _ACCESSION = re.compile(r"^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A
 #: "Only '1000' accessions are allowed in each request". Measured, not assumed.
 _BATCH = 1000
 
+#: Endpoint de busqueda, para resolver accesiones secundarias. Ver
+#: ``_resolve_secondary``: el endpoint de lote casa SOLO primarias.
+_SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
+
+#: Tope de condiciones OR por consulta, dicho por UniProt en el cuerpo del 400:
+#: "Too many OR conditions in query. Maximum allowed is 100." Medido, no supuesto.
+_SEC_BATCH = 100
+
+#: 0-indexed GAF column holding the DB Object Type: ``protein``, ``complex``,
+#: ``rna``. Es la forma que el fichero tiene de decir lo que es cada fila, y
+#: sustituye al uso de la regex de accesion como filtro de tipo.
+_GAF_TYPE = 11
+
+#: Tipos que NO son una proteina con una cadena que embeder. Se RECHAZAN por
+#: nombre en vez de aceptar solo ``protein``, y la diferencia importa: un tipo
+#: nuevo que GOA empiece a publicar entra al corpus y aparece en el histograma
+#: del resultado, en vez de desaparecer en silencio. Dejar fuera a una proteina
+#: de verdad es peor que dejar entrar a un complejo, porque al complejo lo frena
+#: ademas la regex de accesion -- medido en GOA 156: 0 de 1.032 identificadores
+#: de IntAct y RNAcentral pasan la regex.
+_NOT_A_PROTEIN = frozenset({"complex", "protein_complex", "rna", "ncrna", "mrna",
+                            "trna", "rrna", "snrna", "snorna", "lncrna",
+                            "transcript", "gene", "small molecule"})
+
 #: 0-indexed GAF column holding the evidence code. We read the raw column
 #: instead of the parsed record so the evidence test can run before the plugin
 #: builds anything -- see ``_reliable_accessions``. The plugin keeps the same
@@ -76,6 +140,76 @@ _BATCH = 1000
 _GAF_EVIDENCE = 6
 
 _ACCESSIONS_URL = "https://rest.uniprot.org/uniprotkb/accessions"
+
+
+def _organism_of(entry: dict[str, Any]) -> str | None:
+    return ((entry.get("organism") or {}).get("scientificName")) or None
+
+
+def _taxon_of(entry: dict[str, Any]) -> str | None:
+    t = (entry.get("organism") or {}).get("taxonId")
+    return str(t) if t is not None else None
+
+
+def _gene_of(entry: dict[str, Any]) -> str | None:
+    genes = entry.get("genes") or []
+    if not genes:
+        return None
+    return ((genes[0].get("geneName") or {}).get("value")) or None
+
+
+def _records_for_merge(
+    entry: dict[str, Any], pedidas: set[str]
+) -> tuple[str, list[UniProtProteinRecord], list[str]] | None:
+    """Las filas que una entrada de UniProt aporta: la primaria y sus alias.
+
+    Solo genera alias para las secundarias que ALGUIEN PIDIO. Una entrada puede
+    traer decenas -- P04439 tiene 135 -- y crear las demas inventaria proteinas
+    que ningun GAF anoto.
+    """
+    from protea_contracts import compute_sequence_hash
+
+    primary = entry.get("primaryAccession")
+    seq = ((entry.get("sequence") or {}).get("value") or "").strip()
+    if not primary or not seq:
+        return None
+    encontradas = [sec for sec in (entry.get("secondaryAccessions") or []) if sec in pedidas]
+    if not encontradas:
+        return None
+    comun: dict[str, Any] = {
+        "organism": _organism_of(entry),
+        "taxonomy_id": _taxon_of(entry),
+        "gene_name": _gene_of(entry),
+        "reviewed": "reviewed" in (entry.get("entryType") or "").lower(),
+        "sequence": seq,
+        "length": len(seq),
+        "sequence_hash": compute_sequence_hash(seq),
+    }
+    filas = [
+        UniProtProteinRecord(
+            accession=primary,
+            canonical_accession=primary,
+            is_canonical=True,
+            isoform_index=None,
+            **comun,
+        )
+    ]
+    filas += [
+        UniProtProteinRecord(
+            accession=sec,
+            canonical_accession=primary,
+            is_canonical=False,
+            isoform_index=None,
+            **comun,
+        )
+        for sec in encontradas
+    ]
+    return primary, filas, encontradas
+
+
+def universe_key_for(job_id: Any, nombre: str) -> str:
+    """Clave de almacenamiento de un artefacto de esta operacion."""
+    return f"goa_universe/{job_id}/{nombre}"
 
 
 class EnsureGoaUniversePayload(ProteaPayload, frozen=True):
@@ -147,8 +281,15 @@ class EnsureGoaUniverseOperation(Operation):
         )
 
         fetched = inserted = sequences = 0
+        alias: dict[str, str] = {}
+        sin_resolver: list[str] = []
+        artefactos: dict[str, Any] = {}
         if missing and not p.dry_run:
             fetched, inserted, sequences = self._fetch_and_store(session, missing, p, emit)
+            alias, sin_resolver, mas_p, mas_s = self._segunda_pasada(session, missing, p, emit)
+            inserted += mas_p
+            sequences += mas_s
+            artefactos = self._guardar_artefactos(payload.get("_job_id"), alias, sin_resolver)
 
         result = {
             "rows_scanned": rows,
@@ -157,7 +298,10 @@ class EnsureGoaUniverseOperation(Operation):
             "already_present": len(wanted) - len(missing),
             "missing": len(missing),
             "fetched": fetched,
-            "not_retrievable": len(missing) - fetched if not p.dry_run else None,
+            "resolved_as_merge": len(alias) if not p.dry_run else None,
+            "not_retrievable": len(sin_resolver) if not p.dry_run else None,
+            "tipos_fiables": getattr(self, "_tipos_fiables", {}),
+            "artefactos": artefactos,
             "proteins_inserted": inserted,
             "sequences_inserted": sequences,
             "dry_run": p.dry_run,
@@ -165,6 +309,76 @@ class EnsureGoaUniverseOperation(Operation):
         }
         emit("ensure_goa_universe.done", None, result, "info")
         return OperationResult(result=result)
+
+    def _segunda_pasada(
+        self,
+        session: Session,
+        missing: list[str],
+        p: EnsureGoaUniversePayload,
+        emit: EmitFn,
+    ) -> tuple[dict[str, str], list[str], int, int]:
+        """Lo que el endpoint de lote no devolvio: fusion o baja.
+
+        La pregunta se hace a la base y no a la aritmetica. ``missing`` menos
+        ``fetched`` cuenta bien, pero no dice QUIEN falta, y quien falta es lo que
+        hay que resolver y lo que hay que registrar si no se resuelve.
+        """
+        pendientes = self._missing(session, set(missing))
+        if not pendientes:
+            return {}, [], 0, 0
+        alias, mas_p, mas_s = self._resolve_secondary(session, pendientes, p, emit)
+        sin_resolver = sorted(set(pendientes) - set(alias))
+        emit(
+            "ensure_goa_universe.secondary",
+            None,
+            {
+                "pending": len(pendientes),
+                "resolved_as_merge": len(alias),
+                "unresolved": len(sin_resolver),
+            },
+            "info",
+        )
+        return alias, sin_resolver, mas_p, mas_s
+
+    def _guardar_artefactos(
+        self, job_id: Any, alias: dict[str, str], sin_resolver: list[str]
+    ) -> dict[str, Any]:
+        """Persiste el mapa de fusiones y la lista de las que no se resolvieron.
+
+        Hasta ahora ``not_retrievable`` era un numero sin nombres: proteinas con
+        evidencia experimental curada que no entran al corpus y que no se podian
+        citar. Un numero no se puede auditar; una lista si.
+        """
+        if job_id is None:
+            return {}
+        import csv
+        import tempfile
+        from pathlib import Path
+
+        from protea.infrastructure.settings import load_settings
+        from protea.infrastructure.storage import get_artifact_store
+
+        store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
+        out: dict[str, Any] = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            if alias:
+                ruta = Path(tmp) / "fusiones.tsv"
+                with ruta.open("w", encoding="utf-8", newline="") as fh:
+                    w = csv.writer(fh, delimiter="\t")
+                    w.writerow(["accesion_gaf", "accesion_primaria"])
+                    w.writerows(sorted(alias.items()))
+                out["fusiones"] = {
+                    "uri": store.put(universe_key_for(job_id, "fusiones.tsv"), str(ruta)),
+                    "filas": len(alias),
+                }
+            if sin_resolver:
+                ruta = Path(tmp) / "sin_resolver.txt"
+                ruta.write_text("\n".join(sin_resolver) + "\n", encoding="utf-8")
+                out["sin_resolver"] = {
+                    "uri": store.put(universe_key_for(job_id, "sin_resolver.txt"), str(ruta)),
+                    "filas": len(sin_resolver),
+                }
+        return out
 
     def _reliable_accessions(
         self, p: EnsureGoaUniversePayload, emit: EmitFn
@@ -181,6 +395,7 @@ class EnsureGoaUniverseOperation(Operation):
         wanted: set[str] = set()
         malformed = 0
         rows = 0
+        por_tipo: Counter[str] = Counter()
 
         def accept(cols: list[str]) -> bool:
             """Reject on the raw column, before a record exists.
@@ -197,7 +412,11 @@ class EnsureGoaUniverseOperation(Operation):
             """
             nonlocal rows
             rows += 1
-            return cols[_GAF_EVIDENCE].strip() in reliable
+            if cols[_GAF_EVIDENCE].strip() not in reliable:
+                return False
+            tipo = cols[_GAF_TYPE].strip().lower()
+            por_tipo[tipo or "(vacio)"] += 1
+            return tipo not in _NOT_A_PROTEIN
 
         for rec in self._stream_gaf(p, emit, accept):
             accession = rec.accession.strip()
@@ -205,6 +424,7 @@ class EnsureGoaUniverseOperation(Operation):
                 wanted.add(accession)
             else:
                 malformed += 1
+        self._tipos_fiables = dict(por_tipo.most_common())
         return wanted, malformed, rows
 
     def _stream_gaf(
@@ -284,6 +504,73 @@ class EnsureGoaUniverseOperation(Operation):
                 "info",
             )
         return fetched, proteins, sequences
+
+    def _resolve_secondary(
+        self,
+        session: Session,
+        pending: list[str],
+        p: EnsureGoaUniversePayload,
+        emit: EmitFn,
+    ) -> tuple[dict[str, str], int, int]:
+        """Rescata las accesiones que el endpoint de lote no devuelve.
+
+        El por que, el cuanto y el como se guardan estan en el docstring del
+        modulo, bajo LAS ACCESIONES SECUNDARIAS.
+        """
+        from protea.core.operations.insert_proteins import InsertProteinsOperation
+
+        inserter = InsertProteinsOperation()
+        alias: dict[str, str] = {}
+        proteins = sequences = 0
+
+        for batch in chunks(pending, _SEC_BATCH):
+            payload = self._search_secondary(batch, p.timeout_seconds)
+            pedidas = set(batch)
+            records: list[UniProtProteinRecord] = []
+            for entry in payload.get("results") or []:
+                hecho = _records_for_merge(entry, pedidas)
+                if hecho is None:
+                    continue
+                primary, filas, encontradas = hecho
+                records.extend(filas)
+                for sec in encontradas:
+                    alias[sec] = primary
+            if records:
+                ins_p, _upd, ins_s, _re = inserter._store_records(session, records, emit)
+                proteins += ins_p
+                sequences += ins_s
+                session.commit()
+            emit(
+                "ensure_goa_universe.secondary_batch",
+                None,
+                {"requested": len(batch), "resolved": len(alias), "rows": len(records)},
+                "info",
+            )
+        return alias, proteins, sequences
+
+    def _search_secondary(self, accessions: list[str], timeout: int) -> dict[str, Any]:
+        """Una consulta ``sec_acc:`` por lote. Sin ``fields``, a proposito.
+
+        ``fields=accession,sec_acc`` da 400 ``Invalid fields parameter value
+        'sec_acc'``: vale como campo de CONSULTA y no de retorno. Y hace falta
+        ``secondaryAccessions`` en la respuesta para saber cual de las pedidas
+        resolvio cada entrada, asi que se pide la entrada completa.
+        """
+        import json
+        from urllib import error, parse, request
+
+        q = " OR ".join(f"sec_acc:{a}" for a in accessions)
+        url = f"{_SEARCH_URL}?query={parse.quote(q)}&format=json&size=500"
+        req = request.Request(
+            url,
+            headers={"User-Agent": "PROTEA/ensure_goa_universe", "Accept": "application/json"},
+        )
+        try:
+            with request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))  # type: ignore[no-any-return]
+        except error.HTTPError as exc:
+            body = exc.read().decode("utf-8", "replace")[:300]
+            raise RuntimeError(f"UniProt sec_acc {exc.code}: {body}") from exc
 
     def _get_fasta(self, accessions: list[str], timeout: int) -> str:
         from urllib import error, request
