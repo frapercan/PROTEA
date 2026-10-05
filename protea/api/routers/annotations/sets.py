@@ -103,19 +103,21 @@ def delete_annotation_set(
     set_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
-    """Delete an annotation set and all its annotations. Returns 409 if referenced by a prediction set.
-
-    Invalidates the list cache, which is the whole reason this is not a
-    one-liner. ``GET /sets`` is cached for five minutes because its GROUP BY
-    over ``protein_go_annotation`` takes six seconds, and nothing used to drop
-    that entry on a delete: measured 2026-10-05, after deleting all 71 sets the
-    database answered 0 and the list kept answering 71. Worse, the cache is read
-    with ``serve_stale_on_error=True``, so a database blip during the window
-    extends the lie instead of ending it.
-
-    Both the unfiltered view and the deleted set's own ``source`` view are
-    dropped, because they are cached independently.
-    """
+    """Delete an annotation set and all its annotations. Returns 409 if referenced by a prediction set."""
+    # EL DOCSTRING DE UNA RUTA ES DOCUMENTACION PUBLICA: FastAPI lo publica como
+    # `description` del endpoint en docs/openapi.json, y el guardia de deriva
+    # compara ese fichero con el codigo. Asi que el razonamiento va aqui.
+    #
+    # La invalidacion de abajo es la razon de que esto no sea una sola linea.
+    # `GET /sets` esta cacheado cinco minutos porque su GROUP BY sobre
+    # protein_go_annotation tarda seis segundos, y nada soltaba esa entrada al
+    # borrar: medido el 2026-10-05, tras borrar los 71 conjuntos heredados la base
+    # contestaba 0 y la lista seguia contestando 71. Y la lectura usa
+    # `serve_stale_on_error=True`, asi que un tropiezo de la base dentro de la
+    # ventana alarga la respuesta vieja en vez de terminarla.
+    #
+    # Se sueltan las DOS claves, la sin filtrar y la del `source` del conjunto
+    # borrado, porque se cachean por separado.
     try:
         with session_scope(factory) as session:
             result = delete_annotation_set_data(session, set_id)
