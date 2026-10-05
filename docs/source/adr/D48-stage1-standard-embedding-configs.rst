@@ -177,15 +177,17 @@ numeric path by hand and records it:
 - The declaration stays frozen for the whole of stage 1. A jump that carries a
   migration must set ``coordinator`` and ``schema-applied`` to the same new sha,
   after the server has applied it.
-- **Regime fingerprint.** 16 fixed sequences, stratified by length and
-  including the longest in the store (about 36k residues), are embedded by
-  every stage-1 config one sequence per forward pass (batch 1, no padding).
-  Shape, dtype and sha256 are recorded per vector. The fingerprint is computed
-  twice in a row to establish that byte equality is attainable on this GPU in
-  half precision; if it is not, the comparison falls back to a numeric
-  threshold. It is then compared before the first pass and after the last.
-  ``pip freeze`` is kept alongside. Production passes run at ``batch_size=1``
-  for the same reason.
+- **Regime fingerprint.** 17 fixed sequences, chosen by length (including
+  the 1020 and 1023 boundary and the longest in the store, 35,991 residues)
+  plus one with ``X`` and one with ``U``, are embedded by every stage-1 config
+  one sequence per forward pass (batch 1, no padding). Shape, dtype and the
+  sha256 of the float32 vector and of its float16 cast are recorded per vector.
+  **Measured 2026-10-05: two runs in separate processes agree byte for byte on
+  136 of 136 vectors**, so byte equality is attainable on this GPU in half
+  precision and the regime check compares hashes. It is repeated before the
+  first pass and after the last, with ``pip freeze`` kept alongside.
+  Production passes run at ``batch_size=1`` for the same reason. The procedure,
+  the sequences and the reference output are in ``docs/campaign/stage1/``.
 
 **5. The selection rule is fixed before anything is measured.**
 
@@ -271,5 +273,7 @@ References
 - ADR-D35 (roster), ADR-D40 (temporal protocol), ADR-D46 (IA as a corpus
   artifact; the VALID IA is recomputed on the rebuilt corpus and recorded with
   the run)
+- ``docs/campaign/stage1/REGIME.md``, ``fingerprint.py``,
+  ``fingerprint-sequences.fasta`` and ``fingerprint-2026-10-05.json``
 - ``agent-farm/plans/DECLARED-REVISION.txt`` and
   ``agent-farm/scripts/services/protea-node-sync.sh``
