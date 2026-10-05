@@ -33,7 +33,17 @@ class _InsertTotals:
 
 
 class InsertProteinsPayload(ProteaPayload, frozen=True):
+    #: The UniProt query to fetch. When ``release_fasta_urls`` is set it
+    #: is not used to fetch anything, but it is still required and still
+    #: recorded: it states which query the named files are being
+    #: asserted to be equivalent to, so the declaration is readable
+    #: without opening the URLs.
     search_criteria: str
+    #: Gzipped FASTA files from a UniProt release directory to read
+    #: instead of walking the search endpoint by cursor. Empty means
+    #: paginate. See :meth:`InsertProteinsOperation._stream_fasta` for
+    #: when each path is the right one.
+    release_fasta_urls: list[str] = []
     page_size: PositiveInt = 500
     total_limit: PositiveInt | None = None
     timeout_seconds: PositiveInt = 60
@@ -52,20 +62,34 @@ class InsertProteinsPayload(ProteaPayload, frozen=True):
             raise ValueError("must be a non-empty string")
         return v.strip()
 
+    @field_validator("release_fasta_urls", mode="after")
+    @classmethod
+    def must_be_http_urls(cls, v: list[str]) -> list[str]:
+        for url in v:
+            if not url.startswith(("http://", "https://")):
+                raise ValueError(f"not an http(s) URL: {url!r}")
+        return v
+
 
 class InsertProteinsOperation(Operation):
     """Fetches protein sequences from UniProt (FASTA) and upserts them into the DB.
 
-    Uses cursor-based pagination, exponential backoff with jitter, and MD5-based
-    sequence deduplication. Many proteins can share one Sequence row.
-    Isoforms (``<canonical>-<n>``) are stored as separate Protein rows grouped
-    by ``canonical_accession``.
+    Reads either a release directory's gzipped flat files or the search
+    endpoint by cursor, depending on the payload; :meth:`_stream_fasta`
+    documents which to use. Both paths share exponential backoff with
+    jitter and MD5-based sequence deduplication. Many proteins can share
+    one Sequence row. Isoforms (``<canonical>-<n>``) are stored as
+    separate Protein rows grouped by ``canonical_accession``.
+
+    The whole run is one transaction: nothing is visible until it
+    commits, and a failure leaves no partial universe.
     """
 
     name = "insert_proteins"
     description = (
-        "Fetch protein sequences from UniProt (FASTA, cursor-paginated) and upsert "
-        "Protein + Sequence rows; isoforms are stored grouped by canonical accession."
+        "Fetch protein sequences from UniProt (FASTA, from release files or "
+        "cursor-paginated) and upsert Protein + Sequence rows; isoforms are "
+        "stored grouped by canonical accession."
     )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
@@ -79,6 +103,11 @@ class InsertProteinsOperation(Operation):
             bits.append(f"query={short}")
         if limit:
             bits.append(f"limit={limit}")
+        # Without this the summary reads as a live query on a run that
+        # never issued one.
+        urls = (payload or {}).get("release_fasta_urls") or ()
+        if urls:
+            bits.append(f"release files={len(urls)}")
         return " · ".join(bits)
 
     def __init__(self) -> None:
@@ -94,12 +123,8 @@ class InsertProteinsOperation(Operation):
     ) -> OperationResult:
         p = InsertProteinsPayload.model_validate(contract_payload(payload))
         t0 = time.perf_counter()
-        emit(
-            "insert_proteins.start",
-            None,
-            {"search_criteria": p.search_criteria, "page_size": p.page_size},
-            "info",
-        )
+        source = "release_files" if p.release_fasta_urls else "cursor_pagination"
+        self._emit_start(p, source, emit)
 
         totals = _InsertTotals()
         buffer: list[UniProtProteinRecord] = []
@@ -130,6 +155,7 @@ class InsertProteinsOperation(Operation):
 
         http_req, http_ret = self._uniprot_plugin.http_counters
         result_dict = {
+            "source": source,
             "pages": totals.pages,
             "retrieved_records": totals.retrieved,
             "isoform_records": totals.isoforms,
@@ -143,6 +169,21 @@ class InsertProteinsOperation(Operation):
         }
         emit("insert_proteins.done", None, result_dict, "info")
         return OperationResult(result=result_dict)
+
+    @staticmethod
+    def _emit_start(p: InsertProteinsPayload, source: str, emit: EmitFn) -> None:
+        """Record which source path the run took, and over which files."""
+        emit(
+            "insert_proteins.start",
+            None,
+            {
+                "search_criteria": p.search_criteria,
+                "page_size": p.page_size,
+                "source": source,
+                "release_fasta_urls": list(p.release_fasta_urls),
+            },
+            "info",
+        )
 
     def _flush_page(
         self,
@@ -180,12 +221,64 @@ class InsertProteinsOperation(Operation):
     ) -> Iterator[UniProtProteinRecord]:
         """Delegate to the protea-sources UniProtSource plugin.
 
-        Plugin owns HTTP retries, cursor pagination, gzip decoding,
-        and FASTA parsing. The operation owns batching, dedup, and
-        bulk insert. See ``f2a6_real_migration_design.md``.
+        Plugin owns HTTP retries, pagination or release-file reading,
+        gzip decoding, and FASTA parsing. The operation owns batching,
+        dedup, and bulk insert. See ``f2a6_real_migration_design.md``.
+
+        Two source paths, chosen by whether the payload names release
+        files:
+
+        * **Release files** (``release_fasta_urls`` set). Reads the
+          gzipped flat files of a UniProt release directory. For a
+          whole-database criterion such as ``reviewed:true`` this is the
+          only practical path: UniProt rate-limits cursor pagination
+          progressively, so throughput decays over a long walk and the
+          wall-clock time of a full fetch is not bounded by the result
+          size. Those files are the same query materialised, they are
+          served at full bandwidth, and because a release directory is
+          immutable they also pin the bytes. Pass the canonical file and
+          its ``_varsplic`` companion, in that order, so isoforms arrive
+          after the canonical entries they belong to. ``include_isoforms``
+          has no effect here -- which files are read decides that.
+        * **Cursor pagination** (the default). Right for a narrow
+          criterion, where the result set is small enough that the walk
+          finishes before throttling matters, and where no published
+          file corresponds to the query.
+
+        Prefer a versioned release path over ``current_release``, which
+        moves: the job's event log records each file's md5, but only a
+        pinned URL makes the fetch repeatable.
         """
+        if p.release_fasta_urls:
+            yield from self._stream_release_fasta(p, emit)
+            return
         yield from self._uniprot_plugin.stream_fasta(
             UniProtFastaStreamPayload(
+                search_criteria=p.search_criteria,
+                page_size=p.page_size,
+                timeout_seconds=p.timeout_seconds,
+                include_isoforms=p.include_isoforms,
+                compressed=p.compressed,
+                max_retries=p.max_retries,
+                backoff_base_seconds=p.backoff_base_seconds,
+                backoff_max_seconds=p.backoff_max_seconds,
+                jitter_seconds=p.jitter_seconds,
+                user_agent=p.user_agent,
+            ),
+            emit=emit,
+        )
+
+    def _stream_release_fasta(
+        self, p: InsertProteinsPayload, emit: EmitFn
+    ) -> Iterator[UniProtProteinRecord]:
+        """Read the release files named by the payload.
+
+        The transport payload carries only the retry/timeout knobs; the
+        plugin ignores its query fields on this path.
+        """
+        yield from self._uniprot_plugin.stream_release_fasta(
+            p.release_fasta_urls,
+            payload=UniProtFastaStreamPayload(
                 search_criteria=p.search_criteria,
                 page_size=p.page_size,
                 timeout_seconds=p.timeout_seconds,
