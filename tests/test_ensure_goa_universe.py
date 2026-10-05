@@ -83,9 +83,40 @@ class TestWhichCodesCount:
             wanted, _, _ = _scan([_line("P12345", code)])
             assert wanted == {"P12345"}, f"{code} must count"
 
-    def test_electronic_and_computational_do_not_count(self):
-        wanted, _, _ = _scan([_line("P12345", c) for c in ("IEA", "ISS", "RCA", "IBA", "ND", "NAS")])
+    def test_only_iea_is_excluded_under_the_curated_scope(self):
+        """``curated`` admits every non-IEA code, because IEA is GO's only
+        automatic category. ISS, RCA, IBA, ND and NAS were all assigned by a
+        person -- with varying directness -- and they qualify a protein for the
+        retrieval bank. The thirteen-code tier stays recoverable because
+        ``evidence_code`` is persisted per annotation row."""
+        for code in ("ISS", "RCA", "IBA", "ND", "NAS"):
+            wanted, _, _ = _scan([_line("P12345", code)])
+            assert wanted == {"P12345"}, f"{code} is curated"
+        wanted, _, _ = _scan([_line("P12345", "IEA")])
+        assert wanted == set(), "IEA is the automatic one"
+
+    def test_the_reliable_scope_still_excludes_them(self):
+        """The narrower tier is one payload field away, and it is what evaluation
+        truth uses. If this stopped working, the LAFA parity would be gone with
+        nothing failing."""
+        op = EnsureGoaUniverseOperation()
+        p = EnsureGoaUniversePayload(gaf_url="http://x/g.gz", evidence_scope="reliable")
+        text = "\n".join(_line("P12345", c) for c in ("ISS", "RCA", "IBA", "ND", "NAS"))
+
+        def fake_stream(_p, _emit, accept):
+            return parse_gaf_text(text, accept)
+
+        with patch.object(EnsureGoaUniverseOperation, "_stream_gaf", side_effect=fake_stream):
+            wanted, _, _ = op._reliable_accessions(p, MagicMock())
         assert wanted == set()
+
+    def test_an_unknown_scope_is_refused_not_defaulted(self):
+        """A scope that quietly fell back to a default is how a search criterion
+        fixed the corpus scope for a whole campaign without anybody declaring it."""
+        from protea.core.operations._universe_sources import codes_for
+
+        with pytest.raises(ValueError):
+            codes_for("todo")
 
     def test_a_missing_evidence_code_does_not_count(self):
         """An empty column reaches the predicate as "", not None: the predicate
@@ -359,7 +390,7 @@ class TestLoQueNoSeResuelveQuedaConNombre:
         out, puestos = self._guardar({"P30456": "P04439"}, [])
         assert out["fusiones"]["filas"] == 1
         clave = next(k for k in puestos if k.endswith("fusiones.tsv"))
-        filas = [l.split("\t") for l in puestos[clave].strip().split("\n")]
+        filas = [ln.split("\t") for ln in puestos[clave].strip().split("\n")]
         assert filas[0] == ["accesion_gaf", "accesion_primaria"]
         assert filas[1] == ["P30456", "P04439"]
 
@@ -394,7 +425,7 @@ class TestUnDemergeNoTieneUnaIdentidad:
         }
 
     def _candidatos(self, entries, pedidas):
-        from protea.core.operations.ensure_goa_universe import _records_for_merge
+        from protea.core.operations._universe_sources import records_for_merge as _records_for_merge
 
         out = {}
         for e in entries:
@@ -407,7 +438,7 @@ class TestUnDemergeNoTieneUnaIdentidad:
         return out
 
     def test_un_demerge_no_genera_alias(self):
-        from protea.core.operations.ensure_goa_universe import _decidir
+        from protea.core.operations._universe_sources import classify as _decidir
 
         cand = self._candidatos(
             [self._entry("P9WEV8", ["C8VQ65"], "AAAA"), self._entry("P9WEV9", ["C8VQ65"], "BBBB")],
@@ -420,7 +451,7 @@ class TestUnDemergeNoTieneUnaIdentidad:
         assert "C8VQ65" not in {r.accession for r in records}
 
     def test_una_fusion_de_verdad_si_genera_alias(self):
-        from protea.core.operations.ensure_goa_universe import _decidir
+        from protea.core.operations._universe_sources import classify as _decidir
 
         cand = self._candidatos([self._entry("P04439", ["P30456"])], ["P30456"])
         alias, demerges = {}, {}
@@ -432,7 +463,7 @@ class TestUnDemergeNoTieneUnaIdentidad:
     def test_ninguna_accesion_se_repite_en_las_filas(self):
         """La causa inmediata del duplicate key. Dos secundarias distintas que
         caen en la misma primaria producen esa primaria dos veces."""
-        from protea.core.operations.ensure_goa_universe import _decidir
+        from protea.core.operations._universe_sources import classify as _decidir
 
         cand = self._candidatos([self._entry("P04439", ["P30456", "P01892"])], ["P30456", "P01892"])
         alias, demerges = {}, {}
@@ -443,7 +474,7 @@ class TestUnDemergeNoTieneUnaIdentidad:
         assert alias == {"P30456": "P04439", "P01892": "P04439"}
 
     def test_el_demerge_no_contamina_a_las_fusiones_del_mismo_lote(self):
-        from protea.core.operations.ensure_goa_universe import _decidir
+        from protea.core.operations._universe_sources import classify as _decidir
 
         cand = self._candidatos(
             [
@@ -459,3 +490,149 @@ class TestUnDemergeNoTieneUnaIdentidad:
         assert list(demerges) == ["C8VQ65"]
         accs = [r.accession for r in records]
         assert len(accs) == len(set(accs))
+
+
+class TestTheAuditDates:
+    """``date_created`` is what separates knowledge gain from entry creation, and
+    ``date_sequence_modified`` is what turns the sequence leak into a named
+    subset. Both arrive in the same request as the sequence, and both must be
+    written by BOTH fetch paths -- the batch TSV one and the secondary JSON one.
+    If only one wrote them, half the corpus would carry NULL temporal columns and
+    any date filter would exclude those proteins without saying so.
+    """
+
+    _TSV = (
+        "Entry\tEntry Name\tReviewed\tOrganism\tOrganism (ID)\tGene Names\t"
+        "Length\tSequence\tSequence version\tDate of creation\t"
+        "Date of last sequence modification\n"
+        "P04439\tHLA_A\treviewed\tHomo sapiens\t9606\tHLA-A\t"
+        "4\tMAVM\t2\t1987-08-13\t2003-08-22\n"
+    )
+
+    def test_the_tsv_path_carries_them(self):
+        from protea.core.operations._universe_sources import _parse_tsv
+
+        parsed = _parse_tsv(self._TSV)
+        assert len(parsed) == 1
+        record, dates = parsed[0]
+        assert record.accession == "P04439"
+        assert record.reviewed is True
+        assert record.sequence == "MAVM"
+        assert dates.date_created == "1987-08-13"
+        assert dates.date_sequence_modified == "2003-08-22"
+        assert dates.sequence_version == 2
+
+    def test_a_reordered_response_fails_loudly(self):
+        """A silently reordered response would write dates into the wrong column,
+        and nothing downstream would notice a plausible date in a plausible
+        field."""
+        from protea.core.operations._universe_sources import _parse_tsv
+
+        with pytest.raises(RuntimeError, match="columns"):
+            _parse_tsv("Entry\tSequence\nP04439\tMAVM\n")
+
+    def test_the_json_path_carries_the_same_three(self):
+        from protea.core.operations._universe_sources import _audit_dates_of
+
+        dates = _audit_dates_of(
+            {
+                "entryAudit": {
+                    "firstPublicDate": "1987-08-13",
+                    "lastSequenceUpdateDate": "2003-08-22",
+                    "sequenceVersion": 2,
+                }
+            }
+        )
+        assert dates.date_created == "1987-08-13"
+        assert dates.date_sequence_modified == "2003-08-22"
+        assert dates.sequence_version == 2
+
+    def test_an_entry_without_audit_gives_nulls_not_a_crash(self):
+        from protea.core.operations._universe_sources import _audit_dates_of
+
+        dates = _audit_dates_of({})
+        assert dates == (None, None, None)
+
+    def test_the_two_paths_agree_on_the_field_names(self):
+        """The TSV and the JSON reach the same NamedTuple. A field renamed on one
+        side only would leave the other writing to a column that no longer
+        exists."""
+        from protea.core.operations._universe_sources import _audit_dates_of, _parse_tsv
+
+        _, from_tsv = _parse_tsv(self._TSV)[0]
+        from_json = _audit_dates_of(
+            {"entryAudit": {"firstPublicDate": "1987-08-13",
+                            "lastSequenceUpdateDate": "2003-08-22",
+                            "sequenceVersion": 2}}
+        )
+        assert from_tsv._fields == from_json._fields
+        assert from_tsv == from_json
+
+
+class TestTheDatesReachEveryUniverseMember:
+    """The defect four independent reviewers caught on 2026-10-05, before it shipped.
+
+    ``_fetch_and_store`` only ever sees ``missing`` -- the accessions absent from
+    ``protein`` -- so only those would carry audit dates. Everything a prior
+    release's pass admitted, and everything ``insert_proteins`` loaded, would keep
+    NULL in all three columns. With the reviewed set in place that is roughly
+    575,000 of some 680,000 rows, and a date filter would silently exclude 85% of
+    the corpus while appearing to work.
+
+    What makes it dangerous is that nothing fails: the columns exist, the pass
+    succeeds, and the numbers it reports are all correct. Only a query that filters
+    on a date would reveal it, by returning far too little.
+    """
+
+    def test_a_dates_only_response_parses(self):
+        from protea.core.operations._universe_sources import _parse_dates_tsv
+
+        rows = _parse_dates_tsv(
+            "Entry\tSequence version\tDate of creation\t"
+            "Date of last sequence modification\n"
+            "P04439\t2\t1987-08-13\t2003-08-22\n"
+            "Q9NTW7\t3\t2002-03-27\t2003-04-30\n"
+        )
+        assert [acc for acc, _ in rows] == ["P04439", "Q9NTW7"]
+        assert rows[0][1].date_created == "1987-08-13"
+        assert rows[0][1].sequence_version == 2
+
+    def test_a_reordered_dates_response_fails_loudly(self):
+        """A creation date and a sequence version are both plausible in either
+        column, so a silent reorder would be unnoticeable in the data."""
+        from protea.core.operations._universe_sources import _parse_dates_tsv
+
+        with pytest.raises(RuntimeError, match="date columns"):
+            _parse_dates_tsv("Entry\tDate of creation\nP04439\t1987-08-13\n")
+
+    def test_the_backfill_queries_only_rows_with_no_date(self):
+        """Steady state must be zero requests: after the first release every
+        universe member already has its dates, and re-fetching 680,000 accessions
+        per release would add hours to every pass for nothing."""
+        import inspect
+
+        src = inspect.getsource(EnsureGoaUniverseOperation._fill_dates)
+        assert "date_created.is_(None)" in src, "the backfill must filter on NULL dates"
+        assert "chunks(" in src, "chunked for the 65535 bind-parameter ceiling"
+
+    def test_execute_calls_the_backfill_after_the_fetch(self):
+        """Order matters: the backfill reads what is in the table, so it has to run
+        after the fetch inserted this release's new proteins."""
+        import inspect
+
+        src = inspect.getsource(EnsureGoaUniverseOperation.execute)
+        assert src.index("_fetch_and_store") < src.index("_fill_dates")
+
+    def test_the_result_reports_how_many_were_backfilled(self):
+        """A pass that silently filled nothing and a pass that had nothing to fill
+        look identical without this number."""
+        op = EnsureGoaUniverseOperation()
+        delivered = {"gaf_url": "http://x/g.gz", "dry_run": True}
+        with (
+            patch.object(
+                EnsureGoaUniverseOperation, "_reliable_accessions", return_value=({"P12345"}, 0, 7)
+            ),
+            patch.object(EnsureGoaUniverseOperation, "_missing", return_value=["P12345"]),
+        ):
+            out = op.execute(MagicMock(), delivered, emit=MagicMock())
+        assert "dates_backfilled" in out.result

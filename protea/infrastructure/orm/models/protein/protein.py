@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from protea.infrastructure.orm.base import Base
@@ -47,6 +47,36 @@ class Protein(Base):
     )  # len(sequence) or UniProt length
 
     # MANY proteins can share one Sequence
+    #: UniProt audit dates, from the same batch request that fetches the sequence.
+    #:
+    #: ``date_created`` separates KNOWLEDGE GAIN from ENTRY CREATION. Without it, a
+    #: protein first published in 2022 sits in the universe of a 2016 release with
+    #: no annotations, and a release-to-release delta reads that as ``NK ->
+    #: gained``. It is not: the entry did not exist. "Did this protein exist at
+    #: release N" is a comparison against this column.
+    #:
+    #: ``date_sequence_modified`` turns the sequence leak into a NAMED SUBSET. The
+    #: stored sequence comes from today's UniProt; where the last sequence update
+    #: is at or before a window's ``t0``, today's sequence IS the sequence of then
+    #: and nothing leaks for that protein. Measured against Swiss-Prot release
+    #: 2024_02: 350 of 73,863 differ, 0.47%.
+    #:
+    #: ``sequence_version`` of 1 means the sequence never changed over the entry's
+    #: lifetime. Measured over 109,320 canonical accessions: 71.5% are at
+    #: version 1.
+    #:
+    #: Deliberately absent: a ``first_release`` column. It is derivable from
+    #: ``date_created`` against ``annotation_set.source_published_at``, which is
+    #: already in this database, so a stored copy would be a second source of truth.
+    #: And it must not be taken from the order the universe passes run in: phase 1
+    #: runs descending (235 to 156), so "the pass that admitted it" would be 235 for
+    #: nearly every row.
+    date_created: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    date_sequence_modified: Mapped[date | None] = mapped_column(
+        Date, nullable=True, index=True
+    )
+    sequence_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     sequence_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("sequence.id", ondelete="SET NULL"),
