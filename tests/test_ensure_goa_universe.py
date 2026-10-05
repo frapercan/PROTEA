@@ -16,6 +16,7 @@ records without calling the predicate would make every test in
 """
 
 import inspect
+import io
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -23,6 +24,7 @@ import pytest
 from protea_sources.goa import parse_gaf_text
 from pydantic import ValidationError
 
+from protea.core.operations import _universe_http as _uhttp
 from protea.core.operations.ensure_goa_universe import (
     _ACCESSION,
     _BATCH,
@@ -204,6 +206,151 @@ class TestThePinnedCoupling:
         from protea_sources.goa import plugin as goa_plugin
 
         assert "accept" in inspect.signature(goa_plugin.stream).parameters
+
+
+
+class TestATransientFailureDoesNotKillAPass:
+    """A 503 from UniProt's cache must not throw away a quarter of an hour.
+
+    Measured 2026-10-06: release 231 died on exactly that, after its batch
+    phase had finished, and the driver moved on leaving a hole in the union.
+    """
+
+    def _emit(self):
+        llamadas = []
+
+        def emit(event, _msg, fields, level):
+            llamadas.append((event, fields, level))
+
+        emit.llamadas = llamadas  # type: ignore[attr-defined]
+        return emit
+
+    def _http_error(self, code, cuerpo=b"nope", cabeceras=None):
+        from urllib import error
+
+        return error.HTTPError(
+            "https://x", code, "boom", cabeceras or {}, io.BytesIO(cuerpo)
+        )
+
+    def _ok(self, cuerpo=b"ACC\tSEQ\n"):
+        resp = MagicMock()
+        resp.read.return_value = cuerpo
+        resp.__enter__ = lambda self_: self_
+        resp.__exit__ = lambda *a: False
+        return resp
+
+    def test_retries_a_503_and_then_succeeds(self):
+        op = EnsureGoaUniverseOperation()
+        emit = self._emit()
+        with (
+            patch(
+                "urllib.request.urlopen",
+                side_effect=[self._http_error(503), self._ok()],
+            ) as mock_get,
+            patch("time.sleep") as mock_sleep,
+        ):
+            salida = _uhttp.get("https://x", label="sec_acc", timeout=5, emit=emit)
+        assert salida == "ACC\tSEQ\n"
+        assert mock_get.call_count == 2
+        assert mock_sleep.called
+        reintentos = [c for c in emit.llamadas if c[0] == "ensure_goa_universe.http_retry"]
+        assert len(reintentos) == 1
+        assert reintentos[0][1]["reason"] == "http_503"
+        assert reintentos[0][2] == "warning"
+
+    def test_exhausting_the_retries_raises_and_never_returns_empty(self):
+        # EL INVARIANTE. Un lote que fallo no es un lote que no encontro nada:
+        # devolver vacio aqui se contaria como cero recuperables, que es el
+        # defecto que ya se pago una vez.
+        op = EnsureGoaUniverseOperation()
+        emit = self._emit()
+        with (
+            patch(
+                "urllib.request.urlopen",
+                side_effect=[self._http_error(503) for _ in range(_uhttp.ATTEMPTS)],
+            ) as mock_get,
+            patch("time.sleep"),
+            pytest.raises(RuntimeError, match="503"),
+        ):
+            _uhttp.get("https://x", label="sec_acc", timeout=5, emit=emit)
+        assert mock_get.call_count == _uhttp.ATTEMPTS
+
+    def test_a_400_is_not_retried(self):
+        # Una consulta mal formada no se arregla esperando, y gastar dos minutos
+        # de backoff en ella retrasa 75 pasadas.
+        op = EnsureGoaUniverseOperation()
+        emit = self._emit()
+        with (
+            patch("urllib.request.urlopen", side_effect=self._http_error(400)) as mock_get,
+            patch("time.sleep") as mock_sleep,
+            pytest.raises(RuntimeError, match="400"),
+        ):
+            _uhttp.get("https://x", label="dates", timeout=5, emit=emit)
+        assert mock_get.call_count == 1
+        assert not mock_sleep.called
+
+    def test_a_network_error_is_retried(self):
+        from urllib import error
+
+        op = EnsureGoaUniverseOperation()
+        emit = self._emit()
+        with (
+            patch(
+                "urllib.request.urlopen",
+                side_effect=[error.URLError("connection reset"), self._ok()],
+            ) as mock_get,
+            patch("time.sleep"),
+        ):
+            _uhttp.get("https://x", label="dates", timeout=5, emit=emit)
+        assert mock_get.call_count == 2
+        reintentos = [c for c in emit.llamadas if c[0] == "ensure_goa_universe.http_retry"]
+        assert "urlerror" in reintentos[0][1]["reason"]
+
+    def test_honours_retry_after(self):
+        op = EnsureGoaUniverseOperation()
+        emit = self._emit()
+        with (
+            patch(
+                "urllib.request.urlopen",
+                side_effect=[
+                    self._http_error(429, cabeceras={"Retry-After": "7"}),
+                    self._ok(),
+                ],
+            ),
+            patch("time.sleep") as mock_sleep,
+        ):
+            _uhttp.get("https://x", label="sec_acc", timeout=5, emit=emit)
+        # 7 s de UniProt mas el jitter, no los 2 s del backoff propio.
+        espera = mock_sleep.call_args_list[0].args[0]
+        assert 7.0 <= espera <= 7.5
+
+    def test_the_backoff_grows_and_is_capped(self):
+        esperas = [_uhttp.backoff(n) for n in range(1, 9)]
+        assert esperas[:4] == [2.0, 4.0, 8.0, 16.0]
+        assert esperas[-1] == 60.0
+        assert esperas == sorted(esperas)
+
+    def test_every_transient_status_is_covered(self):
+        # 503 es el medido, pero el Varnish de UniProt tambien da 502 y 504, y
+        # 429 cuando se va demasiado rapido.
+        assert {429, 500, 502, 503, 504} <= _uhttp.RETRYABLE_STATUS
+        assert 400 not in _uhttp.RETRYABLE_STATUS
+        assert 404 not in _uhttp.RETRYABLE_STATUS
+
+    def test_the_sec_acc_path_survives_a_503(self):
+        # El camino exacto que murio en la 231.
+        op = EnsureGoaUniverseOperation()
+        emit = self._emit()
+        cuerpo = b'{"results": []}'
+        with (
+            patch(
+                "urllib.request.urlopen",
+                side_effect=[self._http_error(503), self._ok(cuerpo)],
+            ),
+            patch("time.sleep"),
+        ):
+            salida = op._search_secondary(["P12345"], 5, emit)
+        assert salida == {"results": []}
 
 
 class TestPayload:
