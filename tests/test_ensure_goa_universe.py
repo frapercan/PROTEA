@@ -369,3 +369,93 @@ class TestLoQueNoSeResuelveQuedaConNombre:
         out, puestos = self._guardar({"A": "B"}, ["C"], job_id=None)
         assert out == {}
         assert puestos == {}
+
+
+class TestUnDemergeNoTieneUnaIdentidad:
+    """`C8VQ65` tumbo la pasada de la 156 el 2026-10-05 tras 317 fusiones
+    correctas: es `DEMERGED` con `mergeDemergeTo: [P9WEV8, P9WEV9]`, asi que sale
+    en DOS entradas. Eso daba dos filas alias con la misma accesion en el mismo
+    lote, y `_store_records` --que separa inserts de updates mirando la base y no
+    deduplica su propia entrada-- las mandaba como dos INSERT: duplicate key.
+
+    Pero el choque de claves es el sintoma. El fondo es que una accesion partida
+    en dos entradas NO APUNTA A UNA PROTEINA, y la secuencia que heredaria seria
+    la de una de dos distintas, elegida por el orden de la respuesta.
+    """
+
+    def _entry(self, primary, secundarias, seq="MAVM"):
+        return {
+            "primaryAccession": primary,
+            "secondaryAccessions": list(secundarias),
+            "entryType": "UniProtKB reviewed (Swiss-Prot)",
+            "sequence": {"value": seq},
+            "organism": {"scientificName": "Mycobacterium tuberculosis", "taxonId": 83332},
+            "genes": [],
+        }
+
+    def _candidatos(self, entries, pedidas):
+        from protea.core.operations.ensure_goa_universe import _records_for_merge
+
+        out = {}
+        for e in entries:
+            hecho = _records_for_merge(e, set(pedidas))
+            if hecho is None:
+                continue
+            primary, filas, encontradas = hecho
+            for sec in encontradas:
+                out.setdefault(sec, []).append((primary, filas))
+        return out
+
+    def test_un_demerge_no_genera_alias(self):
+        from protea.core.operations.ensure_goa_universe import _decidir
+
+        cand = self._candidatos(
+            [self._entry("P9WEV8", ["C8VQ65"], "AAAA"), self._entry("P9WEV9", ["C8VQ65"], "BBBB")],
+            ["C8VQ65"],
+        )
+        alias, demerges = {}, {}
+        records = _decidir(cand, alias, demerges)
+        assert alias == {}, "no se le puede asignar una primaria"
+        assert demerges == {"C8VQ65": ["P9WEV8", "P9WEV9"]}, "queda registrado con sus destinos"
+        assert "C8VQ65" not in {r.accession for r in records}
+
+    def test_una_fusion_de_verdad_si_genera_alias(self):
+        from protea.core.operations.ensure_goa_universe import _decidir
+
+        cand = self._candidatos([self._entry("P04439", ["P30456"])], ["P30456"])
+        alias, demerges = {}, {}
+        records = _decidir(cand, alias, demerges)
+        assert alias == {"P30456": "P04439"}
+        assert demerges == {}
+        assert {r.accession for r in records} == {"P04439", "P30456"}
+
+    def test_ninguna_accesion_se_repite_en_las_filas(self):
+        """La causa inmediata del duplicate key. Dos secundarias distintas que
+        caen en la misma primaria producen esa primaria dos veces."""
+        from protea.core.operations.ensure_goa_universe import _decidir
+
+        cand = self._candidatos([self._entry("P04439", ["P30456", "P01892"])], ["P30456", "P01892"])
+        alias, demerges = {}, {}
+        records = _decidir(cand, alias, demerges)
+        accs = [r.accession for r in records]
+        assert len(accs) == len(set(accs)), f"accesion repetida: {accs}"
+        assert set(accs) == {"P04439", "P30456", "P01892"}
+        assert alias == {"P30456": "P04439", "P01892": "P04439"}
+
+    def test_el_demerge_no_contamina_a_las_fusiones_del_mismo_lote(self):
+        from protea.core.operations.ensure_goa_universe import _decidir
+
+        cand = self._candidatos(
+            [
+                self._entry("P9WEV8", ["C8VQ65"], "AAAA"),
+                self._entry("P9WEV9", ["C8VQ65"], "BBBB"),
+                self._entry("P04439", ["P30456"], "CCCC"),
+            ],
+            ["C8VQ65", "P30456"],
+        )
+        alias, demerges = {}, {}
+        records = _decidir(cand, alias, demerges)
+        assert alias == {"P30456": "P04439"}
+        assert list(demerges) == ["C8VQ65"]
+        accs = [r.accession for r in records]
+        assert len(accs) == len(set(accs))
