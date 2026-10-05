@@ -94,6 +94,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
+from protea.core.operations import _universe_http as _uhttp
 from protea.core.operations._universe_sources import (
     _DATE_FIELDS,
     _TSV_FIELDS,
@@ -485,7 +486,7 @@ class EnsureGoaUniverseOperation(Operation):
             return 0
         escritas = 0
         for batch in chunks(pendientes, _BATCH):
-            filas = _parse_dates_tsv(self._get_dates_tsv(batch, p.timeout_seconds))
+            filas = _parse_dates_tsv(self._get_dates_tsv(batch, p.timeout_seconds, emit))
             if filas:
                 _store_dates(session, filas)
                 session.commit()
@@ -498,21 +499,13 @@ class EnsureGoaUniverseOperation(Operation):
         )
         return escritas
 
-    def _get_dates_tsv(self, accessions: list[str], timeout: int) -> str:
+    def _get_dates_tsv(self, accessions: list[str], timeout: int, emit: EmitFn) -> str:
         """Dates only, no sequence: these proteins already have theirs."""
-        from urllib import error, request
-
         url = (
             f"{_ACCESSIONS_URL}?accessions={','.join(accessions)}"
             f"&fields={_DATE_FIELDS}&format=tsv"
         )
-        req = request.Request(url, headers={"User-Agent": "PROTEA/ensure_goa_universe"})
-        try:
-            with request.urlopen(req, timeout=timeout) as resp:
-                return resp.read().decode("utf-8")
-        except error.HTTPError as exc:
-            body = exc.read().decode("utf-8", "replace")[:300]
-            raise RuntimeError(f"UniProt dates {exc.code}: {body}") from exc
+        return _uhttp.get(url, label="dates", timeout=timeout, emit=emit)
 
     def _fetch_and_store(
         self,
@@ -546,7 +539,7 @@ class EnsureGoaUniverseOperation(Operation):
         inserter = InsertProteinsOperation()
         fetched = proteins = sequences = 0
         for batch in chunks(missing, _BATCH):
-            parsed = _parse_tsv(self._get_tsv(batch, p.timeout_seconds))
+            parsed = _parse_tsv(self._get_tsv(batch, p.timeout_seconds, emit))
             records: list[UniProtProteinRecord] = [r for r, _d in parsed]
             fetched += len(records)
             if records:
@@ -583,7 +576,7 @@ class EnsureGoaUniverseOperation(Operation):
         proteins = sequences = 0
 
         for batch in chunks(pending, _SEC_BATCH):
-            payload = self._search_secondary(batch, p.timeout_seconds)
+            payload = self._search_secondary(batch, p.timeout_seconds, emit)
             pedidas = set(batch)
             # UNA ACCESION PUEDE SALIR EN VARIAS ENTRADAS, y entonces no es una
             # fusion. Se recoge todo primero y se decide despues, por accesion.
@@ -614,7 +607,9 @@ class EnsureGoaUniverseOperation(Operation):
         self._demerges = demerges
         return alias, proteins, sequences
 
-    def _search_secondary(self, accessions: list[str], timeout: int) -> dict[str, Any]:
+    def _search_secondary(
+        self, accessions: list[str], timeout: int, emit: EmitFn
+    ) -> dict[str, Any]:
         """One ``sec_acc:`` query per batch. Without ``fields``, deliberately.
 
         ``fields=accession,sec_acc`` returns 400 ``Invalid fields parameter value
@@ -628,35 +623,27 @@ class EnsureGoaUniverseOperation(Operation):
             batches had 400'd and the failures were tallied as zeroes.
         """
         import json
-        from urllib import error, parse, request
+        from urllib import parse
 
         q = " OR ".join(f"sec_acc:{a}" for a in accessions)
         url = f"{_SEARCH_URL}?query={parse.quote(q)}&format=json&size=500"
-        req = request.Request(
+        cuerpo = _uhttp.get(
             url,
-            headers={"User-Agent": "PROTEA/ensure_goa_universe", "Accept": "application/json"},
+            label="sec_acc",
+            timeout=timeout,
+            emit=emit,
+            accept="application/json",
         )
-        try:
-            with request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))  # type: ignore[no-any-return]
-        except error.HTTPError as exc:
-            body = exc.read().decode("utf-8", "replace")[:300]
-            raise RuntimeError(f"UniProt sec_acc {exc.code}: {body}") from exc
+        return json.loads(cuerpo)  # type: ignore[no-any-return]
 
-    def _get_tsv(self, accessions: list[str], timeout: int) -> str:
-        from urllib import error, request
-
+    def _get_tsv(self, accessions: list[str], timeout: int, emit: EmitFn) -> str:
         url = (
             f"{_ACCESSIONS_URL}?accessions={','.join(accessions)}"
             f"&fields={_TSV_FIELDS}&format=tsv"
         )
-        req = request.Request(url, headers={"User-Agent": "PROTEA/ensure_goa_universe"})
-        try:
-            with request.urlopen(req, timeout=timeout) as resp:
-                return resp.read().decode("utf-8")
-        except error.HTTPError as exc:
-            body = exc.read().decode("utf-8", "replace")[:300]
-            raise RuntimeError(
-                f"UniProt refused a batch of {len(accessions)} accessions "
-                f"({exc.code}): {body}"
-            ) from exc
+        return _uhttp.get(
+            url,
+            label=f"batch of {len(accessions)} accessions",
+            timeout=timeout,
+            emit=emit,
+        )
