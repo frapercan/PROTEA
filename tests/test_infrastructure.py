@@ -5,6 +5,7 @@ No real database or broker required — SQLAlchemy and pika are mocked.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -397,16 +398,33 @@ class TestCreateApp:
             patch("protea.api.app.prewarm_benchmark_matrix") as prewarm_bench_mtx,
         ):
             app = create_app(Path("/fake/root"))
+            targets = [
+                prewarm_stats,
+                prewarm_ps,
+                prewarm_configs,
+                prewarm_snapshots,
+                prewarm_asets,
+                prewarm_bench_emb,
+                prewarm_bench_mtx,
+            ]
             with TestClient(app):
-                pass  # entering the context fires the lifespan startup
+                # WAIT FOR THE FACT, DO NOT ASSUME A CLOCK. Each prewarm runs
+                # through ``asyncio.to_thread``, so the mock is invoked by an
+                # executor thread, not by the event loop. The lifespan yields
+                # three event-loop ticks before serving and the comment there
+                # used to claim that was "enough" for all seven to have landed.
+                # It is not enough, it is usually enough: the one that loses the
+                # race is the LAST of the list, and this test failed in CI on
+                # exactly that one (``benchmark:matrix``, "Called 0 times") after
+                # passing twice locally. Polling until the fact holds makes the
+                # test deterministic without the production path owing anything
+                # to a timing guess.
+                deadline = time.monotonic() + 10.0
+                while time.monotonic() < deadline and not all(m.call_count for m in targets):
+                    time.sleep(0.005)
 
-        prewarm_stats.assert_called_once_with(mock_factory)
-        prewarm_ps.assert_called_once_with(mock_factory)
-        prewarm_configs.assert_called_once_with(mock_factory)
-        prewarm_snapshots.assert_called_once_with(mock_factory)
-        prewarm_asets.assert_called_once_with(mock_factory)
-        prewarm_bench_emb.assert_called_once_with(mock_factory)
-        prewarm_bench_mtx.assert_called_once_with(mock_factory)
+        for mock in targets:
+            mock.assert_called_once_with(mock_factory)
 
     def test_sphinx_mount_when_directory_exists(self, tmp_path):
         """When docs/build/html exists, /sphinx is mounted."""
