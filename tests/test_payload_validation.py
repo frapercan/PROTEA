@@ -79,10 +79,6 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
 )
-from protea.core.operations.extract_goa_universe import ExtractGoaUniversePayload
-from protea.core.operations.resolve_protein_sequences import (
-    ResolveProteinSequencesPayload,
-)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsPayload,
 )
@@ -102,6 +98,7 @@ from protea.core.operations.export_minijobs.export_coordinator import (
 from protea.core.operations.export_research_dataset import (
     ExportResearchDatasetPayload,
 )
+from protea.core.operations.extract_goa_universe import ExtractGoaUniversePayload
 from protea.core.operations.fetch_uniprot_metadata import (
     FetchUniProtMetadataPayload,
 )
@@ -129,6 +126,9 @@ from protea.core.operations.predict_go_terms_from_interpro import (
 )
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesPayload,
+)
+from protea.core.operations.resolve_protein_sequences import (
+    ResolveProteinSequencesPayload,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.core.operations.run_interproscan_batch import (

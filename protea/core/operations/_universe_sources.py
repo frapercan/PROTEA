@@ -12,6 +12,33 @@ Everything here is pure except :func:`_store_dates`, which needs a session
 because the three date columns do not fit in ``UniProtProteinRecord``: that model
 lives in ``protea-contracts``, so extending it would mean a contract change and
 two lock bumps for three dates.
+
+WHAT BROKE AT RELEASE 179, and why the Swiss-Prot rule now demands positive
+evidence. GOA stopped putting the UniProtKB entry name first in DB Object Synonym
+and started putting the GENE SYMBOL. Measured 2026-10-06 over the cached releases:
+
+    164..178   100% of rows carry an entry name      the rule works
+    179          0%                                  GOA dropped it
+    180          0%
+    231          5%
+
+The name is in no other column. The same row reads
+``A0A021WW32_DROME|vtd|80Fh|...`` in release 178 and ``vtd|vtd|80Fh|...`` in 179,
+and ``A0A021WW32_DROME`` appears nowhere in it.
+
+The first version of the rule inferred Swiss-Prot from the ABSENCE of the TrEMBL
+pattern, so with no entry name it returned True for every row: 7.639.329
+admissible accessions on release 179 against some 600.000 on each of its
+predecessors, silently, with the job reporting success. It stalled for three hours
+in the database phase and was stopped before writing anything. A rule that
+concludes from an absence fails open, and failing open on the tier that defines
+the corpus is the worst direction available.
+
+So ``is_swissprot_entry`` now requires a name of the shape
+``<MNEMONIC>_<ORGANISM>``, and ``entry_name_is_readable`` separates "not reviewed"
+from "cannot tell" so the caller can count the second and report it. A release
+where the column is unreadable has no ``swissprot_of_release`` tier at all, and
+that is a warning on the job rather than a suspiciously low admission count.
 """
 
 from __future__ import annotations
@@ -338,6 +365,13 @@ class _RowCounters:
     #: type. Measured the day ``malformed_skipped`` dropped from 27,300 to 13,500
     #: between releases 227 and 226 with nobody able to say why.
     not_a_protein: int = 0
+    #: Filas cuyo DB Object Synonym NO lleva un nombre de entrada legible, asi que
+    #: la pregunta de Swiss-Prot no se puede contestar desde esa fila. GOA dejo de
+    #: ponerlo en la release 179: de ahi al final de la serie son TODAS las filas.
+    #: Se cuenta porque "no revisada" y "no se puede saber" son hechos distintos, y
+    #: sin esta cifra una release sin el nivel parece una release donde el nivel no
+    #: admitio a nadie.
+    entry_name_unreadable: int = 0
     by_type: Counter[str] = field(default_factory=Counter)
     unknown_codes: Counter[str] = field(default_factory=Counter)
     by_tier: Counter[str] = field(default_factory=Counter)
@@ -384,6 +418,7 @@ def extraction_report(
         "admissible_accessions": scan.admissible,
         "malformed_accessions": scan.malformed,
         "rows_not_a_protein": c.not_a_protein,
+        "rows_entry_name_unreadable": c.entry_name_unreadable,
         "already_present": scan.admissible - scan.missing,
         "missing": scan.missing,
         "proteins_inserted": scan.inserted_rows,
@@ -480,11 +515,26 @@ def is_swissprot_entry(accession: str, synonym_field: str) -> bool:
       cannot be a target. Not seeing them is correct, not a gap.
     * Every data row carried an entry name: 0 of 280,916,291 were empty.
 
-    The empty case still returns ``False`` rather than guessing, which leaves
-    such a row to be decided by its evidence code alone.
+    WHERE THIS RULE STOPS WORKING, and it is not an edge case: GOA dropped the
+    entry name at release 179 and the tier is unavailable from there to the end of
+    the series. The measurement and the row that proves it are in this module's
+    own docstring, under WHAT BROKE AT RELEASE 179.
+
+    So this now requires POSITIVE evidence. A UniProtKB entry name is
+    ``<MNEMONIC>_<ORGANISM>``: it always contains an underscore and the part
+    after the last one is an uppercase organism code. A first element that does
+    not have that shape is not an entry name, so the question CANNOT BE ANSWERED
+    from this row, and the answer is ``False`` -- the row is left to be decided
+    by its evidence code alone.
+
+    Use :func:`entry_name_is_readable` to tell "not Swiss-Prot" from "cannot
+    tell", because the caller has to count the second case and report it: a
+    release where the column is unreadable has no ``swissprot_of_release`` tier
+    at all, and that has to be visible in the run rather than inferred from a
+    suspiciously round admission count.
     """
     entry_name = synonym_field.split("|", 1)[0] if synonym_field else ""
-    if not entry_name:
+    if not _looks_like_an_entry_name(entry_name):
         return False
     # TrEMBL iff the name is the accession followed by '_'. Anything else is a
     # mnemonic, which only Swiss-Prot entries have.
@@ -493,6 +543,36 @@ def is_swissprot_entry(accession: str, synonym_field: str) -> bool:
         and len(entry_name) > len(accession)
         and entry_name[len(accession)] == "_"
     )
+
+
+def _looks_like_an_entry_name(first_element: str) -> bool:
+    """Whether this is a UniProtKB entry name at all.
+
+    ``<MNEMONIC>_<ORGANISM>``: an underscore, and after the last one an uppercase
+    organism code of at least three characters. ``A0A000_STRVD`` and ``HLA_A_HUMAN``
+    pass; ``moeA5``, ``vtd`` and ``GA0070216_102329`` do not.
+
+    Deliberately not a regex over the whole shape. The mnemonic half is not worth
+    constraining -- it contains digits, letters and further underscores -- and a
+    tighter pattern would reject real names to buy nothing. What matters is
+    separating "a name" from "a gene symbol", and the organism suffix does that.
+    """
+    if not first_element or "_" not in first_element:
+        return False
+    organism = first_element.rsplit("_", 1)[1]
+    return len(organism) >= 3 and organism.isupper() and organism.isalnum()
+
+
+def entry_name_is_readable(synonym_field: str) -> bool:
+    """Whether this row can answer the Swiss-Prot question at all.
+
+    Separate from :func:`is_swissprot_entry` because "not reviewed" and "cannot
+    tell" are different facts and the second one has to be counted. GOA dropped
+    the entry name at release 179, so for 52 of the 75 releases of this series
+    every row answers "cannot tell", and without this the tier would just look
+    like it admitted nobody.
+    """
+    return _looks_like_an_entry_name(synonym_field.split("|", 1)[0] if synonym_field else "")
 
 
 def _organism_of(entry: dict[str, Any]) -> str | None:
