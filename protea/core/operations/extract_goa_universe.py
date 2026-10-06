@@ -74,6 +74,7 @@ from protea.core.operations._universe_sources import (
     TIER_TRUTH,
     _RowCounters,
     _ScanOutcome,
+    assert_the_tier_is_derivable,
     codes_for_tiers,
     entry_name_is_readable,
     extraction_report,
@@ -225,6 +226,10 @@ class ExtractGoaUniverseOperation(Operation):
         )
 
         wanted, malformed, counters = self._admissible_accessions(p, emit)
+        # ANTES DE TOCAR LA BASE: si el nivel pedido no es derivable de esta
+        # release, esto levanta. Un aviso no basto -- la release 179 emitio
+        # `swissprot_tier_unavailable` y siguio adelante e inserto 1.601.408 filas.
+        assert_the_tier_is_derivable(counters, admit=p.admit)
         emit(
             "extract_goa_universe.scanned",
             None,
