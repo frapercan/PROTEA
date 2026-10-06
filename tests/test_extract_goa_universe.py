@@ -31,13 +31,14 @@ from pydantic import ValidationError
 from protea.core.operations._universe_sources import (
     ACCESSION_GRAMMAR,
     ALL_KNOWN_CODES,
-    _RowCounters,
     CURATED_INFERENCE_CODES,
     TIER_CURATED_INFERENCE,
     TIER_SWISSPROT,
     TIER_TRUTH,
     TRUTH_CODES,
+    _RowCounters,
     codes_for_tiers,
+    entry_name_is_readable,
     is_swissprot_entry,
 )
 from protea.core.operations.extract_goa_universe import (
@@ -612,3 +613,105 @@ class TestTheFirstReleaseIsAMinimum:
         assert out.result["proteins_inserted"] == 1
         assert out.result["first_release_written"] == 1
         assert out.result["release"] == 156
+
+
+class TestGoaDroppedTheEntryNameAtRelease179:
+    """The defect that stalled release 179 for three hours and would have put
+    7,639,329 accessions in the corpus.
+
+    GOA stopped putting the UniProtKB entry name first in DB Object Synonym at
+    release 179 and started putting the GENE SYMBOL. The name is in no other
+    column: the row that reads ``A0A021WW32_DROME|vtd|80Fh|...`` in release 178
+    reads ``vtd|vtd|80Fh|...`` in 179.
+
+    The rule inferred Swiss-Prot from the ABSENCE of the TrEMBL pattern, so with no
+    entry name it said True for every row. Measured over the cached releases:
+    164..178 carry the name in 100% of rows, 179 in 0%, 180 in 0%, 231 in 5%. That
+    is 52 of the 75 releases of this series, including the evaluation window.
+    """
+
+    def test_the_real_row_from_179_is_not_swissprot(self):
+        """Taken verbatim from the cached GAF, same protein as the 178 row below."""
+        assert is_swissprot_entry("A0A021WW32", "vtd|vtd|80Fh|CG40222|DRAD21") is False
+
+    def test_the_same_protein_in_178_is_correctly_trembl(self):
+        assert is_swissprot_entry("A0A021WW32", "A0A021WW32_DROME|vtd|80Fh") is False
+
+    def test_a_real_swissprot_name_still_passes(self):
+        """The fix must not close the tier where the data IS there."""
+        assert is_swissprot_entry("P12345", "HLA_A_HUMAN|hla") is True
+        assert is_swissprot_entry("P04439", "1A01_HUMAN|HLA-A") is True
+
+    def test_a_gene_symbol_is_not_a_readable_entry_name(self):
+        """``moeA5``, ``vtd``: no underscore, so no organism code, so not a name."""
+        for symbol in ("moeA5", "vtd", "CG40222", ""):
+            assert entry_name_is_readable(symbol) is False, symbol
+
+    def test_the_231_shape_is_not_a_readable_entry_name(self):
+        """``GA0070216_102329`` has an underscore but the suffix is digits, not an
+        uppercase organism code. It is a locus tag."""
+        assert entry_name_is_readable("GA0070216_102329") is False
+
+    def test_a_real_entry_name_is_readable(self):
+        for name in ("A0A000_STRVD", "HLA_A_HUMAN", "1A01_HUMAN", "Q8CF25_MOUSE"):
+            assert entry_name_is_readable(name) is True, name
+
+    def test_cannot_tell_is_counted_apart_from_not_reviewed(self):
+        """The whole point: a release with no tier must be distinguishable from a
+        release where the tier admitted nobody."""
+        cols = list(_COLS)
+        cols[_GAF_SYNONYM] = "vtd|vtd"
+        cols[_GAF_EVIDENCE] = "IEA"
+        cols[_GAF_ID] = "A0A021WW32"
+        _wanted, _malformed, counters = _scan_with_counters(["\t".join(cols)])
+        assert counters.entry_name_unreadable == 1
+        assert counters.by_tier["swissprot_of_release"] == 0
+
+    def test_a_readable_name_that_is_trembl_is_not_counted_as_unreadable(self):
+        cols = list(_COLS)
+        cols[_GAF_SYNONYM] = "A0A021WW32_DROME|vtd"
+        cols[_GAF_EVIDENCE] = "IEA"
+        cols[_GAF_ID] = "A0A021WW32"
+        _wanted, _malformed, counters = _scan_with_counters(["\t".join(cols)])
+        assert counters.entry_name_unreadable == 0, "legible y TrEMBL no es 'no se puede saber'"
+
+    def test_the_release_without_the_tier_emits_a_warning(self):
+        """The only other symptom would be an admissible count lower than expected,
+        which is exactly what nobody looks at."""
+        op = ExtractGoaUniverseOperation()
+        p = ExtractGoaUniversePayload(gaf_url="http://x/g.gz", release=179)
+        filas = []
+        for i in range(4):
+            cols = list(_COLS)
+            cols[_GAF_ID] = f"A0A0{i:02d}"
+            cols[_GAF_EVIDENCE] = "IEA"
+            cols[_GAF_SYNONYM] = "vtd|vtd"      # la forma de la 179: simbolo de gen
+            filas.append("\t".join(cols))
+        text = "\n".join(filas)
+        emit = MagicMock()
+
+        def fake_stream(_p, _emit, accept):
+            return parse_gaf_text(text, accept)
+
+        with patch.object(ExtractGoaUniverseOperation, "_stream_gaf", side_effect=fake_stream):
+            op._admissible_accessions(p, emit)
+        eventos = [c.args[0] for c in emit.call_args_list]
+        assert "extract_goa_universe.swissprot_tier_unavailable" in eventos
+
+    def test_the_report_carries_the_count(self):
+        op = ExtractGoaUniverseOperation()
+        counters = _RowCounters(rows=10, entry_name_unreadable=10)
+        with (
+            patch.object(
+                ExtractGoaUniverseOperation,
+                "_admissible_accessions",
+                return_value=(set(), 0, counters),
+            ),
+            patch.object(ExtractGoaUniverseOperation, "_missing", return_value=[]),
+        ):
+            out = op.execute(
+                MagicMock(),
+                {"gaf_url": "http://x/g.gz", "release": 179, "dry_run": True},
+                emit=MagicMock(),
+            )
+        assert out.result["rows_entry_name_unreadable"] == 10

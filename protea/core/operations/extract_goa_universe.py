@@ -75,6 +75,7 @@ from protea.core.operations._universe_sources import (
     _RowCounters,
     _ScanOutcome,
     codes_for_tiers,
+    entry_name_is_readable,
     extraction_report,
     is_swissprot_entry,
 )
@@ -281,6 +282,26 @@ class ExtractGoaUniverseOperation(Operation):
                 wanted.add(accession)
             else:
                 malformed += 1
+        # UNA RELEASE SIN NIVEL swissprot_of_release TIENE QUE DECIRLO. GOA dejo
+        # de publicar el nombre de entrada en la 179, y el criterio pierde ahi un
+        # nivel entero: 52 de las 75 releases de esta serie. Sin este aviso, el
+        # unico sintoma seria un recuento de admisibles mas bajo de lo esperado,
+        # que es precisamente lo que nadie mira.
+        if counters.entry_name_unreadable and counters.rows:
+            parte = counters.entry_name_unreadable / counters.rows
+            if parte > 0.5:
+                emit(
+                    "extract_goa_universe.swissprot_tier_unavailable",
+                    "this release does not publish the UniProtKB entry name, so the "
+                    "swissprot_of_release tier admits nobody here",
+                    {
+                        "rows_unreadable": counters.entry_name_unreadable,
+                        "rows": counters.rows,
+                        "fraction": round(parte, 4),
+                        "since": "GOA dropped it at release 179",
+                    },
+                    "warning",
+                )
         if counters.unknown_codes:
             emit(
                 "extract_goa_universe.unknown_evidence_codes",
@@ -325,6 +346,12 @@ class ExtractGoaUniverseOperation(Operation):
             elif wants_swissprot and is_swissprot_entry(cols[_GAF_ID].strip(), cols[_GAF_SYNONYM]):
                 counters.by_tier["swissprot_of_release"] += 1
             else:
+                if wants_swissprot and not entry_name_is_readable(cols[_GAF_SYNONYM]):
+                    # CANNOT TELL, which is not the same as NO. GOA dropped the
+                    # entry name at release 179, so from there on every row lands
+                    # here, and the count is what makes a release with no tier
+                    # distinguishable from a release where the tier admitted nobody.
+                    counters.entry_name_unreadable += 1
                 return False
             obj_type = cols[_GAF_TYPE].strip().lower()
             counters.by_type[obj_type or "(vacio)"] += 1
