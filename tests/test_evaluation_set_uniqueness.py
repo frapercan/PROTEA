@@ -21,6 +21,7 @@ computes, which is the behaviour the widened key exists to allow.
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -139,6 +140,15 @@ def test_swapped_pair_is_a_different_row(pg_session: Session) -> None:
 def _make_annotation_set_mock(snapshot_id: uuid.UUID) -> MagicMock:
     s = MagicMock()
     s.ontology_snapshot_id = snapshot_id
+    # A REAL publication date, because the holdout guard compares it against the
+    # board's mark. A bare MagicMock made that comparison raise TypeError, and the
+    # instinct is to teach the guard to tolerate it; that would be wrong. A real
+    # annotation set always has this column filled or NULL, never a stand-in that
+    # is neither, so a double without it is a double of something that cannot
+    # exist. 2024-04-16 is v220, the campaign's selection endpoint: safely before
+    # the mark, so these tests keep measuring uniqueness and not the guard.
+    s.source_published_at = date(2024, 4, 16)
+    s.source_version = "v220"
     return s
 
 

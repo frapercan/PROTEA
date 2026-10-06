@@ -142,7 +142,10 @@ class GenerateEvaluationSetOperation:
         )
         # Before anything is built: the holdout is scored once, at the end.
         refuse_if_the_set_reads_the_holdout(
-            new_set, waiver=p.holdout_waiver, context="building the window ending at"
+            new_set,
+            waiver=p.holdout_waiver,
+            context="building the window ending at",
+            emit=emit,
         )
         mode = self._delta_mode(old_set, new_set, old_native, new_native, pivot_id)
 

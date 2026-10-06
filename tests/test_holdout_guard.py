@@ -16,9 +16,13 @@ was asking.
 from __future__ import annotations
 
 from datetime import date
+from unittest.mock import MagicMock
 
 import pytest
 
+from protea.core.operations._holdout_guard import (
+    refuse_if_the_set_reads_the_holdout,
+)
 from protea.core.split_registry import (
     BOARD_MARK,
     HOLDOUT_WAIVER,
@@ -89,3 +93,57 @@ class TestTheRefusalIsUsable:
         assert HOLDOUT_WAIVER in message
         assert "scoring at 230" in message
         assert BOARD_MARK in message
+
+
+class TestAGuardThatCannotDecideSaysSo:
+    """Passing for lack of a date is not the same as passing.
+
+    The original justification for the silent pass was that
+    ``refresh_goa_release_dates`` "has run for every set this platform holds".
+    True when it was written, false during a rebuild: phase 2 of the clean
+    campaign creates 75 annotation sets and that job has not run on any of them,
+    so this branch becomes the COMMON case and the guard goes inert exactly when
+    it is needed.
+    """
+
+    def _set_without_a_date(self):
+        s = MagicMock()
+        s.source_published_at = None
+        s.source_version = "v231"
+        return s
+
+    def test_it_still_passes(self):
+        """Refusing every undated window would take down the tune windows to
+        protect the holdout from a case that cannot be decided either way."""
+        refuse_if_the_set_reads_the_holdout(
+            self._set_without_a_date(), waiver=None, context="scoring at", emit=MagicMock()
+        )
+
+    def test_but_it_emits_a_warning_naming_the_remedy(self):
+        emit = MagicMock()
+        refuse_if_the_set_reads_the_holdout(
+            self._set_without_a_date(), waiver=None, context="scoring at", emit=emit
+        )
+        assert emit.call_count == 1
+        event, _msg, fields, level = emit.call_args[0]
+        assert event == "holdout_guard.undecidable"
+        assert level == "warning"
+        assert fields["annotation_set"] == "v231"
+        assert "refresh_goa_release_dates" in fields["remedy"]
+
+    def test_a_caller_with_no_emit_still_works(self):
+        """``emit`` is optional so the guard stays callable from a context that
+        has none, and the absence of a logger must not become an exception."""
+        refuse_if_the_set_reads_the_holdout(
+            self._set_without_a_date(), waiver=None, context="scoring at"
+        )
+
+    def test_a_dated_set_emits_nothing(self):
+        """The warning is about the guard being unable to decide, not about the
+        verdict, so a decidable window must stay quiet."""
+        emit = MagicMock()
+        s = MagicMock()
+        s.source_published_at = date(2024, 4, 16)
+        s.source_version = "v220"
+        refuse_if_the_set_reads_the_holdout(s, waiver=None, context="scoring at", emit=emit)
+        emit.assert_not_called()

@@ -914,6 +914,16 @@ not part of the public API.
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: protea.core.operations._holdout_guard
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_payload
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: protea.core.operations._load_ontology_helpers
    :members:
    :undoc-members:
