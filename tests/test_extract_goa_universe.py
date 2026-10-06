@@ -36,7 +36,9 @@ from protea.core.operations._universe_sources import (
     TIER_SWISSPROT,
     TIER_TRUTH,
     TRUTH_CODES,
+    SwissProtTierNotDerivableError,
     _RowCounters,
+    assert_the_tier_is_derivable,
     codes_for_tiers,
     entry_name_is_readable,
     is_swissprot_entry,
@@ -699,6 +701,10 @@ class TestGoaDroppedTheEntryNameAtRelease179:
         assert "extract_goa_universe.swissprot_tier_unavailable" in eventos
 
     def test_the_report_carries_the_count(self):
+        """With ``admit`` as the driver sends it for 179 and later: no swissprot
+        tier, so the guard stays silent and the count is still reported. The count
+        is what tells a reader WHY the tier was left out, so it has to survive the
+        case where leaving it out was correct."""
         op = ExtractGoaUniverseOperation()
         counters = _RowCounters(rows=10, entry_name_unreadable=10)
         with (
@@ -711,7 +717,97 @@ class TestGoaDroppedTheEntryNameAtRelease179:
         ):
             out = op.execute(
                 MagicMock(),
-                {"gaf_url": "http://x/g.gz", "release": 179, "dry_run": True},
+                {
+                    "gaf_url": "http://x/g.gz",
+                    "release": 179,
+                    "dry_run": True,
+                    "admit": [TIER_TRUTH, TIER_CURATED_INFERENCE],
+                },
                 emit=MagicMock(),
             )
         assert out.result["rows_entry_name_unreadable"] == 10
+        assert out.result["admit"] == [TIER_TRUTH, TIER_CURATED_INFERENCE]
+
+
+class TestAWarningDoesNotStopAnything:
+    """What the first fix got wrong, with the number it cost.
+
+    Release 179 emitted ``swissprot_tier_unavailable`` saying 98.4% of its rows
+    carried no entry name, and then inserted **1,601,408** proteins admitted by
+    the very tier it had just reported as unavailable. A guard that reports and
+    proceeds is a guard that proceeds.
+
+    The first fix also tried to recognise an entry name BY ITS SHAPE, and shape is
+    not identity: ``FD15_GL001936`` is a locus tag whose suffix is uppercase and
+    alphanumeric, so it passed. Tightening the shape helps and is not the answer.
+    The answer is that a release which does not carry the data does not have the
+    tier, which is a per-release fact and belongs in the payload.
+    """
+
+    _REALES = dict(rows=534813197, entry_name_unreadable=526236088)
+
+    def _counters(self):
+        c = _RowCounters(**self._REALES)
+        c.by_tier["swissprot_of_release"] = 7073009
+        return c
+
+    def test_it_raises_on_the_real_figures_from_179(self):
+        with pytest.raises(SwissProtTierNotDerivableError, match="98.4%"):
+            assert_the_tier_is_derivable(
+                self._counters(), admit=[TIER_TRUTH, TIER_CURATED_INFERENCE, TIER_SWISSPROT]
+            )
+
+    def test_it_says_what_to_do_instead(self):
+        """An error that names no remedy gets worked around rather than fixed."""
+        with pytest.raises(SwissProtTierNotDerivableError) as exc:
+            assert_the_tier_is_derivable(self._counters(), admit=[TIER_SWISSPROT])
+        msg = str(exc.value)
+        assert "release 179" in msg
+        assert "present-day Swiss-Prot" in msg
+        assert "Nothing has been written" in msg
+
+    def test_it_is_silent_when_the_tier_was_not_asked_for(self):
+        """Which is what the driver does for releases 179 and later."""
+        assert_the_tier_is_derivable(
+            self._counters(), admit=[TIER_TRUTH, TIER_CURATED_INFERENCE]
+        )
+
+    def test_it_is_silent_on_a_release_that_carries_the_name(self):
+        c = _RowCounters(rows=280_922_738, entry_name_unreadable=0)
+        assert_the_tier_is_derivable(
+            c, admit=[TIER_TRUTH, TIER_CURATED_INFERENCE, TIER_SWISSPROT]
+        )
+
+    def test_the_locus_tag_that_leaked_is_no_longer_a_name(self):
+        """``GL001936`` is eight characters. A UniProt organism mnemonic is three
+        to five: HUMAN, DROME, 9ACTN, ECOLI."""
+        assert entry_name_is_readable("FD15_GL001936") is False
+        assert entry_name_is_readable("FD15_GL000293") is False
+
+    def test_real_organism_codes_of_every_width_still_pass(self):
+        for name in ("A0A000_STRVD", "HLA_A_HUMAN", "Q8CF25_MOUSE", "P0A7B8_ECOLI",
+                     "X5M5N0_9ACTN", "FOO_ABC"):
+            assert entry_name_is_readable(name) is True, name
+
+    def test_the_guard_runs_before_the_database_is_touched(self):
+        """It can only know after the scan, and it must act before the write. The
+        ORDER is the whole protection, so it is what gets pinned."""
+        src = inspect.getsource(ExtractGoaUniverseOperation.execute)
+        assert src.index("assert_the_tier_is_derivable") < src.index("self._missing(")
+
+    def test_execute_refuses_instead_of_inserting(self):
+        """End to end: the operation raises and never reaches the insert."""
+        op = ExtractGoaUniverseOperation()
+        with (
+            patch.object(
+                ExtractGoaUniverseOperation,
+                "_admissible_accessions",
+                return_value=({"P12345"}, 0, self._counters()),
+            ),
+            patch.object(ExtractGoaUniverseOperation, "_insert_accessions") as ins,
+            pytest.raises(SwissProtTierNotDerivableError),
+        ):
+            op.execute(
+                MagicMock(), {"gaf_url": "http://x/g.gz", "release": 179}, emit=MagicMock()
+            )
+        ins.assert_not_called()

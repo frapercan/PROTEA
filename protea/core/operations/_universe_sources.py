@@ -560,7 +560,53 @@ def _looks_like_an_entry_name(first_element: str) -> bool:
     if not first_element or "_" not in first_element:
         return False
     organism = first_element.rsplit("_", 1)[1]
-    return len(organism) >= 3 and organism.isupper() and organism.isalnum()
+    # TRES A CINCO caracteres, que es el ancho del mnemonico de organismo de
+    # UniProt (HUMAN, DROME, 9ACTN, ECOLI). Sin el tope superior, un locus tag
+    # pasa: `FD15_GL001936` tiene `GL001936` en mayusculas y alfanumerico, y en la
+    # release 179 un millon seiscientas mil accesiones entraron por esa puerta.
+    # Es defensa en profundidad y NO la defensa: la forma no es la identidad, y la
+    # unica respuesta correcta cuando la columna no trae nombres de entrada es no
+    # usar el nivel en esa release. Eso lo decide el payload y lo exige
+    # `assert_the_tier_is_derivable`.
+    return 3 <= len(organism) <= 5 and organism.isupper() and organism.isalnum()
+
+
+class SwissProtTierNotDerivableError(RuntimeError):
+    """The payload asked for a tier whose data this release does not carry.
+
+    Raised AFTER the scan and BEFORE anything is written, which is the only place
+    it can both know the answer and still prevent the damage.
+
+    A warning was tried first and was not enough. On release 179 the operation
+    emitted ``swissprot_tier_unavailable`` saying 98,4% of rows were unreadable,
+    and then went on to insert **1.601.408** proteins admitted by the tier it had
+    just reported as unavailable. A guard that reports and proceeds is a guard
+    that proceeds.
+    """
+
+
+def assert_the_tier_is_derivable(counters: _RowCounters, *, admit: Seq[str]) -> None:
+    """Refuse a pass that admitted on ``swissprot_of_release`` without the data.
+
+    The threshold is half the rows. Not a tuned number: a release either carries
+    the entry name in essentially every row or in essentially none. Measured over
+    the cached series, 164..178 carry it in 100% and 179, 180 and 231 in 0%, 0%
+    and 5%. There is no middle to calibrate against.
+    """
+    if TIER_SWISSPROT not in admit or not counters.rows:
+        return
+    unreadable = counters.entry_name_unreadable / counters.rows
+    if unreadable <= 0.5:
+        return
+    raise SwissProtTierNotDerivableError(
+        f"{unreadable:.1%} of this release's rows carry no UniProtKB entry name, so "
+        f"the {TIER_SWISSPROT!r} tier cannot be derived from it, yet "
+        f"{counters.by_tier.get(TIER_SWISSPROT, 0)} rows were admitted by that tier. "
+        "GOA stopped publishing the entry name in DB Object Synonym at release 179. "
+        f"Pass admit without {TIER_SWISSPROT!r} for this release, and cover those "
+        "entries with the present-day Swiss-Prot source instead (MARCO-DECLARADO, "
+        "decision A+B). Nothing has been written."
+    )
 
 
 def entry_name_is_readable(synonym_field: str) -> bool:
