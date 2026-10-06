@@ -31,7 +31,7 @@ from pydantic import ValidationError
 from protea.core.operations._universe_sources import (
     ACCESSION_GRAMMAR,
     ALL_KNOWN_CODES,
-    _Cuentas,
+    _RowCounters,
     CURATED_INFERENCE_CODES,
     TIER_CURATED_INFERENCE,
     TIER_SWISSPROT,
@@ -57,7 +57,7 @@ _COLS = [
 
 
 def _con(cols, accession, code, qualifier="", entry_name=None):
-    """Una fila a partir de una plantilla de columnas ya modificada."""
+    """A row built from an already-modified column template."""
     out = list(cols)
     out[1] = accession
     out[3] = qualifier
@@ -67,14 +67,14 @@ def _con(cols, accession, code, qualifier="", entry_name=None):
 
 
 def _line(accession, code, qualifier="", entry_name=None):
-    """Una fila de GAF realista.
+    """A realistic GAF row.
 
-    ``entry_name`` por defecto es ``<accesion>_HUMAN``, que es la forma de
-    TrEMBL. Importa: la plantilla ponia ``"syn"``, un nombre que no empieza por
-    la accesion, asi que bajo el nivel ``swissprot_of_release`` TODA fila de test
-    habria entrado como revisada y los tests del predicado de evidencia habrian
-    dejado de medir lo que dicen medir. Un fixture irreal es un test que pasa por
-    el motivo equivocado.
+    ``entry_name`` defaults to ``<accession>_HUMAN``, which is the TrEMBL form.
+    That matters: the template used to say ``"syn"``, a name that does not start
+    with the accession, so under tier ``swissprot_of_release`` EVERY test row would
+    have been admitted as reviewed and the evidence-predicate tests would have
+    stopped measuring what they claim to. An unrealistic fixture is a test that
+    passes for the wrong reason.
     """
     cols = list(_COLS)
     cols[1] = accession
@@ -98,15 +98,15 @@ def _scan(lines, admit=None):
         return parse_gaf_text(text, accept)
 
     with patch.object(ExtractGoaUniverseOperation, "_stream_gaf", side_effect=fake_stream):
-        wanted, malformed, cuentas = op._admissible_accessions(p, MagicMock())
-    # Se devuelve ``rows`` y no el objeto para que las aserciones que ya existian
-    # sigan midiendo exactamente lo que median; quien necesite los contadores usa
-    # ``_scan_con_cuentas``.
-    return wanted, malformed, cuentas.rows
+        wanted, malformed, counters = op._admissible_accessions(p, MagicMock())
+    # ``rows`` is returned rather than the object so the assertions that already
+    # existed keep measuring exactly what they measured; whoever needs the counters
+    # uses ``_scan_with_counters``.
+    return wanted, malformed, counters.rows
 
 
-def _scan_con_cuentas(lines, admit=None):
-    """Como :func:`_scan` pero devolviendo el objeto de contadores."""
+def _scan_with_counters(lines, admit=None):
+    """Like :func:`_scan` but returning the counters object."""
     op = ExtractGoaUniverseOperation()
     p = (
         ExtractGoaUniversePayload(gaf_url="http://x/g.gz", release=156, admit=admit)
@@ -164,10 +164,10 @@ class TestWhichCodesCount:
 
     def test_dropping_a_tier_narrows_the_corpus(self):
         """The tier list is the lever, so removing one has to be visible."""
-        filas = [_line("P00001", "IDA"), _line("P00002", "ISS")]
-        solo_verdad, _, _ = _scan(filas, admit=[TIER_TRUTH])
+        rows = [_line("P00001", "IDA"), _line("P00002", "ISS")]
+        solo_verdad, _, _ = _scan(rows, admit=[TIER_TRUTH])
         assert solo_verdad == {"P00001"}
-        con_inferencia, _, _ = _scan(filas, admit=[TIER_TRUTH, TIER_CURATED_INFERENCE])
+        con_inferencia, _, _ = _scan(rows, admit=[TIER_TRUTH, TIER_CURATED_INFERENCE])
         assert con_inferencia == {"P00001", "P00002"}
 
     def test_an_unknown_tier_is_refused_not_defaulted(self):
@@ -221,26 +221,26 @@ class TestWhichCodesCount:
 
 
 class TestSwissProtOfTheRelease:
-    """La pertenencia a Swiss-Prot sale del GAF, fechada, sin descargar nada."""
+    """Swiss-Prot membership comes from the GAF, dated, with no download."""
 
     def test_the_synonym_column_is_where_we_think(self):
-        """``_GAF_SYNONYM`` se ancla contra los campos que el plugin SI expone.
+        """``_GAF_SYNONYM`` is anchored against the fields the plugin DOES expose.
 
-        El registro del plugin tiene ocho campos --accession, go_id, qualifier,
-        evidence_code, db_reference, with_from, assigned_by, annotation_date-- y
-        el sinonimo NO esta entre ellos. Tampoco el tipo de objeto, que
-        ``_GAF_TYPE`` ya venia leyendo igual de a ciegas. Asi que no se puede
-        fijar el indice 10 directamente, como si se fija el 6.
+        The plugin's record has eight fields (accession, go_id, qualifier,
+        evidence_code, db_reference, with_from, assigned_by, annotation_date) and
+        the synonym is NOT among them. Neither is the object type, which
+        ``_GAF_TYPE`` was already reading just as blindly. So index 10 cannot be
+        pinned directly, the way index 6 can.
 
-        Lo que si se puede: poner un marcador distinto en cada columna y
-        comprobar que los seis campos que el plugin expone caen donde este
-        modulo cree. Eso demuestra que el plugin trocea en el orden estandar de
-        GAF 2.x, y los indices 8, 10 y 11 quedan determinados por ese mismo
-        troceo. Si el plugin moviera su mapeo, los anclajes se romperian aqui.
+        What can be done: put a distinct marker in every column and check that the
+        six fields the plugin does expose land where this module believes. That
+        proves the plugin splits in the standard GAF 2.x order, and indices 8, 10
+        and 11 are determined by that same split. If the plugin moved its mapping,
+        the anchors would break here.
 
-        El arreglo fuerte seria que el plugin expusiera el nombre de entrada en
-        su registro, ya que es parte del GAF y ahora decide el criterio. Es un
-        cambio de contrato y va aparte, no de propina.
+        The strong fix would be for the plugin to expose the entry name in its
+        record, since it is part of the GAF and now decides the criterion. That is
+        a contract change and goes separately, not as a freebie.
         """
         cols = [f"c{i}" for i in range(17)]
         cols[_GAF_ID] = "P12345"
@@ -251,7 +251,7 @@ class TestSwissProtOfTheRelease:
         text = "\t".join(cols)
         rec = next(iter(parse_gaf_text(text)))
 
-        # Los anclajes: si cualquiera se mueve, el troceo ya no es el que creemos.
+        # The anchors: if any of them moves, the split is not what we believe.
         assert rec.accession == cols[_GAF_ID] == "P12345"
         assert rec.go_id == cols[4]
         assert rec.evidence_code == cols[_GAF_EVIDENCE] == "IDA"
@@ -274,19 +274,18 @@ class TestSwissProtOfTheRelease:
         assert is_swissprot_entry("P12345", "FOO_HUMAN|foo") is True
 
     def test_an_empty_entry_name_does_not_guess(self):
-        """Medido 0 de 280.916.291 filas en GOA 156, asi que esto no ocurre; pero
-        si ocurriera, la fila la decide su codigo de evidencia y no una
-        suposicion."""
+        """Measured 0 of 280,916,291 rows in GOA 156, so this does not happen; but
+        if it did, the row is decided by its evidence code and not by a guess."""
         assert is_swissprot_entry("P12345", "") is False
 
     def test_a_prefix_that_is_not_the_whole_name_is_still_swissprot(self):
-        """El corte es ``<accesion>_``, no ``startswith``. Un mnemonico que
-        empiece por las mismas letras no es TrEMBL."""
+        """The cut is ``<accession>_``, not ``startswith``. A mnemonic that begins
+        with the same letters is not TrEMBL."""
         assert is_swissprot_entry("P12345", "P12345X_HUMAN") is True
 
     def test_swissprot_admits_a_row_its_evidence_would_reject(self):
-        """Es el punto del nivel: una entrada revisada entra por PERTENENCIA,
-        aunque su unica anotacion sea IEA."""
+        """That is the point of the tier: a reviewed entry enters by MEMBERSHIP,
+        even if its only annotation is IEA."""
         wanted, _, _ = _scan([_line("P12345", "IEA", entry_name="FOO_HUMAN")])
         assert wanted == {"P12345"}
 
@@ -295,16 +294,16 @@ class TestSwissProtOfTheRelease:
         assert wanted == set()
 
     def test_dropping_the_swissprot_tier_drops_it(self):
-        filas = [_line("P12345", "IEA", entry_name="FOO_HUMAN")]
-        assert _scan(filas, admit=[TIER_TRUTH])[0] == set()
-        assert _scan(filas, admit=[TIER_TRUTH, TIER_SWISSPROT])[0] == {"P12345"}
+        rows = [_line("P12345", "IEA", entry_name="FOO_HUMAN")]
+        assert _scan(rows, admit=[TIER_TRUTH])[0] == set()
+        assert _scan(rows, admit=[TIER_TRUTH, TIER_SWISSPROT])[0] == {"P12345"}
 
 
 class TestAnUnknownCodeIsNotADefault:
     def test_it_is_rejected_and_counted(self):
-        """Un codigo que GO anada despues de escribirse la particion necesita una
-        DECISION. El criterio anterior, que era el complemento de IEA, lo habria
-        admitido sin que nadie se enterase."""
+        """A code GO adds after the partition was written needs a DECISION. The
+        previous criterion, the complement of IEA, would have admitted it without
+        anybody noticing."""
         op = ExtractGoaUniverseOperation()
         p = ExtractGoaUniversePayload(gaf_url="http://x/g.gz", release=156)
         text = "\n".join([_line("P00001", "IDA"), _line("P00002", "XYZ")])
@@ -314,9 +313,9 @@ class TestAnUnknownCodeIsNotADefault:
             return parse_gaf_text(text, accept)
 
         with patch.object(ExtractGoaUniverseOperation, "_stream_gaf", side_effect=fake_stream):
-            wanted, _, cuentas = op._admissible_accessions(p, emit)
-        assert wanted == {"P00001"}, "el desconocido no entra"
-        assert dict(cuentas.desconocidos) == {"XYZ": 1}
+            wanted, _, counters = op._admissible_accessions(p, emit)
+        assert wanted == {"P00001"}, "the unknown one does not enter"
+        assert dict(counters.unknown_codes) == {"XYZ": 1}
         eventos = [c.args[0] for c in emit.call_args_list]
         assert "extract_goa_universe.unknown_evidence_codes" in eventos
 
@@ -373,31 +372,31 @@ class TestTheAccessionGate:
         assert malformed == 2
 
 
-class TestLoQueEstaOperacionNoHace:
-    """El acoplamiento privado se fue, y con el su test.
+class TestWhatThisOperationDoesNot:
+    """The private coupling is gone, and so is the test that pinned it.
 
-    Hasta el 2026-10-06 esta operacion llamaba a
-    ``InsertProteinsOperation._store_records`` -- un metodo privado de otra
-    operacion -- y habia un test fijando su firma porque la rotura habria salido
-    en tiempo de ejecucion, horas dentro de una carga. Ahora el almacen vive en
-    ``_protein_store`` y lo importan las dos, asi que no hay nada que fijar: lo
-    que hay que fijar es que esta operacion NO guarda secuencias en absoluto.
+    Until 2026-10-06 this operation called
+    ``InsertProteinsOperation._store_records``, a private method of another
+    operation, and a test pinned its signature because a break would otherwise
+    have surfaced at runtime, hours into a load. The store now lives in
+    ``_protein_store`` and both import it, so there is nothing left to pin. What
+    needs pinning is that this operation stores NO sequences at all.
     """
 
-    def test_no_toca_la_tabla_sequence(self):
-        """Si volviera a insertar secuencias, volveria a necesitar la red en una
-        pasada que se repite 75 veces, que es el defecto que la particion cerro."""
+    def test_does_not_touch_the_sequence_table(self):
+        """If it inserted sequences again it would need the network again, in a
+        pass that runs 75 times, which is the defect the split closed."""
         import protea.core.operations.extract_goa_universe as mod
 
-        texto = Path(mod.__file__).read_text(encoding="utf-8")
-        assert "SequenceModel" not in texto
-        assert "store_records" not in texto
-        assert "protea_sources.uniprot" not in texto
+        text = Path(mod.__file__).read_text(encoding="utf-8")
+        assert "SequenceModel" not in text
+        assert "store_records" not in text
+        assert "protea_sources.uniprot" not in text
 
-    def test_el_plugin_sigue_aceptando_un_filtro_de_linea_cruda(self):
-        """El 2,6x depende de que ``stream`` acepte ``accept``. Una rev del plugin
-        que lo quitara haria que ``_stream_gaf`` lanzara TypeError en la primera
-        release de una serie de 75."""
+    def test_the_plugin_still_takes_a_raw_line_filter(self):
+        """The 2.6x depends on ``stream`` accepting ``accept``. A plugin rev that
+        dropped it would make ``_stream_gaf`` raise TypeError on the first release
+        of a 75-release run."""
         from protea_sources.goa import plugin as goa_plugin
 
         assert "accept" in inspect.signature(goa_plugin.stream).parameters
@@ -427,7 +426,7 @@ class TestPayload:
                      "_job_id": str(uuid.uuid4())}
         with (
             patch.object(
-                ExtractGoaUniverseOperation, "_admissible_accessions", return_value=({"P12345"}, 0, _Cuentas(rows=7))
+                ExtractGoaUniverseOperation, "_admissible_accessions", return_value=({"P12345"}, 0, _RowCounters(rows=7))
             ),
             patch.object(ExtractGoaUniverseOperation, "_missing", return_value=["P12345"]),
         ):
@@ -436,38 +435,38 @@ class TestPayload:
         assert out.result["dry_run"] is True
 
 
-class TestElTipoDelObjeto:
-    """El GAF dice en la columna 11 si la fila es una proteina, un complejo o un
-    RNA. Hasta ahora los no-proteina se caian por la regex de formato de accesion,
-    que acierta al 100% en GOA 156 (0 de 1.032 identificadores de IntAct y
-    RNAcentral la pasan) pero es acierto por accidente: un espacio de nombres
-    nuevo con ids que casaran el patron de UniProt entraria sin aviso. Y la serie
-    ya renombro uno a mitad, IntAct a ComplexPortal en la release 171."""
+class TestTheObjectType:
+    """Column 11 of the GAF states whether the row is a protein, a complex or an
+    RNA. Non-proteins used to be stopped by the accession-format regex, which is
+    100% right on GOA 156 (0 of 1,032 IntAct and RNAcentral identifiers pass it)
+    but right by accident: a new namespace whose ids matched UniProt's pattern
+    would enter unannounced. And the series has already renamed one mid-way,
+    IntAct to ComplexPortal at release 171."""
 
-    def test_un_complejo_no_entra(self):
+    def test_a_complex_does_not_enter(self):
         cols = list(_COLS)
         cols[11] = "complex"
         wanted, _, rows = _scan(["\t".join(_con(cols, accession="P12345", code="IPI"))])
         assert wanted == set()
-        assert rows == 1, "se ha visto, no se ha ignorado"
+        assert rows == 1, "it was seen, not ignored"
 
-    def test_un_rna_no_entra(self):
+    def test_an_rna_does_not_enter(self):
         cols = list(_COLS)
         cols[11] = "rna"
         wanted, _, _ = _scan(["\t".join(_con(cols, accession="P12345", code="IDA"))])
         assert wanted == set()
 
-    def test_una_proteina_si(self):
+    def test_a_protein_does(self):
         wanted, _, _ = _scan([_line("P12345", "IDA")])
         assert wanted == {"P12345"}
 
-    def test_un_tipo_DESCONOCIDO_entra_y_se_cuenta(self):
-        """Deliberado: dejar fuera a una proteina de verdad es peor que dejar
-        entrar a un tipo nuevo, porque al tipo nuevo lo frena ademas la regex y
-        aparece en el histograma del resultado. Aceptar solo 'protein' convertiria
-        cualquier vocabulario nuevo de GOA en una perdida silenciosa."""
+    def test_an_UNKNOWN_type_enters_and_is_counted(self):
+        """Deliberate: leaving out a real protein is worse than letting a new type
+        in, because the regex stops the new type anyway and it shows up in the
+        result's histogram. Admitting only 'protein' would turn any new GOA
+        vocabulary into a silent loss."""
         cols = list(_COLS)
-        cols[11] = "algo_que_goa_invente_en_2030"
+        cols[11] = "something_goa_invents_in_2030"
         op = ExtractGoaUniverseOperation()
         p = ExtractGoaUniversePayload(gaf_url="http://x/g.gz", release=156)
         text = "\t".join(_con(cols, accession="P12345", code="IDA"))
@@ -476,27 +475,27 @@ class TestElTipoDelObjeto:
             return parse_gaf_text(text, accept)
 
         with patch.object(ExtractGoaUniverseOperation, "_stream_gaf", side_effect=fake_stream):
-            wanted, _, cuentas = op._admissible_accessions(p, MagicMock())
-        assert wanted == {"P12345"}, "un tipo desconocido no se descarta"
-        assert "algo_que_goa_invente_en_2030" in cuentas.por_tipo, "y queda contado"
+            wanted, _, counters = op._admissible_accessions(p, MagicMock())
+        assert wanted == {"P12345"}, "an unknown type is not discarded"
+        assert "something_goa_invents_in_2030" in counters.by_type, "and it stays counted"
 
 
 
 
-class TestLaFilaQueSeInserta:
-    """Una fila de ``protein`` con accesion y nada mas.
+class TestTheRowItInserts:
+    """A ``protein`` row with an accession and nothing else.
 
-    Es lo que hace posible separar las secuencias: ``protein.sequence_id`` es
-    nullable y ``canonical_accession`` no lo es, asi que la unica cosa que una
-    accesion dice por si sola -- si es una isoforma de otra -- hay que parsearla
-    aqui, y todo lo demas lo rellena ``resolve_protein_sequences`` cuando UniProt
-    contesta. La fase 2 no necesita mas: ``load_goa_annotations`` filtra con
-    ``select(Protein.accession)``.
+    This is what makes separating the sequences possible: ``protein.sequence_id``
+    is nullable and ``canonical_accession`` is not, so the one thing an accession
+    states by itself -- whether it is an isoform of another -- has to be parsed
+    here, and everything else is filled in by ``resolve_protein_sequences`` when
+    UniProt answers. Phase 2 needs no more than this: ``load_goa_annotations``
+    filters on ``select(Protein.accession)``.
     """
 
-    def test_una_accesion_canonica(self):
-        fila = ExtractGoaUniverseOperation._accession_row("P12345", 156)
-        assert fila == {
+    def test_a_canonical_accession(self):
+        row = ExtractGoaUniverseOperation._accession_row("P12345", 156)
+        assert row == {
             "accession": "P12345",
             "canonical_accession": "P12345",
             "is_canonical": True,
@@ -504,63 +503,63 @@ class TestLaFilaQueSeInserta:
             "first_admitted_release": 156,
         }
 
-    def test_una_isoforma_apunta_a_su_canonica(self):
-        fila = ExtractGoaUniverseOperation._accession_row("P12345-2", 194)
-        assert fila["canonical_accession"] == "P12345"
-        assert fila["is_canonical"] is False
-        assert fila["isoform_index"] == 2
+    def test_an_isoform_points_at_its_canonical(self):
+        row = ExtractGoaUniverseOperation._accession_row("P12345-2", 194)
+        assert row["canonical_accession"] == "P12345"
+        assert row["is_canonical"] is False
+        assert row["isoform_index"] == 2
 
-    def test_no_escribe_ninguna_columna_que_sea_de_uniprot(self):
-        """Dejarlas en NULL no es un descuido: es lo que permite que
-        ``apply_record_updates`` las rellene despues sin pisar nada. Escribir aqui
-        un ``reviewed`` leido del GAF seria peor que no escribirlo, porque
-        ``protein.reviewed`` es la instantanea de HOY y el GAF trae la de su
-        release."""
-        fila = ExtractGoaUniverseOperation._accession_row("P12345", 156)
-        for columna in ("sequence_id", "reviewed", "entry_name", "length",
-                        "organism", "taxonomy_id", "gene_name", "date_created"):
-            assert columna not in fila
+    def test_writes_no_column_that_belongs_to_uniprot(self):
+        """Leaving them NULL is not an oversight: it is what lets
+        ``apply_record_updates`` fill them later without clobbering anything.
+        Writing a ``reviewed`` read from the GAF here would be worse than not
+        writing it, because ``protein.reviewed`` is TODAY's snapshot and the GAF
+        carries its own release's."""
+        row = ExtractGoaUniverseOperation._accession_row("P12345", 156)
+        for column in ("sequence_id", "reviewed", "entry_name", "length",
+                       "organism", "taxonomy_id", "gene_name", "date_created"):
+            assert column not in row
 
-    def test_la_insercion_no_perdona_un_conflicto(self):
-        """``missing`` se calculo contra esta misma tabla hace un momento, asi que
-        un conflicto de clave significa que esa consulta minti�. Sin ``ON CONFLICT
-        DO NOTHING`` eso es una excepcion, y eso es lo correcto: con el seria un
-        salto silencioso y el recuento informado seria falso."""
+    def test_the_insert_does_not_forgive_a_conflict(self):
+        """``missing`` was computed against this same table moments earlier, so a
+        key conflict means that query lied. Without ``ON CONFLICT DO NOTHING`` that
+        is an exception, and that is correct: with it, it would be a silent skip and
+        the reported count would be false."""
         src = inspect.getsource(ExtractGoaUniverseOperation._insert_accessions)
         assert "on_conflict" not in src
 
 
-class TestLosDosRechazosSeCuentanAparte:
-    """``malformed_skipped`` mezclaba dos cosas distintas.
+class TestTheTwoRejectionsAreCountedApart:
+    """``malformed_skipped`` conflated two different things.
 
-    Una era "esto no es una accesion de UniProtKB" y la otra "esto es un complejo
-    o un RNA". El 2026-10-06 la cifra bajo de ~27.300 a ~13.500 entre las releases
-    227 y 226 y nadie podia decir cual de las dos se habia movido, que es
-    exactamente lo que un numero mezclado impide.
+    One was "this is not a UniProtKB accession" and the other "this is a complex or
+    an RNA". On 2026-10-06 the figure dropped from ~27,300 to ~13,500 between
+    releases 227 and 226 and nobody could say which of the two had moved, which is
+    exactly what a conflated number prevents.
     """
 
-    def test_una_accesion_que_no_parsea_cuenta_como_malformada(self):
-        _wanted, malformed, cuentas = _scan_con_cuentas([_line("NOEXISTE1", "IDA")])
+    def test_an_accession_that_does_not_parse_counts_as_malformed(self):
+        _wanted, malformed, counters = _scan_with_counters([_line("NOEXISTE1", "IDA")])
         assert malformed == 1
-        assert cuentas.no_proteina == 0
+        assert counters.not_a_protein == 0
 
-    def test_un_tipo_que_no_es_proteina_cuenta_en_su_propio_cubo(self):
+    def test_a_type_that_is_not_a_protein_counts_in_its_own_bucket(self):
         cols = list(_COLS)
         cols[_GAF_TYPE] = "complex"
-        _wanted, malformed, cuentas = _scan_con_cuentas(
+        _wanted, malformed, counters = _scan_with_counters(
             ["\t".join(_con(cols, accession="P12345", code="IPI"))]
         )
         assert malformed == 0
-        assert cuentas.no_proteina == 1
+        assert counters.not_a_protein == 1
 
-    def test_el_informe_lleva_las_dos(self):
+    def test_the_report_carries_both(self):
         op = ExtractGoaUniverseOperation()
-        cuentas = _Cuentas(rows=9, no_proteina=4)
+        counters = _RowCounters(rows=9, not_a_protein=4)
         with (
             patch.object(
                 ExtractGoaUniverseOperation,
                 "_admissible_accessions",
-                return_value=({"P12345"}, 3, cuentas),
+                return_value=({"P12345"}, 3, counters),
             ),
             patch.object(ExtractGoaUniverseOperation, "_missing", return_value=[]),
         ):
@@ -571,37 +570,37 @@ class TestLosDosRechazosSeCuentanAparte:
             )
         assert out.result["malformed_accessions"] == 3
         assert out.result["rows_not_a_protein"] == 4
-        assert "malformed_skipped" not in out.result, "la cifra mezclada ya no existe"
+        assert "malformed_skipped" not in out.result, "the conflated figure is gone"
 
 
-class TestLaPrimeraReleaseEsUnMinimo:
-    """``first_admitted_release`` se escribe con ``IS NULL OR > N``, no al insertar.
+class TestTheFirstReleaseIsAMinimum:
+    """``first_admitted_release`` is written with ``IS NULL OR > N``, not on insert.
 
-    La serie se recorre ascendente, asi que en una pasada limpia el minimo coincide
-    con el primer escritor. Pero el orden es una propiedad del driver y la columna
-    es una propiedad del corpus: si alguien procesa la 194 antes de la 156, el
-    minimo sigue siendo 156 y una pasada repetida no sube el valor.
+    The series is walked ascending, so in a clean run the minimum coincides with
+    the first writer. But the order is a property of the driver and the column is a
+    property of the corpus: if someone processes 194 before 156, the minimum is
+    still 156, and a repeated pass does not raise the value.
     """
 
-    def test_la_consulta_baja_el_valor_y_nunca_lo_sube(self):
+    def test_the_query_lowers_the_value_and_never_raises_it(self):
         src = inspect.getsource(ExtractGoaUniverseOperation._write_first_release)
         assert "first_admitted_release.is_(None)" in src
         assert "first_admitted_release > release" in src
 
-    def test_la_fila_nueva_ya_trae_la_release(self):
-        """Si no la trajera, el UPDATE posterior tendria que cubrirla y el numero
-        informado como 'rellenadas' contaria tambien las nuevas."""
+    def test_the_new_row_already_carries_the_release(self):
+        """If it did not, the later UPDATE would have to cover it and the number
+        reported as backfilled would count the new rows too."""
         assert ExtractGoaUniverseOperation._accession_row("P12345", 156)[
             "first_admitted_release"
         ] == 156
 
-    def test_el_informe_separa_insertadas_de_rellenadas(self):
+    def test_the_report_separates_inserted_from_backfilled(self):
         op = ExtractGoaUniverseOperation()
         with (
             patch.object(
                 ExtractGoaUniverseOperation,
                 "_admissible_accessions",
-                return_value=({"P12345", "Q99999"}, 0, _Cuentas(rows=2)),
+                return_value=({"P12345", "Q99999"}, 0, _RowCounters(rows=2)),
             ),
             patch.object(ExtractGoaUniverseOperation, "_missing", return_value=["P12345"]),
             patch.object(ExtractGoaUniverseOperation, "_insert_accessions", return_value=1),

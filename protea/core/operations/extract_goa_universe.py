@@ -72,10 +72,10 @@ from protea.core.operations._universe_sources import (
     TIER_CURATED_INFERENCE,
     TIER_SWISSPROT,
     TIER_TRUTH,
-    _Cuentas,
-    _Escaneo,
+    _RowCounters,
+    _ScanOutcome,
     codes_for_tiers,
-    informe_de_extraccion,
+    extraction_report,
     is_swissprot_entry,
 )
 from protea.core.utils import chunks, contract_payload
@@ -176,7 +176,7 @@ class ExtractGoaUniversePayload(ProteaPayload, frozen=True):
     def tiers_must_be_known_and_nonempty(cls, v: list[str]) -> list[str]:
         if not v:
             raise ValueError("admit must name at least one tier; an empty corpus is not a scope")
-        codes_for_tiers(v)  # levanta ValueError nombrando el nivel desconocido
+        codes_for_tiers(v)  # raises ValueError naming the unknown tier
         return v
 
 
@@ -223,21 +223,21 @@ class ExtractGoaUniverseOperation(Operation):
             "info",
         )
 
-        wanted, malformed, cuentas = self._admissible_accessions(p, emit)
+        wanted, malformed, counters = self._admissible_accessions(p, emit)
         emit(
             "extract_goa_universe.scanned",
             None,
             {
-                "rows": cuentas.rows,
+                "rows": counters.rows,
                 "admissible_accessions": len(wanted),
                 "malformed_accessions": malformed,
-                "rows_not_a_protein": cuentas.no_proteina,
+                "rows_not_a_protein": counters.not_a_protein,
             },
             "info",
         )
 
         missing = self._missing(session, wanted)
-        escaneo = _Escaneo(cuentas, malformed, len(wanted), len(missing))
+        scan = _ScanOutcome(counters, malformed, len(wanted), len(missing))
         emit(
             "extract_goa_universe.missing",
             None,
@@ -246,16 +246,16 @@ class ExtractGoaUniverseOperation(Operation):
         )
 
         if not p.dry_run:
-            escaneo.insertadas = self._insert_accessions(session, missing, p.release, emit)
-            escaneo.primera_release_escrita = self._write_first_release(
+            scan.inserted_rows = self._insert_accessions(session, missing, p.release, emit)
+            scan.first_release_written = self._write_first_release(
                 session, wanted, p.release, emit
             )
 
-        result = informe_de_extraccion(
+        result = extraction_report(
             release=p.release,
             admit=list(p.admit),
             dry_run=p.dry_run,
-            escaneo=escaneo,
+            scan=scan,
             elapsed=round(time.perf_counter() - t0, 1),
         )
         emit("extract_goa_universe.done", None, result, "info")
@@ -263,7 +263,7 @@ class ExtractGoaUniverseOperation(Operation):
 
     def _admissible_accessions(
         self, p: ExtractGoaUniversePayload, emit: EmitFn
-    ) -> tuple[set[str], int, _Cuentas]:
+    ) -> tuple[set[str], int, _RowCounters]:
         """Every accession the GAF admits under the requested tiers, NOT included.
 
         A ``NOT`` row admits: the qualifier is never read. A ``NOT`` with
@@ -271,8 +271,8 @@ class ExtractGoaUniverseOperation(Operation):
         curated knowledge, so the protein belongs in the universe even though it
         has no positive truth.
         """
-        cuentas = _Cuentas()
-        accept = self._build_accept(p, cuentas)
+        counters = _RowCounters()
+        accept = self._build_accept(p, counters)
         wanted: set[str] = set()
         malformed = 0
         for rec in self._stream_gaf(p, emit, accept):
@@ -281,17 +281,17 @@ class ExtractGoaUniverseOperation(Operation):
                 wanted.add(accession)
             else:
                 malformed += 1
-        if cuentas.desconocidos:
+        if counters.unknown_codes:
             emit(
                 "extract_goa_universe.unknown_evidence_codes",
                 None,
-                {"codes": dict(cuentas.desconocidos.most_common())},
+                {"codes": dict(counters.unknown_codes.most_common())},
                 "warning",
             )
-        return wanted, malformed, cuentas
+        return wanted, malformed, counters
 
     def _build_accept(
-        self, p: ExtractGoaUniversePayload, cuentas: _Cuentas
+        self, p: ExtractGoaUniversePayload, counters: _RowCounters
     ) -> Callable[[list[str]], bool]:
         """The row predicate, deciding on the RAW columns before a record exists.
 
@@ -300,7 +300,7 @@ class ExtractGoaUniverseOperation(Operation):
         validate a record for each of the other 99,76% and then drop it, which
         measured 11,5 minutes a release against 4,4.
 
-        ``cuentas.rows`` keeps meaning exactly what it meant before the predicate
+        ``counters.rows`` keeps meaning exactly what it meant before the predicate
         existed: the plugin calls this for every line that is neither a comment
         nor short, which is precisely the set of lines that used to yield a
         record, and it is the denominator the run reports.
@@ -311,25 +311,25 @@ class ExtractGoaUniverseOperation(Operation):
         default. The previous criterion was the complement of ``IEA`` and would
         have admitted it in silence.
         """
-        codigos = codes_for_tiers(p.admit)
-        quiere_sp = TIER_SWISSPROT in p.admit
+        codes = codes_for_tiers(p.admit)
+        wants_swissprot = TIER_SWISSPROT in p.admit
 
         def accept(cols: list[str]) -> bool:
-            cuentas.rows += 1
+            counters.rows += 1
             ev = cols[_GAF_EVIDENCE].strip()
-            if ev in codigos:
-                cuentas.por_nivel["por_codigo"] += 1
+            if ev in codes:
+                counters.by_tier["por_codigo"] += 1
             elif ev and ev not in ALL_KNOWN_CODES:
-                cuentas.desconocidos[ev] += 1
+                counters.unknown_codes[ev] += 1
                 return False
-            elif quiere_sp and is_swissprot_entry(cols[_GAF_ID].strip(), cols[_GAF_SYNONYM]):
-                cuentas.por_nivel["swissprot_of_release"] += 1
+            elif wants_swissprot and is_swissprot_entry(cols[_GAF_ID].strip(), cols[_GAF_SYNONYM]):
+                counters.by_tier["swissprot_of_release"] += 1
             else:
                 return False
-            tipo = cols[_GAF_TYPE].strip().lower()
-            cuentas.por_tipo[tipo or "(vacio)"] += 1
-            if tipo in _NOT_A_PROTEIN:
-                cuentas.no_proteina += 1
+            obj_type = cols[_GAF_TYPE].strip().lower()
+            counters.by_type[obj_type or "(vacio)"] += 1
+            if obj_type in _NOT_A_PROTEIN:
+                counters.not_a_protein += 1
                 return False
             return True
 
@@ -380,21 +380,21 @@ class ExtractGoaUniverseOperation(Operation):
         """
         if not missing:
             return 0
-        escritas = 0
+        written = 0
         for chunk in chunks(missing, _DB_CHUNK):
             session.execute(
                 insert(Protein.__table__),
                 [self._accession_row(acc, release) for acc in chunk],
             )
             session.commit()
-            escritas += len(chunk)
+            written += len(chunk)
             emit(
                 "extract_goa_universe.inserted",
                 None,
-                {"rows": len(chunk), "inserted_total": escritas, "of": len(missing)},
+                {"rows": len(chunk), "inserted_total": written, "of": len(missing)},
                 "info",
             )
-        return escritas
+        return written
 
     @staticmethod
     def _accession_row(accession: str, release: int) -> dict[str, Any]:
@@ -430,7 +430,7 @@ class ExtractGoaUniverseOperation(Operation):
         and the returned count is the backfill alone.
         """
         col = Protein.__table__.c
-        escritas = 0
+        written = 0
         for chunk in chunks(sorted(wanted), _DB_CHUNK):
             res = session.execute(
                 update(Protein.__table__)
@@ -443,13 +443,13 @@ class ExtractGoaUniverseOperation(Operation):
                 )
                 .values(first_admitted_release=release)
             )
-            escritas += res.rowcount or 0
+            written += res.rowcount or 0
             session.commit()
-        if escritas:
+        if written:
             emit(
                 "extract_goa_universe.first_release_written",
                 None,
-                {"rows": escritas, "release": release},
+                {"rows": written, "release": release},
                 "info",
             )
-        return escritas
+        return written

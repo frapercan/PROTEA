@@ -110,13 +110,13 @@ from protea.core.operations._universe_sources import (
     _TSV_FIELDS,
     ACCESSION_GRAMMAR,
     _audit_dates_of,
+    _FetchOutcome,
     _parse_dates_tsv,
     _parse_tsv,
-    _Salida,
     _store_dates,
     candidates_from,
     classify,
-    informe_de_resolucion,
+    resolution_report,
 )
 from protea.core.utils import chunks, contract_payload
 from protea.infrastructure.orm.models.protein.protein import Protein
@@ -126,9 +126,9 @@ from protea.infrastructure.orm.models.protein.protein import Protein
 _DB_CHUNK = 20000
 
 
-def resolution_key_for(job_id: Any, nombre: str) -> str:
-    """Clave de almacenamiento de un artefacto de esta operacion."""
-    return f"protein_resolution/{job_id}/{nombre}"
+def resolution_key_for(job_id: Any, name: str) -> str:
+    """Storage key for one artifact of this operation."""
+    return f"protein_resolution/{job_id}/{name}"
 
 
 class ResolveProteinSequencesPayload(ProteaPayload, frozen=True):
@@ -180,27 +180,27 @@ class ResolveProteinSequencesOperation(Operation):
     ) -> OperationResult:
         t0 = time.perf_counter()
         p = ResolveProteinSequencesPayload.model_validate(contract_payload(payload))
-        salida = _Salida()
+        outcome = _FetchOutcome()
 
-        candidatos = self._without_sequence(session, p.max_accessions)
-        salida.candidatos = len(candidatos)
+        candidates = self._without_sequence(session, p.max_accessions)
+        outcome.candidates = len(candidates)
         emit(
             "resolve_protein_sequences.start",
             None,
-            {"candidates": len(candidatos), "limit": p.max_accessions},
+            {"candidates": len(candidates), "limit": p.max_accessions},
             "info",
         )
 
-        if not p.dry_run and candidatos:
-            self._fetch_sequences(session, candidatos, p, emit, salida)
-            self._resolve_merges(session, candidatos, p, emit, salida)
+        if not p.dry_run and candidates:
+            self._fetch_sequences(session, candidates, p, emit, outcome)
+            self._resolve_merges(session, candidates, p, emit, outcome)
         if not p.dry_run:
-            self._backfill_dates(session, p, emit, salida)
-            salida.artefactos = self._store_artifacts(payload.get("_job_id"), salida)
+            self._backfill_dates(session, p, emit, outcome)
+            outcome.artefactos = self._store_artifacts(payload.get("_job_id"), outcome)
 
-        result = informe_de_resolucion(
+        result = resolution_report(
             dry_run=p.dry_run,
-            salida=salida,
+            outcome=outcome,
             elapsed=round(time.perf_counter() - t0, 1),
         )
         result["limit"] = p.max_accessions
@@ -233,10 +233,10 @@ class ResolveProteinSequencesOperation(Operation):
     def _fetch_sequences(
         self,
         session: Session,
-        candidatos: list[str],
+        candidates: list[str],
         p: ResolveProteinSequencesPayload,
         emit: EmitFn,
-        salida: _Salida,
+        outcome: _FetchOutcome,
     ) -> None:
         """Ask for the sequence and the three audit dates in one request per batch.
 
@@ -245,17 +245,17 @@ class ResolveProteinSequencesOperation(Operation):
         """
         from protea_sources.uniprot import MAX_ACCESSIONS_PER_REQUEST
 
-        contado = StoreCounts()
-        for batch in chunks(candidatos, MAX_ACCESSIONS_PER_REQUEST):
+        counts = StoreCounts()
+        for batch in chunks(candidates, MAX_ACCESSIONS_PER_REQUEST):
             parsed = _parse_tsv(
                 self._uniprot.fetch_accessions_tsv(
                     batch, fields=_TSV_FIELDS, emit=emit, knobs=self._knobs(p)
                 )
             )
             records: list[UniProtProteinRecord] = [r for r, _d in parsed]
-            salida.fetched += len(records)
+            outcome.fetched += len(records)
             if records:
-                contado.add(store_records(session, records, emit))
+                counts.add(store_records(session, records, emit))
                 _store_dates(session, [(r.accession, d) for r, d in parsed])
                 session.commit()
             emit(
@@ -264,51 +264,51 @@ class ResolveProteinSequencesOperation(Operation):
                 {
                     "requested": len(batch),
                     "returned": len(records),
-                    "fetched_total": salida.fetched,
-                    "_progress_current": salida.fetched,
-                    "_progress_total": len(candidatos),
+                    "fetched_total": outcome.fetched,
+                    "_progress_current": outcome.fetched,
+                    "_progress_total": len(candidates),
                 },
                 "info",
             )
-        salida.updated += contado.proteins_updated
-        salida.inserted += contado.proteins_inserted
-        salida.sequences += contado.sequences_inserted
+        outcome.updated += counts.proteins_updated
+        outcome.inserted += counts.proteins_inserted
+        outcome.sequences += counts.sequences_inserted
 
     # ---- pass two: what the batch endpoint does not return ----
 
     def _resolve_merges(
         self,
         session: Session,
-        candidatos: list[str],
+        candidates: list[str],
         p: ResolveProteinSequencesPayload,
         emit: EmitFn,
-        salida: _Salida,
+        outcome: _FetchOutcome,
     ) -> None:
         """Rescue the FUSED accessions, and name the ones that are simply gone.
 
         The question is put to the database and not to the arithmetic: which of
-        the candidates STILL has no sequence. ``candidatos`` minus ``fetched``
+        the candidates STILL has no sequence. ``candidates`` minus ``fetched``
         counts right but does not say who.
         """
         from protea_sources.uniprot import MAX_OR_CONDITIONS
 
-        pendientes = self._still_without_sequence(session, candidatos)
-        if not pendientes:
+        pending = self._still_without_sequence(session, candidates)
+        if not pending:
             return
-        contado = StoreCounts()
-        for batch in chunks(pendientes, MAX_OR_CONDITIONS):
-            contado.add(self._merge_batch(session, batch, p, emit, salida))
-        salida.sin_resolver = sorted(set(pendientes) - set(salida.alias))
-        salida.updated += contado.proteins_updated
-        salida.inserted += contado.proteins_inserted
-        salida.sequences += contado.sequences_inserted
+        counts = StoreCounts()
+        for batch in chunks(pending, MAX_OR_CONDITIONS):
+            counts.add(self._merge_batch(session, batch, p, emit, outcome))
+        outcome.unresolved = sorted(set(pending) - set(outcome.alias))
+        outcome.updated += counts.proteins_updated
+        outcome.inserted += counts.proteins_inserted
+        outcome.sequences += counts.sequences_inserted
         emit(
             "resolve_protein_sequences.secondary",
             None,
             {
-                "pending": len(pendientes),
-                "resolved_as_merge": len(salida.alias),
-                "unresolved": len(salida.sin_resolver),
+                "pending": len(pending),
+                "resolved_as_merge": len(outcome.alias),
+                "unresolved": len(outcome.unresolved),
             },
             "info",
         )
@@ -319,7 +319,7 @@ class ResolveProteinSequencesOperation(Operation):
         batch: list[str],
         p: ResolveProteinSequencesPayload,
         emit: EmitFn,
-        salida: _Salida,
+        outcome: _FetchOutcome,
     ) -> StoreCounts:
         """One ``sec_acc:`` query and what it resolves.
 
@@ -328,14 +328,14 @@ class ResolveProteinSequencesOperation(Operation):
         accession that appears in SEVERAL entries is a demerge, not a merge, and
         that cannot be decided until the whole response has been read.
         """
-        cuerpo = self._uniprot.search_secondary_accessions(
+        body = self._uniprot.search_secondary_accessions(
             batch, emit=emit, knobs=self._knobs(p)
         )
-        candidates, entry_by_acc = candidates_from(cuerpo, set(batch))
-        records = classify(candidates, salida.alias, salida.demerges)
-        contado = StoreCounts()
+        candidates, entry_by_acc = candidates_from(body, set(batch))
+        records = classify(candidates, outcome.alias, outcome.demerges)
+        counts = StoreCounts()
         if records:
-            contado.add(store_records(session, records, emit))
+            counts.add(store_records(session, records, emit))
             _store_dates(
                 session,
                 [
@@ -350,18 +350,18 @@ class ResolveProteinSequencesOperation(Operation):
             None,
             {
                 "requested": len(batch),
-                "resolved": len(salida.alias),
-                "demerged": len(salida.demerges),
+                "resolved": len(outcome.alias),
+                "demerged": len(outcome.demerges),
                 "rows": len(records),
             },
             "info",
         )
-        return contado
+        return counts
 
-    def _still_without_sequence(self, session: Session, candidatos: list[str]) -> list[str]:
-        pendientes: list[str] = []
-        for chunk in chunks(candidatos, _DB_CHUNK):
-            pendientes.extend(
+    def _still_without_sequence(self, session: Session, candidates: list[str]) -> list[str]:
+        pending: list[str] = []
+        for chunk in chunks(candidates, _DB_CHUNK):
+            pending.extend(
                 session.scalars(
                     select(Protein.accession).where(
                         Protein.accession.in_(chunk),
@@ -369,7 +369,7 @@ class ResolveProteinSequencesOperation(Operation):
                     )
                 ).all()
             )
-        return sorted(pendientes)
+        return sorted(pending)
 
     # ---- pass three: the dates of everything that already had a sequence ----
 
@@ -378,7 +378,7 @@ class ResolveProteinSequencesOperation(Operation):
         session: Session,
         p: ResolveProteinSequencesPayload,
         emit: EmitFn,
-        salida: _Salida,
+        outcome: _FetchOutcome,
     ) -> None:
         """Fill the audit dates of every row that still lacks them.
 
@@ -386,36 +386,36 @@ class ResolveProteinSequencesOperation(Operation):
         population: ``date_created IS NULL`` includes every protein
         ``insert_proteins`` loaded, which has a sequence and no dates.
         """
-        pendientes = session.scalars(
+        pending = session.scalars(
             select(Protein.accession)
             .where(Protein.date_created.is_(None))
             .order_by(Protein.accession)
         ).all()
-        salida.fechas_pendientes = len(pendientes)
-        if not pendientes:
+        outcome.dates_pending = len(pending)
+        if not pending:
             return
         from protea_sources.uniprot import MAX_ACCESSIONS_PER_REQUEST
 
-        for batch in chunks(list(pendientes), MAX_ACCESSIONS_PER_REQUEST):
-            filas = _parse_dates_tsv(
+        for batch in chunks(list(pending), MAX_ACCESSIONS_PER_REQUEST):
+            rows = _parse_dates_tsv(
                 self._uniprot.fetch_accessions_tsv(
                     batch, fields=_DATE_FIELDS, emit=emit, knobs=self._knobs(p)
                 )
             )
-            if filas:
-                _store_dates(session, filas)
+            if rows:
+                _store_dates(session, rows)
                 session.commit()
-                salida.fechas_escritas += len(filas)
+                outcome.dates_written += len(rows)
         emit(
             "resolve_protein_sequences.dates_backfilled",
             None,
-            {"pending": salida.fechas_pendientes, "written": salida.fechas_escritas},
+            {"pending": outcome.dates_pending, "written": outcome.dates_written},
             "info",
         )
 
     # ---- what the run leaves behind ----
 
-    def _store_artifacts(self, job_id: Any, salida: _Salida) -> dict[str, Any]:
+    def _store_artifacts(self, job_id: Any, outcome: _FetchOutcome) -> dict[str, Any]:
         """Persist the merge map and the accessions nothing could resolve.
 
         ``not_retrievable`` used to be a number with no names: proteins carrying
@@ -434,35 +434,35 @@ class ResolveProteinSequencesOperation(Operation):
         store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
         out: dict[str, Any] = {}
         with tempfile.TemporaryDirectory() as tmp:
-            if salida.alias:
-                ruta = Path(tmp) / "fusiones.tsv"
-                with ruta.open("w", encoding="utf-8", newline="") as fh:
+            if outcome.alias:
+                path = Path(tmp) / "fusiones.tsv"
+                with path.open("w", encoding="utf-8", newline="") as fh:
                     w = csv.writer(fh, delimiter="\t")
                     w.writerow(["accesion_gaf", "accesion_primaria"])
-                    w.writerows(sorted(salida.alias.items()))
+                    w.writerows(sorted(outcome.alias.items()))
                 out["fusiones"] = {
-                    "uri": store.put(resolution_key_for(job_id, "fusiones.tsv"), str(ruta)),
-                    "filas": len(salida.alias),
+                    "uri": store.put(resolution_key_for(job_id, "fusiones.tsv"), str(path)),
+                    "filas": len(outcome.alias),
                 }
-            if salida.sin_resolver:
-                ruta = Path(tmp) / "sin_resolver.txt"
-                ruta.write_text("\n".join(salida.sin_resolver) + "\n", encoding="utf-8")
+            if outcome.unresolved:
+                path = Path(tmp) / "sin_resolver.txt"
+                path.write_text("\n".join(outcome.unresolved) + "\n", encoding="utf-8")
                 out["sin_resolver"] = {
-                    "uri": store.put(resolution_key_for(job_id, "sin_resolver.txt"), str(ruta)),
-                    "filas": len(salida.sin_resolver),
+                    "uri": store.put(resolution_key_for(job_id, "sin_resolver.txt"), str(path)),
+                    "filas": len(outcome.unresolved),
                 }
-            if salida.demerges:
-                # Aparte de las borradas, y con sus destinos: una borrada no tiene
-                # a donde ir, un demerge tiene varios y elegir es una decision
-                # curatorial que esta operacion no puede tomar.
-                ruta = Path(tmp) / "demerges.tsv"
-                with ruta.open("w", encoding="utf-8", newline="") as fh:
+            if outcome.demerges:
+                # Apart from the deleted ones, and with their destinations: a
+                # deleted accession has nowhere to go, a demerge has several, and
+                # choosing is a curatorial decision this operation cannot take.
+                path = Path(tmp) / "demerges.tsv"
+                with path.open("w", encoding="utf-8", newline="") as fh:
                     w = csv.writer(fh, delimiter="\t")
                     w.writerow(["accesion_gaf", "destinos"])
-                    w.writerows((k, ",".join(v)) for k, v in sorted(salida.demerges.items()))
+                    w.writerows((k, ",".join(v)) for k, v in sorted(outcome.demerges.items()))
                 out["demerges"] = {
-                    "uri": store.put(resolution_key_for(job_id, "demerges.tsv"), str(ruta)),
-                    "filas": len(salida.demerges),
+                    "uri": store.put(resolution_key_for(job_id, "demerges.tsv"), str(path)),
+                    "filas": len(outcome.demerges),
                 }
         return out
 

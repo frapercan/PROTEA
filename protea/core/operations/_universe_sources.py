@@ -299,135 +299,133 @@ def _store_dates(session: Session, rows: list[tuple[str, _AuditDates]]) -> None:
 
 
 @dataclass
-class _Salida:
-    """Lo que ``resolve_protein_sequences`` produce: todo sale de la red.
+class _FetchOutcome:
+    """What ``resolve_protein_sequences`` produces: everything comes from the network.
 
-    Fue la mitad de ``ensure_goa_universe`` que hablaba con UniProt, y es hoy la
-    operacion entera. El objeto se quedo con la misma forma porque su utilidad
-    era exactamente esa: separar en el informe lo que genera un fichero de lo
-    que genera un servicio remoto, para poder separar despues las operaciones.
+    It was the half of ``ensure_goa_universe`` that talked to UniProt, and it is
+    today the whole operation. The object kept the same shape because that was
+    exactly its use: separating, in the report, what a file produces from what a
+    remote service produces, so the operations could be separated afterwards.
     """
 
-    candidatos: int = 0
+    candidates: int = 0
     fetched: int = 0
     updated: int = 0
     inserted: int = 0
     sequences: int = 0
-    fechas_pendientes: int = 0
-    fechas_escritas: int = 0
+    dates_pending: int = 0
+    dates_written: int = 0
     alias: dict[str, str] = field(default_factory=dict)
-    sin_resolver: list[str] = field(default_factory=list)
+    unresolved: list[str] = field(default_factory=list)
     demerges: dict[str, list[str]] = field(default_factory=dict)
     artefactos: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
-class _Cuentas:
-    """Los contadores que el predicado llena y el resultado reporta.
+class _RowCounters:
+    """The counters the predicate fills and the result reports.
 
-    Agrupados en un objeto en vez de cinco ``nonlocal``, para que el predicado
-    quepa en su propio metodo y se pueda construir --y probar-- aparte.
+    Grouped into an object instead of five ``nonlocal`` names, so the predicate
+    fits in its own method and can be built, and tested, on its own.
     """
 
     rows: int = 0
-    #: Filas admitidas por evidencia o por nivel cuyo DB Object Type NO es una
-    #: proteina. Contadas aparte de las accesiones malformadas porque son dos
-    #: rechazos distintos y antes caian en el mismo numero: ``malformed_skipped``
-    #: mezclaba "esto no es una accesion de UniProtKB" con "esto es un complejo o
-    #: un RNA", y la segunda cifra es la que dice si GOA empezo a publicar un
-    #: tipo nuevo. Se midio el dia que ``malformed_skipped`` bajo de 27.300 a
-    #: 13.500 entre las releases 227 y 226 sin que nadie pudiera decir por que.
-    no_proteina: int = 0
-    por_tipo: Counter[str] = field(default_factory=Counter)
-    desconocidos: Counter[str] = field(default_factory=Counter)
-    por_nivel: Counter[str] = field(default_factory=Counter)
+    #: Rows admitted by evidence or by tier whose DB Object Type is NOT a protein.
+    #: Counted apart from the malformed accessions because they are two different
+    #: rejections and used to land in one number: ``malformed_skipped`` conflated
+    #: "this is not a UniProtKB accession" with "this is a complex or an RNA", and
+    #: the second figure is the one that says whether GOA started publishing a new
+    #: type. Measured the day ``malformed_skipped`` dropped from 27,300 to 13,500
+    #: between releases 227 and 226 with nobody able to say why.
+    not_a_protein: int = 0
+    by_type: Counter[str] = field(default_factory=Counter)
+    unknown_codes: Counter[str] = field(default_factory=Counter)
+    by_tier: Counter[str] = field(default_factory=Counter)
 
 
 @dataclass
-class _Escaneo:
-    """Lo que ``extract_goa_universe`` produce: todo sale del fichero.
+class _ScanOutcome:
+    """What ``extract_goa_universe`` produces: everything comes from the file.
 
-    Simetrico a :class:`_Salida`, y por la misma razon: una pasada del GAF no
-    abre un socket contra UniProt, asi que todo lo que hay aqui se puede volver a
-    calcular con el fichero en cache y nada de aqui depende de que un servicio
-    remoto conteste.
+    Symmetric to :class:`_FetchOutcome`, and for the same reason: a GAF pass opens no
+    socket against UniProt, so everything here can be recomputed from the cached
+    file and nothing here depends on a remote service answering.
     """
 
-    cuentas: _Cuentas
+    counters: _RowCounters
     malformed: int = 0
-    admisibles: int = 0
+    admissible: int = 0
     missing: int = 0
-    insertadas: int = 0
-    primera_release_escrita: int = 0
+    inserted_rows: int = 0
+    first_release_written: int = 0
 
 
-def informe_de_extraccion(
+def extraction_report(
     *,
     release: int,
     admit: list[str],
     dry_run: bool,
-    escaneo: _Escaneo,
+    scan: _ScanOutcome,
     elapsed: float,
 ) -> dict[str, Any]:
-    """El resultado de una pasada del GAF, que es su unico registro.
+    """The result of one GAF pass, which is its only record.
 
-    Aqui y no en la operacion porque es una funcion pura de sus entradas, que es
-    lo que este modulo contiene.
+    Here and not in the operation because it is a pure function of its inputs,
+    which is what this module holds.
 
-    ``malformed_accessions`` y ``rows_not_a_protein`` son dos cifras y antes eran
-    una: ver :class:`_Cuentas`.
+    ``malformed_accessions`` and ``rows_not_a_protein`` are two figures and used to
+    be one: see :class:`_RowCounters`.
     """
-    c = escaneo.cuentas
+    c = scan.counters
     return {
         "release": release,
         "admit": admit,
         "rows_scanned": c.rows,
-        "admissible_accessions": escaneo.admisibles,
-        "malformed_accessions": escaneo.malformed,
-        "rows_not_a_protein": c.no_proteina,
-        "already_present": escaneo.admisibles - escaneo.missing,
-        "missing": escaneo.missing,
-        "proteins_inserted": escaneo.insertadas,
-        "first_release_written": escaneo.primera_release_escrita,
-        "tipos_fiables": dict(c.por_tipo.most_common()),
-        "filas_por_nivel": dict(c.por_nivel),
-        "codigos_desconocidos": dict(c.desconocidos.most_common()),
+        "admissible_accessions": scan.admissible,
+        "malformed_accessions": scan.malformed,
+        "rows_not_a_protein": c.not_a_protein,
+        "already_present": scan.admissible - scan.missing,
+        "missing": scan.missing,
+        "proteins_inserted": scan.inserted_rows,
+        "first_release_written": scan.first_release_written,
+        "tipos_fiables": dict(c.by_type.most_common()),
+        "filas_por_nivel": dict(c.by_tier),
+        "codigos_desconocidos": dict(c.unknown_codes.most_common()),
         "dry_run": dry_run,
         "elapsed_seconds": elapsed,
     }
 
 
-def informe_de_resolucion(
+def resolution_report(
     *,
     dry_run: bool,
-    salida: _Salida,
+    outcome: _FetchOutcome,
     elapsed: float,
 ) -> dict[str, Any]:
-    """El resultado de la pasada contra UniProt.
+    """The result of the pass against UniProt.
 
-    ``None`` en un dry run en vez de ``0``, porque "cero recuperables" y "no se
-    intento" no son lo mismo: un informe anterior leyo 0% de fusiones
-    recuperables porque diez lotes habian dado 400 y los fallos se tallaron como
-    ceros.
+    ``None`` in a dry run rather than ``0``, because "zero recoverable" and "not
+    attempted" are not the same thing: an earlier report read 0% recoverable merges
+    because ten batches had answered 400 and the failures were tallied as zeroes.
     """
     return {
-        "candidates": salida.candidatos,
-        "fetched": salida.fetched,
-        "proteins_updated": salida.updated,
-        "proteins_inserted": salida.inserted,
-        "sequences_inserted": salida.sequences,
-        "resolved_as_merge": None if dry_run else len(salida.alias),
-        "not_retrievable": None if dry_run else len(salida.sin_resolver),
-        "demerged": None if dry_run else len(salida.demerges),
-        "dates_pending": salida.fechas_pendientes,
-        "dates_backfilled": None if dry_run else salida.fechas_escritas,
-        "artefactos": salida.artefactos,
+        "candidates": outcome.candidates,
+        "fetched": outcome.fetched,
+        "proteins_updated": outcome.updated,
+        "proteins_inserted": outcome.inserted,
+        "sequences_inserted": outcome.sequences,
+        "resolved_as_merge": None if dry_run else len(outcome.alias),
+        "not_retrievable": None if dry_run else len(outcome.unresolved),
+        "demerged": None if dry_run else len(outcome.demerges),
+        "dates_pending": outcome.dates_pending,
+        "dates_backfilled": None if dry_run else outcome.dates_written,
+        "artefactos": outcome.artefactos,
         "dry_run": dry_run,
         "elapsed_seconds": elapsed,
     }
 
 
-#: Los niveles que un payload puede pedir, por nombre.
+#: The tiers a payload may ask for, by name.
 TIER_TRUTH = "truth"
 TIER_CURATED_INFERENCE = "curated_inference"
 TIER_SWISSPROT = "swissprot_of_release"
@@ -442,9 +440,9 @@ def codes_for_tiers(tiers: Seq[str]) -> frozenset[str]:
         ``reviewed:true`` defect went unnoticed for a whole campaign, and a tier
         that quietly NARROWED it would be the same mistake mirrored.
     """
-    desconocidos = [t for t in tiers if t not in TIERS]
-    if desconocidos:
-        raise ValueError(f"unknown admission tier(s): {desconocidos}; known: {list(TIERS)}")
+    unknown_codes = [t for t in tiers if t not in TIERS]
+    if unknown_codes:
+        raise ValueError(f"unknown admission tier(s): {unknown_codes}; known: {list(TIERS)}")
     out: frozenset[str] = frozenset()
     if TIER_TRUTH in tiers:
         out |= TRUTH_CODES
@@ -485,15 +483,15 @@ def is_swissprot_entry(accession: str, synonym_field: str) -> bool:
     The empty case still returns ``False`` rather than guessing, which leaves
     such a row to be decided by its evidence code alone.
     """
-    nombre = synonym_field.split("|", 1)[0] if synonym_field else ""
-    if not nombre:
+    entry_name = synonym_field.split("|", 1)[0] if synonym_field else ""
+    if not entry_name:
         return False
     # TrEMBL iff the name is the accession followed by '_'. Anything else is a
     # mnemonic, which only Swiss-Prot entries have.
     return not (
-        nombre.startswith(accession)
-        and len(nombre) > len(accession)
-        and nombre[len(accession)] == "_"
+        entry_name.startswith(accession)
+        and len(entry_name) > len(accession)
+        and entry_name[len(accession)] == "_"
     )
 
 
