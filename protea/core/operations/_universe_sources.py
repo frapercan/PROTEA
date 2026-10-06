@@ -16,7 +16,9 @@ two lock bumps for three dates.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Sequence as Seq
+from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 from protea_contracts import UniProtProteinRecord
@@ -26,16 +28,65 @@ from sqlalchemy.orm import Session
 from protea.core.evidence_codes import EXPERIMENTAL
 from protea.infrastructure.orm.models.protein.protein import Protein
 
-#: The only automatic evidence code in GO. Every other code was assigned by a
-#: person, though not with equal directness: ``IBA`` comes from the PAINT
-#: phylogenetic pipeline, where a curator annotates an ancestral node and the
-#: annotation propagates down the tree mechanically, and ``ND`` records that a
-#: curator looked and found nothing. Both are curated information and neither is a
-#: measurement on the protein in question, so they qualify a protein for the
-#: *retrieval bank* but never as evaluation *truth*. The distinction is not baked
-#: in here: ``evidence_code`` is persisted per annotation row, so the tier is a
-#: choice made at analysis time.
-_AUTOMATIC_CODES = frozenset({"IEA"})
+#: THE FOUR TIERS, and the partition is exact: 13 + 9 + 4 = 26, which is every
+#: code the ECO mapping knows. Nothing unclassified, nothing invented. An
+#: unknown code is therefore a new GO code, and it is REJECTED and counted
+#: rather than admitted, because the previous criterion was a complement --
+#: "anything that is not IEA" -- and a complement admits whatever GO invents
+#: next without anybody deciding.
+#:
+#: The principle that orders them: a protein is admitted on evidence that is a
+#: MEASUREMENT ON THAT PROTEIN, or on a curated database saying it reviewed the
+#: entry. Everything excluded fails both.
+#:
+#: T1, the truth. The thirteen LAFA scores on: the eleven GO experimental codes
+#: plus ``IC`` and ``TAS``. These are the only codes that make a protein an
+#: evaluation TARGET, and the set is identical to
+#: :data:`protea.core.ia_regimes.LAFA_EVIDENCE` -- admission criterion and truth
+#: criterion are the same set, deliberately.
+TRUTH_CODES = frozenset(EXPERIMENTAL) | {"IC", "TAS"}
+
+#: T3, curated inference. A curator judged THIS protein's function, from
+#: sequence similarity, orthology, a sequence model, genomic context or a
+#: reviewed computational analysis. Never truth -- none of them is a measurement
+#: -- but a real judgement about a specific protein, unlike T1's exclusions.
+#:
+#: They are in because they are the direct, independent probe of the question
+#: the campaign asks: ``ISS`` and friends are curator-reviewed ALIGNMENT
+#: inferences, so comparing a nearest-neighbour prediction against them tests
+#: whether an embedding neighbourhood captures what curated alignment captures,
+#: without touching the scored truth. Measured on GOA 156: 62,363 proteins enter
+#: by these and by nothing else.
+CURATED_INFERENCE_CODES = frozenset(
+    {"ISS", "ISO", "ISA", "ISM", "IGC", "RCA", "NAS", "IKR", "IRD"}
+)
+
+#: Excluded, each for its own reason, and the reasons are not interchangeable.
+#:
+#: ``IEA`` is GO's only automatic code: no person involved.
+#:
+#: ``IBA`` and ``IBD`` come from the PAINT phylogenetic pipeline, where a curator
+#: annotates an ancestral (or descendant) node and the annotation propagates
+#: mechanically. There IS a person, but not one looking at this protein, and the
+#: label is by construction its family's consensus. Measured: 58% of the corpus
+#: entered by ``IBA`` alone when the criterion was "not IEA", and its share of
+#: curated annotation rose from 52% on GOA 156 to 83% on GOA 231.
+#:
+#: ``ND`` records that a curator looked and found NOTHING. Its rows sit on the
+#: three ontology ROOT terms, whose Information Accretion is zero by
+#: construction -- IA(v) = -log2 P(v | parents(v)) and P = 1 for a root. So an
+#: ND-only donor contributes nothing to an IA-weighted metric AND occupies a
+#: slot among the k neighbours: not inert, harmful. Measured on GOA 156: 83,950
+#: accessions carry only ``ND``, and 83,949 of them have every non-IEA row on a
+#: root term.
+AUTOMATIC_CODES = frozenset({"IEA"})
+PROPAGATED_CODES = frozenset({"IBA", "IBD"})
+ABSENCE_CODES = frozenset({"ND"})
+
+#: Kept for the one thing it is still good for: asserting the partition.
+ALL_KNOWN_CODES = (
+    TRUTH_CODES | CURATED_INFERENCE_CODES | AUTOMATIC_CODES | PROPAGATED_CODES | ABSENCE_CODES
+)
 
 #: Fields requested from ``/uniprotkb/accessions``, which returns sequence *and*
 #: audit dates in a single call. The previous implementation asked for
@@ -234,33 +285,164 @@ def _store_dates(session: Session, rows: list[tuple[str, _AuditDates]]) -> None:
     )
 
 
-def codes_for(scope: str) -> Callable[[str], bool]:
-    """Resolve a declared evidence scope to a predicate over the GAF code column.
+@dataclass
+class _Salida:
+    """Lo que la mitad de UniProt produce.
 
-    ``curated``
-        Any code other than ``IEA``. Since ``IEA`` is GO's only automatic
-        category, this reads as "a person assigned it". Measured on GOA release
-        156: 554,328 distinct proteins.
-    ``reliable``
-        The thirteen codes LAFA's ground truth filters on -- the eleven GO
-        experimental codes plus ``IC`` and ``TAS``. Measured on GOA release 156:
-        117,136 distinct proteins.
-
-    The universe pass uses ``curated`` because breadth serves the retrieval bank,
-    and because the per-row ``evidence_code`` keeps the narrower tier recoverable.
-    Evaluation truth remains the thirteen, and that is decided by the evaluation,
-    not here.
-
-    :raises ValueError: on an unknown scope, rather than silently falling back to
-        a default. A scope that quietly widened the corpus is how the original
-        ``reviewed:true`` defect went unnoticed for a whole campaign.
+    Agrupado porque es exactamente la mitad que sale a su propia operacion
+    cuando se parta esta: todo lo de aqui lo genera la red, y nada de aqui lo
+    genera el escaneo del GAF.
     """
-    if scope == "reliable":
-        allowed = set(EXPERIMENTAL) | {"IC", "TAS"}
-        return lambda ev: ev in allowed
-    if scope == "curated":
-        return lambda ev: bool(ev) and ev not in _AUTOMATIC_CODES
-    raise ValueError(f"unknown evidence_scope: {scope!r}")
+
+    fetched: int = 0
+    inserted: int = 0
+    sequences: int = 0
+    sin_fechas: int = 0
+    alias: dict[str, str] = field(default_factory=dict)
+    sin_resolver: list[str] = field(default_factory=list)
+    artefactos: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class _Cuentas:
+    """Los contadores que el predicado llena y el resultado reporta.
+
+    Agrupados en un objeto en vez de cinco ``nonlocal``, para que el predicado
+    quepa en su propio metodo y se pueda construir --y probar-- aparte.
+    """
+
+    rows: int = 0
+    por_tipo: Counter[str] = field(default_factory=Counter)
+    desconocidos: Counter[str] = field(default_factory=Counter)
+    por_nivel: Counter[str] = field(default_factory=Counter)
+
+
+@dataclass
+class _Escaneo:
+    """Lo que el GAF produce, simetrico a :class:`_Salida`.
+
+    Las dos mitades de una pasada tienen ahora la misma forma: un objeto por lo
+    que sale del fichero y otro por lo que sale de la red. Eso es lo que permite
+    partir la operacion en dos sin reescribir el informe.
+    """
+
+    cuentas: _Cuentas
+    malformed: int = 0
+    admisibles: int = 0
+    missing: int = 0
+
+
+def informe_de_pasada(
+    *,
+    admit: list[str],
+    dry_run: bool,
+    escaneo: _Escaneo,
+    salida: _Salida,
+    demerges: int,
+    elapsed: float,
+) -> dict[str, Any]:
+    """El resultado del job, que es el unico registro de lo que paso.
+
+    Aqui y no en la operacion porque es una funcion pura de sus entradas, que es
+    lo que este modulo contiene.
+
+    ``None`` en un dry run en vez de ``0``, porque "cero recuperables" y "no se
+    intento" no son lo mismo: un informe anterior leyo 0% de fusiones
+    recuperables porque diez lotes habian dado 400 y los fallos se tallaron como
+    ceros.
+    """
+    c = escaneo.cuentas
+    return {
+        "rows_scanned": c.rows,
+        "admissible_accessions": escaneo.admisibles,
+        "malformed_skipped": escaneo.malformed,
+        "already_present": escaneo.admisibles - escaneo.missing,
+        "missing": escaneo.missing,
+        "fetched": salida.fetched,
+        "resolved_as_merge": None if dry_run else len(salida.alias),
+        "not_retrievable": None if dry_run else len(salida.sin_resolver),
+        "demerged": None if dry_run else demerges,
+        "dates_backfilled": None if dry_run else salida.sin_fechas,
+        "tipos_fiables": dict(c.por_tipo.most_common()),
+        "admit": admit,
+        "filas_por_nivel": dict(c.por_nivel),
+        "codigos_desconocidos": dict(c.desconocidos.most_common()),
+        "artefactos": salida.artefactos,
+        "proteins_inserted": salida.inserted,
+        "sequences_inserted": salida.sequences,
+        "dry_run": dry_run,
+        "elapsed_seconds": elapsed,
+    }
+
+
+#: Los niveles que un payload puede pedir, por nombre.
+TIER_TRUTH = "truth"
+TIER_CURATED_INFERENCE = "curated_inference"
+TIER_SWISSPROT = "swissprot_of_release"
+TIERS = (TIER_TRUTH, TIER_CURATED_INFERENCE, TIER_SWISSPROT)
+
+
+def codes_for_tiers(tiers: Seq[str]) -> frozenset[str]:
+    """Which evidence codes the requested tiers admit.
+
+    :raises ValueError: on an unknown tier name, rather than silently dropping
+        it. A scope that quietly widened the corpus is how the original
+        ``reviewed:true`` defect went unnoticed for a whole campaign, and a tier
+        that quietly NARROWED it would be the same mistake mirrored.
+    """
+    desconocidos = [t for t in tiers if t not in TIERS]
+    if desconocidos:
+        raise ValueError(f"unknown admission tier(s): {desconocidos}; known: {list(TIERS)}")
+    out: frozenset[str] = frozenset()
+    if TIER_TRUTH in tiers:
+        out |= TRUTH_CODES
+    if TIER_CURATED_INFERENCE in tiers:
+        out |= CURATED_INFERENCE_CODES
+    return out
+
+
+def is_swissprot_entry(accession: str, synonym_field: str) -> bool:
+    """Was this entry reviewed AT THE RELEASE this GAF row comes from?
+
+    UniProt names its entries ``<mnemonic>_<ORGANISM>`` in Swiss-Prot and
+    ``<accession>_<ORGANISM>`` in TrEMBL. The GAF carries that name in the
+    DB Object Synonym column, as the first ``|``-separated element -- and it
+    carries the name OF ITS OWN RELEASE. So the contemporaneous reviewed status
+    is already in the file being read: no historical download, no pairing of a
+    GOA release to a UniProt release, and the date is the GAF's own rather than
+    the nearest archived release's.
+
+    That matters because the alternative is expensive and the shortcut does not
+    work. UniProt's archive publishes no standalone Swiss-Prot FASTA: only
+    ``uniprot_sprot-only<release>.tar.gz`` at ~1.5 GB, of which 541 MB must be
+    streamed to reach the FASTA member, so ~40 GB for the series. And
+    ``date_created`` cannot substitute: it is the UniProtKB integration date,
+    not the Swiss-Prot promotion date, so an entry that sat in TrEMBL from 2014
+    and was reviewed in 2024 carries 2014.
+
+    MEASURED on GOA 156 against the archived Swiss-Prot of 2016_07:
+
+    * 527,149 accessions classified Swiss-Prot, and the intersection with the
+      archived set is 527,149 -- **zero false positives**, precision 100.000%.
+    * The 24,556 archived entries this does not see are absent from the GAF
+      altogether: 0 of a 20-accession sample appear anywhere in the file. They
+      carry no GO annotation in that release, so they have nothing to donate and
+      cannot be a target. Not seeing them is correct, not a gap.
+    * Every data row carried an entry name: 0 of 280,916,291 were empty.
+
+    The empty case still returns ``False`` rather than guessing, which leaves
+    such a row to be decided by its evidence code alone.
+    """
+    nombre = synonym_field.split("|", 1)[0] if synonym_field else ""
+    if not nombre:
+        return False
+    # TrEMBL iff the name is the accession followed by '_'. Anything else is a
+    # mnemonic, which only Swiss-Prot entries have.
+    return not (
+        nombre.startswith(accession)
+        and len(nombre) > len(accession)
+        and nombre[len(accession)] == "_"
+    )
 
 
 def _organism_of(entry: dict[str, Any]) -> str | None:

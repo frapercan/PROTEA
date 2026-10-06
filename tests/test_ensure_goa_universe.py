@@ -25,10 +25,24 @@ from protea_sources.goa import parse_gaf_text
 from pydantic import ValidationError
 
 from protea.core.operations import _universe_http as _uhttp
+from protea.core.operations._universe_sources import (
+    ALL_KNOWN_CODES,
+    _Cuentas,
+    CURATED_INFERENCE_CODES,
+    TIER_CURATED_INFERENCE,
+    TIER_SWISSPROT,
+    TIER_TRUTH,
+    TRUTH_CODES,
+    codes_for_tiers,
+    is_swissprot_entry,
+)
 from protea.core.operations.ensure_goa_universe import (
     _ACCESSION,
     _BATCH,
     _GAF_EVIDENCE,
+    _GAF_ID,
+    _GAF_SYNONYM,
+    _GAF_TYPE,
     EnsureGoaUniverseOperation,
     EnsureGoaUniversePayload,
 )
@@ -40,34 +54,70 @@ _COLS = [
 ]
 
 
-def _con(cols, accession, code, qualifier=""):
+def _con(cols, accession, code, qualifier="", entry_name=None):
     """Una fila a partir de una plantilla de columnas ya modificada."""
     out = list(cols)
     out[1] = accession
     out[3] = qualifier
     out[_GAF_EVIDENCE] = code
+    out[_GAF_SYNONYM] = f"{entry_name or accession + '_HUMAN'}|gene"
     return out
 
 
-def _line(accession, code, qualifier=""):
+def _line(accession, code, qualifier="", entry_name=None):
+    """Una fila de GAF realista.
+
+    ``entry_name`` por defecto es ``<accesion>_HUMAN``, que es la forma de
+    TrEMBL. Importa: la plantilla ponia ``"syn"``, un nombre que no empieza por
+    la accesion, asi que bajo el nivel ``swissprot_of_release`` TODA fila de test
+    habria entrado como revisada y los tests del predicado de evidencia habrian
+    dejado de medir lo que dicen medir. Un fixture irreal es un test que pasa por
+    el motivo equivocado.
+    """
     cols = list(_COLS)
     cols[1] = accession
     cols[3] = qualifier
     cols[_GAF_EVIDENCE] = code
+    cols[_GAF_SYNONYM] = f"{entry_name or accession + '_HUMAN'}|gene"
     return "\t".join(cols)
 
 
-def _scan(lines):
+def _scan(lines, admit=None):
     """Run the real scan over real GAF text, faking only the HTTP fetch."""
     op = EnsureGoaUniverseOperation()
-    p = EnsureGoaUniversePayload(gaf_url="http://x/g.gz")
+    p = (
+        EnsureGoaUniversePayload(gaf_url="http://x/g.gz", admit=admit)
+        if admit is not None
+        else EnsureGoaUniversePayload(gaf_url="http://x/g.gz")
+    )
     text = "\n".join(lines)
 
     def fake_stream(_p, _emit, accept):
         return parse_gaf_text(text, accept)
 
     with patch.object(EnsureGoaUniverseOperation, "_stream_gaf", side_effect=fake_stream):
-        return op._reliable_accessions(p, MagicMock())
+        wanted, malformed, cuentas = op._admissible_accessions(p, MagicMock())
+    # Se devuelve ``rows`` y no el objeto para que las aserciones que ya existian
+    # sigan midiendo exactamente lo que median; quien necesite los contadores usa
+    # ``_scan_con_cuentas``.
+    return wanted, malformed, cuentas.rows
+
+
+def _scan_con_cuentas(lines, admit=None):
+    """Como :func:`_scan` pero devolviendo el objeto de contadores."""
+    op = EnsureGoaUniverseOperation()
+    p = (
+        EnsureGoaUniversePayload(gaf_url="http://x/g.gz", admit=admit)
+        if admit is not None
+        else EnsureGoaUniversePayload(gaf_url="http://x/g.gz")
+    )
+    text = "\n".join(lines)
+
+    def fake_stream(_p, _emit, accept):
+        return parse_gaf_text(text, accept)
+
+    with patch.object(EnsureGoaUniverseOperation, "_stream_gaf", side_effect=fake_stream):
+        return op._admissible_accessions(p, MagicMock())
 
 
 class TestWhichCodesCount:
@@ -85,46 +135,188 @@ class TestWhichCodesCount:
             wanted, _, _ = _scan([_line("P12345", code)])
             assert wanted == {"P12345"}, f"{code} must count"
 
-    def test_only_iea_is_excluded_under_the_curated_scope(self):
-        """``curated`` admits every non-IEA code, because IEA is GO's only
-        automatic category. ISS, RCA, IBA, ND and NAS were all assigned by a
-        person -- with varying directness -- and they qualify a protein for the
-        retrieval bank. The thirteen-code tier stays recoverable because
-        ``evidence_code`` is persisted per annotation row."""
-        for code in ("ISS", "RCA", "IBA", "ND", "NAS"):
-            wanted, _, _ = _scan([_line("P12345", code)])
-            assert wanted == {"P12345"}, f"{code} is curated"
-        wanted, _, _ = _scan([_line("P12345", "IEA")])
-        assert wanted == set(), "IEA is the automatic one"
+    def test_the_excluded_three_are_excluded_each_for_its_own_reason(self):
+        """``IEA``, ``IBA``/``IBD`` and ``ND`` are out, and not for the same reason.
 
-    def test_the_reliable_scope_still_excludes_them(self):
-        """The narrower tier is one payload field away, and it is what evaluation
-        truth uses. If this stopped working, the LAFA parity would be gone with
-        nothing failing."""
+        This replaces a test that asserted the OPPOSITE -- that ``ISS``, ``RCA``,
+        ``IBA``, ``ND`` and ``NAS`` all counted, because the criterion was the
+        complement of ``IEA``. That criterion was reverted on 2026-10-06 after
+        measuring what the complement admitted: 58% of the corpus entered by
+        ``IBA`` alone, and 83,950 accessions on GOA 156 carried only ``ND``, with
+        83,949 of them annotated exclusively on ontology ROOT terms whose
+        Information Accretion is zero by construction.
+
+        The old expectation is kept here as a comment rather than deleted, so a
+        reader can see that the behaviour changed deliberately.
+        """
+        for code in ("IEA", "IBA", "IBD", "ND"):
+            wanted, _, _ = _scan([_line("P12345", code)])
+            assert wanted == set(), f"{code} must not admit"
+
+    def test_curated_inference_admits_but_is_not_truth(self):
+        """T3 is in the corpus and out of the truth, and both halves matter."""
+        for code in sorted(CURATED_INFERENCE_CODES):
+            wanted, _, _ = _scan([_line("P12345", code)])
+            assert wanted == {"P12345"}, f"{code} admits under curated_inference"
+            assert code not in TRUTH_CODES, f"{code} must never be truth"
+
+    def test_dropping_a_tier_narrows_the_corpus(self):
+        """The tier list is the lever, so removing one has to be visible."""
+        filas = [_line("P00001", "IDA"), _line("P00002", "ISS")]
+        solo_verdad, _, _ = _scan(filas, admit=[TIER_TRUTH])
+        assert solo_verdad == {"P00001"}
+        con_inferencia, _, _ = _scan(filas, admit=[TIER_TRUTH, TIER_CURATED_INFERENCE])
+        assert con_inferencia == {"P00001", "P00002"}
+
+    def test_an_unknown_tier_is_refused_not_defaulted(self):
+        """A scope that quietly fell back to a default is how a search criterion
+        fixed the corpus scope for a whole campaign without anybody declaring it.
+        A tier that quietly NARROWED it would be the same mistake mirrored."""
+        with pytest.raises(ValueError):
+            codes_for_tiers(["todo"])
+        with pytest.raises(ValidationError):
+            EnsureGoaUniversePayload(gaf_url="http://x/g.gz", admit=["todo"])
+        with pytest.raises(ValidationError, match="at least one tier"):
+            EnsureGoaUniversePayload(gaf_url="http://x/g.gz", admit=[])
+
+    def test_the_partition_is_exact(self):
+        """26 codes, 13 + 9 + 4, nothing unclassified and nothing invented.
+
+        This is the invariant that makes the criterion an ENUMERATION instead of
+        a complement. If GO adds a code, this fails and somebody has to put it in
+        a tier -- which is the point: the previous criterion would have admitted
+        it silently.
+        """
+        from protea.core.evidence_codes import ECO_TO_CODE
+        from protea.core.operations._universe_sources import (
+            ABSENCE_CODES,
+            AUTOMATIC_CODES,
+            PROPAGATED_CODES,
+        )
+
+        conocidos = set(ECO_TO_CODE.values())
+        assert len(TRUTH_CODES) == 13
+        assert len(CURATED_INFERENCE_CODES) == 9
+        assert len(AUTOMATIC_CODES | PROPAGATED_CODES | ABSENCE_CODES) == 4
+        assert ALL_KNOWN_CODES == conocidos, (
+            f"sin clasificar: {sorted(conocidos - ALL_KNOWN_CODES)}; "
+            f"inventados: {sorted(ALL_KNOWN_CODES - conocidos)}"
+        )
+        # Y los niveles no se solapan: un codigo esta en exactamente uno.
+        cubos = [TRUTH_CODES, CURATED_INFERENCE_CODES, AUTOMATIC_CODES,
+                 PROPAGATED_CODES, ABSENCE_CODES]
+        for i, a in enumerate(cubos):
+            for b in cubos[i + 1:]:
+                assert not (a & b), f"solapan: {sorted(a & b)}"
+
+    def test_truth_codes_are_exactly_the_lafa_regime(self):
+        """Criterio de admision y criterio de verdad son el MISMO conjunto, y eso
+        es deliberado: si divergen, el corpus admite por una regla y se puntua por
+        otra, que es la clase de defecto que esta campana lleva corrigiendo."""
+        from protea.core.ia_regimes import LAFA_EVIDENCE
+
+        assert TRUTH_CODES == set(LAFA_EVIDENCE)
+
+
+class TestSwissProtOfTheRelease:
+    """La pertenencia a Swiss-Prot sale del GAF, fechada, sin descargar nada."""
+
+    def test_the_synonym_column_is_where_we_think(self):
+        """``_GAF_SYNONYM`` se ancla contra los campos que el plugin SI expone.
+
+        El registro del plugin tiene ocho campos --accession, go_id, qualifier,
+        evidence_code, db_reference, with_from, assigned_by, annotation_date-- y
+        el sinonimo NO esta entre ellos. Tampoco el tipo de objeto, que
+        ``_GAF_TYPE`` ya venia leyendo igual de a ciegas. Asi que no se puede
+        fijar el indice 10 directamente, como si se fija el 6.
+
+        Lo que si se puede: poner un marcador distinto en cada columna y
+        comprobar que los seis campos que el plugin expone caen donde este
+        modulo cree. Eso demuestra que el plugin trocea en el orden estandar de
+        GAF 2.x, y los indices 8, 10 y 11 quedan determinados por ese mismo
+        troceo. Si el plugin moviera su mapeo, los anclajes se romperian aqui.
+
+        El arreglo fuerte seria que el plugin expusiera el nombre de entrada en
+        su registro, ya que es parte del GAF y ahora decide el criterio. Es un
+        cambio de contrato y va aparte, no de propina.
+        """
+        cols = [f"c{i}" for i in range(17)]
+        cols[_GAF_ID] = "P12345"
+        cols[4] = "GO:0005515"
+        cols[_GAF_EVIDENCE] = "IDA"
+        cols[_GAF_SYNONYM] = "FOO_HUMAN|foo"
+        cols[_GAF_TYPE] = "protein"
+        text = "\t".join(cols)
+        rec = next(iter(parse_gaf_text(text)))
+
+        # Los anclajes: si cualquiera se mueve, el troceo ya no es el que creemos.
+        assert rec.accession == cols[_GAF_ID] == "P12345"
+        assert rec.go_id == cols[4]
+        assert rec.evidence_code == cols[_GAF_EVIDENCE] == "IDA"
+        assert rec.db_reference == cols[5]
+        assert rec.with_from == cols[7]
+        assert rec.assigned_by == cols[14]
+        assert rec.annotation_date == cols[13]
+        # Y con el troceo fijado, el sinonimo es el 10 y el tipo el 11.
+        assert text.split("\t")[_GAF_SYNONYM] == "FOO_HUMAN|foo"
+        assert text.split("\t")[_GAF_TYPE] == "protein"
+
+    def test_trembl_names_itself_after_its_accession(self):
+        # Medido en el GAF real: A0A000 lleva A0A000_9ACTN|moeA5.
+        assert is_swissprot_entry("A0A000", "A0A000_9ACTN|moeA5") is False
+        assert is_swissprot_entry("A0A021WW64", "A0A021WW64_DROME|CG17162") is False
+
+    def test_swissprot_names_itself_after_a_gene(self):
+        # Medido: P34546 lleva VATL2_CAEEL.
+        assert is_swissprot_entry("P34546", "VATL2_CAEEL") is True
+        assert is_swissprot_entry("P12345", "FOO_HUMAN|foo") is True
+
+    def test_an_empty_entry_name_does_not_guess(self):
+        """Medido 0 de 280.916.291 filas en GOA 156, asi que esto no ocurre; pero
+        si ocurriera, la fila la decide su codigo de evidencia y no una
+        suposicion."""
+        assert is_swissprot_entry("P12345", "") is False
+
+    def test_a_prefix_that_is_not_the_whole_name_is_still_swissprot(self):
+        """El corte es ``<accesion>_``, no ``startswith``. Un mnemonico que
+        empiece por las mismas letras no es TrEMBL."""
+        assert is_swissprot_entry("P12345", "P12345X_HUMAN") is True
+
+    def test_swissprot_admits_a_row_its_evidence_would_reject(self):
+        """Es el punto del nivel: una entrada revisada entra por PERTENENCIA,
+        aunque su unica anotacion sea IEA."""
+        wanted, _, _ = _scan([_line("P12345", "IEA", entry_name="FOO_HUMAN")])
+        assert wanted == {"P12345"}
+
+    def test_trembl_with_only_iea_stays_out(self):
+        wanted, _, _ = _scan([_line("P12345", "IEA")])
+        assert wanted == set()
+
+    def test_dropping_the_swissprot_tier_drops_it(self):
+        filas = [_line("P12345", "IEA", entry_name="FOO_HUMAN")]
+        assert _scan(filas, admit=[TIER_TRUTH])[0] == set()
+        assert _scan(filas, admit=[TIER_TRUTH, TIER_SWISSPROT])[0] == {"P12345"}
+
+
+class TestAnUnknownCodeIsNotADefault:
+    def test_it_is_rejected_and_counted(self):
+        """Un codigo que GO anada despues de escribirse la particion necesita una
+        DECISION. El criterio anterior, que era el complemento de IEA, lo habria
+        admitido sin que nadie se enterase."""
         op = EnsureGoaUniverseOperation()
-        p = EnsureGoaUniversePayload(gaf_url="http://x/g.gz", evidence_scope="reliable")
-        text = "\n".join(_line("P12345", c) for c in ("ISS", "RCA", "IBA", "ND", "NAS"))
+        p = EnsureGoaUniversePayload(gaf_url="http://x/g.gz")
+        text = "\n".join([_line("P00001", "IDA"), _line("P00002", "XYZ")])
+        emit = MagicMock()
 
         def fake_stream(_p, _emit, accept):
             return parse_gaf_text(text, accept)
 
         with patch.object(EnsureGoaUniverseOperation, "_stream_gaf", side_effect=fake_stream):
-            wanted, _, _ = op._reliable_accessions(p, MagicMock())
-        assert wanted == set()
-
-    def test_an_unknown_scope_is_refused_not_defaulted(self):
-        """A scope that quietly fell back to a default is how a search criterion
-        fixed the corpus scope for a whole campaign without anybody declaring it."""
-        from protea.core.operations._universe_sources import codes_for
-
-        with pytest.raises(ValueError):
-            codes_for("todo")
-
-    def test_a_missing_evidence_code_does_not_count(self):
-        """An empty column reaches the predicate as "", not None: the predicate
-        runs before the record's ``or None`` normalisation."""
-        wanted, _, _ = _scan([_line("P12345", "")])
-        assert wanted == set()
+            wanted, _, cuentas = op._admissible_accessions(p, emit)
+        assert wanted == {"P00001"}, "el desconocido no entra"
+        assert dict(cuentas.desconocidos) == {"XYZ": 1}
+        eventos = [c.args[0] for c in emit.call_args_list]
+        assert "ensure_goa_universe.unknown_evidence_codes" in eventos
 
 
 class TestTheRawPredicate:
@@ -376,7 +568,7 @@ class TestPayload:
         delivered = {"gaf_url": "http://x/g.gz", "dry_run": True, "_job_id": str(uuid.uuid4())}
         with (
             patch.object(
-                EnsureGoaUniverseOperation, "_reliable_accessions", return_value=({"P12345"}, 0, 7)
+                EnsureGoaUniverseOperation, "_admissible_accessions", return_value=({"P12345"}, 0, _Cuentas(rows=7))
             ),
             patch.object(EnsureGoaUniverseOperation, "_missing", return_value=["P12345"]),
         ):
@@ -425,9 +617,9 @@ class TestElTipoDelObjeto:
             return parse_gaf_text(text, accept)
 
         with patch.object(EnsureGoaUniverseOperation, "_stream_gaf", side_effect=fake_stream):
-            wanted, _, _ = op._reliable_accessions(p, MagicMock())
+            wanted, _, cuentas = op._admissible_accessions(p, MagicMock())
         assert wanted == {"P12345"}, "un tipo desconocido no se descarta"
-        assert "algo_que_goa_invente_en_2030" in op._tipos_fiables, "y queda contado"
+        assert "algo_que_goa_invente_en_2030" in cuentas.por_tipo, "y queda contado"
 
 
 class TestLasSecundarias:
@@ -777,7 +969,7 @@ class TestTheDatesReachEveryUniverseMember:
         delivered = {"gaf_url": "http://x/g.gz", "dry_run": True}
         with (
             patch.object(
-                EnsureGoaUniverseOperation, "_reliable_accessions", return_value=({"P12345"}, 0, 7)
+                EnsureGoaUniverseOperation, "_admissible_accessions", return_value=({"P12345"}, 0, _Cuentas(rows=7))
             ),
             patch.object(EnsureGoaUniverseOperation, "_missing", return_value=["P12345"]),
         ):

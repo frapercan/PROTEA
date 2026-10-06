@@ -84,9 +84,8 @@ from __future__ import annotations
 
 import re
 import time
-from collections import Counter
 from collections.abc import Callable, Iterator
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from protea_contracts import GoaStreamPayload, UniProtProteinRecord
 from pydantic import Field, field_validator
@@ -98,13 +97,22 @@ from protea.core.operations import _universe_http as _uhttp
 from protea.core.operations._universe_sources import (
     _DATE_FIELDS,
     _TSV_FIELDS,
+    ALL_KNOWN_CODES,
+    TIER_CURATED_INFERENCE,
+    TIER_SWISSPROT,
+    TIER_TRUTH,
     _audit_dates_of,
+    _Cuentas,
+    _Escaneo,
     _parse_dates_tsv,
     _parse_tsv,
+    _Salida,
     _store_dates,
     candidates_from,
     classify,
-    codes_for,
+    codes_for_tiers,
+    informe_de_pasada,
+    is_swissprot_entry,
 )
 from protea.core.utils import chunks, contract_payload
 from protea.infrastructure.orm.models.protein.protein import Protein
@@ -152,10 +160,22 @@ _NOT_A_PROTEIN = frozenset({"complex", "protein_complex", "rna", "ncrna", "mrna"
 
 #: 0-indexed GAF column holding the evidence code. We read the raw column
 #: instead of the parsed record so the evidence test can run before the plugin
-#: builds anything -- see ``_reliable_accessions``. The plugin keeps the same
+#: builds anything -- see ``_admissible_accessions``. The plugin keeps the same
 #: index privately; ``test_the_evidence_column_is_where_we_think`` pins ours
 #: against the plugin's own parse rather than against its private name.
 _GAF_EVIDENCE = 6
+
+#: 0-indexed GAF column holding the accession. The predicate needs it to decide
+#: Swiss-Prot membership, which is a comparison between the accession and the
+#: entry name.
+_GAF_ID = 1
+
+#: 0-indexed GAF column holding DB Object Synonym, whose first ``|``-separated
+#: element is the UniProtKB entry name. That name is what distinguishes
+#: Swiss-Prot from TrEMBL, and the GAF carries the name of its OWN release --
+#: which is why the reviewed status needs no historical download. Verified
+#: against the plugin's own parse by ``test_the_synonym_column_is_where_we_think``.
+_GAF_SYNONYM = 10
 
 _ACCESSIONS_URL = "https://rest.uniprot.org/uniprotkb/accessions"
 
@@ -169,25 +189,33 @@ class EnsureGoaUniversePayload(ProteaPayload, frozen=True):
     gaf_url: str
     timeout_seconds: Annotated[int, Field(gt=0)] = 120
     dry_run: bool = False
-    #: What counts as an annotation for admission to the universe. This lives in
-    #: the PAYLOAD deliberately: it is the decision that defines the corpus scope,
-    #: and the previous version kept it hidden in a module constant -- which is
-    #: precisely how a ``reviewed:true`` search criterion fixed the scope of a
-    #: whole campaign on 2026-09-15 without anybody declaring it. Here it is on
-    #: the job row, queryable after the fact.
+    #: WHICH TIERS ADMIT A PROTEIN. This lives in the PAYLOAD deliberately: it
+    #: is the decision that defines the corpus, and keeping it in a module
+    #: constant is precisely how a ``reviewed:true`` search criterion fixed the
+    #: scope of a whole campaign on 2026-09-15 without anybody declaring it.
+    #: Here it is on the job row, queryable after the fact.
     #:
-    #: ``curated``
-    #:     Any code other than ``IEA``, GO's only automatic category, so it reads
-    #:     as "a person assigned it". Measured on GOA 156: 554,328 proteins.
-    #: ``reliable``
-    #:     The thirteen LAFA codes: eleven experimental plus ``IC`` and ``TAS``.
-    #:     Measured on GOA 156: 117,136 proteins.
+    #: ``truth``
+    #:     The thirteen LAFA codes. The only tier that makes a protein an
+    #:     evaluation TARGET. Measured on GOA 156: 117,136 accessions.
+    #: ``curated_inference``
+    #:     ``ISS ISO ISA ISM IGC RCA NAS IKR IRD`` -- a curator's judgement about
+    #:     THIS protein, never truth. Measured on GOA 156: 62,363 proteins enter
+    #:     by these and nothing else.
+    #: ``swissprot_of_release``
+    #:     The entry was reviewed AT THIS RELEASE, read from the entry name the
+    #:     GAF itself carries. See
+    #:     :func:`protea.core.operations._universe_sources.is_swissprot_entry`
+    #:     for the measurement: 527,149 on GOA 156, zero false positives.
     #:
-    #: The universe uses ``curated`` because breadth serves the retrieval bank and
-    #: because ``evidence_code`` is persisted per row, so the narrower tier stays
-    #: recoverable at analysis time. Evaluation truth remains the thirteen, and
-    #: that is the evaluation's decision, not this operation's.
-    evidence_scope: Literal["curated", "reliable"] = "curated"
+    #: WHAT IS NOT HERE, and why the list is an enumeration rather than a
+    #: complement: the previous version admitted "anything that is not IEA",
+    #: which let in ``IBA`` (58% of the corpus, a mechanically propagated family
+    #: consensus) and ``ND`` (a curator recording that they found NOTHING, on
+    #: root terms whose Information Accretion is zero). A complement admits
+    #: whatever GO invents next without anybody deciding; an enumeration does
+    #: not, and an unknown code is counted and reported instead.
+    admit: list[str] = [TIER_TRUTH, TIER_CURATED_INFERENCE, TIER_SWISSPROT]
 
     @field_validator("gaf_url", mode="before")
     @classmethod
@@ -195,6 +223,14 @@ class EnsureGoaUniversePayload(ProteaPayload, frozen=True):
         if not isinstance(v, str) or not v.strip():
             raise ValueError("gaf_url must be a non-empty string")
         return v.strip()
+
+    @field_validator("admit", mode="after")
+    @classmethod
+    def tiers_must_be_known_and_nonempty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("admit must name at least one tier; an empty corpus is not a scope")
+        codes_for_tiers(v)  # levanta ValueError nombrando el nivel desconocido
+        return v
 
 
 class EnsureGoaUniverseOperation(Operation):
@@ -236,11 +272,11 @@ class EnsureGoaUniverseOperation(Operation):
         p = EnsureGoaUniversePayload.model_validate(contract_payload(payload))
         emit("ensure_goa_universe.start", None, {"gaf_url": p.gaf_url}, "info")
 
-        wanted, malformed, rows = self._reliable_accessions(p, emit)
+        wanted, malformed, cuentas = self._admissible_accessions(p, emit)
         emit(
             "ensure_goa_universe.scanned",
             None,
-            {"rows": rows, "reliable_accessions": len(wanted), "malformed": malformed},
+            {"rows": cuentas.rows, "admissible_accessions": len(wanted), "malformed": malformed},
             "info",
         )
 
@@ -252,38 +288,30 @@ class EnsureGoaUniverseOperation(Operation):
             "info",
         )
 
-        fetched = inserted = sequences = sin_fechas = 0
-        alias: dict[str, str] = {}
-        sin_resolver: list[str] = []
-        artefactos: dict[str, Any] = {}
+        salida = _Salida()
         if missing and not p.dry_run:
-            fetched, inserted, sequences = self._fetch_and_store(session, missing, p, emit)
-            sin_fechas = self._fill_dates(session, wanted, p, emit)
-            alias, sin_resolver, mas_p, mas_s = self._segunda_pasada(session, missing, p, emit)
-            inserted += mas_p
-            sequences += mas_s
-            artefactos = self._guardar_artefactos(
-                payload.get("_job_id"), alias, sin_resolver, getattr(self, "_demerges", {})
+            salida.fetched, salida.inserted, salida.sequences = self._fetch_and_store(
+                session, missing, p, emit
+            )
+            salida.sin_fechas = self._fill_dates(session, wanted, p, emit)
+            salida.alias, salida.sin_resolver, mas_p, mas_s = self._segunda_pasada(
+                session, missing, p, emit
+            )
+            salida.inserted += mas_p
+            salida.sequences += mas_s
+            salida.artefactos = self._guardar_artefactos(
+                payload.get("_job_id"), salida.alias, salida.sin_resolver,
+                getattr(self, "_demerges", {}),
             )
 
-        result = {
-            "rows_scanned": rows,
-            "reliable_accessions": len(wanted),
-            "malformed_skipped": malformed,
-            "already_present": len(wanted) - len(missing),
-            "missing": len(missing),
-            "fetched": fetched,
-            "resolved_as_merge": len(alias) if not p.dry_run else None,
-            "not_retrievable": len(sin_resolver) if not p.dry_run else None,
-            "demerged": len(getattr(self, "_demerges", {})) if not p.dry_run else None,
-            "dates_backfilled": sin_fechas if not p.dry_run else None,
-            "tipos_fiables": getattr(self, "_tipos_fiables", {}),
-            "artefactos": artefactos,
-            "proteins_inserted": inserted,
-            "sequences_inserted": sequences,
-            "dry_run": p.dry_run,
-            "elapsed_seconds": round(time.perf_counter() - t0, 1),
-        }
+        result = informe_de_pasada(
+            admit=list(p.admit),
+            dry_run=p.dry_run,
+            escaneo=_Escaneo(cuentas, malformed, len(wanted), len(missing)),
+            salida=salida,
+            demerges=len(getattr(self, "_demerges", {})),
+            elapsed=round(time.perf_counter() - t0, 1),
+        )
         emit("ensure_goa_universe.done", None, result, "info")
         return OperationResult(result=result)
 
@@ -374,52 +402,76 @@ class EnsureGoaUniverseOperation(Operation):
                 }
         return out
 
-    def _reliable_accessions(
+    def _admissible_accessions(
         self, p: EnsureGoaUniversePayload, emit: EmitFn
-    ) -> tuple[set[str], int, int]:
-        """Every accession the GAF annotates with a reliable code, NOT included.
+    ) -> tuple[set[str], int, _Cuentas]:
+        """Every accession the GAF admits under the requested tiers, NOT included.
 
-        Uses ``EXPERIMENTAL`` -- the eleven GO experimental codes -- plus ``IC``
-        and ``TAS``, which is what LAFA's own ground truth filters on
-        (``democafa/groundtruth/process_ground_truth.py``: ``selected=
-        'Experimental,IC,TAS'``). Not the eight of classic CAFA, which omit the
-        five high-throughput codes, and not the six a stats router still uses.
+        A ``NOT`` row admits: the qualifier is never read. A ``NOT`` with
+        experimental evidence IS a measurement on that protein, and scarce
+        curated knowledge, so the protein belongs in the universe even though it
+        has no positive truth.
         """
-        accepts = codes_for(p.evidence_scope)
+        cuentas = _Cuentas()
+        accept = self._build_accept(p, cuentas)
         wanted: set[str] = set()
         malformed = 0
-        rows = 0
-        por_tipo: Counter[str] = Counter()
-
-        def accept(cols: list[str]) -> bool:
-            """Reject on the raw column, before a record exists.
-
-            Of 280.922.738 lines in GOA 156, 671.138 carry a reliable code --
-            0,24%. Testing ``rec.evidence_code`` instead would have the plugin
-            validate a record for each of the other 99,76% and then drop it,
-            which measured 11,5 minutes a release against 4,4.
-
-            Counting here rather than in the loop keeps ``rows`` meaning exactly
-            what it meant before the predicate existed: the plugin calls this for
-            every line that is neither a comment nor short, which is precisely
-            the set of lines that used to yield a record.
-            """
-            nonlocal rows
-            rows += 1
-            if not accepts(cols[_GAF_EVIDENCE].strip()):
-                return False
-            tipo = cols[_GAF_TYPE].strip().lower()
-            por_tipo[tipo or "(vacio)"] += 1
-            return tipo not in _NOT_A_PROTEIN
-
         for rec in self._stream_gaf(p, emit, accept):
             accession = rec.accession.strip()
             if _ACCESSION.match(accession):
                 wanted.add(accession)
             else:
                 malformed += 1
-        self._tipos_fiables = dict(por_tipo.most_common())
-        return wanted, malformed, rows
+        if cuentas.desconocidos:
+            emit(
+                "ensure_goa_universe.unknown_evidence_codes",
+                None,
+                {"codes": dict(cuentas.desconocidos.most_common())},
+                "warning",
+            )
+        return wanted, malformed, cuentas
+
+    def _build_accept(
+        self, p: EnsureGoaUniversePayload, cuentas: _Cuentas
+    ) -> Callable[[list[str]], bool]:
+        """The row predicate, deciding on the RAW columns before a record exists.
+
+        Of 280.922.738 lines in GOA 156, 671.138 carry one of the thirteen --
+        0,24%. Testing ``rec.evidence_code`` instead would have the plugin
+        validate a record for each of the other 99,76% and then drop it, which
+        measured 11,5 minutes a release against 4,4.
+
+        ``cuentas.rows`` keeps meaning exactly what it meant before the predicate
+        existed: the plugin calls this for every line that is neither a comment
+        nor short, which is precisely the set of lines that used to yield a
+        record, and it is the denominator the run reports.
+
+        An unknown evidence code is counted and REJECTED. The tiers enumerate the
+        26 codes the ECO mapping knows, partitioned exactly, so an unknown one is
+        a code GO added after this was written: it needs a decision, not a
+        default. The previous criterion was the complement of ``IEA`` and would
+        have admitted it in silence.
+        """
+        codigos = codes_for_tiers(p.admit)
+        quiere_sp = TIER_SWISSPROT in p.admit
+
+        def accept(cols: list[str]) -> bool:
+            cuentas.rows += 1
+            ev = cols[_GAF_EVIDENCE].strip()
+            if ev in codigos:
+                cuentas.por_nivel["por_codigo"] += 1
+            elif ev and ev not in ALL_KNOWN_CODES:
+                cuentas.desconocidos[ev] += 1
+                return False
+            elif quiere_sp and is_swissprot_entry(cols[_GAF_ID].strip(), cols[_GAF_SYNONYM]):
+                cuentas.por_nivel["swissprot_of_release"] += 1
+            else:
+                return False
+            tipo = cols[_GAF_TYPE].strip().lower()
+            cuentas.por_tipo[tipo or "(vacio)"] += 1
+            return tipo not in _NOT_A_PROTEIN
+
+        return accept
 
     def _stream_gaf(
         self,
