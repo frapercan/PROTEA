@@ -1,13 +1,13 @@
-"""El almacen compartido: una sola copia del dedup por MD5 y del upsert.
+"""The shared store: one copy of the MD5 dedup and of the protein upsert.
 
-Estas pruebas vivian en ``tests/test_insert_proteins.py`` cuando el codigo era
-``InsertProteinsOperation._store_records``, un metodo privado al que
-``ensure_goa_universe`` llegaba desde fuera. Se movieron con el codigo, que es
-donde tienen que estar: lo que prueban ahora lo usan DOS operaciones --
-``insert_proteins`` y ``resolve_protein_sequences`` -- y un fallo aqui rompe las
-dos, no una.
+These tests lived in ``tests/test_insert_proteins.py`` when the code was
+``InsertProteinsOperation._store_records``, a private method that
+``ensure_goa_universe`` reached into from outside. They moved with the code, which
+is where they belong: what they cover is now used by TWO operations,
+``insert_proteins`` and ``resolve_protein_sequences``, so a failure here breaks
+both rather than one.
 
-Session y HTTP simulados: sin base y sin red.
+Mocked session and HTTP: no database, no network.
 """
 
 from __future__ import annotations
@@ -60,18 +60,19 @@ def _make_record(
 
 class TestStoreRecords:
     def test_empty_records_returns_zeros(self):
-        """Sin registros no se consulta nada: la salida temprana."""
+        """With no records nothing is queried: the early return."""
         session = _make_mock_session()
         result = store_records(session, [], _noop_emit)
         assert result == StoreCounts(0, 0, 0, 0)
         session.query.assert_not_called()
 
     def test_updates_existing_protein(self):
-        """Una fila que ya existe se parchea, no se pisa.
+        """An existing row is patched, never clobbered.
 
-        Esto es lo que hace componibles a las dos operaciones del universo:
-        ``extract_goa_universe`` escribe una fila con todo a NULL y esta funcion la
-        completa despues sin tocar nada que ya tuviera valor.
+        This is what makes the two universe operations composable:
+        ``extract_goa_universe`` writes a row with everything NULL and this
+        function fills it in later without touching anything that already had a
+        value.
         """
         record = _make_record()
         seq_hash = record.sequence_hash
@@ -125,7 +126,7 @@ class TestStoreRecords:
         assert existing_prot.reviewed is True
 
     def test_inserts_new_sequence_when_missing(self):
-        """Un hash que la base no tiene entra como fila nueva de ``sequence``."""
+        """A hash the database does not hold becomes a new ``sequence`` row."""
         record = _make_record()
 
         session = MagicMock(spec=Session)
@@ -160,17 +161,18 @@ class TestStoreRecords:
 
 
 
-class TestLaFilaSinSecuenciaSeCompletaDespues:
-    """El invariante que hace posible construir el universo en dos pasos.
+class TestTheSequencelessRowIsCompletedLater:
+    """The invariant that makes a two-step universe possible.
 
-    ``extract_goa_universe`` escribe una fila con accesion, canonica y nada mas;
-    ``resolve_protein_sequences`` la encuentra despues y la completa. Si el parcheo
-    pisara valores, el orden de las dos operaciones importaria, y una tercera
-    pasada de ``insert_proteins`` sobre la misma accesion desharia una de las dos.
+    ``extract_goa_universe`` writes a row with an accession, its canonical and
+    nothing else; ``resolve_protein_sequences`` finds it later and fills it in. If
+    the patching clobbered values, the ORDER of the two operations would matter,
+    and a later ``insert_proteins`` pass over the same accession would undo one of
+    them.
     """
 
-    def _fila_de_extraccion(self, accession="P12345"):
-        """Lo mismo que escribe ``ExtractGoaUniverseOperation._accession_row``."""
+    def _extracted_row(self, accession="P12345"):
+        """Exactly what ``ExtractGoaUniverseOperation._accession_row`` writes."""
         from protea.infrastructure.orm.models.protein.protein import Protein
 
         canonical, is_canonical, isoform = Protein.parse_isoform(accession)
@@ -182,32 +184,33 @@ class TestLaFilaSinSecuenciaSeCompletaDespues:
             first_admitted_release=156,
         )
 
-    def test_rellena_todo_lo_que_estaba_nulo(self):
+    def test_fills_everything_that_was_null(self):
         from protea.core.operations._protein_store import apply_record_updates
 
-        fila = self._fila_de_extraccion()
-        assert apply_record_updates(fila, _make_record(), seq_id=42) is True
-        assert fila.sequence_id == 42
-        assert fila.entry_name == "TEST_HUMAN"
-        assert fila.organism == "Homo sapiens"
-        assert fila.taxonomy_id == "9606"
-        assert fila.gene_name == "TEST"
-        assert fila.reviewed is True
-        assert fila.length == 8
+        row = self._extracted_row()
+        assert apply_record_updates(row, _make_record(), seq_id=42) is True
+        assert row.sequence_id == 42
+        assert row.entry_name == "TEST_HUMAN"
+        assert row.organism == "Homo sapiens"
+        assert row.taxonomy_id == "9606"
+        assert row.gene_name == "TEST"
+        assert row.reviewed is True
+        assert row.length == 8
 
-    def test_no_toca_la_release_que_la_admitio(self):
-        """``first_admitted_release`` es lo unico que el GAF sabe y UniProt no.
-        Un parcheo que lo pisara borraria la unica observacion de la serie."""
+    def test_does_not_touch_the_release_that_admitted_it(self):
+        """``first_admitted_release`` is the one thing the GAF knows and UniProt
+        does not. A patch that clobbered it would erase the only observation of it
+        the series makes."""
         from protea.core.operations._protein_store import apply_record_updates
 
-        fila = self._fila_de_extraccion()
-        apply_record_updates(fila, _make_record(), seq_id=42)
-        assert fila.first_admitted_release == 156
+        row = self._extracted_row()
+        apply_record_updates(row, _make_record(), seq_id=42)
+        assert row.first_admitted_release == 156
 
-    def test_un_segundo_parcheo_no_cambia_nada(self):
+    def test_a_second_patch_changes_nothing(self):
         from protea.core.operations._protein_store import apply_record_updates
 
-        fila = self._fila_de_extraccion()
-        apply_record_updates(fila, _make_record(), seq_id=42)
-        assert apply_record_updates(fila, _make_record(), seq_id=99) is False
-        assert fila.sequence_id == 42, "la secuencia ya estaba y no se repisa"
+        row = self._extracted_row()
+        apply_record_updates(row, _make_record(), seq_id=42)
+        assert apply_record_updates(row, _make_record(), seq_id=99) is False
+        assert row.sequence_id == 42, "the sequence was already there and is not overwritten"

@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from protea.core.operations._protein_store import StoreCounts
-from protea.core.operations._universe_sources import _Salida
+from protea.core.operations._universe_sources import _FetchOutcome
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesOperation,
     ResolveProteinSequencesPayload,
@@ -40,50 +40,51 @@ def _op():
     return op
 
 
-class TestLaPoblacionEsUnaConsulta:
-    """Que proteinas se preguntan NO es un campo del payload.
+class TestThePopulationIsAQuery:
+    """WHICH proteins get asked about is NOT a payload field.
 
-    Es "toda fila de ``protein`` sin ``sequence_id``", leido de la tabla en el
-    momento de ejecutar. Una lista de accesiones en el payload seria una hipotesis
-    sobre el estado de la base congelada al enviar el job, y esta campa�a ya se
-    comio una de esas: ``search_criteria: reviewed:true``, el 2026-09-15, fijo el
-    alcance de toda una campa�a sin que nadie lo declarase.
+    It is "every ``protein`` row with no ``sequence_id``", read from the table at
+    the moment the job runs. A list of accessions in the payload would be a
+    hypothesis about the state of the database frozen at submission time, and this
+    campaign has already been bitten by one of those: ``search_criteria:
+    reviewed:true``, on 2026-09-15, fixed the scope of a whole campaign without
+    anybody declaring it.
     """
 
-    def test_la_consulta_filtra_por_secuencia_nula(self):
+    def test_the_query_filters_on_a_null_sequence(self):
         src = inspect.getsource(ResolveProteinSequencesOperation._without_sequence)
         assert "Protein.sequence_id.is_(None)" in src
 
-    def test_va_ordenada_para_que_un_limite_sea_reproducible(self):
-        """Sin ``order_by`` dos ejecuciones acotadas piden conjuntos distintos y
-        la segunda no continua donde acabo la primera."""
+    def test_it_is_ordered_so_a_cap_is_reproducible(self):
+        """Without ``order_by`` two capped runs ask for different sets, and the
+        second does not continue where the first stopped."""
         src = inspect.getsource(ResolveProteinSequencesOperation._without_sequence)
         assert "order_by(Protein.accession)" in src
 
-    def test_la_gramatica_de_accesiones_es_una_barrera_antes_del_lote(self):
-        """Un solo miembro malformado hace que UniProt responda 400 a TODO el
-        lote -- medido: 'Accession NOEXISTE1 has invalid format'. Son mil
-        proteinas por un identificador suelto, y esta tabla la escribe mas de una
-        operacion."""
+    def test_the_accession_grammar_is_a_barrier_before_the_batch(self):
+        """One malformed member makes UniProt answer 400 for the WHOLE batch.
+        Measured: 'Accession NOEXISTE1 has invalid format'. That is a thousand
+        proteins for one stray identifier, and this table is written by more than
+        one operation."""
         op = _op()
         session = MagicMock()
         session.scalars.return_value.all.return_value = ["P12345", "NOEXISTE1", "Q8CF25"]
         assert op._without_sequence(session, None) == ["P12345", "Q8CF25"]
 
 
-class TestElTransporteEsDelPlugin:
-    """Lo que esta operacion ya no contiene.
+class TestTheTransportBelongsToThePlugin:
+    """What this operation no longer contains.
 
-    ``_universe_http.py`` eran 115 lineas que duplicaban la logica de reintentos
-    del plugin: el mismo conjunto ``{429, 500, 502, 503, 504}``, el mismo
-    ``Retry-After``, el mismo backoff. Dos copias de eso divergen sin que nadie se
-    entere, y la copia de aqui era la que no tenia tests propios.
+    ``_universe_http.py`` was 115 lines duplicating the plugin's retry logic: the
+    same ``{429, 500, 502, 503, 504}`` set, the same ``Retry-After``, the same
+    backoff. Two copies of that diverge without anybody noticing, and the copy here
+    was the one with no tests of its own.
     """
 
-    def test_no_importa_ninguna_libreria_de_red(self):
-        """Leido del AST y no del texto: la prosa del modulo HABLA de reintentos y
-        de ``Retry-After`` para explicar por que no los implementa, y un grep
-        sobre el fichero no sabe distinguir una explicacion de una implementacion.
+    def test_it_imports_no_networking_library(self):
+        """Read from the AST and not from the text: the module's prose TALKS about
+        retries and ``Retry-After`` to explain why it does not implement them, and a
+        grep over the file cannot tell an explanation from an implementation.
         """
         import ast
 
@@ -98,9 +99,9 @@ class TestElTransporteEsDelPlugin:
                 importados.add(nodo.module.split(".")[0])
         assert not importados & {"requests", "urllib", "http", "httpx", "socket"}, importados
 
-    def test_todo_lo_remoto_pasa_por_el_plugin(self):
-        """Los dos metodos del plugin y ninguno mas. Un tercer camino de salida
-        seria otro sitio donde los reintentos pueden faltar."""
+    def test_everything_remote_goes_through_the_plugin(self):
+        """The plugin's two methods and no others. A third way out would be another
+        place where the retries can be missing."""
         import ast
 
         import protea.core.operations.resolve_protein_sequences as mod
@@ -116,33 +117,33 @@ class TestElTransporteEsDelPlugin:
         }
         assert llamadas == {"fetch_accessions_tsv", "search_secondary_accessions"}, llamadas
 
-    def test_el_modulo_duplicado_ya_no_existe(self):
+    def test_the_duplicated_module_no_longer_exists(self):
         with pytest.raises(ModuleNotFoundError):
             __import__("protea.core.operations._universe_http")
 
-    def test_los_tamanos_de_lote_son_constantes_medidas_del_plugin(self):
-        """1001 contesta "Only '1000' accessions are allowed in each request", y
-        101 condiciones OR contestan "Maximum allowed is 100". Son hechos sobre
-        UniProt, no parametros: un llamante no puede elegirlos, asi que no estan
-        en el payload."""
+    def test_the_batch_sizes_are_the_plugins_measured_constants(self):
+        """1001 answers "Only '1000' accessions are allowed in each request", and
+        101 OR conditions answer "Maximum allowed is 100". These are facts about
+        UniProt, not parameters: a caller cannot choose them, so they are not
+        payload fields."""
         from protea_sources.uniprot import MAX_ACCESSIONS_PER_REQUEST, MAX_OR_CONDITIONS
 
         assert MAX_ACCESSIONS_PER_REQUEST == 1000
         assert MAX_OR_CONDITIONS == 100
 
-    def test_el_timeout_del_payload_llega_a_los_knobs(self):
+    def test_the_payload_timeout_reaches_the_knobs(self):
         knobs = ResolveProteinSequencesOperation._knobs(
             ResolveProteinSequencesPayload(timeout_seconds=7)
         )
         assert knobs.timeout_seconds == 7
-        assert knobs.max_retries == 6, "lo demas se queda en los valores medidos"
+        assert knobs.max_retries == 6, "everything else keeps the measured values"
 
 
-class TestLasSecundarias:
-    """``/uniprotkb/accessions`` casa SOLO primarias: una accesion fusionada no se
-    devuelve, y UniProt la cuenta igual en X-Total-Results, asi que la respuesta
-    dice "7 resultados" con el cuerpo vacio. Sobre GOA 156 eso son 10.791
-    accesiones de las que el 18,2% son fusiones recuperables."""
+class TestSecondaryAccessions:
+    """``/uniprotkb/accessions`` matches PRIMARY accessions only: a merged accession
+    is not returned, and UniProt counts it in X-Total-Results regardless, so the
+    response says "7 results" with an empty body. On GOA 156 that is 10,791
+    accessions, of which 18.2% are recoverable merges."""
 
     _ENTRY = {
         "primaryAccession": "P04439",
@@ -153,16 +154,16 @@ class TestLasSecundarias:
         "genes": [{"geneName": {"value": "HLA-A"}}],
     }
 
-    def _resolver(self, pedidas):
+    def _resolve(self, requested):
         op = _op()
         op._uniprot.search_secondary_accessions.return_value = {"results": [self._ENTRY]}
-        guardadas = []
+        stored = []
 
         def fake_store(_session, records, _emit):
-            guardadas.extend(records)
+            stored.extend(records)
             return StoreCounts(proteins_inserted=len(records), sequences_inserted=1)
 
-        salida = _Salida()
+        outcome = _FetchOutcome()
         with (
             patch(
                 "protea.core.operations.resolve_protein_sequences.store_records",
@@ -171,189 +172,189 @@ class TestLasSecundarias:
             patch.object(
                 ResolveProteinSequencesOperation,
                 "_still_without_sequence",
-                return_value=list(pedidas),
+                return_value=list(requested),
             ),
         ):
             op._resolve_merges(
-                MagicMock(), list(pedidas), ResolveProteinSequencesPayload(),
-                MagicMock(), salida,
+                MagicMock(), list(requested), ResolveProteinSequencesPayload(),
+                MagicMock(), outcome,
             )
-        return salida, guardadas
+        return outcome, stored
 
-    def test_resuelve_la_secundaria_a_su_primaria(self):
-        salida, _ = self._resolver(["P30456"])
-        assert salida.alias == {"P30456": "P04439"}
+    def test_resolves_the_secondary_to_its_primary(self):
+        outcome, _ = self._resolve(["P30456"])
+        assert outcome.alias == {"P30456": "P04439"}
 
-    def test_guarda_la_primaria_Y_el_alias(self):
-        """Las dos filas hacen falta: la primaria es la proteina, y el alias es lo
-        que satisface la clave ajena cuando la fase 2 cargue la anotacion de 2016,
-        que viene con la accesion vieja."""
-        _, guardadas = self._resolver(["P30456"])
-        por_acc = {r.accession: r for r in guardadas}
-        assert set(por_acc) == {"P04439", "P30456"}
-        assert por_acc["P04439"].is_canonical is True
-        assert por_acc["P30456"].is_canonical is False
-        assert por_acc["P30456"].canonical_accession == "P04439"
+    def test_stores_the_primary_AND_the_alias(self):
+        """Both rows are needed: the primary is the protein, and the alias is what
+        satisfies the foreign key when phase 2 loads the 2016 annotation, which
+        arrives under the old accession."""
+        _, stored = self._resolve(["P30456"])
+        by_acc = {r.accession: r for r in stored}
+        assert set(by_acc) == {"P04439", "P30456"}
+        assert by_acc["P04439"].is_canonical is True
+        assert by_acc["P30456"].is_canonical is False
+        assert by_acc["P30456"].canonical_accession == "P04439"
 
-    def test_el_alias_no_es_una_isoforma(self):
-        """``isoform_index`` es lo que separa los dos casos: entero para una
-        isoforma, None para un alias de fusion. Sin eso, cualquier recuento de
-        isoformas por ``NOT is_canonical`` contaria fusiones."""
-        _, guardadas = self._resolver(["P30456"])
-        assert all(r.isoform_index is None for r in guardadas)
+    def test_the_alias_is_not_an_isoform(self):
+        """``isoform_index`` is what separates the two cases: an integer for an
+        isoform, None for a merge alias. Without it, any count of isoforms by
+        ``NOT is_canonical`` would count merges."""
+        _, stored = self._resolve(["P30456"])
+        assert all(r.isoform_index is None for r in stored)
 
-    def test_las_dos_filas_comparten_la_secuencia(self):
-        """Mismo hash, asi que ``store_records`` inserta UNA fila de sequence. Y
-        los embeddings se indexan por Sequence, no por Protein, de modo que esto
-        no mete un vecino duplicado en el banco KNN."""
-        _, guardadas = self._resolver(["P30456"])
-        assert len({r.sequence_hash for r in guardadas}) == 1
-        assert len({r.sequence for r in guardadas}) == 1
+    def test_the_two_rows_share_the_sequence(self):
+        """Same hash, so ``store_records`` inserts ONE sequence row. And embeddings
+        are keyed on Sequence rather than Protein, so this adds no duplicate
+        neighbour to the KNN bank."""
+        _, stored = self._resolve(["P30456"])
+        assert len({r.sequence_hash for r in stored}) == 1
+        assert len({r.sequence for r in stored}) == 1
 
-    def test_solo_las_secundarias_pedidas_generan_alias(self):
-        """La entrada trae dos secundarias y solo se pidio una. Crear la otra
-        inventaria una proteina que ningun GAF anoto."""
-        salida, guardadas = self._resolver(["P30456"])
-        assert "P01892" not in salida.alias
-        assert "P01892" not in {r.accession for r in guardadas}
+    def test_only_the_requested_secondaries_produce_an_alias(self):
+        """The entry carries two secondaries and only one was asked for. Creating
+        the other would invent a protein no GAF annotated."""
+        outcome, stored = self._resolve(["P30456"])
+        assert "P01892" not in outcome.alias
+        assert "P01892" not in {r.accession for r in stored}
 
-    def test_lo_que_no_resuelve_queda_nombrado(self):
-        """Y se pregunta a la BASE, no a la aritmetica: ``candidatos`` menos
-        ``fetched`` cuenta bien pero no dice QUIEN falta, y quien falta es lo que
-        hay que registrar."""
-        salida, _ = self._resolver(["P30456", "Q11111"])
-        assert salida.sin_resolver == ["Q11111"]
+    def test_what_it_cannot_resolve_is_left_named(self):
+        """And the question goes to the DATABASE, not to the arithmetic:
+        ``candidates`` minus ``fetched`` counts right but does not say WHO is
+        missing, and who is missing is what has to be recorded."""
+        outcome, _ = self._resolve(["P30456", "Q11111"])
+        assert outcome.unresolved == ["Q11111"]
 
 
-class TestLoQueNoSeResuelveQuedaConNombre:
-    """``not_retrievable: 10.791`` era un numero sin nombres: proteinas con
-    evidencia experimental curada que no entran al corpus y que no se podian
-    citar. Un numero no se audita; una lista si."""
+class TestWhatCannotBeResolvedKeepsItsName:
+    """``not_retrievable: 10,791`` was a number with no names: proteins carrying
+    curated experimental evidence that do not enter the corpus and could not be
+    cited. A number cannot be audited; a list can."""
 
-    def _guardar(self, alias, sin_resolver, job_id="11111111-2222-3333-4444-555555555555"):
+    def _store(self, alias, unresolved, job_id="11111111-2222-3333-4444-555555555555"):
         op = _op()
-        puestos = {}
+        put = {}
 
         class _Store:
             def put(self, key, path):
-                puestos[key] = open(path, encoding="utf-8").read()
+                put[key] = open(path, encoding="utf-8").read()
                 return f"s3://artifacts/{key}"
 
-        salida = _Salida(alias=dict(alias), sin_resolver=list(sin_resolver))
+        outcome = _FetchOutcome(alias=dict(alias), unresolved=list(unresolved))
         with (
             patch("protea.infrastructure.storage.get_artifact_store", return_value=_Store()),
             patch("protea.infrastructure.settings.load_settings", return_value=MagicMock()),
         ):
-            out = op._store_artifacts(job_id, salida)
-        return out, puestos
+            out = op._store_artifacts(job_id, outcome)
+        return out, put
 
-    def test_la_lista_de_no_resueltas_se_persiste(self):
-        out, puestos = self._guardar({}, ["Q11111", "Q22222"])
+    def test_the_list_of_unresolved_is_persisted(self):
+        out, put = self._store({}, ["Q11111", "Q22222"])
         assert out["sin_resolver"]["filas"] == 2
-        clave = next(k for k in puestos if k.endswith("sin_resolver.txt"))
-        assert puestos[clave].split() == ["Q11111", "Q22222"]
+        key = next(k for k in put if k.endswith("sin_resolver.txt"))
+        assert put[key].split() == ["Q11111", "Q22222"]
 
-    def test_el_mapa_de_fusiones_se_persiste_con_las_dos_columnas(self):
-        """Sin el mapa no se puede canonicalizar despues, y canonicalizar es lo
-        que une la historia de una proteina que cambio de accesion a mitad de la
-        serie."""
-        out, puestos = self._guardar({"P30456": "P04439"}, [])
+    def test_the_merge_map_is_persisted_with_both_columns(self):
+        """Without the map there is no canonicalising afterwards, and canonicalising
+        is what joins the history of a protein that changed accession mid-series."""
+        out, put = self._store({"P30456": "P04439"}, [])
         assert out["fusiones"]["filas"] == 1
-        clave = next(k for k in puestos if k.endswith("fusiones.tsv"))
-        filas = [ln.split("\t") for ln in puestos[clave].strip().split("\n")]
-        assert filas[0] == ["accesion_gaf", "accesion_primaria"]
-        assert filas[1] == ["P30456", "P04439"]
+        key = next(k for k in put if k.endswith("fusiones.tsv"))
+        rows = [ln.split("\t") for ln in put[key].strip().split("\n")]
+        assert rows[0] == ["accesion_gaf", "accesion_primaria"]
+        assert rows[1] == ["P30456", "P04439"]
 
-    def test_la_clave_nombra_a_esta_operacion(self):
-        """El prefijo cambio de ``goa_universe/`` a ``protein_resolution/``: los
-        artefactos de las diez pasadas viejas siguen donde estaban y no se mezclan
-        con los de una operacion que ya no hace lo mismo."""
-        _, puestos = self._guardar({}, ["Q11111"])
-        assert all(k.startswith("protein_resolution/") for k in puestos), puestos
+    def test_the_key_names_this_operation(self):
+        """The prefix moved from ``goa_universe/`` to ``protein_resolution/``: the
+        artifacts of the ten old passes stay where they were and do not mix with
+        those of an operation that no longer does the same thing."""
+        _, put = self._store({}, ["Q11111"])
+        assert all(k.startswith("protein_resolution/") for k in put), put
 
-    def test_sin_job_id_no_escribe_nada(self):
-        """El dry run y los tests llaman sin job: no hay donde colgar el
-        artefacto, y no es un error."""
-        out, puestos = self._guardar({"A": "B"}, ["C"], job_id=None)
+    def test_with_no_job_id_it_writes_nothing(self):
+        """A dry run and the tests call it with no job: there is nowhere to hang the
+        artifact, and that is not an error."""
+        out, put = self._store({"A": "B"}, ["C"], job_id=None)
         assert out == {}
-        assert puestos == {}
+        assert put == {}
 
 
-class TestUnDemergeNoTieneUnaIdentidad:
-    """`C8VQ65` tumbo la pasada de la 156 el 2026-10-05 tras 317 fusiones
-    correctas: es `DEMERGED` con `mergeDemergeTo: [P9WEV8, P9WEV9]`, asi que sale
-    en DOS entradas. Eso daba dos filas alias con la misma accesion en el mismo
-    lote, y el almacen --que separa inserts de updates mirando la base y no
-    deduplica su propia entrada-- las mandaba como dos INSERT: duplicate key.
+class TestADemergeHasNoIdentity:
+    """`C8VQ65` brought down the release-156 pass on 2026-10-05 after 317 correct
+    merges: it is `DEMERGED` with `mergeDemergeTo: [P9WEV8, P9WEV9]`, so it appears
+    in TWO entries. That produced two alias rows with the same accession in one
+    batch, and the store, which separates inserts from updates by looking at the
+    database and does not deduplicate its own input, sent them as two INSERTs:
+    duplicate key.
 
-    Pero el choque de claves es el sintoma. El fondo es que una accesion partida
-    en dos entradas NO APUNTA A UNA PROTEINA, y la secuencia que heredaria seria
-    la de una de dos distintas, elegida por el orden de la respuesta.
+    But the key clash is the symptom. The substance is that an accession split
+    across two entries DOES NOT POINT AT ONE PROTEIN, and the sequence it would
+    inherit would be one of two different ones, chosen by the order of the response.
     """
 
-    def _entry(self, primary, secundarias, seq="MAVM"):
+    def _entry(self, primary, secondaries, seq="MAVM"):
         return {
             "primaryAccession": primary,
-            "secondaryAccessions": list(secundarias),
+            "secondaryAccessions": list(secondaries),
             "entryType": "UniProtKB reviewed (Swiss-Prot)",
             "sequence": {"value": seq},
             "organism": {"scientificName": "Mycobacterium tuberculosis", "taxonId": 83332},
             "genes": [],
         }
 
-    def _candidatos(self, entries, pedidas):
+    def _candidates(self, entries, requested):
         from protea.core.operations._universe_sources import records_for_merge
 
         out = {}
         for e in entries:
-            hecho = records_for_merge(e, set(pedidas))
-            if hecho is None:
+            done = records_for_merge(e, set(requested))
+            if done is None:
                 continue
-            primary, filas, encontradas = hecho
-            for sec in encontradas:
-                out.setdefault(sec, []).append((primary, filas))
+            primary, rows, found = done
+            for sec in found:
+                out.setdefault(sec, []).append((primary, rows))
         return out
 
-    def test_un_demerge_no_genera_alias(self):
+    def test_a_demerge_produces_no_alias(self):
         from protea.core.operations._universe_sources import classify
 
-        cand = self._candidatos(
+        cand = self._candidates(
             [self._entry("P9WEV8", ["C8VQ65"], "AAAA"), self._entry("P9WEV9", ["C8VQ65"], "BBBB")],
             ["C8VQ65"],
         )
         alias, demerges = {}, {}
         records = classify(cand, alias, demerges)
-        assert alias == {}, "no se le puede asignar una primaria"
-        assert demerges == {"C8VQ65": ["P9WEV8", "P9WEV9"]}, "queda registrado con sus destinos"
+        assert alias == {}, "no primary can be assigned to it"
+        assert demerges == {"C8VQ65": ["P9WEV8", "P9WEV9"]}, "recorded with its destinations"
         assert "C8VQ65" not in {r.accession for r in records}
 
-    def test_una_fusion_de_verdad_si_genera_alias(self):
+    def test_a_real_merge_does_produce_an_alias(self):
         from protea.core.operations._universe_sources import classify
 
-        cand = self._candidatos([self._entry("P04439", ["P30456"])], ["P30456"])
+        cand = self._candidates([self._entry("P04439", ["P30456"])], ["P30456"])
         alias, demerges = {}, {}
         records = classify(cand, alias, demerges)
         assert alias == {"P30456": "P04439"}
         assert demerges == {}
         assert {r.accession for r in records} == {"P04439", "P30456"}
 
-    def test_ninguna_accesion_se_repite_en_las_filas(self):
-        """La causa inmediata del duplicate key. Dos secundarias distintas que
-        caen en la misma primaria producen esa primaria dos veces."""
+    def test_no_accession_repeats_across_the_rows(self):
+        """The immediate cause of the duplicate key. Two different secondaries
+        landing on the same primary produce that primary twice."""
         from protea.core.operations._universe_sources import classify
 
-        cand = self._candidatos([self._entry("P04439", ["P30456", "P01892"])], ["P30456", "P01892"])
+        cand = self._candidates([self._entry("P04439", ["P30456", "P01892"])], ["P30456", "P01892"])
         alias, demerges = {}, {}
         records = classify(cand, alias, demerges)
         accs = [r.accession for r in records]
-        assert len(accs) == len(set(accs)), f"accesion repetida: {accs}"
+        assert len(accs) == len(set(accs)), f"repeated accession: {accs}"
         assert set(accs) == {"P04439", "P30456", "P01892"}
         assert alias == {"P30456": "P04439", "P01892": "P04439"}
 
-    def test_el_demerge_no_contamina_a_las_fusiones_del_mismo_lote(self):
+    def test_the_demerge_does_not_contaminate_the_merges_of_its_batch(self):
         from protea.core.operations._universe_sources import classify
 
-        cand = self._candidatos(
+        cand = self._candidates(
             [
                 self._entry("P9WEV8", ["C8VQ65"], "AAAA"),
                 self._entry("P9WEV9", ["C8VQ65"], "BBBB"),
@@ -505,15 +506,15 @@ class TestTheDatesReachEveryUniverseMember:
         assert out.result["candidates"] == 1
 
 
-class TestUnaPasadaAcotadaNoSeLeeComoCompleta:
-    """``max_accessions`` existe para una prueba de humo antes de la de verdad.
+class TestACappedRunIsNotReadAsComplete:
+    """``max_accessions`` exists for a smoke run before the real one.
 
-    Un tope silencioso es peor que no tenerlo: el informe de una pasada acotada y
-    el de una completa serian identicos, y el segundo es el que dice que el corpus
-    esta entero.
+    A silent cap is worse than no cap: the report of a capped run and that of a
+    complete one would be identical, and the second is the one that says the corpus
+    is whole.
     """
 
-    def test_el_limite_viaja_al_informe(self):
+    def test_the_cap_travels_into_the_report(self):
         op = _op()
         with patch.object(
             ResolveProteinSequencesOperation, "_without_sequence", return_value=["P12345"]
@@ -523,7 +524,7 @@ class TestUnaPasadaAcotadaNoSeLeeComoCompleta:
             )
         assert out.result["limit"] == 500
 
-    def test_sin_limite_el_informe_lo_dice_tambien(self):
+    def test_with_no_cap_the_report_says_so_too(self):
         op = _op()
         with patch.object(
             ResolveProteinSequencesOperation, "_without_sequence", return_value=[]
@@ -531,17 +532,17 @@ class TestUnaPasadaAcotadaNoSeLeeComoCompleta:
             out = op.execute(MagicMock(), {"dry_run": True}, emit=MagicMock())
         assert out.result["limit"] is None
 
-    def test_un_limite_de_cero_es_un_error_no_una_pasada_vacia(self):
+    def test_a_cap_of_zero_is_an_error_not_an_empty_run(self):
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             ResolveProteinSequencesPayload(max_accessions=0)
 
-    def test_execute_acepta_la_forma_que_entrega_base_worker(self):
-        """``base_worker`` entrega ``{**job.payload, "_job_id": ...}`` y
-        ``ProteaPayload`` prohibe claves no declaradas, asi que ``execute`` tiene
-        que quitar la clave de transporte con ``contract_payload``. Escrito sin
-        eso, la operacion habria fallado en su primer job real."""
+    def test_execute_accepts_the_shape_base_worker_delivers(self):
+        """``base_worker`` hands over ``{**job.payload, "_job_id": ...}`` and
+        ``ProteaPayload`` forbids undeclared keys, so ``execute`` has to strip the
+        transport key with ``contract_payload``. Written without it, the operation
+        would have failed on its first real job."""
         import uuid
 
         op = _op()
