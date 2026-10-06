@@ -15,6 +15,7 @@ from protea.core.contracts.operation import OperationResult
 from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsOperation,
     LoadGOAAnnotationsPayload,
+    _Rejections,
 )
 
 _noop_emit = lambda *_: None  # noqa: E731
@@ -170,7 +171,7 @@ class TestStoreBuffer:
         op = self._op()
         session = MagicMock()
         records = [self._make_record(accession="UNKNOWN")]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -178,13 +179,15 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 0
-        assert skipped == 1
+        assert rejected.total == 1
+        assert rejected.not_in_universe == 1, "un accession ajeno NO es perdida nuestra"
+        assert rejected.go_term_unknown == 0
 
     def test_skips_empty_accession(self) -> None:
         op = self._op()
         session = MagicMock()
         records = [self._make_record(accession="  ")]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -192,13 +195,14 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 0
-        assert skipped == 1
+        assert rejected.total == 1
+        assert rejected.not_in_universe == 1
 
     def test_skips_unknown_go_term(self) -> None:
         op = self._op()
         session = MagicMock()
         records = [self._make_record(go_id="GO:9999999")]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -206,7 +210,13 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 0
-        assert skipped == 1
+        # EL CUBO QUE IMPORTA: la proteina es nuestra y la fila se cae. Es la
+        # unica de las tres razones que significa perdida del superset, y antes
+        # iba sumada con las ~270M filas de "esta proteina no es nuestra".
+        assert rejected.go_term_unknown == 1
+        assert rejected.not_in_universe == 0
+        # Y el id perdido queda NOMBRADO, no solo contado, hasta el tope.
+        assert rejected.lost_go_ids == {"GO:9999999": 1}
 
     def test_inserts_valid_records(self) -> None:
         op = self._op()
@@ -215,7 +225,7 @@ class TestStoreBuffer:
             self._make_record(accession="P12345", go_id="GO:0003824"),
             self._make_record(accession="Q67890", go_id="GO:0008150", evidence="IEA"),
         ]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -223,7 +233,7 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1, "GO:0008150": 2},
         )
         assert inserted == 2
-        assert skipped == 0
+        assert rejected.total == 0
         session.execute.assert_called()
 
     def test_deduplicates_within_buffer(self) -> None:
@@ -231,7 +241,7 @@ class TestStoreBuffer:
         session = MagicMock()
         rec = self._make_record()
         records = [rec.model_copy(), rec.model_copy(), rec.model_copy()]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -239,7 +249,9 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 1
-        assert skipped == 2
+        assert rejected.total == 2
+        assert rejected.duplicate_in_batch == 2, "un repetido dentro del lote es inocuo"
+        assert rejected.go_term_unknown == 0
 
     def test_different_evidence_codes_not_deduplicated(self) -> None:
         op = self._op()
@@ -248,7 +260,7 @@ class TestStoreBuffer:
             self._make_record(evidence="IDA"),
             self._make_record(evidence="IEA"),
         ]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -256,7 +268,7 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 2
-        assert skipped == 0
+        assert rejected.total == 0
 
     def test_mixed_valid_and_invalid(self) -> None:
         op = self._op()
@@ -267,7 +279,7 @@ class TestStoreBuffer:
             self._make_record(accession="Q67890", go_id="GO:0008150"),
             self._make_record(go_id="GO:INVALID"),
         ]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -275,12 +287,12 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1, "GO:0008150": 2},
         )
         assert inserted == 2
-        assert skipped == 2
+        assert rejected.total == 2
 
     def test_empty_buffer(self) -> None:
         op = self._op()
         session = MagicMock()
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             [],
             uuid.UUID(_SNAPSHOT_ID),
@@ -288,7 +300,7 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 0
-        assert skipped == 0
+        assert rejected.total == 0
         session.execute.assert_not_called()
 
     def test_empty_evidence_treated_as_none_for_dedup(self) -> None:
@@ -299,7 +311,7 @@ class TestStoreBuffer:
             self._make_record(evidence=""),
             self._make_record(evidence=""),
         ]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -307,7 +319,7 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 1
-        assert skipped == 1
+        assert rejected.total == 1
 
 
 # ---------------------------------------------------------------------------
@@ -591,27 +603,31 @@ class TestExecute:
         real_go = dict(go_terms)
 
         def fake_store_buffer(_session, records, _ann_set_id, _valid, _go_map):
+            # Mirrors the real method's THREE rejection buckets, not a single
+            # count: a double that collapsed them would let the production code
+            # stop distinguishing them without any test noticing.
             inserted = 0
-            skipped = 0
+            rejected = _Rejections()
             seen = set()
             for rec in records:
                 acc = rec.accession.strip()
                 if not acc or acc not in real_valid:
-                    skipped += 1
+                    rejected.not_in_universe += 1
                     continue
                 go_id = rec.go_id.strip()
                 go_term_id = real_go.get(go_id)
                 if go_term_id is None:
-                    skipped += 1
+                    rejected.go_term_unknown += 1
+                    rejected.lost_go_ids[go_id] += 1
                     continue
                 ev = rec.evidence_code
                 key = (_ann_set_id, acc, go_term_id, ev)
                 if key in seen:
-                    skipped += 1
+                    rejected.duplicate_in_batch += 1
                     continue
                 seen.add(key)
                 inserted += 1
-            return inserted, skipped
+            return inserted, rejected
 
         if store_buffer_side_effect is not None:
             fake_store_buffer = store_buffer_side_effect
@@ -1270,3 +1286,58 @@ class TestAnAnnotationSetThatNamesNoJobIsUnattributable:
 
         assert got.job_id is None
         assert got.meta["job_ids"] == []
+
+
+class TestTheThreeRejectionsAreCountedApart:
+    """``skipped`` conflated one expected rejection with two that are loss.
+
+    Of GOA 156's 280.9M rows some 270M belong to proteins outside this corpus, so
+    a loss of 50,000 of OUR rows inside that number is invisible. This is the same
+    defect ``malformed_skipped`` had on the extraction side (ADR-D49), on the other
+    end of the pipeline.
+    """
+
+    def test_the_sum_still_equals_the_old_single_number(self):
+        """``annotations_skipped`` stays as the total, so nothing that already
+        reads it breaks."""
+        r = _Rejections(not_in_universe=7, go_term_unknown=2, duplicate_in_batch=1)
+        assert r.total == 10
+
+    def test_the_lost_go_ids_are_named_not_only_counted(self):
+        """A number cannot be audited, a list can: the same argument as
+        ``sin_resolver.txt``. Which GO ids were dropped is what says whether the
+        ontology pairing is wrong or GOA simply moved a term."""
+        r = _Rejections()
+        r.go_term_unknown += 1
+        r.lost_go_ids["GO:0000040"] += 1
+        assert dict(r.lost_go_ids) == {"GO:0000040": 1}
+
+    def test_the_sample_of_names_is_capped_but_the_count_is_not(self):
+        """A release paired with the wrong OBO would otherwise put tens of
+        thousands of ids into one job event."""
+        from protea.core.operations._goa_load_report import (
+            _MAX_LOST_GO_IDS,
+            _GoaPageTotals,
+        )
+
+        totals = _GoaPageTotals()
+        for i in range(_MAX_LOST_GO_IDS * 3):
+            r = _Rejections()
+            r.go_term_unknown += 1
+            r.lost_go_ids[f"GO:{i:07d}"] += 1
+            totals.absorb(r)
+        assert totals.go_term_unknown == _MAX_LOST_GO_IDS * 3, "el recuento NO se acota"
+        assert len(totals.lost_go_ids) == _MAX_LOST_GO_IDS, "la muestra de nombres si"
+
+    def test_a_repeated_lost_id_keeps_accumulating_past_the_cap(self):
+        """Once an id is in the sample it keeps counting, so the most frequent
+        offender does not get frozen at one."""
+        from protea.core.operations._goa_load_report import _GoaPageTotals
+
+        totals = _GoaPageTotals()
+        for _ in range(5):
+            r = _Rejections()
+            r.go_term_unknown += 1
+            r.lost_go_ids["GO:0000040"] += 1
+            totals.absorb(r)
+        assert totals.lost_go_ids["GO:0000040"] == 5

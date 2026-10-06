@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 import uuid
 from collections.abc import Iterator
-from dataclasses import dataclass
 from typing import Annotated, Any, NamedTuple
 
 from protea_contracts import GoaAnnotationRecord, GoaStreamPayload
@@ -22,6 +21,11 @@ from protea.core.operations._gaf_header import (
     assert_not_newer_than_declared,
     declared_release,
     fetch_header,
+)
+from protea.core.operations._goa_load_report import (
+    _GoaPageTotals,
+    _Rejections,
+    load_report,
 )
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -182,14 +186,6 @@ class _GoaStoreCtx(NamedTuple):
     go_term_map: dict[str, int]
 
 
-@dataclass
-class _GoaPageTotals:
-    """Mutable accumulator for the GAF page loop."""
-
-    pages: int = 0
-    lines: int = 0
-    inserted: int = 0
-    skipped: int = 0
 
 
 class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
@@ -290,15 +286,12 @@ class LoadGOAAnnotationsOperation:
         )
         totals = self._stream_and_store(session, p, store_ctx, emit)
 
-        result: dict[str, Any] = {
-            "annotation_set_id": str(annotation_set.id),
-            "pages": totals.pages,
-            "total_lines_read": totals.lines,
-            "annotations_inserted": totals.inserted,
-            "annotations_skipped": totals.skipped,
-            "elapsed_seconds": time.perf_counter() - t0,
-            "ontology_check": ontology_check,
-        }
+        result = load_report(
+            annotation_set_id=annotation_set.id,
+            totals=totals,
+            ontology_check=ontology_check,
+            elapsed=time.perf_counter() - t0,
+        )
 
         # Auto-trigger an atomic generate_evaluation_set against the latest
         # prior goa AnnotationSet (numeric source_version sort).  Cascade
@@ -456,7 +449,7 @@ class LoadGOAAnnotationsOperation:
         Final flush after the loop passes ``emit=None`` to skip the per-page
         progress event; in-loop flushes pass the real emit.
         """
-        inserted, skipped = self._store_buffer(
+        inserted, rejected = self._store_buffer(
             session,
             buffer,
             store_ctx.annotation_set_id,
@@ -465,7 +458,7 @@ class LoadGOAAnnotationsOperation:
         )
         totals.pages += 1
         totals.inserted += inserted
-        totals.skipped += skipped
+        totals.absorb(rejected)
         buffer.clear()
         if emit is not None:
             emit(
@@ -476,6 +469,9 @@ class LoadGOAAnnotationsOperation:
                     "total_lines": totals.lines,
                     "total_inserted": totals.inserted,
                     "total_skipped": totals.skipped,
+                    # The one bucket worth watching page by page: the only one
+                    # that means a row of OUR corpus was dropped.
+                    "total_go_term_unknown": totals.go_term_unknown,
                 },
                 "info",
             )
@@ -657,27 +653,29 @@ class LoadGOAAnnotationsOperation:
         annotation_set_id: uuid.UUID,
         valid_accessions: set[str],
         go_term_map: dict[str, int],
-    ) -> tuple[int, int]:
+    ) -> tuple[int, _Rejections]:
         to_add: list[dict] = []
-        skipped = 0
+        rejected = _Rejections()
         seen: set[tuple] = set()
 
         for rec in records:
             accession = rec.accession.strip()
             if not accession or accession not in valid_accessions:
-                skipped += 1
+                rejected.not_in_universe += 1
                 continue
 
             go_id = rec.go_id.strip()
             go_term_id = go_term_map.get(go_id)
             if go_term_id is None:
-                skipped += 1
+                # OURS, and dropped. See _Rejections for why this is apart.
+                rejected.go_term_unknown += 1
+                rejected.lost_go_ids[go_id] += 1
                 continue
 
             evidence_code = rec.evidence_code
             dedup_key = _identity_key(annotation_set_id, accession, go_term_id, rec)
             if dedup_key in seen:
-                skipped += 1
+                rejected.duplicate_in_batch += 1
                 continue
             seen.add(dedup_key)
 
@@ -705,4 +703,4 @@ class LoadGOAAnnotationsOperation:
                 stmt = stmt.on_conflict_do_nothing(index_elements=_IDENTITY_ELEMENTS)
                 session.execute(stmt)
 
-        return len(to_add), skipped
+        return len(to_add), rejected

@@ -909,6 +909,11 @@ not part of the public API.
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: protea.core.operations._goa_load_report
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: protea.core.operations._load_ontology_helpers
    :members:
    :undoc-members:
