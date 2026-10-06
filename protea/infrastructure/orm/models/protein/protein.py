@@ -65,17 +65,34 @@ class Protein(Base):
     #: lifetime. Measured over 109,320 canonical accessions: 71.5% are at
     #: version 1.
     #:
-    #: Deliberately absent: a ``first_release`` column. It is derivable from
+    #: Still deliberately absent: a ``first_release`` column meaning "the earliest
+    #: release that existed once this entry existed". It is derivable from
     #: ``date_created`` against ``annotation_set.source_published_at``, which is
     #: already in this database, so a stored copy would be a second source of truth.
-    #: And it must not be taken from the order the universe passes run in: phase 1
-    #: runs descending (235 to 156), so "the pass that admitted it" would be 235 for
-    #: nearly every row.
+    #: :attr:`first_admitted_release` is a DIFFERENT quantity and is stored; see
+    #: migration ``f2a8c41d9e37``.
     date_created: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     date_sequence_modified: Mapped[date | None] = mapped_column(
         Date, nullable=True, index=True
     )
     sequence_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    #: The lowest GOA release number whose GAF admitted this accession into the
+    #: universe, written by ``extract_goa_universe``. KNOWLEDGE GAIN, not entry
+    #: creation: a protein can have existed since 1998 and have acquired its first
+    #: experimental annotation in 2019, and ``date_created`` can only say 1998.
+    #:
+    #: Written as a MINIMUM (``IS NULL OR > N``), so the value is the true earliest
+    #: release even if the series is ever walked out of order, and a repeated pass
+    #: cannot raise it. NULL means no pass has admitted this row yet -- which is the
+    #: state of every protein ``insert_proteins`` loaded.
+    #:
+    #: Not recoverable afterwards for a protein admitted ONLY as a reviewed entry of
+    #: its release, because per-release Swiss-Prot membership is read from the entry
+    #: name the GAF carries and no table keeps it.
+    first_admitted_release: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
 
     sequence_id: Mapped[int | None] = mapped_column(
         Integer,

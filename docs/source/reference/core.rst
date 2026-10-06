@@ -508,6 +508,27 @@ are documented below; the four ephemeral siblings
    :undoc-members:
    :show-inheritance:
 
+**extract_goa_universe**
+   Scans one GOA release and makes every accession it admits under the declared
+   tiers exist in ``protein`` as an accession-only row, so the annotation loader
+   has nothing left to skip. Opens no connection but the one that fetches the
+   GAF. See :doc:`ADR-D49 </adr/D49-corpus-is-four-tiers-of-the-gaf-series>`.
+
+.. automodule:: protea.core.operations.extract_goa_universe
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**resolve_protein_sequences**
+   Fetches sequences, audit dates and merged-accession links from UniProt for
+   every row that lacks them. Runs once, after the GAF series, because the
+   sequences are needed over the union of the releases and not per release.
+
+.. automodule:: protea.core.operations.resolve_protein_sequences
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **load_goa_annotations**
    Bulk-loads a GAF (Gene Association Format) file. Annotations are filtered
    against canonical accessions present in the database, avoiding orphaned
@@ -877,6 +898,16 @@ not part of the public API.
    :undoc-members:
    :show-inheritance:
    :noindex:
+
+.. automodule:: protea.core.operations._protein_store
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._universe_sources
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 .. automodule:: protea.core.operations._load_ontology_helpers
    :members:

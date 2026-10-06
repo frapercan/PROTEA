@@ -4095,8 +4095,8 @@ requests = ">=2.31"
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-sources.git"
-reference = "73af41987f797414ab74aa4d083844a690687b80"
-resolved_reference = "73af41987f797414ab74aa4d083844a690687b80"
+reference = "946227ca3b8840eb0ea7223c8fc52b746027f9fe"
+resolved_reference = "946227ca3b8840eb0ea7223c8fc52b746027f9fe"
 
 [[package]]
 name = "protobuf"
@@ -7010,4 +7010,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "d435132e2ca1e335d6f8c924dd093e5d96c4298c5c24e132f254194ffbd362eb"
+content-hash = "e294322c9ac332d92ab6f73db2536c35ef2268f854d0c71d4ba850339da46ec4"

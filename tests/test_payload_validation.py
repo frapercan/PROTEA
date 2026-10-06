@@ -79,7 +79,10 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
 )
-from protea.core.operations.ensure_goa_universe import EnsureGoaUniversePayload
+from protea.core.operations.extract_goa_universe import ExtractGoaUniversePayload
+from protea.core.operations.resolve_protein_sequences import (
+    ResolveProteinSequencesPayload,
+)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsPayload,
 )
@@ -456,10 +459,28 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
     # host -- a symptom three layers from the cause. The universe pass is the
     # first thing a release runs, so a bad url here must be refused at the door.
     (
-        "ensure_goa_universe",
-        EnsureGoaUniversePayload,
-        {"gaf_url": "   "},
+        "extract_goa_universe",
+        ExtractGoaUniversePayload,
+        {"gaf_url": "   ", "release": 156},
         ("gaf_url",),
+    ),
+    # missing-release: the release number is written onto every row the pass
+    # inserts, as ``protein.first_admitted_release``. Defaulting it would put a
+    # wrong number in the corpus, which is worse than refusing the job.
+    (
+        "extract_goa_universe",
+        ExtractGoaUniversePayload,
+        {"gaf_url": "http://x/goa_uniprot_all.gaf.156.gz"},
+        ("release",),
+    ),
+    # zero-cap: ``max_accessions`` exists for a smoke run before the real one. A
+    # zero would be a pass that resolves nothing and reports success, which reads
+    # exactly like a universe that was already complete.
+    (
+        "resolve_protein_sequences",
+        ResolveProteinSequencesPayload,
+        {"max_accessions": 0},
+        ("max_accessions",),
     ),
     # bad-vocabulary: evidence_regime must name a known regime. Falling back to
     # a default here would silently widen the IA corpus (ADR-D46).

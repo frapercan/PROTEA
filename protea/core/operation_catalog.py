@@ -44,7 +44,6 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchOperation,
     EncodeResidueSparseOperation,
 )
-from protea.core.operations.ensure_goa_universe import EnsureGoaUniverseOperation
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsOperation,
 )
@@ -58,6 +57,7 @@ from protea.core.operations.export_minijobs import (
 from protea.core.operations.export_research_dataset import (
     ExportResearchDatasetOperation,
 )
+from protea.core.operations.extract_goa_universe import ExtractGoaUniverseOperation
 from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOperation
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetOperation
 from protea.core.operations.insert_proteins import InsertProteinsOperation
@@ -82,6 +82,9 @@ from protea.core.operations.predict_go_terms_from_interpro import (
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesOperation,
 )
+from protea.core.operations.resolve_protein_sequences import (
+    ResolveProteinSequencesOperation,
+)
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
 from protea.core.operations.seal_evaluation_frames import (
@@ -104,7 +107,8 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(FetchUniProtMetadataOperation())
     registry.register(LoadOntologySnapshotOperation())
     registry.register(LoadQuickGOAnnotationsOperation())
-    registry.register(EnsureGoaUniverseOperation())
+    registry.register(ExtractGoaUniverseOperation())
+    registry.register(ResolveProteinSequencesOperation())
     registry.register(LoadGOAAnnotationsOperation())
     registry.register(LoadInterProGoMappingOperation())
     registry.register(RunInterProScanBatchOperation())
