@@ -12,7 +12,7 @@ ADRs come in two layers:
   PROTEA. They explain trade-offs of concrete code paths (KNN
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
-- **Strategic decisions** (``D1``-``D45``): plan-level decisions. The
+- **Strategic decisions** (``D1``-``D49``): plan-level decisions. The
   ``D1``-``D31`` block was taken in the master plan revision 3 (2026-05-05)
   and drives the structure of the project, the deployment story, and the
   thesis writing cadence. Later records (``D34`` onward) were added as the
@@ -279,6 +279,22 @@ later revision) or *Superseded* (a named later decision replaces it).
      - :doc:`The producer seam in the reranker feature export <D45-jsonb-blob-feature-governance>`
      - Accepted
      - T-GOBERNANZA
+   * - D46
+     - :doc:`Information Accretion is a corpus artifact, not an ontology attribute <D46-information-accretion-as-tracked-artifact>`
+     - Accepted
+     - F-EVAL
+   * - D47
+     - :doc:`Archive the OBO behind every snapshot <D47-archive-the-obo-behind-every-snapshot>`
+     - Accepted
+     - F-EVAL
+   * - D48
+     - :doc:`Stage-1 standard embedding configs replace the rung-1 seeds <D48-stage1-standard-embedding-configs>`
+     - Accepted
+     - T-CAMPANA
+   * - D49
+     - :doc:`The corpus is four tiers of the GAF series, built in two operations <D49-corpus-is-four-tiers-of-the-gaf-series>`
+     - Accepted
+     - T-CAMPANA
 
 .. toctree::
    :maxdepth: 1
@@ -339,3 +355,4 @@ later revision) or *Superseded* (a named later decision replaces it).
    D46-information-accretion-as-tracked-artifact
    D47-archive-the-obo-behind-every-snapshot
    D48-stage1-standard-embedding-configs
+   D49-corpus-is-four-tiers-of-the-gaf-series

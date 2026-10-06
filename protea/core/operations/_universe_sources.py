@@ -16,6 +16,7 @@ two lock bumps for three dates.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Sequence as Seq
 from dataclasses import dataclass, field
@@ -86,6 +87,18 @@ ABSENCE_CODES = frozenset({"ND"})
 #: Kept for the one thing it is still good for: asserting the partition.
 ALL_KNOWN_CODES = (
     TRUTH_CODES | CURATED_INFERENCE_CODES | AUTOMATIC_CODES | PROPAGATED_CODES | ABSENCE_CODES
+)
+
+#: UniProtKB accession grammar, from UniProt's own documentation.
+#:
+#: Two operations need it, for two reasons. ``extract_goa_universe`` uses it as an
+#: admission gate, because GOA's object column is not guaranteed to hold only
+#: UniProtKB accessions and an identifier that is not one is not a protein of this
+#: universe. ``resolve_protein_sequences`` uses it as a barrier before a batch:
+#: ``/uniprotkb/accessions`` answers 400 for the WHOLE request when one member is
+#: malformed, so one stray identifier would cost a thousand proteins.
+ACCESSION_GRAMMAR = re.compile(
+    r"^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})$"
 )
 
 #: Fields requested from ``/uniprotkb/accessions``, which returns sequence *and*
@@ -287,19 +300,24 @@ def _store_dates(session: Session, rows: list[tuple[str, _AuditDates]]) -> None:
 
 @dataclass
 class _Salida:
-    """Lo que la mitad de UniProt produce.
+    """Lo que ``resolve_protein_sequences`` produce: todo sale de la red.
 
-    Agrupado porque es exactamente la mitad que sale a su propia operacion
-    cuando se parta esta: todo lo de aqui lo genera la red, y nada de aqui lo
-    genera el escaneo del GAF.
+    Fue la mitad de ``ensure_goa_universe`` que hablaba con UniProt, y es hoy la
+    operacion entera. El objeto se quedo con la misma forma porque su utilidad
+    era exactamente esa: separar en el informe lo que genera un fichero de lo
+    que genera un servicio remoto, para poder separar despues las operaciones.
     """
 
+    candidatos: int = 0
     fetched: int = 0
+    updated: int = 0
     inserted: int = 0
     sequences: int = 0
-    sin_fechas: int = 0
+    fechas_pendientes: int = 0
+    fechas_escritas: int = 0
     alias: dict[str, str] = field(default_factory=dict)
     sin_resolver: list[str] = field(default_factory=list)
+    demerges: dict[str, list[str]] = field(default_factory=dict)
     artefactos: dict[str, Any] = field(default_factory=dict)
 
 
@@ -312,6 +330,14 @@ class _Cuentas:
     """
 
     rows: int = 0
+    #: Filas admitidas por evidencia o por nivel cuyo DB Object Type NO es una
+    #: proteina. Contadas aparte de las accesiones malformadas porque son dos
+    #: rechazos distintos y antes caian en el mismo numero: ``malformed_skipped``
+    #: mezclaba "esto no es una accesion de UniProtKB" con "esto es un complejo o
+    #: un RNA", y la segunda cifra es la que dice si GOA empezo a publicar un
+    #: tipo nuevo. Se midio el dia que ``malformed_skipped`` bajo de 27.300 a
+    #: 13.500 entre las releases 227 y 226 sin que nadie pudiera decir por que.
+    no_proteina: int = 0
     por_tipo: Counter[str] = field(default_factory=Counter)
     desconocidos: Counter[str] = field(default_factory=Counter)
     por_nivel: Counter[str] = field(default_factory=Counter)
@@ -319,57 +345,83 @@ class _Cuentas:
 
 @dataclass
 class _Escaneo:
-    """Lo que el GAF produce, simetrico a :class:`_Salida`.
+    """Lo que ``extract_goa_universe`` produce: todo sale del fichero.
 
-    Las dos mitades de una pasada tienen ahora la misma forma: un objeto por lo
-    que sale del fichero y otro por lo que sale de la red. Eso es lo que permite
-    partir la operacion en dos sin reescribir el informe.
+    Simetrico a :class:`_Salida`, y por la misma razon: una pasada del GAF no
+    abre un socket contra UniProt, asi que todo lo que hay aqui se puede volver a
+    calcular con el fichero en cache y nada de aqui depende de que un servicio
+    remoto conteste.
     """
 
     cuentas: _Cuentas
     malformed: int = 0
     admisibles: int = 0
     missing: int = 0
+    insertadas: int = 0
+    primera_release_escrita: int = 0
 
 
-def informe_de_pasada(
+def informe_de_extraccion(
     *,
+    release: int,
     admit: list[str],
     dry_run: bool,
     escaneo: _Escaneo,
-    salida: _Salida,
-    demerges: int,
     elapsed: float,
 ) -> dict[str, Any]:
-    """El resultado del job, que es el unico registro de lo que paso.
+    """El resultado de una pasada del GAF, que es su unico registro.
 
     Aqui y no en la operacion porque es una funcion pura de sus entradas, que es
     lo que este modulo contiene.
+
+    ``malformed_accessions`` y ``rows_not_a_protein`` son dos cifras y antes eran
+    una: ver :class:`_Cuentas`.
+    """
+    c = escaneo.cuentas
+    return {
+        "release": release,
+        "admit": admit,
+        "rows_scanned": c.rows,
+        "admissible_accessions": escaneo.admisibles,
+        "malformed_accessions": escaneo.malformed,
+        "rows_not_a_protein": c.no_proteina,
+        "already_present": escaneo.admisibles - escaneo.missing,
+        "missing": escaneo.missing,
+        "proteins_inserted": escaneo.insertadas,
+        "first_release_written": escaneo.primera_release_escrita,
+        "tipos_fiables": dict(c.por_tipo.most_common()),
+        "filas_por_nivel": dict(c.por_nivel),
+        "codigos_desconocidos": dict(c.desconocidos.most_common()),
+        "dry_run": dry_run,
+        "elapsed_seconds": elapsed,
+    }
+
+
+def informe_de_resolucion(
+    *,
+    dry_run: bool,
+    salida: _Salida,
+    elapsed: float,
+) -> dict[str, Any]:
+    """El resultado de la pasada contra UniProt.
 
     ``None`` en un dry run en vez de ``0``, porque "cero recuperables" y "no se
     intento" no son lo mismo: un informe anterior leyo 0% de fusiones
     recuperables porque diez lotes habian dado 400 y los fallos se tallaron como
     ceros.
     """
-    c = escaneo.cuentas
     return {
-        "rows_scanned": c.rows,
-        "admissible_accessions": escaneo.admisibles,
-        "malformed_skipped": escaneo.malformed,
-        "already_present": escaneo.admisibles - escaneo.missing,
-        "missing": escaneo.missing,
+        "candidates": salida.candidatos,
         "fetched": salida.fetched,
-        "resolved_as_merge": None if dry_run else len(salida.alias),
-        "not_retrievable": None if dry_run else len(salida.sin_resolver),
-        "demerged": None if dry_run else demerges,
-        "dates_backfilled": None if dry_run else salida.sin_fechas,
-        "tipos_fiables": dict(c.por_tipo.most_common()),
-        "admit": admit,
-        "filas_por_nivel": dict(c.por_nivel),
-        "codigos_desconocidos": dict(c.desconocidos.most_common()),
-        "artefactos": salida.artefactos,
+        "proteins_updated": salida.updated,
         "proteins_inserted": salida.inserted,
         "sequences_inserted": salida.sequences,
+        "resolved_as_merge": None if dry_run else len(salida.alias),
+        "not_retrievable": None if dry_run else len(salida.sin_resolver),
+        "demerged": None if dry_run else len(salida.demerges),
+        "dates_pending": salida.fechas_pendientes,
+        "dates_backfilled": None if dry_run else salida.fechas_escritas,
+        "artefactos": salida.artefactos,
         "dry_run": dry_run,
         "elapsed_seconds": elapsed,
     }

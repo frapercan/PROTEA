@@ -73,6 +73,8 @@ MUST_DOCUMENT_PATTERNS: list[str] = [
     "protea.core.operations.insert_proteins",
     "protea.core.operations.fetch_uniprot_metadata",
     "protea.core.operations.load_ontology_snapshot",
+    "protea.core.operations.extract_goa_universe",
+    "protea.core.operations.resolve_protein_sequences",
     "protea.core.operations.load_goa_annotations",
     "protea.core.operations.load_quickgo_annotations",
     "protea.core.operations.compute_embeddings",

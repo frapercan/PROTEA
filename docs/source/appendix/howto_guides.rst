@@ -175,6 +175,82 @@ safe (idempotent).
        }
      }'
 
+Build the protein universe from a GOA release
+---------------------------------------------
+
+Runs BEFORE ``load_goa_annotations`` for the same release, on the same file.
+``protein_go_annotation.protein_accession`` is a foreign key, so an accession the
+loader does not find is dropped in silence; this makes it exist first. See
+:doc:`ADR-D49 </adr/D49-corpus-is-four-tiers-of-the-gaf-series>` for what the
+tiers are.
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "extract_goa_universe",
+       "queue_name": "protea.jobs",
+       "payload": {
+         "gaf_url": "https://ftp.ebi.ac.uk/pub/databases/GO/goa/old/UNIPROT/goa_uniprot_all.gaf.156.gz",
+         "release": 156
+       }
+     }'
+
+The series is walked ASCENDING (156 upward), because that is what makes
+``protein.first_admitted_release`` mean the first release that admitted the
+protein. ``admit`` defaults to all three tiers; to measure only the evaluation
+targets, narrow it and the job row records that you did:
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "extract_goa_universe",
+       "queue_name": "protea.jobs",
+       "payload": {
+         "gaf_url": "http://127.0.0.1:8790/goa_uniprot_all.gaf.156.gz",
+         "release": 156,
+         "admit": ["truth"],
+         "dry_run": true
+       }
+     }'
+
+Give the universe its sequences
+--------------------------------
+
+Runs ONCE, after the last release has been extracted and before any embedding.
+Its population is every ``protein`` row with no sequence, read from the table at
+the moment the job runs, so it takes no list of accessions.
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "resolve_protein_sequences",
+       "queue_name": "protea.jobs",
+       "payload": {}
+     }'
+
+Smoke-test it on five hundred accessions first. The cap comes back in the result
+as ``limit``, so the capped run cannot later be mistaken for the complete one:
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "resolve_protein_sequences",
+       "queue_name": "protea.jobs",
+       "payload": {"max_accessions": 500}
+     }'
+
+Re-running it is safe and cheap: it asks only about what is still missing, which
+after a complete run is the set of accessions UniProt no longer serves. Their
+names are in the ``sin_resolver.txt`` artifact of the job that found them.
+
 Load GOA annotations
 ---------------------
 
