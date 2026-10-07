@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { ARGUMENT_RECORD, CAMPAIGN_STATUS, EXTERNAL_RESULT, LINKS, PLATFORM } from "@/lib/campaign";
 import { QuietLink } from "@/components/AwaitingData";
+import { AnnotateForm } from "@/components/AnnotateForm";
 import { NineCellGrid } from "@/components/book/NineCellGrid";
 import { ReceiptFootnote } from "@/components/book/ReceiptFootnote";
 import { CHAPTER_ZERO, HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
@@ -167,6 +168,21 @@ export default async function ArgumentPage() {
           })}
         </p>
       </header>
+
+      {/* The tool, at the entrance, because that is what this is.
+          The sidebar's call to action pointed at `/#annotate-form` and
+          that anchor did not exist here any more, which is the fossil of
+          this block having lived on the home page before. It reads
+          better here than the sealed board did: a visitor who does not
+          know what a protein annotation is learns more from the form
+          than from a table of withdrawn figures.
+
+          The form renders itself disabled, with its own explanation,
+          while the annotation corpus is rebuilt. Showing it disabled
+          shows the tool; hiding it hid the tool. */}
+      <section id="annotate-form" className="mt-14 scroll-mt-24 border-t border-[var(--border)] pt-10">
+        <AnnotateForm />
+      </section>
 
       {/* The argument, published in full and dated. Not a word of the
           prose is edited: it states the LAFA board in the present tense
