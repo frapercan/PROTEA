@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
+import { ARGUMENT_RECORD, CAMPAIGN_STATUS, EXTERNAL_RESULT } from "@/lib/campaign";
 import { NineCellGrid } from "@/components/book/NineCellGrid";
 import { ReceiptFootnote } from "@/components/book/ReceiptFootnote";
 import { CHAPTER_ZERO, HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
@@ -39,15 +40,69 @@ export default async function ArgumentPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-1 pb-16">
-      {/* The argument. */}
+      {/* What this is, in the reader's own words, before any of ours.
+          The thesis sentence used to be the h1, which meant the first
+          thing a visitor read was "a taxonomy of orthogonal evidence
+          combined by a calibrated fusion". It is the right sentence for
+          the argument and the wrong one for an opening. It keeps every
+          word, one section down. */}
       <header className="pt-2 sm:pt-6">
         <p className="protea-eyebrow text-[12px] uppercase tracking-wide text-[var(--primary)]">
           {t("eyebrow")}
         </p>
-        <h1 className="mt-6 font-serif text-[1.7rem] font-normal leading-[1.42] tracking-tight text-[var(--foreground)] sm:text-[2.05rem] sm:leading-[1.4]">
-          {THESIS_SENTENCE}
+        <h1 className="mt-6 text-[1.65rem] font-semibold leading-[1.25] tracking-tight text-[var(--foreground)] sm:text-[2.1rem]">
+          {t("welcomeTitle")}
         </h1>
+        <p className="mt-5 max-w-prose text-[16px] leading-relaxed text-[var(--foreground)]">
+          {t("welcomeBody")}
+        </p>
+        <p className="mt-4 max-w-prose text-[15px] leading-relaxed text-[var(--muted-foreground)]">
+          {t("welcomeResult", {
+            rank: EXTERNAL_RESULT.rank,
+            teams: EXTERNAL_RESULT.teams,
+            competition: EXTERNAL_RESULT.competition,
+          })}
+        </p>
+        <p className="mt-4 max-w-prose rounded-lg border border-[var(--border)] bg-[var(--muted)] px-4 py-3 text-[14px] leading-relaxed text-[var(--muted-foreground)]">
+          {t("welcomeCampaign", {
+            asOf: CAMPAIGN_STATUS.asOf,
+            releases: CAMPAIGN_STATUS.goaReleases,
+            gigabytes: CAMPAIGN_STATUS.gafGigabytes,
+            proteins: CAMPAIGN_STATUS.proteinsAdmitted,
+          })}
+        </p>
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <Link
+            href={`/${locale}/instrument/benchmark`}
+            className="rounded-lg bg-[var(--primary)] px-4 py-2.5 text-[14px] font-semibold text-white hover:opacity-90"
+          >
+            {t("openInstrument")}
+          </Link>
+          <Link
+            href="/thesis.pdf"
+            className="rounded-lg border border-[var(--border-strong)] px-4 py-2.5 text-[14px] font-semibold text-[var(--foreground)] hover:bg-[var(--muted)]"
+          >
+            {t("thesisPdf")}
+          </Link>
+        </div>
       </header>
+
+      {/* The argument, scoped by the board and window it was written
+          against. Not a word of the prose is edited: the figures inside
+          it are stated in the present tense and were true then, so the
+          honest fix is to date the whole record rather than rewrite a
+          researcher's sentences. */}
+      <section aria-labelledby="argument-heading" className="mt-14 border-t border-[var(--border)] pt-10">
+        <p className="max-w-prose text-[13px] leading-relaxed text-[var(--muted-foreground)]">
+          {t("argumentRecord", { board: ARGUMENT_RECORD.board, frame: ARGUMENT_RECORD.frame })}
+        </p>
+        <h2
+          id="argument-heading"
+          className="mt-6 font-serif text-[1.7rem] font-normal leading-[1.42] tracking-tight text-[var(--foreground)] sm:text-[2.05rem] sm:leading-[1.4]"
+        >
+          {THESIS_SENTENCE}
+        </h2>
+      </section>
 
       {/* Chapter zero: the whole argument, end to end, for a reader barely initiated. */}
       <section aria-labelledby="ch0-heading" className="mt-12 border-t border-[var(--border)] pt-10">

@@ -4,9 +4,11 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+import { CAMPAIGN_STATUS, LIVE_ANNOTATION_AVAILABLE } from "@/lib/campaign";
 import {
   annotateProteins,
   getGpuAvailability,
+  publicBaseUrl,
   getJob,
   launchPredictGoTerms,
   resolvePredictionSet,
@@ -201,6 +203,7 @@ export function AnnotateForm() {
   // pipeline is genuinely busy (vs. a stale row left behind by a dead
   // worker).
   useEffect(() => {
+    if (!LIVE_ANNOTATION_AVAILABLE) return;
     let cancelled = false;
     const fetchAvailability = async () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
@@ -239,6 +242,50 @@ export function AnnotateForm() {
       ? Math.round((gpu.progress_current / gpu.progress_total) * 100)
       : null;
   const queuedCount = gpu?.queued ?? 0;
+
+  // Paused: say so, in the reader's language, instead of submitting a
+  // request whose 409 body ("Load GO annotations first.") would be
+  // rendered to them verbatim. See lib/campaign.ts for the measurement
+  // and for what has to be true before this is flipped back.
+  if (!LIVE_ANNOTATION_AVAILABLE) {
+    return (
+      <section
+        id="annotate-form"
+        className="rounded-2xl border border-stone-300 bg-stone-50 p-6 sm:p-8"
+      >
+        <h2 className="text-xl sm:text-2xl font-bold text-slate-900 mb-2">
+          {t("annotatePausedTitle")}
+        </h2>
+        <p className="text-sm leading-relaxed text-slate-700 max-w-prose">
+          {t("annotatePausedBody")}
+        </p>
+        <p className="mt-4 text-sm leading-relaxed text-slate-600 max-w-prose">
+          {t("annotatePausedIngest", {
+            asOf: CAMPAIGN_STATUS.asOf,
+            releases: CAMPAIGN_STATUS.goaReleases,
+            gigabytes: CAMPAIGN_STATUS.gafGigabytes,
+            proteins: CAMPAIGN_STATUS.proteinsAdmitted,
+          })}
+        </p>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <a
+            href={`${publicBaseUrl()}/docs`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            {t("annotatePausedApi")}
+          </a>
+          <Link
+            href={`/${locale}/instrument/benchmark`}
+            className="rounded-lg border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-stone-100"
+          >
+            {t("annotatePausedInstrument")}
+          </Link>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="rounded-2xl border-2 border-blue-100 bg-gradient-to-b from-blue-50/60 to-white p-6 sm:p-8">
