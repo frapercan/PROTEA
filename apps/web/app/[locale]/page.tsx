@@ -408,8 +408,13 @@ export default async function ArgumentPage() {
       {/* Quiet footer: the instrument is a tab, not the entrance. */}
       <footer className="mt-14 border-t border-[var(--border)] pt-6">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[14px]">
+          {/* Same label, same destination as the one in the header rail.
+              It used to point at /instrument/benchmark while the rail's
+              pointed at the hub and the annotate panel's pointed at the
+              jobs queue: three links reading "Open the instrument" and
+              going to three different places. */}
           <Link
-            href={`/${locale}/instrument/benchmark`}
+            href={`/${locale}/instrument`}
             className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
           >
             {t("openInstrument")}

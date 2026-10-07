@@ -61,7 +61,17 @@ test.describe("argument front door", () => {
 
   test("the quiet footer opens the instrument", async ({ page }) => {
     await page.goto("/en/");
-    const instrument = page.getByRole("link", { name: /Open the instrument/i });
+    // Two of them, repeating the call to action in the header rail and in
+    // the quiet footer, which is ordinary for a landing page. What is NOT
+    // ordinary, and was true until 2026-10-07, is three links with this
+    // same label going to three different destinations. So the test pins
+    // the count AND that every one of them leads to the same place.
+    const all = page.getByRole("link", { name: /Open the instrument/i });
+    await expect(all).toHaveCount(2);
+    for (const href of await all.evaluateAll((els) => els.map((e) => e.getAttribute("href")))) {
+      expect(href).toMatch(/\/instrument\/?$/);
+    }
+    const instrument = all.first();
     await expect(instrument).toBeVisible();
     await instrument.click();
     await page.waitForURL(/\/instrument\/?$/);

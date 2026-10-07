@@ -129,7 +129,7 @@
     "annotatePausedBody": "A PROTEA está reconstruindo seu corpus de anotações do zero, portanto ainda não há nada contra o que prever. O formulário fica fechado até essa execução terminar, em vez de devolver uma resposta que não poderíamos sustentar.",
     "annotatePausedIngest": "Em andamento agora, em {asOf}: {read, number} de {releases, number} versões do GOA lidas, dos {gigabytes, number} GB que compõem a série.",
     "annotatePausedApi": "Explorar a API",
-    "annotatePausedInstrument": "Abrir o instrumento",
+    "annotatePausedInstrument": "Acompanhar a campanha",
     "annotateCpuModeNotice": "Não há GPU disponível neste momento, por isso anotar uma sequência que ainda não esteja na base de dados corre em CPU e pode demorar bastante mais.",
     "annotateDescription": "Cole suas sequencias de proteinas em formato FASTA e obtenha anotacoes funcionais automaticamente com o melhor metodo disponivel.",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
