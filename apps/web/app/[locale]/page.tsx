@@ -71,8 +71,16 @@ export default async function ArgumentPage() {
     .filter(Boolean)
     .join(" · ");
 
+  // The page is wider than its prose on purpose. On a 1830px screen the
+  // old max-w-3xl left roughly 370px of dead gutter on each side of a
+  // 768px column. Widening the text would have been the wrong fix: about
+  // 65 characters is the measure that reads well, and the h1 and the
+  // argument keep it. What the extra room buys is somewhere to PUT
+  // things, so the counted figures, the links and the campaign note move
+  // into a rail beside the opening instead of sitting below the fold.
+  // Every section below the header is pinned back to the reading measure.
   return (
-    <div className="mx-auto max-w-3xl px-1 pb-16">
+    <div className="mx-auto max-w-6xl px-1 pb-16">
       {/* What this is, in the reader's own words, before any of ours.
           The thesis sentence used to be the h1, which meant the first
           thing a visitor read was "a taxonomy of orthogonal evidence
@@ -97,7 +105,8 @@ export default async function ArgumentPage() {
           and the understated underlined link it uses everywhere. No
           filled buttons, and no --muted background: --muted is #57534E,
           a TEXT colour. */}
-      <header className="pt-2 sm:pt-6">
+      <header className="grid grid-cols-1 gap-x-14 gap-y-10 pt-2 sm:pt-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="max-w-[46rem]">
         <p className="protea-eyebrow text-[12px] uppercase tracking-wide text-[var(--primary)]">
           {t("eyebrow")}
         </p>
@@ -194,9 +203,12 @@ export default async function ArgumentPage() {
           </p>
         </figure>
 
-        {/* Scannable, because this is what an engineer reads the page
-            for, and every one of them is counted rather than estimated. */}
-        <dl className="mt-9 grid grid-cols-1 gap-x-8 gap-y-5 border-t border-[var(--border)] pt-6 sm:grid-cols-3">
+        </div>
+
+        {/* The rail: counted figures, where to go, and what is running.
+            One column on a phone, beside the opening on a wide screen. */}
+        <aside className="flex flex-col gap-7 xl:border-l xl:border-[var(--border)] xl:pl-10">
+        <dl className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-3 xl:grid-cols-1">
           {[
             [t("statApi"), t("statApiValue", { ops: PLATFORM.apiOperations, routes: PLATFORM.apiRoutes })],
             [t("statTests"), t("statTestsValue", { tests: PLATFORM.backendTests })],
@@ -211,7 +223,7 @@ export default async function ArgumentPage() {
           ))}
         </dl>
 
-        <div className="mt-9 flex flex-wrap gap-x-7 gap-y-3 border-t border-[var(--border)] pt-6">
+        <div className="flex flex-wrap gap-x-7 gap-y-3 border-t border-[var(--border)] pt-6 xl:flex-col xl:gap-y-3">
           <QuietLink href={`/${locale}/instrument`}>{t("openInstrument")}</QuietLink>
           <QuietLink href={`/${locale}/annotate`}>{t("annotate")}</QuietLink>
           <QuietLink href={LINKS.repo} external>{t("readTheCode")}</QuietLink>
@@ -219,7 +231,7 @@ export default async function ArgumentPage() {
           <QuietLink href={`/${locale}?policy=1`}>{t("termsAndPrivacy")}</QuietLink>
         </div>
 
-        <p className="mt-9 border-l-2 border-[var(--border-strong)] pl-4 text-[13.5px] leading-relaxed text-[var(--subtle)]">
+        <p className="border-l-2 border-[var(--border-strong)] pl-4 text-[13.5px] leading-relaxed text-[var(--subtle)]">
           {t("welcomeCampaign", {
             asOf: CAMPAIGN_STATUS.asOf,
             read: CAMPAIGN_STATUS.releasesRead,
@@ -228,6 +240,7 @@ export default async function ArgumentPage() {
             proteins: liveTotal ?? CAMPAIGN_STATUS.proteinsAdmitted,
           })}
         </p>
+        </aside>
       </header>
 
       {/* The tool, at the entrance, because that is what this is.
@@ -250,7 +263,7 @@ export default async function ArgumentPage() {
           and that was true when written, so the honest move is to say
           what it was measured against, not to rewrite a researcher's
           sentences or to make published work read as withheld. */}
-      <section aria-labelledby="argument-heading" className="mt-14 border-t border-[var(--border)] pt-10">
+      <section aria-labelledby="argument-heading" className="max-w-3xl mt-14 border-t border-[var(--border)] pt-10">
         <p className="max-w-prose text-[13px] leading-relaxed text-[var(--subtle)]">
           {t("argumentRecord", { board: ARGUMENT_RECORD.board, frame: ARGUMENT_RECORD.frame })}
         </p>
@@ -263,7 +276,7 @@ export default async function ArgumentPage() {
       </section>
 
       {/* Chapter zero: the whole argument, end to end, for a reader barely initiated. */}
-      <section aria-labelledby="ch0-heading" className="mt-12 border-t border-[var(--border)] pt-10">
+      <section aria-labelledby="ch0-heading" className="max-w-3xl mt-12 border-t border-[var(--border)] pt-10">
         <h2 id="ch0-heading" className="sr-only">
           The argument, end to end
         </h2>
@@ -290,7 +303,7 @@ export default async function ArgumentPage() {
       </section>
 
       {/* The hero: the sealed board, typeset as a table. */}
-      <section aria-labelledby="board-heading" className="mt-14 border-t border-[var(--border)] pt-10">
+      <section aria-labelledby="board-heading" className="max-w-3xl mt-14 border-t border-[var(--border)] pt-10">
         <h2 id="board-heading" className="sr-only">
           {t("boardHeading")}
         </h2>
@@ -331,7 +344,7 @@ export default async function ArgumentPage() {
       </section>
 
       {/* The four pillars, as chapters. */}
-      <section aria-labelledby="chapters-heading" className="mt-16 border-t border-[var(--border)] pt-10">
+      <section aria-labelledby="chapters-heading" className="max-w-3xl mt-16 border-t border-[var(--border)] pt-10">
         <h2
           id="chapters-heading"
           className="protea-eyebrow text-[12px] uppercase tracking-wide text-[var(--muted)]"
