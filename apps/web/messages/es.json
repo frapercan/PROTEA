@@ -156,7 +156,7 @@
   "book": {
     "eyebrow": "PROTEA · Anotación funcional de proteínas basada en embeddings",
     "boardHeading": "El tablero sellado de nueve celdas",
-    "nineCellItalic": "Primeros en siete de nueve; las dos que no, las explicamos.",
+    "nineCellItalic": "Las dos celdas que no ganamos, las explicamos.",
     "welcomeTitle": "PROTEA predice qué hace una proteína a partir de su secuencia",
     "statApi": "API REST",
     "statApiValue": "{ops, number} operaciones · {routes, number} rutas",
@@ -1516,8 +1516,10 @@
   },
   "support": {
     "title": "Apoya el proyecto",
+    "loadFailed": "Ahora mismo no se ha podido cargar el muro de apoyos.",
     "hero": {
       "supportCount": "{count} personas apoyan este proyecto",
+      "beFirst": "Sé la primera persona en apoyar este proyecto.",
       "withComments": "{count} con comentarios",
       "anonymous": "{count} anónimos"
     },
@@ -1628,6 +1630,7 @@
       "commentPlaceholder": "Deja un comentario (opcional)…",
       "publicNote": "Los comentarios y métricas son públicos.",
       "sendThumbsUp": "👍 Apoyar",
+      "failed": "No ha llegado. No se ha guardado nada, inténtalo otra vez.",
       "sending": "Enviando…",
       "thanks": "¡Gracias por el apoyo! 🎉",
       "recentComments": "Comentarios recientes",

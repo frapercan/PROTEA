@@ -157,7 +157,7 @@
   "book": {
     "eyebrow": "PROTEA · Funktionelle Proteinannotation auf Embedding-Basis",
     "boardHeading": "Das versiegelte Neun-Zellen-Board",
-    "nineCellItalic": "Erster in sieben von neun; die zwei, in denen nicht, erklären wir.",
+    "nineCellItalic": "Die zwei Zellen, die wir nicht gewinnen, erklären wir.",
     "welcomeTitle": "PROTEA sagt allein aus der Sequenz vorher, was ein Protein tut",
     "statApi": "REST-API",
     "statApiValue": "{ops, number} Operationen · {routes, number} Routen",
@@ -1517,8 +1517,10 @@
   },
   "support": {
     "title": "Projekt unterstützen",
+    "loadFailed": "Die Unterstützungsliste konnte gerade nicht geladen werden.",
     "hero": {
       "supportCount": "{count} Personen unterstützen dieses Projekt",
+      "beFirst": "Unterstützen Sie dieses Projekt als Erste oder Erster.",
       "withComments": "{count} mit Kommentaren",
       "anonymous": "{count} anonym"
     },
@@ -1629,6 +1631,7 @@
       "commentPlaceholder": "Kommentar hinterlassen (optional)…",
       "publicNote": "Kommentare und Metriken sind öffentlich.",
       "sendThumbsUp": "👍 Daumen hoch",
+      "failed": "Das ist nicht durchgegangen. Es wurde nichts gespeichert, bitte erneut versuchen.",
       "sending": "Wird gesendet…",
       "thanks": "Danke für die Unterstützung! 🎉",
       "recentComments": "Aktuelle Kommentare",

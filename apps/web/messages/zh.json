@@ -157,7 +157,7 @@
   "book": {
     "eyebrow": "PROTEA · 基于嵌入的蛋白质功能注释",
     "boardHeading": "封存的九格评测表",
-    "nineCellItalic": "九格中七格居首；未居首的两格，我们予以说明。",
+    "nineCellItalic": "未能居首的那两格，我们予以说明。",
     "welcomeTitle": "PROTEA 仅凭序列预测蛋白质的功能",
     "statApi": "REST API",
     "statApiValue": "{ops, number} 个操作 · {routes, number} 条路由",
@@ -1517,8 +1517,10 @@
   },
   "support": {
     "title": "支持本项目",
+    "loadFailed": "目前无法加载支持列表。",
     "hero": {
       "supportCount": "{count} 人支持此项目",
+      "beFirst": "成为第一个支持本项目的人。",
       "withComments": "{count} 条含评论",
       "anonymous": "{count} 条匿名"
     },
@@ -1629,6 +1631,7 @@
       "commentPlaceholder": "留下评论（可选）…",
       "publicNote": "评论和指标是公开的。",
       "sendThumbsUp": "👍 发送点赞",
+      "failed": "没有提交成功。系统未记录任何内容，请再试一次。",
       "sending": "发送中…",
       "thanks": "感谢您的支持！🎉",
       "recentComments": "最新评论",
