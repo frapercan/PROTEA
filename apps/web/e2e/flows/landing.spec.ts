@@ -11,11 +11,29 @@
 import { test, expect } from "./fixtures/mock-api";
 
 test.describe("argument front door", () => {
-  test("opens with the one-sentence thesis", async ({ page }) => {
+  test("opens in plain language, and still carries the thesis", async ({ page }) => {
     await page.goto("/en/");
+    // The h1 used to be the thesis sentence, so the first thing a visitor
+    // read was "a taxonomy of orthogonal evidence, combined by a calibrated
+    // fusion". It is the right sentence for the argument and the wrong one
+    // for an opening, so it moved down to an h2 without losing a word.
     await expect(
-      page.getByRole("heading", { level: 1, name: /Protein function is predictable/i }),
+      page.getByRole("heading", { level: 1, name: /predicts what a protein does/i }),
     ).toBeVisible();
+    // Both halves matter: the plain opening AND the thesis still being
+    // published in full. Asserting only the first would let the argument
+    // quietly disappear.
+    await expect(
+      page.getByRole("heading", { level: 2, name: /Protein function is predictable/i }),
+    ).toBeVisible();
+  });
+
+  test("names who built it, and links the code", async ({ page }) => {
+    await page.goto("/en/");
+    // A reader evaluating the project looks for this first, and it was
+    // nowhere on the site until 2026-10-07.
+    await expect(page.getByRole("link", { name: /Pérez Canales/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^ORCID$/ })).toBeVisible();
   });
 
   test("the board leads with the two cells it does not win", async ({ page }) => {
@@ -26,8 +44,10 @@ test.describe("argument front door", () => {
     // frontier rose inside a hairline bracket.
     await expect(page.getByText("carried").first()).toBeVisible();
     await expect(page.getByText("frontier").first()).toBeVisible();
-    // The honest frame line is present.
-    await expect(page.getByText(/the two we are not, we explain/i)).toBeVisible();
+    // The honest frame line is present. It used to repeat the rank that
+    // the sentence beside it already states, so it keeps only the half
+    // that is not a repetition: the admission about the two cells.
+    await expect(page.getByText(/we do not win, we explain/i)).toBeVisible();
   });
 
   test("the four pillars are chapter links", async ({ page }) => {
@@ -44,8 +64,11 @@ test.describe("argument front door", () => {
     const instrument = page.getByRole("link", { name: /Open the instrument/i });
     await expect(instrument).toBeVisible();
     await instrument.click();
-    await page.waitForURL(/\/benchmark/);
-    expect(page.url()).toMatch(/\/benchmark/);
+    await page.waitForURL(/\/instrument\/?$/);
+    // It used to land on /instrument/benchmark. That surface is hidden
+    // from the rail while the corpus is empty, so sending the main call
+    // to action there contradicted the navigation: it goes to the hub.
+    expect(page.url()).toMatch(/\/instrument\/?$/);
   });
 });
 
