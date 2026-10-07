@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
-import { ARGUMENT_RECORD, CAMPAIGN_STATUS, EXTERNAL_RESULT, LINKS, PLATFORM } from "@/lib/campaign";
+import { ARGUMENT_RECORD, AUTHOR, CAMPAIGN_STATUS, EXTERNAL_RESULT, LINKS, PLATFORM } from "@/lib/campaign";
+import { baseUrl } from "@/lib/api";
 import { QuietLink } from "@/components/AwaitingData";
 import { AnnotateForm } from "@/components/AnnotateForm";
 import { NineCellGrid } from "@/components/book/NineCellGrid";
@@ -18,9 +19,39 @@ import { CHAPTER_ZERO, HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
  *
  * Server component: the only client island is the pull-a-footnote apparatus.
  */
+/**
+ * The live corpus size, or null when it cannot be read.
+ *
+ * An external audit on 2026-10-07 found four different protein counts on
+ * four pages within the same minute: 745,421, 715,602, 713,318 and
+ * 754673. They were not contradictory, they were unlabelled: the API
+ * reports `total` (canonical entries plus isoforms) and `canonical`
+ * separately, and this page was quoting a hand-written snapshot of the
+ * total that had already gone stale. On a page about data, four numbers
+ * for one quantity reads worse than any of them being wrong.
+ *
+ * Read at request time, with a short timeout, and the dated constant as
+ * the fallback: this figure is the only genuinely live thing on the page
+ * and it should not be the reason it fails to render.
+ */
+async function liveProteinTotal(): Promise<number | null> {
+  try {
+    const res = await fetch(`${baseUrl()}/proteins/stats`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!res.ok) return null;
+    const stats = (await res.json()) as { total?: unknown };
+    return typeof stats.total === "number" ? stats.total : null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function ArgumentPage() {
   const t = await getTranslations("book");
   const locale = await getLocale();
+  const liveTotal = await liveProteinTotal();
 
   // The board gets its own window, and it is the only one this page states.
   //
@@ -73,7 +104,21 @@ export default async function ArgumentPage() {
         <h1 className="mt-6 font-serif text-[1.7rem] font-normal leading-[1.42] tracking-tight text-[var(--foreground)] sm:text-[2.05rem] sm:leading-[1.4]">
           {t("welcomeTitle")}
         </h1>
-        <p className="mt-7 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
+        <p className="mt-5 text-[14px] leading-relaxed text-[var(--muted)]">
+          {t.rich("byline", {
+            name: () => (
+              <a
+                href={LINKS.github}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+              >
+                {AUTHOR.name}
+              </a>
+            ),
+          })}
+        </p>
+        <p className="mt-6 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
           {t("welcomeBody")}
         </p>
 
@@ -156,6 +201,7 @@ export default async function ArgumentPage() {
         <div className="mt-9 flex flex-wrap gap-x-7 gap-y-3 border-t border-[var(--border)] pt-6">
           <QuietLink href={`/${locale}/instrument/benchmark`}>{t("openInstrument")}</QuietLink>
           <QuietLink href={`/${locale}/annotate`}>{t("annotate")}</QuietLink>
+          <QuietLink href={LINKS.repo} external>{t("readTheCode")}</QuietLink>
           <QuietLink href="/thesis.pdf">{t("thesisPdf")}</QuietLink>
         </div>
 
@@ -165,7 +211,7 @@ export default async function ArgumentPage() {
             read: CAMPAIGN_STATUS.releasesRead,
             releases: CAMPAIGN_STATUS.goaReleases,
             gigabytes: CAMPAIGN_STATUS.gafGigabytes,
-            proteins: CAMPAIGN_STATUS.proteinsAdmitted,
+            proteins: liveTotal ?? CAMPAIGN_STATUS.proteinsAdmitted,
           })}
         </p>
       </header>
@@ -245,7 +291,7 @@ export default async function ArgumentPage() {
             // retracted.
             value: () => (
               <span className="font-semibold italic text-[var(--muted)]">
-                {HEADLINE.value ?? "being recomputed"}
+                {HEADLINE.value ?? t("headlineBeingRecomputed")}
               </span>
             ),
             note: (chunks) => (

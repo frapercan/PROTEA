@@ -159,6 +159,9 @@
     "boardHeading": "Das versiegelte Neun-Zellen-Board",
     "nineCellItalic": "Die zwei Zellen, die wir nicht gewinnen, erklären wir.",
     "welcomeTitle": "PROTEA sagt allein aus der Sequenz vorher, was ein Protein tut",
+    "byline": "Entwickelt und betrieben von <name></name>, Doktorand an der Universidad de Sevilla.",
+    "readTheCode": "Den Code lesen",
+    "headlineBeingRecomputed": "wird neu berechnet",
     "statApi": "REST-API",
     "statApiValue": "{ops, number} Operationen · {routes, number} Routen",
     "statTests": "Backend-Tests",
@@ -168,8 +171,8 @@
     "resultLabel": "Externes Ergebnis",
     "welcomeBody": "Man übergibt eine Aminosäuresequenz und erhält die Funktionen zurück, die sie wahrscheinlich erfüllt, entnommen der Gene Ontology. Es ist eine laufende Plattform und kein Aufsatz, und alles Weitere läuft auf der Maschine, die diese Seite ausliefert.",
     "welcomeResult": "Es belegte Platz {rank, number} von {teams, number} Teams in <cafa>{competition}</cafa>, einem offenen Wettbewerb, der von seinen Organisatoren bewertet wird und nicht von uns.",
-    "welcomeValidation": "Zur externen Validierung wird die Methode als laufender Container beim <lafa>LAFA-Benchmark</lafa> eingereicht, nicht als Datei mit Vorhersagen, und der <evaluator>offizielle CAFA-Evaluator, den wir hier betreiben</evaluator>, ist derselbe, mit dem bewertet wird. Jede Zahl auf dieser Seite lässt sich also neu erzeugen und gegen <upstream>den Evaluator, von dem er abgeleitet ist</upstream>, prüfen.",
-    "welcomeCampaign": "Eine neue Datenkampagne baut den Annotationskorpus von Grund auf neu. Stand {asOf} hat sie {read, number} der insgesamt {releases, number} Releases der Gene-Ontology-Annotationsdatenbank gelesen, zusammen {gigabytes, number} GB an Dateien, und {proteins, number} Proteine geladen, jedes mit dem Release, aus dem es stammt. Die Werkzeuge unten sind gebaut und laufen; ihre Zahlen erscheinen wieder, sobald der Neuaufbau abgeschlossen ist.",
+    "welcomeValidation": "Die Methode wird extern gegen den <lafa>LAFA-Benchmark</lafa> validiert, der bewertet wird, indem man einen laufenden Container einreicht und keine Datei mit Vorhersagen. Den <evaluator>offiziellen CAFA-Evaluator</evaluator> betreiben wir auf unserer eigenen Maschine, und dort werden diese Ergebnisse validiert, bevor etwas behauptet wird; er ist ein Fork <upstream>des veröffentlichten Evaluators</upstream> mit unveränderter Bewertung, sodass Dritte jede Zahl dieser Seite neu erzeugen können.",
+    "welcomeCampaign": "Eine neue Datenkampagne baut den Annotationskorpus von Grund auf neu. Stand {asOf} hat sie {read, number} der insgesamt {releases, number} Releases der Gene-Ontology-Annotationsdatenbank gelesen, zusammen {gigabytes, number} GB an Dateien, und {proteins, number} Proteineinträge geladen (kanonische plus Isoformen), jeder mit dem Release, aus dem er stammt. Die Werkzeuge unten sind gebaut und laufen; ihre Zahlen erscheinen wieder, sobald der Neuaufbau abgeschlossen ist.",
     "argumentRecord": "Die Argumentation ist unten vollständig veröffentlicht, so wie sie gegen das LAFA-Board für {frame} gemessen wurde.",
     "headlineSentence": "Mit ihrem Rahmen genannt, lautet das versiegelte Ergebnis <value></value> bei <metric></metric>, Erster in sieben von neun Zellen<note>.</note>",
     "chaptersHeading": "Die vier Säulen, als Kapitel",
@@ -1140,7 +1143,7 @@
       "taxonomicProximityHint": "1 / (1 + taxonomische_Distanz)"
     },
     "configCard": {
-      "deleteConfirm": "Scoring-Konfiguration \"{name}\" löschen?",
+      "deleteConfirm": "Scoring-Konfiguration \"<name></name>\" löschen?",
       "delete": "Löschen",
       "customEvidenceWeights": "benutzerdefinierte Evidenzgewichte",
       "evidenceCodeWeights": "Evidenzcode-Gewichte",
@@ -1206,7 +1209,7 @@
       "created": "Erstellt"
     },
     "delete": "Löschen",
-    "deleteConfirm": "Query-Set \"{name}\" löschen? Dies kann nicht rückgängig gemacht werden.",
+    "deleteConfirm": "Query-Set \"<name></name>\" löschen? Dies kann nicht rückgängig gemacht werden.",
     "uploadModal": {
       "title": "FASTA hochladen",
       "close": "×",
@@ -1240,8 +1243,8 @@
     "emptyAll": "Noch keine Datasets registriert.",
     "emptyFiltered": "Keine Datasets entsprechen den aktuellen Filtern.",
     "dispatchFirst": "Ersten Export starten",
-    "dispatched": "Export gestartet: {name} (Job {jobId})",
-    "imported": "Dataset per Referenz registriert: {name} ({datasetId})",
+    "dispatched": "Export gestartet: <name></name> (Job {jobId})",
+    "imported": "Dataset per Referenz registriert: <name></name> ({datasetId})",
     "footnote": "Jede Zeile ist ein Dataset-Eintrag. Klick auf den Namen zeigt Schema-/Manifest-Herkunft und verlinkt den Producer-Job.",
     "filters": {
       "family": "PLM-Familie",
@@ -1340,7 +1343,7 @@
       "noEmbeddings": "Keine Embedding-Konfigurationen verfügbar",
       "noSnapshots": "Keine Ontologie-Snapshots verfügbar",
       "nameLabel": "Ausgabename",
-      "useSuggested": "Vorschlag übernehmen: {name}",
+      "useSuggested": "Vorschlag übernehmen: <name></name>",
       "embeddingLabel": "Embedding-Konfiguration",
       "snapshotLabel": "Ontologie-Snapshot",
       "kLabel": "Nachbarn (K)",
@@ -1459,7 +1462,7 @@
       },
       "emptyAll": "Noch keine Experiment-Runs. Erstelle den ersten, um eine Kampagnenerzählung zu starten.",
       "emptyFiltered": "Keine Runs passen zu diesem Status-Filter.",
-      "deleteConfirm": "Experiment-Run \"{name}\" löschen? Das lässt sich nicht rückgängig machen.",
+      "deleteConfirm": "Experiment-Run \"<name></name>\" löschen? Das lässt sich nicht rückgängig machen.",
       "deleteDialog": {
         "title": "Experiment-Run löschen?",
         "body": "Damit wird die Zeile auf dem Server entfernt. Narrative, Hypothese und Findings können nicht wiederhergestellt werden.",
@@ -1470,9 +1473,9 @@
         "close": "Dialog schließen"
       },
       "toasts": {
-        "created": "Experiment-Run \"{name}\" angelegt",
-        "updated": "Experiment-Run \"{name}\" aktualisiert",
-        "deleted": "Experiment-Run \"{name}\" gelöscht"
+        "created": "Experiment-Run \"<name></name>\" angelegt",
+        "updated": "Experiment-Run \"<name></name>\" aktualisiert",
+        "deleted": "Experiment-Run \"<name></name>\" gelöscht"
       },
       "mint": {
         "title": "Neuen Experiment-Run anlegen",
@@ -1481,7 +1484,7 @@
         "submitting": "Lege an…"
       },
       "edit": {
-        "title": "Run bearbeiten: {name}",
+        "title": "Run bearbeiten: <name></name>",
         "subtitle": "Narrative, Status, Tags, Config oder Provenance patchen. Status-Übergänge stempeln started_at / finished_at automatisch serverseitig.",
         "submit": "Änderungen speichern",
         "submitting": "Speichere…"
@@ -1993,9 +1996,9 @@
     "statusActive": "Aktiv",
     "statusRevoked": "Widerrufen",
     "loadError": "API-Schlussel konnten nicht geladen werden",
-    "revokedToast": "{name} widerrufen",
+    "revokedToast": "<name></name> widerrufen",
     "revokeErrorToast": "Widerruf fehlgeschlagen: {error}",
-    "mintedToast": "{name} erstellt",
+    "mintedToast": "<name></name> erstellt",
     "footnote": "Widerruf ist unwiderruflich. Widerrufene Eintrage bleiben sichtbar, wenn 'Widerrufene Schlussel anzeigen' aktiv ist.",
     "forbiddenTitle": "Nur fur Admins",
     "forbiddenBody": "Diese Seite verwaltet programmatische Zugriffsschlussel und ist auf Operatoren mit Admin-Rolle beschrankt.",
@@ -2076,8 +2079,8 @@
     "scoringConfigCreated": "Scoring-Konfiguration erstellt",
     "annotationsDeleted": "Gelöscht ({count} Annotationen entfernt)",
     "predictionsDeleted": "Gelöscht ({count} Zuordnungen entfernt)",
-    "querySetDeleted": "Gelöscht \"{name}\"",
-    "querySetUploaded": "Query-Set \"{name}\" hochgeladen ({count} Sequenzen)",
+    "querySetDeleted": "Gelöscht \"<name></name>\"",
+    "querySetUploaded": "Query-Set \"<name></name>\" hochgeladen ({count} Sequenzen)",
     "sequencesVacuumed": "{count} verwaiste Sequenz(en) gelöscht",
     "embeddingsVacuumed": "{count} nicht indizierte Embedding(s) gelöscht",
     "presetsCreated": "Voreinstellungen erstellt: {names}",
@@ -2152,7 +2155,7 @@
       "createAccount": "Konto erstellen",
       "loadError": "Profil konnte nicht geladen werden: {message}",
       "title": "Ihr Profil",
-      "subtitle": "Kontodaten von {name}.",
+      "subtitle": "Kontodaten von <name></name>.",
       "signOut": "Abmelden",
       "fields": {
         "username": "Benutzername",

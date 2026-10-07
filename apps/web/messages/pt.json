@@ -159,6 +159,9 @@
     "boardHeading": "O quadro selado de nove células",
     "nineCellItalic": "As duas células que não vencemos, nós as explicamos.",
     "welcomeTitle": "A PROTEA prevê o que uma proteína faz, apenas a partir da sequência",
+    "byline": "Criado e mantido por <name></name>, pesquisador de doutorado na Universidad de Sevilla.",
+    "readTheCode": "Ler o código",
+    "headlineBeingRecomputed": "sendo recalculado",
     "statApi": "API REST",
     "statApiValue": "{ops, number} operações · {routes, number} rotas",
     "statTests": "Testes de backend",
@@ -168,8 +171,8 @@
     "resultLabel": "Resultado externo",
     "welcomeBody": "Você fornece uma sequência de aminoácidos e ela devolve as funções que provavelmente desempenha, tiradas da Gene Ontology. É uma plataforma em funcionamento, não um artigo, e tudo o que está abaixo roda na máquina que serve esta página.",
     "welcomeResult": "Ficou em {rank, number}º de {teams, number} equipes no <cafa>{competition}</cafa>, uma competição aberta pontuada pelos seus organizadores, não por nós.",
-    "welcomeValidation": "Para a validação externa o método é submetido ao <lafa>benchmark LAFA</lafa> como um contêiner em execução, não como um arquivo de predições, e o <evaluator>avaliador oficial do CAFA que implantamos aqui</evaluator> é o mesmo com que ele é pontuado, portanto qualquer número deste site pode ser regerado e conferido contra <upstream>o avaliador do qual ele deriva</upstream>.",
-    "welcomeCampaign": "Uma nova campanha de dados está reconstruindo o corpus de anotações do zero. Em {asOf} ela já leu {read, number} das {releases, number} versões do banco de anotações da Gene Ontology que compõem a série, {gigabytes, number} GB de arquivos no total, e carregou {proteins, number} proteínas, cada uma marcada com a versão de que provém. As ferramentas abaixo estão construídas e funcionando; seus números voltam quando a reconstrução terminar.",
+    "welcomeValidation": "O método é validado externamente diante do <lafa>benchmark LAFA</lafa>, que é pontuado submetendo um contêiner em execução, e não um arquivo de predições. O <evaluator>avaliador oficial do CAFA</evaluator> nós o executamos na nossa própria máquina, que é onde estes resultados são validados antes de afirmar qualquer coisa, e é um fork <upstream>do avaliador publicado</upstream> com a pontuação inalterada, de modo que um terceiro pode regerar qualquer número deste site.",
+    "welcomeCampaign": "Uma nova campanha de dados está reconstruindo o corpus de anotações do zero. Em {asOf} ela já leu {read, number} das {releases, number} versões do banco de anotações da Gene Ontology que compõem a série, {gigabytes, number} GB de arquivos no total, e carregou {proteins, number} entradas de proteína (canônicas mais isoformas), cada uma marcada com a versão de que provém. As ferramentas abaixo estão construídas e funcionando; seus números voltam quando a reconstrução terminar.",
     "argumentRecord": "O argumento está publicado abaixo por inteiro, tal como foi medido diante do painel LAFA de {frame}.",
     "headlineSentence": "Com o seu enquadramento, o resultado selado é <value></value> em <metric></metric>, primeiro em sete de nove células<note>.</note>",
     "chaptersHeading": "Os quatro pilares, como capítulos",
@@ -1140,7 +1143,7 @@
       "taxonomicProximityHint": "1 / (1 + distância_taxonômica)"
     },
     "configCard": {
-      "deleteConfirm": "Excluir scoring \"{name}\"?",
+      "deleteConfirm": "Excluir scoring \"<name></name>\"?",
       "delete": "Excluir",
       "customEvidenceWeights": "pesos de evidência personalizados",
       "evidenceCodeWeights": "Pesos de código de evidência",
@@ -1206,7 +1209,7 @@
       "created": "Criado"
     },
     "delete": "Excluir",
-    "deleteConfirm": "Excluir query set \"{name}\"? Esta ação não pode ser desfeita.",
+    "deleteConfirm": "Excluir query set \"<name></name>\"? Esta ação não pode ser desfeita.",
     "uploadModal": {
       "title": "Enviar FASTA",
       "close": "×",
@@ -1240,8 +1243,8 @@
     "emptyAll": "Ainda não há datasets registrados.",
     "emptyFiltered": "Nenhum dataset corresponde aos filtros atuais.",
     "dispatchFirst": "Despache a primeira exportação",
-    "dispatched": "Exportação despachada: {name} (job {jobId})",
-    "imported": "Dataset registrado por referência: {name} ({datasetId})",
+    "dispatched": "Exportação despachada: <name></name> (job {jobId})",
+    "imported": "Dataset registrado por referência: <name></name> ({datasetId})",
     "footnote": "Cada linha é um registro Dataset. Clique no nome para inspecionar a procedência (schema/manifest) e ver o job produtor.",
     "filters": {
       "family": "Família PLM",
@@ -1340,7 +1343,7 @@
       "noEmbeddings": "Nenhuma configuração de embedding disponível",
       "noSnapshots": "Nenhum snapshot ontológico disponível",
       "nameLabel": "Nome de saída",
-      "useSuggested": "Usar sugerido: {name}",
+      "useSuggested": "Usar sugerido: <name></name>",
       "embeddingLabel": "Configuração de embedding",
       "snapshotLabel": "Snapshot ontológico",
       "kLabel": "Vizinhos (K)",
@@ -1459,7 +1462,7 @@
       },
       "emptyAll": "Ainda não há execuções. Cria a primeira para iniciar uma narrativa de campanha.",
       "emptyFiltered": "Nenhuma execução corresponde a este filtro de estado.",
-      "deleteConfirm": "Eliminar a execução \"{name}\"? Isto não pode ser desfeito.",
+      "deleteConfirm": "Eliminar a execução \"<name></name>\"? Isto não pode ser desfeito.",
       "deleteDialog": {
         "title": "Eliminar execução de experimento?",
         "body": "Remove a linha do servidor. A narrativa, hipótese e achados não poderão ser recuperados.",
@@ -1470,9 +1473,9 @@
         "close": "Fechar diálogo"
       },
       "toasts": {
-        "created": "Execução \"{name}\" criada",
-        "updated": "Execução \"{name}\" atualizada",
-        "deleted": "Execução \"{name}\" eliminada"
+        "created": "Execução \"<name></name>\" criada",
+        "updated": "Execução \"<name></name>\" atualizada",
+        "deleted": "Execução \"<name></name>\" eliminada"
       },
       "mint": {
         "title": "Criar nova execução de experiência",
@@ -1481,7 +1484,7 @@
         "submitting": "A criar…"
       },
       "edit": {
-        "title": "Editar execução: {name}",
+        "title": "Editar execução: <name></name>",
         "subtitle": "Edita narrativa, estado, tags, config ou proveniência. As transições de estado marcam started_at / finished_at automaticamente no servidor.",
         "submit": "Guardar alterações",
         "submitting": "A guardar…"
@@ -1993,9 +1996,9 @@
     "statusActive": "Ativa",
     "statusRevoked": "Revogada",
     "loadError": "Nao foi possivel carregar as chaves de API",
-    "revokedToast": "Revogada: {name}",
+    "revokedToast": "Revogada: <name></name>",
     "revokeErrorToast": "Falha ao revogar: {error}",
-    "mintedToast": "Chave criada: {name}",
+    "mintedToast": "Chave criada: <name></name>",
     "footnote": "A revogacao e irreversivel. As linhas revogadas continuam visiveis para auditoria com 'Mostrar chaves revogadas' ativo.",
     "forbiddenTitle": "Apenas administradores",
     "forbiddenBody": "Esta pagina gere chaves de acesso programatico e esta restrita a operadores com perfil de administrador.",
@@ -2076,8 +2079,8 @@
     "scoringConfigCreated": "Configuração de scoring criada",
     "annotationsDeleted": "Eliminado ({count} anotações removidas)",
     "predictionsDeleted": "Eliminado ({count} atribuições removidas)",
-    "querySetDeleted": "Eliminado \"{name}\"",
-    "querySetUploaded": "Conjunto de consulta \"{name}\" carregado ({count} sequências)",
+    "querySetDeleted": "Eliminado \"<name></name>\"",
+    "querySetUploaded": "Conjunto de consulta \"<name></name>\" carregado ({count} sequências)",
     "sequencesVacuumed": "Eliminadas {count} sequências órfãs",
     "embeddingsVacuumed": "Eliminados {count} embeddings sem índice",
     "presetsCreated": "Predefinições criadas: {names}",
@@ -2152,7 +2155,7 @@
       "createAccount": "Criar conta",
       "loadError": "Não foi possível carregar o seu perfil: {message}",
       "title": "O seu perfil",
-      "subtitle": "Dados da conta de {name}.",
+      "subtitle": "Dados da conta de <name></name>.",
       "signOut": "Terminar sessão",
       "fields": {
         "username": "Nome de utilizador",

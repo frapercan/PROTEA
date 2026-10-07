@@ -158,6 +158,9 @@
     "boardHeading": "The sealed nine-cell board",
     "nineCellItalic": "The two cells we do not win, we explain.",
     "welcomeTitle": "PROTEA predicts what a protein does, from its sequence alone",
+    "byline": "Built and run by <name></name>, doctoral researcher at the Universidad de Sevilla.",
+    "readTheCode": "Read the code",
+    "headlineBeingRecomputed": "being recomputed",
     "statApi": "REST API",
     "statApiValue": "{ops, number} operations · {routes, number} routes",
     "statTests": "Backend tests",
@@ -167,8 +170,8 @@
     "resultLabel": "External result",
     "welcomeBody": "Give it an amino-acid sequence and it returns the functions that sequence is likely to carry out, drawn from the Gene Ontology. It is a working platform rather than a paper, and everything below runs on the machine serving this page.",
     "welcomeResult": "It placed {rank, number} of {teams, number} teams in <cafa>{competition}</cafa>, an open competition scored by its organisers rather than by us.",
-    "welcomeValidation": "For external validation the method is submitted to <lafa>the LAFA benchmark</lafa> as a running container rather than as a file of predictions, and the <evaluator>official CAFA evaluator we deploy here</evaluator> is the same one used to score it, so any figure on this site can be regenerated and checked against <upstream>the evaluator it is forked from</upstream>.",
-    "welcomeCampaign": "A new data campaign is rebuilding the annotation corpus from the ground up. As of {asOf} it has read {read, number} of the series' {releases, number} releases of the Gene Ontology Annotation database, which is {gigabytes, number} GB of files in all, and loaded {proteins, number} proteins, each tagged with the release it came from. The tools below are built and running; their figures come back when the rebuild finishes.",
+    "welcomeValidation": "The method is validated externally against the <lafa>LAFA benchmark</lafa>, which is scored by submitting a running container rather than a file of predictions. We run the <evaluator>official CAFA evaluator</evaluator> on our own machine, which is where these results are validated before anything is claimed, and it is a fork of <upstream>the published evaluator</upstream> with the scoring unchanged, so a third party can regenerate any figure on this site.",
+    "welcomeCampaign": "A new data campaign is rebuilding the annotation corpus from the ground up. As of {asOf} it has read {read, number} of the series' {releases, number} releases of the Gene Ontology Annotation database, which is {gigabytes, number} GB of files in all, and loaded {proteins, number} protein entries (canonical plus isoforms), each tagged with the release it came from. The tools below are built and running; their figures come back when the rebuild finishes.",
     "argumentRecord": "The argument is published below in full, as it was measured against the LAFA board for {frame}.",
     "headlineSentence": "Stated with its frame, the sealed result is <value></value> on <metric></metric>, first in seven of nine cells<note>.</note>",
     "chaptersHeading": "The four pillars, as chapters",
@@ -1149,7 +1152,7 @@
       "taxonomicProximityHint": "1 / (1 + taxonomic_distance)"
     },
     "configCard": {
-      "deleteConfirm": "Delete scoring config \"{name}\"?",
+      "deleteConfirm": "Delete scoring config \"<name></name>\"?",
       "delete": "Delete",
       "customEvidenceWeights": "custom evidence weights",
       "evidenceCodeWeights": "Evidence-code weights",
@@ -1205,7 +1208,7 @@
       "created": "Created"
     },
     "delete": "Delete",
-    "deleteConfirm": "Delete query set \"{name}\"? This cannot be undone.",
+    "deleteConfirm": "Delete query set \"<name></name>\"? This cannot be undone.",
     "uploadModal": {
       "title": "Upload FASTA",
       "close": "×",
@@ -1239,8 +1242,8 @@
     "emptyAll": "No datasets registered yet.",
     "emptyFiltered": "No datasets match the current filters.",
     "dispatchFirst": "Dispatch the first export",
-    "dispatched": "Export dispatched: {name} (job {jobId})",
-    "imported": "Dataset registered by reference: {name} ({datasetId})",
+    "dispatched": "Export dispatched: <name></name> (job {jobId})",
+    "imported": "Dataset registered by reference: <name></name> ({datasetId})",
     "footnote": "Each row is one Dataset record. Click a name to inspect schema/manifest provenance and link back to the producer job.",
     "filters": {
       "family": "PLM family",
@@ -1345,7 +1348,7 @@
       "noEmbeddings": "No embedding configs available",
       "noSnapshots": "No ontology snapshots available",
       "nameLabel": "Output name",
-      "useSuggested": "Use suggested: {name}",
+      "useSuggested": "Use suggested: <name></name>",
       "embeddingLabel": "Embedding config",
       "snapshotLabel": "Ontology snapshot",
       "kLabel": "Neighbours (K)",
@@ -1458,7 +1461,7 @@
       },
       "emptyAll": "No experiment runs yet. Mint the first one to start a campaign narrative.",
       "emptyFiltered": "No runs match this status filter.",
-      "deleteConfirm": "Delete experiment run \"{name}\"? This cannot be undone.",
+      "deleteConfirm": "Delete experiment run \"<name></name>\"? This cannot be undone.",
       "deleteDialog": {
         "title": "Delete experiment run?",
         "body": "This removes the row from the server. The narrative, hypothesis, and findings cannot be restored.",
@@ -1469,9 +1472,9 @@
         "close": "Close dialog"
       },
       "toasts": {
-        "created": "Experiment run \"{name}\" minted",
-        "updated": "Experiment run \"{name}\" updated",
-        "deleted": "Experiment run \"{name}\" deleted"
+        "created": "Experiment run \"<name></name>\" minted",
+        "updated": "Experiment run \"<name></name>\" updated",
+        "deleted": "Experiment run \"<name></name>\" deleted"
       },
       "mint": {
         "title": "Mint a new experiment run",
@@ -1480,7 +1483,7 @@
         "submitting": "Minting…"
       },
       "edit": {
-        "title": "Edit run: {name}",
+        "title": "Edit run: <name></name>",
         "subtitle": "Patch narrative, status, tags, config, or provenance. Status transitions stamp started_at / finished_at automatically on the server.",
         "submit": "Save changes",
         "submitting": "Saving…"
@@ -2004,9 +2007,9 @@
     "statusActive": "Active",
     "statusRevoked": "Revoked",
     "loadError": "Could not load API keys",
-    "revokedToast": "Revoked {name}",
+    "revokedToast": "Revoked <name></name>",
     "revokeErrorToast": "Revoke failed: {error}",
-    "mintedToast": "Minted {name}",
+    "mintedToast": "Minted <name></name>",
     "footnote": "Revocation is irreversible. Revoked rows remain visible for audit when 'Show revoked keys' is enabled.",
     "forbiddenTitle": "Admin only",
     "forbiddenBody": "This page manages programmatic access keys and is restricted to operators with the admin role.",
@@ -2075,8 +2078,8 @@
     "scoringConfigCreated": "Scoring config created",
     "annotationsDeleted": "Deleted ({count} annotations removed)",
     "predictionsDeleted": "Deleted ({count} assignments removed)",
-    "querySetDeleted": "Deleted \"{name}\"",
-    "querySetUploaded": "Query set \"{name}\" uploaded ({count} sequences)",
+    "querySetDeleted": "Deleted \"<name></name>\"",
+    "querySetUploaded": "Query set \"<name></name>\" uploaded ({count} sequences)",
     "sequencesVacuumed": "Deleted {count} orphan sequence(s)",
     "embeddingsVacuumed": "Deleted {count} unindexed embedding(s)",
     "presetsCreated": "Presets created: {names}",
@@ -2151,7 +2154,7 @@
       "createAccount": "Create account",
       "loadError": "Could not load your profile: {message}",
       "title": "Your profile",
-      "subtitle": "Account details for {name}.",
+      "subtitle": "Account details for <name></name>.",
       "signOut": "Sign out",
       "fields": {
         "username": "Username",

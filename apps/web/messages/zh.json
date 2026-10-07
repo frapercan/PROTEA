@@ -159,6 +159,9 @@
     "boardHeading": "封存的九格评测表",
     "nineCellItalic": "未能居首的那两格，我们予以说明。",
     "welcomeTitle": "PROTEA 仅凭序列预测蛋白质的功能",
+    "byline": "由塞维利亚大学博士研究人员 <name></name> 开发并运行。",
+    "readTheCode": "查看代码",
+    "headlineBeingRecomputed": "正在重新计算",
     "statApi": "REST API",
     "statApiValue": "{ops, number} 个操作 · {routes, number} 条路由",
     "statTests": "后端测试",
@@ -168,8 +171,8 @@
     "resultLabel": "外部评测结果",
     "welcomeBody": "输入一条氨基酸序列，它会返回该序列可能承担的功能，取自 Gene Ontology。这是一个真正运行的平台，而非一篇论文，下方的一切都运行在提供本页面的这台机器上。",
     "welcomeResult": "它在 <cafa>{competition}</cafa> 中于 {teams, number} 支队伍里名列第 {rank, number}，这是一项公开竞赛，由其组织方评分，而非由我们自评。",
-    "welcomeValidation": "为了外部验证，该方法以运行中的容器而非预测文件的形式提交给 <lafa>LAFA 评测基准</lafa>，而<evaluator>我们在此部署的官方 CAFA 评估器</evaluator>正是用于评分的同一个，因此本站的任何数字都可以重新生成，并与<upstream>它所派生的上游评估器</upstream>对照核验。",
-    "welcomeCampaign": "新一轮数据运行正在从零重建注释语料库。截至 {asOf}，已读取该系列 {releases, number} 个 Gene Ontology 注释数据库版本中的 {read, number} 个（全系列共 {gigabytes, number} GB 文件），并载入 {proteins, number} 个蛋白质，每个都标注了其来源版本。下方的工具均已构建并在运行；待本轮重建结束后其数字将恢复显示。",
+    "welcomeValidation": "该方法通过 <lafa>LAFA 评测基准</lafa> 进行外部验证，其评分方式是提交一个运行中的容器，而非一份预测文件。我们在自己的机器上运行<evaluator>官方 CAFA 评估器</evaluator>，这些结果正是在那里完成验证之后才对外陈述；它是<upstream>已发布评估器</upstream>的一个分支，评分逻辑未作改动，因此第三方可以重新生成本站的任何数字。",
+    "welcomeCampaign": "新一轮数据运行正在从零重建注释语料库。截至 {asOf}，已读取该系列 {releases, number} 个 Gene Ontology 注释数据库版本中的 {read, number} 个（全系列共 {gigabytes, number} GB 文件），并载入 {proteins, number} 条蛋白质记录（规范条目加同工型），每条都标注了其来源版本。下方的工具均已构建并在运行；待本轮重建结束后其数字将恢复显示。",
     "argumentRecord": "完整的科学论证发表于下方，其测量是针对 {frame} 期间的 LAFA 评测板进行的。",
     "headlineSentence": "连同其评测框架，封存结果为 <value></value>（<metric></metric>），九格中七格居首<note>。</note>",
     "chaptersHeading": "四大支柱，作为章节",
@@ -1140,7 +1143,7 @@
       "taxonomicProximityHint": "1 / (1 + 分类距离)"
     },
     "configCard": {
-      "deleteConfirm": "删除评分配置\"{name}\"？",
+      "deleteConfirm": "删除评分配置\"<name></name>\"？",
       "delete": "删除",
       "customEvidenceWeights": "自定义证据权重",
       "evidenceCodeWeights": "证据代码权重",
@@ -1206,7 +1209,7 @@
       "created": "创建时间"
     },
     "delete": "删除",
-    "deleteConfirm": "删除查询集\"{name}\"？此操作无法撤销。",
+    "deleteConfirm": "删除查询集\"<name></name>\"？此操作无法撤销。",
     "uploadModal": {
       "title": "上传 FASTA",
       "close": "×",
@@ -1240,8 +1243,8 @@
     "emptyAll": "尚未注册任何数据集。",
     "emptyFiltered": "没有数据集匹配当前过滤条件。",
     "dispatchFirst": "派发首个导出",
-    "dispatched": "已派发导出：{name}（任务 {jobId}）",
-    "imported": "已按引用注册数据集：{name}（{datasetId}）",
+    "dispatched": "已派发导出：<name></name>（任务 {jobId}）",
+    "imported": "已按引用注册数据集：<name></name>（{datasetId}）",
     "footnote": "每一行代表一条 Dataset 记录。点击名称查看 schema/manifest 来源并跳转到生产任务。",
     "filters": {
       "family": "PLM 系列",
@@ -1340,7 +1343,7 @@
       "noEmbeddings": "没有可用的嵌入配置",
       "noSnapshots": "没有可用的本体快照",
       "nameLabel": "输出名称",
-      "useSuggested": "使用建议：{name}",
+      "useSuggested": "使用建议：<name></name>",
       "embeddingLabel": "嵌入配置",
       "snapshotLabel": "本体快照",
       "kLabel": "邻居数 (K)",
@@ -1459,7 +1462,7 @@
       },
       "emptyAll": "暂无实验运行。新建第一个以启动一段活动叙述。",
       "emptyFiltered": "没有运行符合当前状态筛选。",
-      "deleteConfirm": "删除实验运行 \"{name}\"？此操作不可撤销。",
+      "deleteConfirm": "删除实验运行 \"<name></name>\"？此操作不可撤销。",
       "deleteDialog": {
         "title": "删除实验运行？",
         "body": "这将从服务器删除该行。叙述、假设和发现将无法恢复。",
@@ -1470,9 +1473,9 @@
         "close": "关闭对话框"
       },
       "toasts": {
-        "created": "已创建实验运行 \"{name}\"",
-        "updated": "已更新实验运行 \"{name}\"",
-        "deleted": "已删除实验运行 \"{name}\""
+        "created": "已创建实验运行 \"<name></name>\"",
+        "updated": "已更新实验运行 \"<name></name>\"",
+        "deleted": "已删除实验运行 \"<name></name>\""
       },
       "mint": {
         "title": "创建新的实验运行",
@@ -1481,7 +1484,7 @@
         "submitting": "正在创建…"
       },
       "edit": {
-        "title": "编辑运行：{name}",
+        "title": "编辑运行：<name></name>",
         "subtitle": "可修改叙述、状态、标签、配置或来源。状态切换会在服务端自动标记 started_at / finished_at。",
         "submit": "保存修改",
         "submitting": "正在保存…"
@@ -1993,9 +1996,9 @@
     "statusActive": "有效",
     "statusRevoked": "已撤销",
     "loadError": "无法加载 API 密钥",
-    "revokedToast": "已撤销 {name}",
+    "revokedToast": "已撤销 <name></name>",
     "revokeErrorToast": "撤销失败：{error}",
-    "mintedToast": "已创建 {name}",
+    "mintedToast": "已创建 <name></name>",
     "footnote": "撤销不可逆。启用“显示已撤销密钥”后可查看历史以供审计。",
     "forbiddenTitle": "仅限管理员",
     "forbiddenBody": "本页面用于管理程序访问密钥，仅限拥有管理员角色的运维人员访问。",
@@ -2076,8 +2079,8 @@
     "scoringConfigCreated": "Scoring 配置已创建",
     "annotationsDeleted": "已删除（移除 {count} 条注释）",
     "predictionsDeleted": "已删除（移除 {count} 条赋值）",
-    "querySetDeleted": "已删除 \"{name}\"",
-    "querySetUploaded": "查询集 \"{name}\" 已上传（{count} 条序列）",
+    "querySetDeleted": "已删除 \"<name></name>\"",
+    "querySetUploaded": "查询集 \"<name></name>\" 已上传（{count} 条序列）",
     "sequencesVacuumed": "已删除 {count} 条孤立序列",
     "embeddingsVacuumed": "已删除 {count} 个未索引 embedding",
     "presetsCreated": "已创建预设：{names}",
@@ -2152,7 +2155,7 @@
       "createAccount": "创建账户",
       "loadError": "无法加载您的个人资料：{message}",
       "title": "您的个人资料",
-      "subtitle": "{name} 的账户详情。",
+      "subtitle": "<name></name> 的账户详情。",
       "signOut": "退出登录",
       "fields": {
         "username": "用户名",

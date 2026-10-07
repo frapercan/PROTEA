@@ -101,6 +101,9 @@ export const ARGUMENT_RECORD = {
 export const LINKS = {
   /** The LAFA benchmark the method is submitted to. Title checked: "CAFA Forever". */
   lafa: "https://functionbench.net/",
+  /** The author's profile and the repository. Both checked, both 200. */
+  github: "https://github.com/frapercan",
+  repo: "https://github.com/frapercan/PROTEA",
   /** The competition itself. Title checked: "CAFA 6 Protein Function Prediction | Kaggle". */
   cafaCompetition: "https://www.kaggle.com/competitions/cafa-6-protein-function-prediction",
   /** The CAFA project, for a reader who wants to know what CAFA is. */
@@ -127,4 +130,18 @@ export const PLATFORM = {
   apiOperations: 136,
   apiRoutes: 117,
   backendTests: 4_495,
+} as const;
+
+/**
+ * Who built it.
+ *
+ * An external audit on 2026-10-07 found the name nowhere on the site,
+ * while the legal notice said the service was "operated personally"
+ * without saying by whom. For a page someone is being evaluated from,
+ * that is the first thing a reader looks for. Taken from the thesis
+ * frontmatter and the git author, not guessed. No email here: publishing
+ * a personal address is the author's call, not this file's.
+ */
+export const AUTHOR = {
+  name: "Francisco Miguel Pérez Canales",
 } as const;
