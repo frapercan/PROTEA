@@ -10884,46 +10884,8 @@
         ]
       },
       "post": {
-        "description": "Submit a thumbs-up with an optional comment.",
+        "description": "Submit a thumbs-up with an optional comment.\n\nOpen to anonymous callers under the IP-hash daily quota, mirroring\n``/annotate``. It used to require ``ROLE_VIEWER``, which made the\nendpoint unusable for the only people it exists for: ``GET /support``\nis public and the button sits on a public page, so every visitor who\npressed it got 401 \"Missing API key or bearer token\". Measured\n2026-10-07 against the live API.\n\nThe quota is the control that replaces the role here. A thumbs-up is\nnot a privileged write: it creates one row with an optional comment\nalready capped by :meth:`SupportCreate.comment_within_limit`, and\nnothing reads it back as instruction.",
         "operationId": "post_support_v1_support_post",
-        "parameters": [
-          {
-            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
-              "title": "Authorization"
-            }
-          },
-          {
-            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
-            "in": "header",
-            "name": "X-Api-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
-              "title": "X-Api-Key"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {

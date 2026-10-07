@@ -514,7 +514,7 @@ See also
 The served thesis PDF
 ---------------------
 
-``GET /thesis.pdf`` is a real route, and on 2026-10-07 it answered 404
+The ``/thesis.pdf`` mount is real, and on 2026-10-07 it answered 404
 everywhere with ``"thesis PDF not available"`` while the public home page
 linked to it. The route was fine; the file had never been placed on this
 machine.
