@@ -19,8 +19,7 @@ import {
   PredictionSet,
   AnnotationSet,
   OntologySnapshot,
-  QuerySet,
-} from "@/lib/api";
+  QuerySet, errorText } from "@/lib/api";
 
 type Tab = "predict" | "results";
 
@@ -261,7 +260,7 @@ export default function FunctionalAnnotationPage() {
       setPredResult(result);
       toast(t("predictTab.launchAnnotationJob"), "success");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : errorText(err);
       setPredError(msg);
       toast(msg, "error");
     } finally {
@@ -281,7 +280,7 @@ export default function FunctionalAnnotationPage() {
       setPredictionSets((prev) => prev.filter((p) => p.id !== id));
       toast(tToast("predictionsDeleted", { count: r.predictions_deleted.toLocaleString() }), "info");
     } catch (err) {
-      toast(err instanceof Error ? err.message : String(err), "error");
+      toast(err instanceof Error ? err.message : errorText(err), "error");
     }
   }
 

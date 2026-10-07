@@ -9,8 +9,7 @@ import {
   deleteAnnotationSet,
   createJob,
   AnnotationSet,
-  OntologySnapshot,
-} from "@/lib/api";
+  OntologySnapshot, errorText } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useLocale, useTranslations } from "next-intl";
@@ -56,7 +55,7 @@ export default function AnnotationsPage() {
       setIaEditId(null);
       toast(tToast("iaUrlSaved"), "success");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     } finally {
       setIaSaving(false);
     }
@@ -124,7 +123,7 @@ export default function AnnotationsPage() {
       setSets((prev) => prev.filter((a) => a.id !== id));
       toast(tToast("annotationsDeleted", { count: r.annotations_deleted.toLocaleString() }), "info");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     }
   }
 
@@ -141,7 +140,7 @@ export default function AnnotationsPage() {
       setSnapResult(res);
       toast(tToast("jobQueued"), "success");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     } finally {
       setSnapSubmitting(false);
     }
@@ -164,7 +163,7 @@ export default function AnnotationsPage() {
       setGoaResult(res);
       toast(tToast("jobQueued"), "success");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     } finally {
       setGoaSubmitting(false);
     }
@@ -183,7 +182,7 @@ export default function AnnotationsPage() {
       setQgoResult(res);
       toast(tToast("jobQueued"), "success");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     } finally {
       setQgoSubmitting(false);
     }

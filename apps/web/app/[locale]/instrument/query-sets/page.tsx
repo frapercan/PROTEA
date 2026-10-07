@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createQuerySet, deleteQuerySet, listQuerySets, QuerySet } from "@/lib/api";
+import { createQuerySet, deleteQuerySet, listQuerySets, QuerySet, errorText } from "@/lib/api";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
 import { useTranslations } from "next-intl";
@@ -67,7 +67,7 @@ export default function QuerySetsPage() {
       setShowModal(false);
       toast(tToast("querySetUploaded", { name: created.name, count: created.entry_count }), "success");
     } catch (err: any) {
-      setUploadError(String(err));
+      setUploadError(errorText(err));
     } finally {
       setUploading(false);
     }
@@ -80,8 +80,8 @@ export default function QuerySetsPage() {
       setSets((prev) => prev.filter((s) => s.id !== id));
       toast(tToast("querySetDeleted", { name }), "info");
     } catch (err: any) {
-      setError(String(err));
-      toast(String(err), "error");
+      setError(errorText(err));
+      toast(errorText(err), "error");
     }
   }
 

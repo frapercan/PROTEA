@@ -146,8 +146,51 @@ describe("lib/api withAuth + http", () => {
     fetchSpy.mockResolvedValueOnce(new Response("bad token", { status: 401 }));
 
     const api = await import("@/lib/api");
+    // It still throws rather than resolving, which is what the name is
+    // about. What changed on 2026-10-07 is the message: it used to be the
+    // response body, so a visitor who pressed a Launch Job button read
+    // the server's own 401 document in a red toast.
     await expect(
       api.createJob({ operation: "ping", queue_name: "protea.ping" }),
-    ).rejects.toThrow(/bad token|HTTP 401/);
+    ).rejects.toThrow(/not signed in/);
+    await expect(
+      api.createJob({ operation: "ping", queue_name: "protea.ping" }),
+    ).rejects.not.toThrow(/bad token/);
+  });
+
+  it("shows the problem document's detail, not the document", async () => {
+    setSessionCookie(null);
+    fetchSpy.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          type: "/problems/conflict",
+          title: "Conflict",
+          status: 409,
+          detail: "No annotation sets available. Load GO annotations first.",
+          instance: "/api-proxy/jobs",
+        }),
+        { status: 409, headers: { "content-type": "application/problem+json" } },
+      ),
+    );
+
+    const api = await import("@/lib/api");
+    try {
+      await api.createJob({ operation: "ping", queue_name: "protea.ping" });
+      throw new Error("expected a rejection");
+    } catch (err) {
+      const message = (err as Error).message;
+      expect(message).toBe("No annotation sets available. Load GO annotations first.");
+      // The giveaway that the whole document leaked through.
+      expect(message).not.toContain("/problems/");
+      expect(message).not.toContain("instance");
+    }
+  });
+
+  it("stringifies an error for a human without the class name", async () => {
+    const api = await import("@/lib/api");
+    expect(api.errorText(new api.ApiError("http", 500, "/x", "Something broke."))).toBe(
+      "Something broke.",
+    );
+    expect(String(new api.ApiError("http", 500, "/x", "Something broke."))).toContain("ApiError");
   });
 });

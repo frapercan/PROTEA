@@ -95,6 +95,27 @@ export function publicBaseUrl(): string {
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * The one human sentence out of an RFC 9457 problem document.
+ *
+ * The API answers errors as application/problem+json. Rendering the whole
+ * document to a visitor shows them a JSON blob; its `detail` is the
+ * sentence that was written for a person. Returns null when the body is
+ * not a problem document, so the caller keeps its own fallback.
+ */
+function problemDetail(body: string): string | null {
+  if (!body.trimStart().startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(body) as { detail?: unknown; title?: unknown };
+    for (const field of [parsed.detail, parsed.title]) {
+      if (typeof field === "string" && field.trim()) return field;
+    }
+  } catch {
+    // Not JSON after all; the caller falls back to the raw body.
+  }
+  return null;
+}
+
 // Merge ``Authorization: Bearer <token>`` onto every request when the
 // ``protea_session`` cookie is present.
 //
@@ -147,27 +168,41 @@ async function http<T>(path: string, init?: RequestInit & { cacheable?: boolean 
     // could not tell "no data" from "not signed in" or "not permitted".
     // Surface a typed error the boundary can explain and act on. Reads
     // and writes both throw; the message is written for the technician.
+    // Writes used to skip these two branches and fall through to the raw
+    // body below, so an anonymous visitor who pressed a Launch Job button
+    // was shown, verbatim and for three and a half seconds,
+    //
+    //     ApiError: {"type":"/problems/unauthorized","title":"Unauthorized",
+    //                "status":401,"detail":"Missing API key or bearer token",
+    //                "instance":"/api-proxy/jobs"}
+    //
+    // Measured on the live site 2026-10-07 on /instrument/proteins?tab=insert
+    // and three sibling pages. A reader is owed a sentence, not a document.
     const isRead = !MUTATING_METHODS.has(method);
-    if (isRead && res.status === 401) {
+    if (res.status === 401) {
       throw new ApiError(
         "unauthorized",
         401,
         path,
-        "You are not signed in, so the server withheld this data. Sign in and retry.",
+        isRead
+          ? "You are not signed in, so the server withheld this data. Sign in and retry."
+          : "You are not signed in, so this was not submitted. Sign in and retry.",
       );
     }
-    if (isRead && res.status === 403) {
+    if (res.status === 403) {
       throw new ApiError(
         "forbidden",
         403,
         path,
-        "Your account is not permitted to read this. An administrator has to grant the required role.",
+        isRead
+          ? "Your account is not permitted to read this. An administrator has to grant the required role."
+          : "Your account is not permitted to do this. An administrator has to grant the required role.",
       );
     }
     const body = await res.text();
-    const msg = body.trimStart().startsWith("<")
+    const msg = problemDetail(body) ?? (body.trimStart().startsWith("<")
       ? `HTTP ${res.status} ${res.statusText}`
-      : body;
+      : body);
     const kind: ApiErrorKind =
       res.status === 401 ? "unauthorized" : res.status === 403 ? "forbidden" : "http";
     throw new ApiError(kind, res.status, path, msg || `HTTP ${res.status} ${res.statusText}`);
@@ -1790,4 +1825,16 @@ export function getFeatureRegistry() {
   // never be masked by a stale-if-error copy that hides that the backend is
   // down. The throwing `http` helper does the rest.
   return http<FeatureRegistry>(`/features/registry`);
+}
+
+/**
+ * What to show a person when a request failed.
+ *
+ * `String(err)` on an Error yields "ApiError: ..." — the class name,
+ * leaked into the user interface. Twenty-four call sites did that, and
+ * with the raw problem+json body behind it the result was a JSON
+ * document prefixed by a JavaScript class name, in a red toast.
+ */
+export function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
