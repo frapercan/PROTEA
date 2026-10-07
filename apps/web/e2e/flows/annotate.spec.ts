@@ -210,7 +210,12 @@ test.describe("annotate, predictor paused", () => {
     // The operator-facing 409 body must not reach the reader.
     await expect(page.getByText(/Load GO annotations first/i)).toHaveCount(0);
     await expect(page.getByRole("link", { name: /Explore the API/i })).toBeVisible();
-    // And no sequence box, so there is nothing to submit.
-    await expect(page.getByRole("textbox")).toHaveCount(0);
+    // The sequence box STAYS, disabled. This assertion said toHaveCount(0)
+    // until CI caught it: it was written while the paused state replaced
+    // the form, and when the form came back the unit test was updated and
+    // this one was not. Showing the tool disabled is the contract.
+    const box = page.getByRole("textbox");
+    await expect(box).toHaveCount(1);
+    await expect(box).toBeDisabled();
   });
 });
