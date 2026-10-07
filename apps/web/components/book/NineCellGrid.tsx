@@ -24,6 +24,7 @@ export function NineCellGrid({
   carriedLabel,
   frontierLabel,
   explainer,
+  scrollHint,
 }: {
   frameCaption: string;
   italicLine: string;
@@ -33,9 +34,16 @@ export function NineCellGrid({
   carriedLabel: string;
   frontierLabel: string;
   explainer: string;
+  scrollHint: string;
 }) {
   return (
     <figure className="m-0">
+      {/* The table is wider than a phone and always has been: at 390px the
+          CC column sits off-screen at x=475, and overflow-x-auto scrolls
+          but gives no sign that there is anything to scroll to. An
+          external audit on 2026-10-07 read it as a two-column board.
+          The hint is shown only where the overflow actually happens. */}
+      <p className="mb-2 text-[11px] text-[var(--subtle)] sm:hidden">{scrollHint}</p>
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-right font-mono tabular-nums">
           <caption className="sr-only">{frameCaption}</caption>

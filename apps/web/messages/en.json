@@ -198,7 +198,8 @@
     "cellCarried": "carried",
     "cellFrontier": "frontier",
     "boardExplainer": "Positions are from the sealed board, which is an external evaluation of a submitted container and does not move. The figures behind them are withdrawn while the campaign recomputes, so each cell names which side of the frontier it is on and not by how much.",
-    "argumentInEnglish": ""
+    "argumentInEnglish": "",
+    "boardScrollHint": "The table scrolls sideways: MF, BP and CC."
   },
   "score": {
     "eyebrow": "Chapter zero",

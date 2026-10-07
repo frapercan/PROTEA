@@ -323,6 +323,7 @@ export default async function ArgumentPage() {
             carriedLabel={t("cellCarried")}
             frontierLabel={t("cellFrontier")}
             explainer={t("boardExplainer")}
+            scrollHint={t("boardScrollHint")}
           />
 
         <p className="mt-8 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">

@@ -199,7 +199,8 @@
     "cellCarried": "gewonnen",
     "cellFrontier": "Grenze",
     "boardExplainer": "Die Positionen stammen vom versiegelten Board, einer externen Auswertung eines eingereichten Containers, und sie bewegen sich nicht. Die Zahlen dahinter sind zurückgezogen, während die Kampagne sie neu berechnet, also nennt jede Zelle, auf welcher Seite der Grenze sie liegt, und nicht um wie viel.",
-    "argumentInEnglish": "Die folgende wissenschaftliche Argumentation wird auf Englisch veröffentlicht, so wie sie geschrieben wurde. Eine Übersetzung würde gemessene Aussagen verändern, und das geschieht nicht leichtfertig."
+    "argumentInEnglish": "Die folgende wissenschaftliche Argumentation wird auf Englisch veröffentlicht, so wie sie geschrieben wurde. Eine Übersetzung würde gemessene Aussagen verändern, und das geschieht nicht leichtfertig.",
+    "boardScrollHint": "Die Tabelle lässt sich seitlich scrollen: MF, BP und CC."
   },
   "score": {
     "eyebrow": "Chapter zero",
