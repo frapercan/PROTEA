@@ -380,7 +380,7 @@ export default function BenchmarkPage() {
           })}
         >
           <QuietLink href={`/${locale}/instrument/jobs`}>{t("awaitingJobs")}</QuietLink>
-          <QuietLink href={`/${locale}/instrument/graph`}>{t("awaitingGraph")}</QuietLink>
+          <QuietLink href={`/${locale}/instrument`}>{t("awaitingGraph")}</QuietLink>
         </AwaitingData>
       </div>
     );

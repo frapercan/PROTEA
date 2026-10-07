@@ -117,6 +117,19 @@ export default async function ArgumentPage() {
               </a>
             ),
           })}
+          {AUTHOR.orcid ? (
+            <>
+              {" "}
+              <a
+                href={`https://orcid.org/${AUTHOR.orcid}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+              >
+                ORCID
+              </a>
+            </>
+          ) : null}
         </p>
         <p className="mt-6 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
           {t("welcomeBody")}
@@ -199,10 +212,11 @@ export default async function ArgumentPage() {
         </dl>
 
         <div className="mt-9 flex flex-wrap gap-x-7 gap-y-3 border-t border-[var(--border)] pt-6">
-          <QuietLink href={`/${locale}/instrument/benchmark`}>{t("openInstrument")}</QuietLink>
+          <QuietLink href={`/${locale}/instrument`}>{t("openInstrument")}</QuietLink>
           <QuietLink href={`/${locale}/annotate`}>{t("annotate")}</QuietLink>
           <QuietLink href={LINKS.repo} external>{t("readTheCode")}</QuietLink>
           <QuietLink href="/thesis.pdf">{t("thesisPdf")}</QuietLink>
+          <QuietLink href={`/${locale}?policy=1`}>{t("termsAndPrivacy")}</QuietLink>
         </div>
 
         <p className="mt-9 border-l-2 border-[var(--border-strong)] pl-4 text-[13.5px] leading-relaxed text-[var(--subtle)]">

@@ -44,6 +44,7 @@ import {
 import { publicBaseUrl } from "@/lib/api";
 import { useHasRole, useIsAuthenticated, useRole } from "@/lib/useRole";
 import { hasRole, type Role } from "@/lib/auth";
+import { DATA_SURFACES_HAVE_DATA, LINKS } from "@/lib/campaign";
 
 /**
  * Primary navigation for PROTEA, rendered as a LEFT SIDEBAR rail.
@@ -82,6 +83,12 @@ type NavItem = {
    * anonymous visitor is shown a link that cannot work.
    */
   minRole?: Role;
+  /**
+   * Hidden while the corpus is empty. The surface works; it would simply
+   * have nothing in it, and a rail full of those reads as a broken
+   * project rather than an unfinished dataset.
+   */
+  needsData?: boolean;
 };
 
 type NavGroup = {
@@ -324,12 +331,12 @@ export function Sidebar({
       hint: t("pipelineHint"),
       icon: Workflow,
       items: [
-        { href: "/instrument/embeddings", label: t("embeddings"), hint: "PLM embedding configs · ESM-2 · ESM3c · ProstT5 · Ankh", icon: Atom },
-        { href: "/instrument/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO", icon: Tags },
-        { href: "/instrument/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB", icon: Sliders },
-        { href: "/instrument/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB", icon: ArrowUpDown },
-        { href: "/instrument/datasets", label: t("datasets"), hint: "Frozen reranker dumps and export dispatcher", icon: Archive },
-        { href: "/feature-registry", label: t("featureRegistry"), hint: "What every reranker feature means, who produces it, and whether it is live", icon: ListTree },
+        { href: "/instrument/embeddings", label: t("embeddings"), hint: "PLM embedding configs · ESM-2 · ESM3c · ProstT5 · Ankh", icon: Atom , needsData: true },
+        { href: "/instrument/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO", icon: Tags , needsData: true },
+        { href: "/instrument/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB", icon: Sliders , needsData: true },
+        { href: "/instrument/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB", icon: ArrowUpDown , needsData: true },
+        { href: "/instrument/datasets", label: t("datasets"), hint: "Frozen reranker dumps and export dispatcher", icon: Archive , needsData: true },
+        { href: "/feature-registry", label: t("featureRegistry"), hint: "What every reranker feature means, who produces it, and whether it is live", icon: ListTree , needsData: true },
       ],
     },
     {
@@ -339,8 +346,8 @@ export function Sidebar({
       icon: Database,
       items: [
         { href: "/instrument/proteins", label: t("proteins"), hint: "UniProt entries · Swiss-Prot + TrEMBL, isoforms", icon: Dna },
-        { href: "/instrument/annotations", label: t("annotations"), hint: "GO ontology snapshots and ground-truth GAF / QuickGO sets", icon: Tag },
-        { href: "/instrument/query-sets", label: t("querySets"), hint: "FASTA uploads grouped for batch runs", icon: FolderOpen },
+        { href: "/instrument/annotations", label: t("annotations"), hint: "GO ontology snapshots and ground-truth GAF / QuickGO sets", icon: Tag , needsData: true },
+        { href: "/instrument/query-sets", label: t("querySets"), hint: "FASTA uploads grouped for batch runs", icon: FolderOpen , needsData: true },
       ],
     },
     {
@@ -349,9 +356,9 @@ export function Sidebar({
       hint: t("resultsHint"),
       icon: BarChart3,
       items: [
-        { href: "/instrument/graph", label: t("graph"), hint: "Every decision as a node, with the strength of the evidence behind it", icon: Workflow },
-        { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
-        { href: "/instrument/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge },
+        { href: "/instrument/graph", label: t("graph"), hint: "Every decision as a node, with the strength of the evidence behind it", icon: Workflow , needsData: true },
+        { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 , needsData: true },
+        { href: "/instrument/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge , needsData: true },
       ],
     },
     {
@@ -373,6 +380,7 @@ export function Sidebar({
         { href: "/sphinx/", label: t("sphinx"), hint: t("sphinxHint"), external: true, icon: Book },
         { href: swaggerHref, label: t("swagger"), hint: t("swaggerHint"), external: true, icon: Braces },
         { href: "/thesis.pdf", label: t("thesis"), hint: t("thesisHint"), external: true, icon: GraduationCap },
+        { href: LINKS.repo, label: t("code"), hint: t("codeHint"), external: true, icon: Braces },
         { href: "/support", label: t("support"), hint: t("supportHint"), icon: ThumbsUp },
       ],
     },
@@ -423,7 +431,9 @@ export function Sidebar({
   const visibleGroups: NavGroup[] = NAV_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter(
-      (item) => item.minRole === undefined || hasRole(role, item.minRole),
+      (item) =>
+        (item.minRole === undefined || hasRole(role, item.minRole)) &&
+        (!item.needsData || DATA_SURFACES_HAVE_DATA),
     ),
   })).filter((group) => group.items.length > 0);
 

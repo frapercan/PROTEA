@@ -15,6 +15,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
+import { DATA_SURFACES_HAVE_DATA } from "@/lib/campaign";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/en" }));
 
@@ -87,10 +88,15 @@ describe("Sidebar nav", () => {
     expect(repeated).toEqual([]);
   });
 
-  it("offers the experiment graph exactly once", () => {
+  it("never offers the same destination twice, graph included", () => {
     render(<Sidebar />);
+    // The original defect was two identical rows for /instrument/graph.
+    // The route is hidden while the corpus is empty, so assert the thing
+    // that must hold in BOTH states rather than a count that moves with
+    // a flag: at most one.
     const graph = railHrefs().filter((h) => h.endsWith("/instrument/graph"));
-    expect(graph).toEqual(["/en/instrument/graph"]);
+    expect(graph.length).toBeLessThanOrEqual(1);
+    if (DATA_SURFACES_HAVE_DATA) expect(graph).toEqual(["/en/instrument/graph"]);
   });
 
   it("hides the operator-gated maintenance page from an anonymous visitor", () => {
@@ -116,13 +122,30 @@ describe("Sidebar nav", () => {
     expect(cta.getAttribute("href")).toBe("/en/annotate");
   });
 
-  it("keeps the public instrument pages visible to an anonymous visitor", () => {
+  it("keeps the surfaces that hold real data visible to an anonymous visitor", () => {
     render(<Sidebar />);
     const hrefs = railHrefs();
-    // The middleware is permissive by design; gating the rail must not
-    // quietly hide what a visitor is meant to be able to explore.
-    for (const open of ["/instrument/benchmark", "/instrument/proteins", "/instrument/stack"]) {
-      expect(hrefs.some((h) => h.endsWith(open))).toBe(true);
+    // The middleware is permissive by design, and hiding a surface
+    // because it is EMPTY must not spread to the ones that are not.
+    // Proteins has 754,862 rows, jobs is the live campaign and stack is
+    // the architecture a technical reader comes for; none of those may
+    // disappear with the data flag.
+    for (const open of ["/instrument/proteins", "/instrument/jobs", "/instrument/stack"]) {
+      expect(hrefs.some((h) => h.endsWith(open)), open).toBe(true);
     }
+  });
+
+  it("hides the result surfaces only while there are no results", () => {
+    render(<Sidebar />);
+    const hrefs = railHrefs();
+    const awaiting = ["/instrument/benchmark", "/instrument/evaluation", "/instrument/embeddings"];
+    for (const route of awaiting) {
+      expect(hrefs.some((h) => h.endsWith(route)), route).toBe(DATA_SURFACES_HAVE_DATA);
+    }
+  });
+
+  it("offers the code, which needs no data at all", () => {
+    render(<Sidebar />);
+    expect(railHrefs().some((h) => h === "https://github.com/frapercan/PROTEA")).toBe(true);
   });
 });

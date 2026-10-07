@@ -31,6 +31,21 @@
 export const LIVE_ANNOTATION_AVAILABLE = false;
 
 /**
+ * Whether the surfaces that exist to display results have results.
+ *
+ * Separate from the predictor: a page can be perfectly able to run and
+ * still have an empty table. While this is false the navigation stops
+ * offering the ten surfaces whose only content would be an empty state,
+ * because an external audit on 2026-10-07 found that a visitor opening
+ * them met admin buttons over blank tables and read the whole project as
+ * broken. They are not deleted and the routes still work; they come back
+ * with this flag.
+ *
+ * Flip it with the same evidence as the other one: rows, not job status.
+ */
+export const DATA_SURFACES_HAVE_DATA = false;
+
+/**
  * The ingest that is running instead, as a dated snapshot.
  *
  * These are true and checkable, and they describe engineering rather than
@@ -144,4 +159,14 @@ export const PLATFORM = {
  */
 export const AUTHOR = {
   name: "Francisco Miguel Pérez Canales",
+  /**
+   * ORCID, once it is known.
+   *
+   * The only ORCID-shaped string anywhere in these repositories is the
+   * placeholder 0000-0000-0000-0000, so it was not written here as a
+   * guess: a wrong ORCID on a public page points a reader at another
+   * researcher. Supplied by the author and checked against the public
+   * record, which reads "Francisco M. Perez-Canales".
+   */
+  orcid: "0009-0008-6422-2303" as string | null,
 } as const;

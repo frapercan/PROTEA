@@ -279,7 +279,7 @@ export function AnnotateForm() {
             <QuietLink href={`${publicBaseUrl()}/docs`} external>
               {t("annotatePausedApi")}
             </QuietLink>
-            <QuietLink href={`/${locale}/instrument/graph`}>
+            <QuietLink href={`/${locale}/instrument/jobs`}>
               {t("annotatePausedInstrument")}
             </QuietLink>
           </AwaitingData>
