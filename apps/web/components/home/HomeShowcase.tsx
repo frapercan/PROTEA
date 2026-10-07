@@ -1,3 +1,4 @@
+import { formatCount } from "@/lib/format";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { getShowcase, type PerTaskAggregate, type ShowcaseData } from "@/lib/api";
@@ -438,7 +439,7 @@ export async function HomeShowcase() {
                       {t(STAGE_I18N[stage.name] as never)}
                     </span>
                     <span className="text-[11px] text-slate-600 tabular-nums mt-0.5 font-medium">
-                      {stage.count.toLocaleString()}
+                      {formatCount(stage.count)}
                     </span>
                     <span className="text-[10px] text-slate-500 leading-snug mt-1.5 line-clamp-2">
                       {t(STAGE_DESC_I18N[stage.name] as never)}
@@ -485,7 +486,7 @@ export async function HomeShowcase() {
                 />
                 <div className="relative">
                   <div className="text-3xl sm:text-4xl font-bold text-slate-900 tabular-nums tracking-tight">
-                    {count.toLocaleString()}
+                    {formatCount(count)}
                   </div>
                   <div className="text-xs uppercase tracking-[0.14em] text-slate-500 mt-2 font-semibold">
                     {t(key as never)}

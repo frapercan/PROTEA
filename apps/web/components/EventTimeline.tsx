@@ -1,5 +1,7 @@
 "use client";
 
+import { formatTime } from "@/lib/format";
+
 import { Fragment } from "react";
 import { JobEvent } from "@/lib/api";
 import { useTranslations } from "next-intl";
@@ -12,7 +14,7 @@ const LEVEL_STYLES: Record<string, string> = {
 
 function formatTs(ts: string) {
   try {
-    return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return formatTime(ts);
   } catch {
     return ts;
   }

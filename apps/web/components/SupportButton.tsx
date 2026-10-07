@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount, formatDate } from "@/lib/format";
+
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { baseUrl } from "@/lib/api";
@@ -78,7 +80,7 @@ export function SupportButton() {
           onClick={() => { setOpen((v) => !v); setSubmitted(false); }}
           aria-label={
             count !== null
-              ? `${t("support")} (${count.toLocaleString()})`
+              ? `${t("support")} (${formatCount(count)})`
               : t("support")
           }
           aria-haspopup="dialog"
@@ -92,7 +94,7 @@ export function SupportButton() {
               aria-hidden="true"
               className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] font-bold text-blue-700 tabular-nums"
             >
-              {count.toLocaleString()}
+              {formatCount(count)}
             </span>
           )}
         </button>
@@ -150,7 +152,7 @@ export function SupportButton() {
               </div>
               {data.comments.map((c) => (
                 <div key={c.id} className="text-xs text-slate-600 leading-relaxed">
-                  <span className="text-slate-600 mr-1">{new Date(c.created_at).toLocaleDateString()}</span>
+                  <span className="text-slate-600 mr-1">{formatDate(c.created_at)}</span>
                   {c.comment}
                 </div>
               ))}

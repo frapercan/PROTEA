@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDateTime } from "@/lib/format";
+
 // FARM-UI.2 detail view. One page per agent-farm task, sourced from the
 // farm-api sidecar. Surfaces the four bits the operator usually wants:
 //   1. Status + identity (badge, agent name, kind, worktree path).
@@ -34,10 +36,7 @@ import { useHasRole } from "@/lib/useRole";
 function formatDate(iso?: string | null) {
   if (!iso) return "-";
   try {
-    return new Date(iso).toLocaleString([], {
-      dateStyle: "short",
-      timeStyle: "medium",
-    });
+    return formatDateTime(iso);
   } catch {
     return iso;
   }

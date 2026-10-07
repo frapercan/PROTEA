@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount, formatDate, formatDateTime } from "@/lib/format";
+
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { ContextBanner } from "@/components/ContextBanner";
@@ -103,8 +105,8 @@ const deleteEvaluationSet = (evalId: string) =>
 function setLabel(s: AnnotationSet) {
   const date = s.source_published_at
     ? new Date(s.source_published_at).toISOString().slice(0, 10)
-    : new Date(s.created_at).toLocaleDateString();
-  const count = s.annotation_count != null ? ` · ${s.annotation_count.toLocaleString()} ann.` : "";
+    : formatDate(s.created_at);
+  const count = s.annotation_count != null ? ` · ${formatCount(s.annotation_count)} ann.` : "";
   const version = s.source_version != null ? `v${s.source_version}` : "?";
   return `[${s.source.toUpperCase()}] ${version} · ${date}${count}`;
 }
@@ -114,13 +116,13 @@ function predLabel(p: PredictionSet) {
   if (p.embedding_config_name) parts.push(p.embedding_config_name);
   if (p.annotation_set_label) parts.push(p.annotation_set_label);
   parts.push(`k=${p.limit_per_entry}`);
-  if (p.prediction_count != null) parts.push(`${p.prediction_count.toLocaleString()} preds`);
-  const date = new Date(p.created_at).toLocaleDateString();
+  if (p.prediction_count != null) parts.push(`${formatCount(p.prediction_count)} preds`);
+  const date = formatDate(p.created_at);
   return `${parts.join(" · ")} · ${date} (${p.id.slice(0, 8)}…)`;
 }
 
 function evalLabel(e: EvaluationSet, annotationSets: AnnotationSet[]) {
-  const date = new Date(e.created_at).toLocaleDateString();
+  const date = formatDate(e.created_at);
   const oldSet = annotationSets.find((a) => a.id === e.old_annotation_set_id);
   const newSet = annotationSets.find((a) => a.id === e.new_annotation_set_id);
   const delta = e.stats.delta_proteins ?? "?";
@@ -143,7 +145,7 @@ function StatBadge({ label, value, tooltip }: { label: string; value: number | u
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-center">
       <div className="text-lg font-semibold text-slate-900">
-        {value != null ? value.toLocaleString() : "—"}
+        {value != null ? formatCount(value) : "—"}
       </div>
       <div className="text-[13px] text-slate-500 mt-0.5">
         {label}
@@ -648,7 +650,7 @@ function EvaluationSetCard({
                           <div className="flex items-center gap-0.5">
                             <span className="font-medium text-slate-700">{t("evaluationSetCard.predictionSet")} </span>
                             {pred
-                              ? <span title={r.prediction_set_id}>{r.prediction_set_id.slice(0, 8)}… · {new Date(pred.created_at).toLocaleDateString()}{pred.prediction_count != null ? ` · ${pred.prediction_count.toLocaleString()} preds.` : ""}</span>
+                              ? <span title={r.prediction_set_id}>{r.prediction_set_id.slice(0, 8)}… · {formatDate(pred.created_at)}{pred.prediction_count != null ? ` · ${formatCount(pred.prediction_count)} preds.` : ""}</span>
                               : <span className="font-mono">{r.prediction_set_id.slice(0, 8)}…</span>
                             }
                             {pred && (
@@ -720,7 +722,7 @@ function EvaluationSetCard({
                               </RichTooltip>
                             )}
                           </div>
-                          <div className="text-slate-600">{new Date(r.created_at).toLocaleString()}</div>
+                          <div className="text-slate-600">{formatDateTime(r.created_at)}</div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <a

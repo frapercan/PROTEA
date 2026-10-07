@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount, formatDateTime } from "@/lib/format";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
@@ -54,7 +56,7 @@ type Tab = "configs" | "compute";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "medium" });
+  return formatDateTime(iso);
 }
 
 function shortId(id: string) {
@@ -179,7 +181,7 @@ const tToast = useTranslations("toasts");
     const cfg = configs.find((c) => c.id === id);
     const count = cfg?.embedding_count ?? 0;
     const msg = count > 0
-      ? t("configsTab.deleteConfirm", { count: count.toLocaleString() })
+      ? t("configsTab.deleteConfirm", { count: formatCount(count) })
       : t("configsTab.deleteConfirmNoEmbeddings");
     if (!confirm(msg)) return;
     try {

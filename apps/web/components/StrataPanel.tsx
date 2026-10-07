@@ -18,6 +18,7 @@
 
 "use client";
 
+import { formatCount } from "@/lib/format";
 import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 
@@ -88,7 +89,7 @@ function SettingTable({
           {CATEGORY_NAME[setting] ?? setting}
         </h4>
         <span className="text-[11px] text-slate-500">
-          {cov.total.toLocaleString()} proteins in {cov.cells} strata
+          {formatCount(cov.total)} proteins in {cov.cells} strata
           {cov.withheld > 0
             ? `, ${((cov.withheld / cov.total) * 100).toFixed(1)}% withheld across ${cov.withheldCells} thin cells`
             : ", every cell above the floor"}
@@ -125,7 +126,7 @@ function SettingTable({
                   </td>
                 ))}
                 <td className={`${TD} text-right text-slate-500`}>
-                  {cell.n_proteins.toLocaleString()}
+                  {formatCount(cell.n_proteins)}
                 </td>
                 <td
                   className={`${TD} text-right ${

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDate } from "@/lib/format";
+
 /**
  * Scoring Configs management page.
  *
@@ -215,7 +217,7 @@ function ConfigCard({
       </div>
 
       <p className="mt-2 text-xs text-slate-300">
-        Created {new Date(config.created_at).toLocaleDateString()}
+        Created {formatDate(config.created_at)}
       </p>
     </div>
   );

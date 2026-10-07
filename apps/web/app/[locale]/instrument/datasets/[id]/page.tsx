@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
@@ -86,7 +88,7 @@ function AspectDonut({ stats }: { stats: Record<string, { annotations: number }>
           />
         ))}
         <text x={CX} y={CY} textAnchor="middle" dominantBaseline="middle" className="text-[11px] font-mono fill-slate-600" fontSize={11}>
-          {total.toLocaleString()}
+          {formatCount(total)}
         </text>
       </svg>
       <ul className="space-y-1">
@@ -308,8 +310,8 @@ export default function DatasetDetail({ params }: { params: Promise<{ id: string
         {/* Stat strip */}
         <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <Stat label={tList("cols.k")} value={String(dataset.k)} />
-          <Stat label={tList("cols.nTrain")} value={dataset.n_train_rows.toLocaleString()} />
-          <Stat label={tList("cols.nEval")} value={dataset.n_eval_rows.toLocaleString()} />
+          <Stat label={tList("cols.nTrain")} value={formatCount(dataset.n_train_rows)} />
+          <Stat label={tList("cols.nEval")} value={formatCount(dataset.n_eval_rows)} />
           <Stat label={t("annotationSource")} value={dataset.annotation_source} />
         </section>
 
@@ -475,13 +477,13 @@ export default function DatasetDetail({ params }: { params: Promise<{ id: string
                           </span>
                         </td>
                         <td className="px-4 py-2 text-right font-mono text-slate-800">
-                          {s ? s.proteins.toLocaleString() : <span className="text-slate-300">—</span>}
+                          {s ? formatCount(s.proteins) : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-4 py-2 text-right font-mono text-slate-800">
-                          {s ? s.go_terms.toLocaleString() : <span className="text-slate-300">—</span>}
+                          {s ? formatCount(s.go_terms) : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-4 py-2 text-right font-mono text-slate-800">
-                          {s ? s.annotations.toLocaleString() : <span className="text-slate-300">—</span>}
+                          {s ? formatCount(s.annotations) : <span className="text-slate-300">—</span>}
                         </td>
                       </tr>
                     );
@@ -491,9 +493,9 @@ export default function DatasetDetail({ params }: { params: Promise<{ id: string
                     return (
                       <tr key={asp} className="hover:bg-slate-50">
                         <td className="px-4 py-2 font-mono text-xs text-slate-600">{asp}</td>
-                        <td className="px-4 py-2 text-right font-mono text-slate-800">{s.proteins.toLocaleString()}</td>
-                        <td className="px-4 py-2 text-right font-mono text-slate-800">{s.go_terms.toLocaleString()}</td>
-                        <td className="px-4 py-2 text-right font-mono text-slate-800">{s.annotations.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-right font-mono text-slate-800">{formatCount(s.proteins)}</td>
+                        <td className="px-4 py-2 text-right font-mono text-slate-800">{formatCount(s.go_terms)}</td>
+                        <td className="px-4 py-2 text-right font-mono text-slate-800">{formatCount(s.annotations)}</td>
                       </tr>
                     );
                   })}
