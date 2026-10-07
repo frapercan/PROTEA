@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
-import { ARGUMENT_RECORD, CAMPAIGN_STATUS, EXTERNAL_RESULT, LINKS } from "@/lib/campaign";
+import { ARGUMENT_RECORD, CAMPAIGN_STATUS, EXTERNAL_RESULT, LINKS, PLATFORM } from "@/lib/campaign";
 import { QuietLink } from "@/components/AwaitingData";
 import { NineCellGrid } from "@/components/book/NineCellGrid";
 import { ReceiptFootnote } from "@/components/book/ReceiptFootnote";
@@ -48,6 +48,19 @@ export default async function ArgumentPage() {
           the argument and the wrong one for an opening. It keeps every
           word, one section down.
 
+          Three things the first draft of this block got wrong, all of
+          them visible the moment it was on screen:
+
+          - The measure was inconsistent. The h1 and the rule spanned the
+            container while every paragraph stopped at max-w-prose, so
+            the body looked narrower than everything around it. One
+            measure now, the container's.
+          - The external result was buried third, with less weight than
+            the campaign note below it. It is the strongest and most
+            checkable claim on the page, so it leads.
+          - The engineering figures were inside prose, where they cannot
+            be scanned. They are a row now.
+
           Typeset in this page's own language: stone family, serif body,
           and the understated underlined link it uses everywhere. No
           filled buttons, and no --muted background: --muted is #57534E,
@@ -59,51 +72,93 @@ export default async function ArgumentPage() {
         <h1 className="mt-6 font-serif text-[1.7rem] font-normal leading-[1.42] tracking-tight text-[var(--foreground)] sm:text-[2.05rem] sm:leading-[1.4]">
           {t("welcomeTitle")}
         </h1>
-        <p className="mt-7 max-w-prose font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
+        <p className="mt-7 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
           {t("welcomeBody")}
         </p>
-        <p className="mt-5 max-w-prose font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
-          {t.rich("welcomeResult", {
-            rank: EXTERNAL_RESULT.rank,
-            teams: EXTERNAL_RESULT.teams,
-            competition: EXTERNAL_RESULT.competition,
-            cafa: (chunks) => (
-              <a
-                href={LINKS.cafaCompetition}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
-              >
-                {chunks}
-              </a>
-            ),
-          })}
-        </p>
-        <p className="mt-5 max-w-prose font-serif text-[17px] leading-relaxed text-[var(--muted)]">
-          {t.rich("welcomeValidation", {
-            evaluator: (chunks) => (
-              <a
-                href={LINKS.evaluator}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
-              >
-                {chunks}
-              </a>
-            ),
-            upstream: (chunks) => (
-              <a
-                href={LINKS.evaluatorUpstream}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
-              >
-                {chunks}
-              </a>
-            ),
-          })}
-        </p>
-        <p className="mt-6 max-w-prose border-l-2 border-[var(--border-strong)] pl-4 text-[14px] leading-relaxed text-[var(--muted)]">
+
+        {/* The result, given the weight it earns: external, dated,
+            scored by someone else, and checkable in one click. */}
+        <figure className="mt-9 border-t border-[var(--border)] pt-6">
+          <figcaption className="protea-eyebrow text-[11px] uppercase tracking-wide text-[var(--subtle)]">
+            {t("resultLabel")}
+          </figcaption>
+          <p className="mt-3 font-serif text-[1.35rem] leading-snug text-[var(--foreground)] sm:text-[1.5rem]">
+            {t.rich("welcomeResult", {
+              rank: EXTERNAL_RESULT.rank,
+              teams: EXTERNAL_RESULT.teams,
+              competition: EXTERNAL_RESULT.competition,
+              cafa: (chunks) => (
+                <a
+                  href={LINKS.cafaCompetition}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {chunks}
+                </a>
+              ),
+            })}
+          </p>
+          <p className="mt-4 text-[14.5px] leading-relaxed text-[var(--muted)]">
+            {t.rich("welcomeValidation", {
+              lafa: (chunks) => (
+                <a
+                  href={LINKS.lafa}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {chunks}
+                </a>
+              ),
+              evaluator: (chunks) => (
+                <a
+                  href={LINKS.evaluator}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {chunks}
+                </a>
+              ),
+              upstream: (chunks) => (
+                <a
+                  href={LINKS.evaluatorUpstream}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {chunks}
+                </a>
+              ),
+            })}
+          </p>
+        </figure>
+
+        {/* Scannable, because this is what an engineer reads the page
+            for, and every one of them is counted rather than estimated. */}
+        <dl className="mt-9 grid grid-cols-1 gap-x-8 gap-y-5 border-t border-[var(--border)] pt-6 sm:grid-cols-3">
+          {[
+            [t("statApi"), t("statApiValue", { ops: PLATFORM.apiOperations, routes: PLATFORM.apiRoutes })],
+            [t("statTests"), t("statTestsValue", { tests: PLATFORM.backendTests })],
+            [t("statData"), t("statDataValue", { gigabytes: CAMPAIGN_STATUS.gafGigabytes })],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <dt className="protea-eyebrow text-[11px] uppercase tracking-wide text-[var(--subtle)]">
+                {label}
+              </dt>
+              <dd className="mt-1.5 font-serif text-[18px] text-[var(--foreground)]">{value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <div className="mt-9 flex flex-wrap gap-x-7 gap-y-3 border-t border-[var(--border)] pt-6">
+          <QuietLink href={`/${locale}/instrument/benchmark`}>{t("openInstrument")}</QuietLink>
+          <QuietLink href={`/${locale}/annotate`}>{t("annotate")}</QuietLink>
+          <QuietLink href="/thesis.pdf">{t("thesisPdf")}</QuietLink>
+        </div>
+
+        <p className="mt-9 border-l-2 border-[var(--border-strong)] pl-4 text-[13.5px] leading-relaxed text-[var(--subtle)]">
           {t("welcomeCampaign", {
             asOf: CAMPAIGN_STATUS.asOf,
             releases: CAMPAIGN_STATUS.goaReleases,
@@ -111,11 +166,6 @@ export default async function ArgumentPage() {
             proteins: CAMPAIGN_STATUS.proteinsAdmitted,
           })}
         </p>
-        <div className="mt-7 flex flex-wrap gap-x-6 gap-y-2">
-          <QuietLink href={`/${locale}/instrument/benchmark`}>{t("openInstrument")}</QuietLink>
-          <QuietLink href={`/${locale}/annotate`}>{t("annotate")}</QuietLink>
-          <QuietLink href="/thesis.pdf">{t("thesisPdf")}</QuietLink>
-        </div>
       </header>
 
       {/* The argument, published in full and dated. Not a word of the

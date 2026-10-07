@@ -87,11 +87,10 @@ export const ARGUMENT_RECORD = {
  * 2026-10-07. A dead link on a page someone is evaluating is worse than
  * no link, so nothing goes here that has not been fetched.
  *
- * There is deliberately no LAFA link. LAFA is named in the prose because
- * it is what the method is submitted to, but no URL for it was found in
- * this repository and inventing one is not an option.
  */
 export const LINKS = {
+  /** The LAFA benchmark the method is submitted to. Title checked: "CAFA Forever". */
+  lafa: "https://functionbench.net/",
   /** The competition itself. Title checked: "CAFA 6 Protein Function Prediction | Kaggle". */
   cafaCompetition: "https://www.kaggle.com/competitions/cafa-6-protein-function-prediction",
   /** The CAFA project, for a reader who wants to know what CAFA is. */
@@ -102,4 +101,20 @@ export const LINKS = {
   evaluatorDocs: "https://cafaeval-protea.readthedocs.io/",
   /** Upstream, so the provenance of the evaluator is visible too. */
   evaluatorUpstream: "https://github.com/claradepaolis/CAFA-evaluator-PK",
+} as const;
+
+/**
+ * What the platform is, in figures a reader can check.
+ *
+ * Counted on 2026-10-07, not rounded up from memory. The API numbers come
+ * from the live OpenAPI document (117 paths, 136 GET/POST/PUT/PATCH/DELETE
+ * operations). The test count is an AST walk over tests/, counting
+ * functions named test_*, which is why it is 4,495 and not "more than
+ * 4,000". A figure like this is the kind an interviewer checks, so it
+ * is better slightly awkward and true.
+ */
+export const PLATFORM = {
+  apiOperations: 136,
+  apiRoutes: 117,
+  backendTests: 4_495,
 } as const;
