@@ -81,3 +81,25 @@ export const ARGUMENT_RECORD = {
   board: "LAFA",
   frame: "Sep 2025 to Mar 2026",
 } as const;
+
+/**
+ * External links the public page states, each checked to return 200 on
+ * 2026-10-07. A dead link on a page someone is evaluating is worse than
+ * no link, so nothing goes here that has not been fetched.
+ *
+ * There is deliberately no LAFA link. LAFA is named in the prose because
+ * it is what the method is submitted to, but no URL for it was found in
+ * this repository and inventing one is not an option.
+ */
+export const LINKS = {
+  /** The competition itself. Title checked: "CAFA 6 Protein Function Prediction | Kaggle". */
+  cafaCompetition: "https://www.kaggle.com/competitions/cafa-6-protein-function-prediction",
+  /** The CAFA project, for a reader who wants to know what CAFA is. */
+  cafaProject: "https://biofunctionprediction.org/cafa/",
+  /** Our deployment of the official evaluator, which is what makes the
+   *  numbers on this site reproducible by a third party. */
+  evaluator: "https://github.com/frapercan/cafaeval-protea",
+  evaluatorDocs: "https://cafaeval-protea.readthedocs.io/",
+  /** Upstream, so the provenance of the evaluator is visible too. */
+  evaluatorUpstream: "https://github.com/claradepaolis/CAFA-evaluator-PK",
+} as const;

@@ -7,6 +7,8 @@ import { useTranslations } from "next-intl";
 import { BenchmarkHeatmap } from "@/components/BenchmarkHeatmap";
 import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import { Skeleton } from "@/components/Skeleton";
+import { AwaitingData, QuietLink } from "@/components/AwaitingData";
+import { CAMPAIGN_STATUS } from "@/lib/campaign";
 import { Tooltip } from "@/components/Tooltip";
 import {
   cellKey,
@@ -347,6 +349,38 @@ export default function BenchmarkPage() {
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
           <p className="text-red-800 text-sm">{error}</p>
         </div>
+      </div>
+    );
+  }
+
+  // Loaded, and genuinely nothing to show. This branch has to come
+  // BEFORE the loading one, and distinguishing the two is the whole
+  // point: with the corpus empty the matrix returns
+  // {"rows":[],"stages":[]}, so `stage` can never resolve from
+  // matrix.stages, and the loading branch below held for ever. A tool
+  // with no data is not a tool that is loading, and it is not a tool
+  // that is broken, but all three look the same behind a skeleton.
+  if (
+    embeddings !== null &&
+    matrix !== null &&
+    matrix.stages.length === 0 &&
+    matrix.rows.length === 0
+  ) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
+        <AwaitingData
+          title={t("awaitingTitle")}
+          body={t("awaitingBody")}
+          detail={t("awaitingDetail", {
+            asOf: CAMPAIGN_STATUS.asOf,
+            releases: CAMPAIGN_STATUS.goaReleases,
+            gigabytes: CAMPAIGN_STATUS.gafGigabytes,
+            proteins: CAMPAIGN_STATUS.proteinsAdmitted,
+          })}
+        >
+          <QuietLink href={`/${locale}/instrument/jobs`}>{t("awaitingJobs")}</QuietLink>
+          <QuietLink href={`/${locale}/instrument/graph`}>{t("awaitingGraph")}</QuietLink>
+        </AwaitingData>
       </div>
     );
   }

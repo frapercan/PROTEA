@@ -57,12 +57,25 @@ describe("AnnotateForm, predictor paused", () => {
     expect(LIVE_ANNOTATION_AVAILABLE).toBe(false);
   });
 
-  it("explains itself instead of offering a submit that fails", () => {
+  it("keeps the tool on screen and says why it cannot run", () => {
     render(<AnnotateForm />);
     expect(screen.getByText("annotatePausedTitle")).toBeInTheDocument();
     expect(screen.getByText("annotatePausedBody")).toBeInTheDocument();
-    // No sequence box, so nothing to submit and no 409 to surface.
-    expect(screen.queryByRole("textbox")).toBeNull();
+    // The form STAYS. Hiding it would hide a tool that is built and
+    // works; what it owes the reader is the reason it cannot run, not an
+    // empty space where it used to be.
+    const box = screen.getByRole("textbox");
+    expect(box).toBeInTheDocument();
+    expect(box).toBeDisabled();
+  });
+
+  it("cannot be submitted, so the 409 is never reached", () => {
+    render(<AnnotateForm />);
+    const submits = screen
+      .getAllByRole("button")
+      .filter((b) => (b as HTMLButtonElement).type === "submit");
+    expect(submits.length).toBeGreaterThan(0);
+    for (const b of submits) expect(b).toBeDisabled();
   });
 
   it("makes no request while paused", () => {
@@ -76,6 +89,6 @@ describe("AnnotateForm, predictor paused", () => {
     const api = screen.getByRole("link", { name: "annotatePausedApi" });
     expect(api.getAttribute("href")).toBe("/api-proxy/docs");
     const instrument = screen.getByRole("link", { name: "annotatePausedInstrument" });
-    expect(instrument.getAttribute("href")).toBe("/en/instrument/benchmark");
+    expect(instrument.getAttribute("href")).toBe("/en/instrument/graph");
   });
 });

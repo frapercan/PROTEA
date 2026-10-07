@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
-import { ARGUMENT_RECORD, CAMPAIGN_STATUS, EXTERNAL_RESULT } from "@/lib/campaign";
+import { ARGUMENT_RECORD, CAMPAIGN_STATUS, EXTERNAL_RESULT, LINKS } from "@/lib/campaign";
+import { QuietLink } from "@/components/AwaitingData";
 import { NineCellGrid } from "@/components/book/NineCellGrid";
 import { ReceiptFootnote } from "@/components/book/ReceiptFootnote";
 import { CHAPTER_ZERO, HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
@@ -45,25 +46,64 @@ export default async function ArgumentPage() {
           thing a visitor read was "a taxonomy of orthogonal evidence
           combined by a calibrated fusion". It is the right sentence for
           the argument and the wrong one for an opening. It keeps every
-          word, one section down. */}
+          word, one section down.
+
+          Typeset in this page's own language: stone family, serif body,
+          and the understated underlined link it uses everywhere. No
+          filled buttons, and no --muted background: --muted is #57534E,
+          a TEXT colour. */}
       <header className="pt-2 sm:pt-6">
         <p className="protea-eyebrow text-[12px] uppercase tracking-wide text-[var(--primary)]">
           {t("eyebrow")}
         </p>
-        <h1 className="mt-6 text-[1.65rem] font-semibold leading-[1.25] tracking-tight text-[var(--foreground)] sm:text-[2.1rem]">
+        <h1 className="mt-6 font-serif text-[1.7rem] font-normal leading-[1.42] tracking-tight text-[var(--foreground)] sm:text-[2.05rem] sm:leading-[1.4]">
           {t("welcomeTitle")}
         </h1>
-        <p className="mt-5 max-w-prose text-[16px] leading-relaxed text-[var(--foreground)]">
+        <p className="mt-7 max-w-prose font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
           {t("welcomeBody")}
         </p>
-        <p className="mt-4 max-w-prose text-[15px] leading-relaxed text-[var(--muted-foreground)]">
-          {t("welcomeResult", {
+        <p className="mt-5 max-w-prose font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
+          {t.rich("welcomeResult", {
             rank: EXTERNAL_RESULT.rank,
             teams: EXTERNAL_RESULT.teams,
             competition: EXTERNAL_RESULT.competition,
+            cafa: (chunks) => (
+              <a
+                href={LINKS.cafaCompetition}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+              >
+                {chunks}
+              </a>
+            ),
           })}
         </p>
-        <p className="mt-4 max-w-prose rounded-lg border border-[var(--border)] bg-[var(--muted)] px-4 py-3 text-[14px] leading-relaxed text-[var(--muted-foreground)]">
+        <p className="mt-5 max-w-prose font-serif text-[17px] leading-relaxed text-[var(--muted)]">
+          {t.rich("welcomeValidation", {
+            evaluator: (chunks) => (
+              <a
+                href={LINKS.evaluator}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+              >
+                {chunks}
+              </a>
+            ),
+            upstream: (chunks) => (
+              <a
+                href={LINKS.evaluatorUpstream}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+              >
+                {chunks}
+              </a>
+            ),
+          })}
+        </p>
+        <p className="mt-6 max-w-prose border-l-2 border-[var(--border-strong)] pl-4 text-[14px] leading-relaxed text-[var(--muted)]">
           {t("welcomeCampaign", {
             asOf: CAMPAIGN_STATUS.asOf,
             releases: CAMPAIGN_STATUS.goaReleases,
@@ -71,34 +111,25 @@ export default async function ArgumentPage() {
             proteins: CAMPAIGN_STATUS.proteinsAdmitted,
           })}
         </p>
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          <Link
-            href={`/${locale}/instrument/benchmark`}
-            className="rounded-lg bg-[var(--primary)] px-4 py-2.5 text-[14px] font-semibold text-white hover:opacity-90"
-          >
-            {t("openInstrument")}
-          </Link>
-          <Link
-            href="/thesis.pdf"
-            className="rounded-lg border border-[var(--border-strong)] px-4 py-2.5 text-[14px] font-semibold text-[var(--foreground)] hover:bg-[var(--muted)]"
-          >
-            {t("thesisPdf")}
-          </Link>
+        <div className="mt-7 flex flex-wrap gap-x-6 gap-y-2">
+          <QuietLink href={`/${locale}/instrument/benchmark`}>{t("openInstrument")}</QuietLink>
+          <QuietLink href={`/${locale}/annotate`}>{t("annotate")}</QuietLink>
+          <QuietLink href="/thesis.pdf">{t("thesisPdf")}</QuietLink>
         </div>
       </header>
 
-      {/* The argument, scoped by the board and window it was written
-          against. Not a word of the prose is edited: the figures inside
-          it are stated in the present tense and were true then, so the
-          honest fix is to date the whole record rather than rewrite a
-          researcher's sentences. */}
+      {/* The argument, published in full and dated. Not a word of the
+          prose is edited: it states the LAFA board in the present tense
+          and that was true when written, so the honest move is to say
+          what it was measured against, not to rewrite a researcher's
+          sentences or to make published work read as withheld. */}
       <section aria-labelledby="argument-heading" className="mt-14 border-t border-[var(--border)] pt-10">
-        <p className="max-w-prose text-[13px] leading-relaxed text-[var(--muted-foreground)]">
+        <p className="max-w-prose text-[13px] leading-relaxed text-[var(--subtle)]">
           {t("argumentRecord", { board: ARGUMENT_RECORD.board, frame: ARGUMENT_RECORD.frame })}
         </p>
         <h2
           id="argument-heading"
-          className="mt-6 font-serif text-[1.7rem] font-normal leading-[1.42] tracking-tight text-[var(--foreground)] sm:text-[2.05rem] sm:leading-[1.4]"
+          className="mt-5 font-serif text-[1.55rem] font-normal leading-[1.42] tracking-tight text-[var(--foreground)] sm:text-[1.85rem] sm:leading-[1.4]"
         >
           {THESIS_SENTENCE}
         </h2>

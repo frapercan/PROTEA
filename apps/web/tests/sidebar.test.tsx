@@ -112,7 +112,7 @@ describe("Sidebar nav", () => {
     // anchor only exists on the annotate page, so the first-screen CTA
     // scrolled nowhere. usePathname is mocked to "/en" here, which is
     // exactly the case that was broken.
-    const cta = screen.getAllByRole("link", { name: "annotate", exact: true })[0];
+    const cta = screen.getAllByRole("link", { name: /^annotate$/ })[0];
     expect(cta.getAttribute("href")).toBe("/en/annotate");
   });
 

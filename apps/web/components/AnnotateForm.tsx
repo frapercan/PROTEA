@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { CAMPAIGN_STATUS, LIVE_ANNOTATION_AVAILABLE } from "@/lib/campaign";
+import { AwaitingData, QuietLink } from "@/components/AwaitingData";
 import {
   annotateProteins,
   getGpuAvailability,
@@ -236,56 +237,17 @@ export function AnnotateForm() {
   // Only block on genuinely-active GPU work (backend `busy`), never on
   // stale/zombie rows.
   const isQueueBlocked = !isRunning && (gpu?.busy ?? false);
+  // Paused because there is no corpus to predict against, which is not the
+  // same as the queue being busy. Both stop a submission; they say
+  // different things, so they get different banners and one shared flag.
+  const paused = !LIVE_ANNOTATION_AVAILABLE;
+  const blocked = isQueueBlocked || paused;
   const runningOperation = (gpu?.running_fresh ?? 0) > 0 ? gpu?.active_operation ?? null : null;
   const runningPct =
     gpu && gpu.progress_total && gpu.progress_current
       ? Math.round((gpu.progress_current / gpu.progress_total) * 100)
       : null;
   const queuedCount = gpu?.queued ?? 0;
-
-  // Paused: say so, in the reader's language, instead of submitting a
-  // request whose 409 body ("Load GO annotations first.") would be
-  // rendered to them verbatim. See lib/campaign.ts for the measurement
-  // and for what has to be true before this is flipped back.
-  if (!LIVE_ANNOTATION_AVAILABLE) {
-    return (
-      <section
-        id="annotate-form"
-        className="rounded-2xl border border-stone-300 bg-stone-50 p-6 sm:p-8"
-      >
-        <h2 className="text-xl sm:text-2xl font-bold text-slate-900 mb-2">
-          {t("annotatePausedTitle")}
-        </h2>
-        <p className="text-sm leading-relaxed text-slate-700 max-w-prose">
-          {t("annotatePausedBody")}
-        </p>
-        <p className="mt-4 text-sm leading-relaxed text-slate-600 max-w-prose">
-          {t("annotatePausedIngest", {
-            asOf: CAMPAIGN_STATUS.asOf,
-            releases: CAMPAIGN_STATUS.goaReleases,
-            gigabytes: CAMPAIGN_STATUS.gafGigabytes,
-            proteins: CAMPAIGN_STATUS.proteinsAdmitted,
-          })}
-        </p>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <a
-            href={`${publicBaseUrl()}/docs`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            {t("annotatePausedApi")}
-          </a>
-          <Link
-            href={`/${locale}/instrument/benchmark`}
-            className="rounded-lg border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-stone-100"
-          >
-            {t("annotatePausedInstrument")}
-          </Link>
-        </div>
-      </section>
-    );
-  }
 
   return (
     <section className="rounded-2xl border-2 border-blue-100 bg-gradient-to-b from-blue-50/60 to-white p-6 sm:p-8">
@@ -301,6 +263,28 @@ export function AnnotateForm() {
           to go: friendly explanation, link to the benchmark (existing
           public results), and a collapsed disclosure for the raw queue
           state. */}
+      {paused && (
+        <div className="mb-6">
+          <AwaitingData
+            title={t("annotatePausedTitle")}
+            body={t("annotatePausedBody")}
+            detail={t("annotatePausedIngest", {
+              asOf: CAMPAIGN_STATUS.asOf,
+              releases: CAMPAIGN_STATUS.goaReleases,
+              gigabytes: CAMPAIGN_STATUS.gafGigabytes,
+              proteins: CAMPAIGN_STATUS.proteinsAdmitted,
+            })}
+          >
+            <QuietLink href={`${publicBaseUrl()}/docs`} external>
+              {t("annotatePausedApi")}
+            </QuietLink>
+            <QuietLink href={`/${locale}/instrument/graph`}>
+              {t("annotatePausedInstrument")}
+            </QuietLink>
+          </AwaitingData>
+        </div>
+      )}
+
       {isQueueBlocked && (
         <div
           role="status"
@@ -395,10 +379,10 @@ export function AnnotateForm() {
           placeholder={t("annotatePlaceholder" as any)}
           aria-label={t("annotateInputAriaLabel" as any)}
           rows={6}
-          disabled={isRunning || isQueueBlocked}
+          disabled={isRunning || blocked}
           className="w-full rounded-lg p-4 text-xs font-mono text-slate-700 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y disabled:opacity-50 disabled:cursor-not-allowed bg-transparent"
         />
-        {!fasta && !isRunning && !isQueueBlocked && (
+        {!fasta && !isRunning && !blocked && (
           <div className="absolute bottom-2 right-2 flex gap-1">
             <button
               type="button"
@@ -432,8 +416,14 @@ export function AnnotateForm() {
       <div className="mt-4 flex flex-wrap items-center gap-3 sm:gap-4">
         <button
           onClick={handleSubmit}
-          disabled={!fasta.trim() || isRunning || isQueueBlocked}
-          title={isQueueBlocked ? t("annotateQueueBlockedTitle" as any) : undefined}
+          disabled={!fasta.trim() || isRunning || blocked}
+          title={
+            paused
+              ? t("annotatePausedTitle")
+              : isQueueBlocked
+                ? t("annotateQueueBlockedTitle" as any)
+                : undefined
+          }
           className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isRunning ? (
@@ -470,7 +460,7 @@ export function AnnotateForm() {
             yet, the local job isn't running, and the queue isn't blocked.
             Gives first-time visitors a one-click path into the demo
             without having to type or upload anything. */}
-        {!fasta && !isRunning && !isQueueBlocked && (
+        {!fasta && !isRunning && !blocked && (
           <button
             type="button"
             onClick={() => setFasta(EXAMPLE_FASTA)}
