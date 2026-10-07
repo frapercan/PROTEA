@@ -42,7 +42,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { publicBaseUrl } from "@/lib/api";
-import { useHasRole, useIsAuthenticated } from "@/lib/useRole";
+import { useHasRole, useIsAuthenticated, useRole } from "@/lib/useRole";
+import { hasRole, type Role } from "@/lib/auth";
 
 /**
  * Primary navigation for PROTEA, rendered as a LEFT SIDEBAR rail.
@@ -72,6 +73,15 @@ type NavItem = {
   external?: boolean;
   badge?: string;
   icon: LucideIcon;
+  /**
+   * Minimum role required to be OFFERED this link, mirroring the
+   * ``PROTECTED`` table in ``middleware.ts``. The edge is the real gate;
+   * this field only stops the rail advertising a destination that the
+   * edge will answer with its plain-text 403 body. Keep the two in step:
+   * every path listed in ``PROTECTED`` needs this field here, or an
+   * anonymous visitor is shown a link that cannot work.
+   */
+  minRole?: Role;
 };
 
 type NavGroup = {
@@ -269,6 +279,7 @@ export function Sidebar({
   // for anonymous visitors before the cookie is read.
   const isAdmin = useHasRole("admin");
   const isAuthed = useIsAuthenticated();
+  const role = useRole();
   const [open, setOpen] = useState(false);
   // Desktop-only: persisted collapsed/expanded state. SSR renders expanded;
   // the effect below hydrates from localStorage on mount. Brief one-frame
@@ -293,10 +304,13 @@ export function Sidebar({
     });
   }, []);
 
-  const onHome = stripLocale(pathname) === "/";
-  const annotateHref = onHome
-    ? `/${locale}#annotate-form`
-    : `/${locale}/instrument/functional-annotation`;
+  // The CTA used to point at `/#annotate-form` when the viewer was on the
+  // home page, and that anchor does not exist there: `id="annotate-form"`
+  // lives only on the annotate page itself. So the first-screen call to
+  // action was a link that scrolled nowhere. It now goes to the annotate
+  // page in every case, which is also where the form explains itself when
+  // the predictor is paused.
+  const annotateHref = `/${locale}/annotate`;
   // AUTH-PUBLIC-VIEWER: the Swagger href is rendered into HTML and
   // clicked by the user, so it must use the public ingress (e.g.
   // ``/api-proxy``) rather than the SSR-only ``127.0.0.1`` fallback
@@ -335,9 +349,8 @@ export function Sidebar({
       hint: t("resultsHint"),
       icon: BarChart3,
       items: [
-        { href: "/instrument/graph", label: t("graph"), hint: "The experiment graph: ten nodes, the strength of each edge, and the nine panels it resolves", icon: Workflow },
-        { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
         { href: "/instrument/graph", label: t("graph"), hint: "Every decision as a node, with the strength of the evidence behind it", icon: Workflow },
+        { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
         { href: "/instrument/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge },
       ],
     },
@@ -348,7 +361,7 @@ export function Sidebar({
       icon: Server,
       items: [
         { href: "/instrument/jobs", label: t("jobs"), hint: "Live job queue and event audit trail", icon: Inbox },
-        { href: "/maintenance", label: t("maintenance"), hint: "Vacuum orphan sequences and unindexed embeddings", icon: Wrench },
+        { href: "/maintenance", label: t("maintenance"), hint: "Vacuum orphan sequences and unindexed embeddings", icon: Wrench, minRole: "operator" },
         { href: "/instrument/stack", label: t("stack"), hint: "Eight repositories, open PRs, deploy targets", icon: Boxes },
       ],
     },
@@ -402,6 +415,17 @@ export function Sidebar({
       ],
     });
   }
+
+  // Drop links the viewer's role cannot open, and drop any group left
+  // empty by that. ``useRole`` reports ``viewer`` during SSR and before
+  // hydration, so the server-rendered rail is the anonymous one and a
+  // gated row never flashes before the cookie is read.
+  const visibleGroups: NavGroup[] = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter(
+      (item) => item.minRole === undefined || hasRole(role, item.minRole),
+    ),
+  })).filter((group) => group.items.length > 0);
 
   const stripped = stripLocale(pathname);
   const annotateActive = stripped.startsWith("/instrument/functional-annotation");
@@ -529,7 +553,7 @@ export function Sidebar({
 
           <div className="min-h-0 flex-1">
             <RailContent
-              groups={NAV_GROUPS}
+              groups={visibleGroups}
               stripped={stripped}
               locale={locale}
               annotateHref={annotateHref}
@@ -647,7 +671,7 @@ export function Sidebar({
 
         <div className="min-h-0 flex-1">
           <RailContent
-            groups={NAV_GROUPS}
+            groups={visibleGroups}
             stripped={stripped}
             locale={locale}
             annotateHref={annotateHref}
