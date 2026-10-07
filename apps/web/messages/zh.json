@@ -195,7 +195,11 @@
     "reproduce": "复现",
     "regenerate": "重新生成该数值",
     "receiptPending": "凭证待补：当前存储快照中未找到。在其重新生成之前，该论点以封存评测表为依据。",
-    "pullReceipt": "显示凭证"
+    "pullReceipt": "显示凭证",
+    "cellCarried": "居首",
+    "cellFrontier": "边界",
+    "boardExplainer": "这些名次来自封存评测板，它是对所提交容器的外部评估，不会变动。其背后的数字在本轮运行重新计算期间处于撤回状态，因此每一格只说明它位于边界的哪一侧，而不说明相差多少。",
+    "argumentInEnglish": "以下科学论证按其撰写原样以英文发表。翻译会改动经过测量的表述，这不是可以轻率处理的事。"
   },
   "score": {
     "eyebrow": "Chapter zero",

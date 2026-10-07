@@ -195,7 +195,11 @@
     "reproduce": "Reproduzieren",
     "regenerate": "Diese Zahl neu erzeugen",
     "receiptPending": "Beleg ausstehend: im aktuellen Speicher-Snapshot nicht gefunden. Die Behauptung stützt sich auf das versiegelte Board, bis er neu erzeugt ist.",
-    "pullReceipt": "Beleg anzeigen"
+    "pullReceipt": "Beleg anzeigen",
+    "cellCarried": "gewonnen",
+    "cellFrontier": "Grenze",
+    "boardExplainer": "Die Positionen stammen vom versiegelten Board, einer externen Auswertung eines eingereichten Containers, und sie bewegen sich nicht. Die Zahlen dahinter sind zurückgezogen, während die Kampagne sie neu berechnet, also nennt jede Zelle, auf welcher Seite der Grenze sie liegt, und nicht um wie viel.",
+    "argumentInEnglish": "Die folgende wissenschaftliche Argumentation wird auf Englisch veröffentlicht, so wie sie geschrieben wurde. Eine Übersetzung würde gemessene Aussagen verändern, und das geschieht nicht leichtfertig."
   },
   "score": {
     "eyebrow": "Chapter zero",

@@ -194,7 +194,11 @@
     "reproduce": "Reproducir",
     "regenerate": "Regenerar este número",
     "receiptPending": "Comprobante pendiente: no se encontró en la instantánea actual de almacenamiento. La afirmación se apoya en el tablero sellado hasta que se regenere.",
-    "pullReceipt": "Mostrar el comprobante"
+    "pullReceipt": "Mostrar el comprobante",
+    "cellCarried": "ganada",
+    "cellFrontier": "frontera",
+    "boardExplainer": "Las posiciones vienen de la tabla cerrada, que es una evaluación externa de un contenedor enviado y no se mueve. Las cifras que hay detrás están retiradas mientras la campaña las recalcula, así que cada celda dice de qué lado de la frontera está, no por cuánto.",
+    "argumentInEnglish": "El argumento científico que sigue se publica en inglés, tal como se escribió. Traducirlo cambiaría afirmaciones medidas, y eso no se hace a la ligera."
   },
   "score": {
     "eyebrow": "Chapter zero",

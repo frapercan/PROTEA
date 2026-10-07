@@ -195,7 +195,11 @@
     "reproduce": "Reproduzir",
     "regenerate": "Regenerar este número",
     "receiptPending": "Comprovativo pendente: não encontrado no instantâneo atual de armazenamento. A afirmação apoia-se no quadro selado até ser regenerada.",
-    "pullReceipt": "Mostrar o comprovativo"
+    "pullReceipt": "Mostrar o comprovativo",
+    "cellCarried": "vencida",
+    "cellFrontier": "fronteira",
+    "boardExplainer": "As posições vêm do painel selado, que é uma avaliação externa de um contêiner submetido e não se move. Os números por trás delas estão retirados enquanto a campanha os recalcula, de modo que cada célula diz de que lado da fronteira está, e não por quanto.",
+    "argumentInEnglish": "O argumento científico a seguir é publicado em inglês, tal como foi escrito. Traduzi-lo alteraria afirmações medidas, e isso não se faz de ânimo leve."
   },
   "score": {
     "eyebrow": "Chapter zero",

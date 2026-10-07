@@ -267,6 +267,16 @@ export default async function ArgumentPage() {
         <p className="max-w-prose text-[13px] leading-relaxed text-[var(--subtle)]">
           {t("argumentRecord", { board: ARGUMENT_RECORD.board, frame: ARGUMENT_RECORD.frame })}
         </p>
+        {/* Said out loud rather than left as a surprise. From here down the
+            page is the researcher's argument, and it is published in the
+            language it was written in. A reader on /es who hits a wall of
+            English deserves to be told why, instead of concluding the
+            translation is broken. */}
+        {locale !== "en" ? (
+          <p className="mt-3 max-w-prose text-[13px] italic leading-relaxed text-[var(--subtle)]">
+            {t("argumentInEnglish")}
+          </p>
+        ) : null}
         <h2
           id="argument-heading"
           className="mt-5 font-serif text-[1.55rem] font-normal leading-[1.42] tracking-tight text-[var(--foreground)] sm:text-[1.85rem] sm:leading-[1.4]"
@@ -307,7 +317,13 @@ export default async function ArgumentPage() {
         <h2 id="board-heading" className="sr-only">
           {t("boardHeading")}
         </h2>
-        <NineCellGrid frameCaption={frameCaption} italicLine={t("nineCellItalic")} />
+        <NineCellGrid
+            frameCaption={frameCaption}
+            italicLine={t("nineCellItalic")}
+            carriedLabel={t("cellCarried")}
+            frontierLabel={t("cellFrontier")}
+            explainer={t("boardExplainer")}
+          />
 
         <p className="mt-8 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
           {/* Two sentences, not one with a hole in it.
