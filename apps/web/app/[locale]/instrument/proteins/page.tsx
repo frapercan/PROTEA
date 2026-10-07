@@ -1,5 +1,7 @@
 "use client";
 
+import { OperatorOnlyNotice, useMayLaunchJobs } from "@/components/OperatorOnly";
+
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
@@ -12,8 +14,7 @@ import {
   listProteins,
   createJob,
   ProteinItem,
-  ProteinStats,
-} from "@/lib/api";
+  ProteinStats, errorText } from "@/lib/api";
 
 type Tab = "browse" | "stats" | "insert" | "metadata";
 
@@ -61,7 +62,15 @@ const tToast = useTranslations("toasts");
   const [searchInput, setSearchInput] = useState("");
   const [reviewedFilter, setReviewedFilter] = useState<"all" | "reviewed" | "unreviewed">("all");
   const [canonicalOnly, setCanonicalOnly] = useState(true);
-  const [loadingBrowse, setLoadingBrowse] = useState(false);
+  // true, not false: the fetch only starts in an effect, so a gate that
+  // opens closed makes SSR and the pre-hydration paint render the empty
+  // branch. This page announced "0 proteins" and "No proteins found. Use
+  // the Insert Proteins tab to import from UniProt." on every cold load,
+  // with 745,421 proteins in the database. Measured 2026-10-07 in the
+  // served HTML. The sibling at instrument/annotations starts its flags
+  // true and server-renders skeletons, which is the shape to copy.
+  const mayLaunch = useMayLaunchJobs();
+  const [loadingBrowse, setLoadingBrowse] = useState(true);
 
   // Stats state
   const [stats, setStats] = useState<ProteinStats | null>(null);
@@ -141,7 +150,7 @@ const tToast = useTranslations("toasts");
       setInsertResult(res);
       toast(tToast("jobQueued"), "success");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     } finally {
       setInsertSubmitting(false);
     }
@@ -158,7 +167,7 @@ const tToast = useTranslations("toasts");
       setMetaResult(res);
       toast(tToast("jobQueued"), "success");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     } finally {
       setMetaSubmitting(false);
     }
@@ -244,7 +253,12 @@ const tToast = useTranslations("toasts");
               {t("browseTab.canonicalOnly")}
             </label>
 
-            <span className="ml-auto text-sm text-slate-600">{t("browseTab.totalProteins", { count: total.toLocaleString() })}</span>
+            {/* Hidden while the first fetch is in flight: `total` starts at
+                0, so an ungated counter announced "0 proteins" on every
+                cold load of a database holding 745,421 of them. */}
+            {!loadingBrowse && (
+              <span className="ml-auto text-sm text-slate-600">{t("browseTab.totalProteins", { count: total.toLocaleString() })}</span>
+            )}
           </div>
 
           {/* Mobile card list */}
@@ -426,8 +440,9 @@ const tToast = useTranslations("toasts");
                   <Link href={`/${locale}/instrument/jobs/${insertResult.id}`} className="font-mono underline hover:text-green-900">{insertResult.id}</Link>
                 </div>
               )}
-              <div className="flex justify-end">
-                <button type="submit" disabled={insertSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
+              <div className="flex items-center justify-between gap-4">
+                {mayLaunch ? <span /> : <OperatorOnlyNotice />}
+                <button type="submit" disabled={insertSubmitting || !mayLaunch} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
                   {insertSubmitting ? t("insertTab.launching") : t("insertTab.launchJob")}
                 </button>
               </div>
@@ -464,8 +479,9 @@ const tToast = useTranslations("toasts");
                   <Link href={`/${locale}/instrument/jobs/${metaResult.id}`} className="font-mono underline hover:text-green-900">{metaResult.id}</Link>
                 </div>
               )}
-              <div className="flex justify-end">
-                <button type="submit" disabled={metaSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
+              <div className="flex items-center justify-between gap-4">
+                {mayLaunch ? <span /> : <OperatorOnlyNotice />}
+                <button type="submit" disabled={metaSubmitting || !mayLaunch} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
                   {metaSubmitting ? t("metadataTab.launching") : t("metadataTab.launchJob")}
                 </button>
               </div>

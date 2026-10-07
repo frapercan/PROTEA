@@ -32,6 +32,8 @@
     "annotateTooltip": "FASTA-Sequenzen zur GO-Annotation einreichen",
     "docs": "Docs",
     "sphinx": "Sphinx-Handbuch",
+    "code": "Code",
+    "codeHint": "Die acht Repositorys auf GitHub",
     "sphinxHint": "Architektur, Queues, ORM, Betrieb",
     "swagger": "OpenAPI / Swagger",
     "swaggerHint": "Interaktive REST-Referenz",
@@ -123,6 +125,11 @@
     "stageView": "ansehen",
     "nkCategory": "NK-Kategorie (No Knowledge) — anspruchsvollste Evaluierungseinstellung",
     "annotateTitle": "Ihre Proteine annotieren",
+    "annotatePausedTitle": "Der Prädiktor ist angehalten",
+    "annotatePausedBody": "PROTEA baut seinen Annotationskorpus von Grund auf neu auf, daher gibt es noch keine Grundlage für eine Vorhersage. Das Formular bleibt geschlossen, bis dieser Durchlauf abgeschlossen ist, anstatt eine Antwort zu liefern, für die wir nicht einstehen können.",
+    "annotatePausedIngest": "Derzeit laufend, Stand {asOf}: {read, number} von {releases, number} GOA-Releases gelesen, von insgesamt {gigabytes, number} GB der Serie.",
+    "annotatePausedApi": "Die API erkunden",
+    "annotatePausedInstrument": "Die laufende Kampagne ansehen",
     "annotateCpuModeNotice": "Aktuell ist keine GPU verfügbar. Das Annotieren einer Sequenz, die noch nicht in der Datenbank ist, läuft daher auf der CPU und kann deutlich länger dauern.",
     "annotateDescription": "Proteinsequenzen im FASTA-Format einfuegen und automatisch funktionelle Annotationen mit der besten verfuegbaren Methode erhalten.",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
@@ -152,8 +159,26 @@
   "book": {
     "eyebrow": "PROTEA · Funktionelle Proteinannotation auf Embedding-Basis",
     "boardHeading": "Das versiegelte Neun-Zellen-Board",
-    "nineCellItalic": "Erster in sieben von neun; die zwei, in denen nicht, erklären wir.",
+    "nineCellItalic": "Die zwei Zellen, die wir nicht gewinnen, erklären wir.",
+    "welcomeTitle": "PROTEA sagt allein aus der Sequenz vorher, was ein Protein tut",
+    "byline": "Entwickelt und betrieben von <name></name>, Doktorand an der Universidad de Sevilla und am Centro Andaluz de Biología del Desarrollo (CSIC).",
+    "readTheCode": "Den Code lesen",
+    "termsAndPrivacy": "Nutzungsbedingungen und Datenschutz",
+    "headlineBeingRecomputed": "wird neu berechnet",
+    "statApi": "REST-API",
+    "statApiValue": "{ops, number} Operationen · {routes, number} Routen",
+    "statTests": "Backend-Tests",
+    "statTestsValue": "{tests, number}",
+    "statData": "Annotationsserie",
+    "statDataValue": "{gigabytes, number} GB",
+    "resultLabel": "Externes Ergebnis",
+    "welcomeBody": "Man übergibt eine Aminosäuresequenz und erhält die Funktionen zurück, die sie wahrscheinlich erfüllt, entnommen der Gene Ontology. Es ist eine laufende Plattform und kein Aufsatz, und alles Weitere läuft auf der Maschine, die diese Seite ausliefert.",
+    "welcomeResult": "Es belegte Platz {rank, number} von {teams, number} Teams in <cafa>{competition}</cafa>, einem offenen Wettbewerb, der von seinen Organisatoren bewertet wird und nicht von uns.",
+    "welcomeValidation": "Die Methode wird beim <lafa>LAFA-Benchmark</lafa> als laufender Container eingereicht, nicht als Datei mit Vorhersagen. Bevor hier etwas behauptet wird, reproduzieren wir die Bewertung selbst, mit dem <evaluator>auf dieser Maschine betriebenen CAFA-Evaluator</evaluator>, einem Fork <upstream>des veröffentlichten</upstream> mit unveränderter Bewertung, sodass Dritte jede Zahl dieser Seite neu erzeugen können.",
+    "welcomeCampaign": "Eine neue Datenkampagne baut den Annotationskorpus von Grund auf neu. Stand {asOf} hat sie {read, number} der insgesamt {releases, number} Releases der Gene-Ontology-Annotationsdatenbank gelesen, zusammen {gigabytes, number} GB an Dateien, und {proteins, number} Proteineinträge geladen (kanonische plus Isoformen), jeder mit dem Release, aus dem er stammt. Die Werkzeuge unten sind gebaut und laufen; ihre Zahlen erscheinen wieder, sobald der Neuaufbau abgeschlossen ist.",
+    "argumentRecord": "Die Argumentation ist unten vollständig veröffentlicht, so wie sie gegen das LAFA-Board für {frame} gemessen wurde.",
     "headlineSentence": "Mit ihrem Rahmen genannt, lautet das versiegelte Ergebnis <value></value> bei <metric></metric>, Erster in sieben von neun Zellen<note>.</note>",
+    "headlineSentenceWithheld": "Mit seinem Rahmen genannt: das versiegelte Ergebnis bei <metric></metric> wird neu berechnet, Erster in sieben von neun Zellen<note>.</note>",
     "chaptersHeading": "Die vier Säulen, als Kapitel",
     "openInstrument": "Das Instrument öffnen",
     "annotate": "Eine Sequenz annotieren",
@@ -170,7 +195,12 @@
     "reproduce": "Reproduzieren",
     "regenerate": "Diese Zahl neu erzeugen",
     "receiptPending": "Beleg ausstehend: im aktuellen Speicher-Snapshot nicht gefunden. Die Behauptung stützt sich auf das versiegelte Board, bis er neu erzeugt ist.",
-    "pullReceipt": "Beleg anzeigen"
+    "pullReceipt": "Beleg anzeigen",
+    "cellCarried": "gewonnen",
+    "cellFrontier": "Grenze",
+    "boardExplainer": "Die Positionen stammen vom versiegelten Board, einer externen Auswertung eines eingereichten Containers, und sie bewegen sich nicht. Die Zahlen dahinter sind zurückgezogen, während die Kampagne sie neu berechnet, also nennt jede Zelle, auf welcher Seite der Grenze sie liegt, und nicht um wie viel.",
+    "argumentInEnglish": "Die folgende wissenschaftliche Argumentation wird auf Englisch veröffentlicht, so wie sie geschrieben wurde. Eine Übersetzung würde gemessene Aussagen verändern, und das geschieht nicht leichtfertig.",
+    "boardScrollHint": "Die Tabelle lässt sich seitlich scrollen: MF, BP und CC."
   },
   "score": {
     "eyebrow": "Chapter zero",
@@ -241,6 +271,12 @@
   },
   "benchmark": {
     "loadingTitle": "Benchmark wird geladen…",
+    "title": "Benchmark-Matrix",
+    "awaitingTitle": "Gebaut, wartet auf Daten",
+    "awaitingBody": "Der Benchmark ist gebaut und läuft. Er vergleicht Protein-Sprachmodelle über die neun Auswertungszellen, drei Wissensregime gekreuzt mit den drei Zweigen der Gene Ontology, auf einer leckfreien zeitlichen Aufteilung. Er hat noch nichts zu zeichnen, weil der Annotationskorpus, gegen den er bewertet, neu aufgebaut wird.",
+    "awaitingDetail": "Stand {asOf} hat die Kampagne {read, number} von {releases, number} GOA-Releases der Serie gelesen, insgesamt {gigabytes, number} GB.",
+    "awaitingJobs": "Die Job-Queue ansehen",
+    "awaitingGraph": "Das Instrument ansehen",
     "loadingHint": "Embeddings und Matrix werden aufgelöst.",
     "loadingStepMatrix": "Matrix",
     "loadingStepEmbeddings": "Embeddings",
@@ -1117,7 +1153,7 @@
       "taxonomicProximityHint": "1 / (1 + taxonomische_Distanz)"
     },
     "configCard": {
-      "deleteConfirm": "Scoring-Konfiguration \"{name}\" löschen?",
+      "deleteConfirm": "Scoring-Konfiguration \"<name></name>\" löschen?",
       "delete": "Löschen",
       "customEvidenceWeights": "benutzerdefinierte Evidenzgewichte",
       "evidenceCodeWeights": "Evidenzcode-Gewichte",
@@ -1183,7 +1219,7 @@
       "created": "Erstellt"
     },
     "delete": "Löschen",
-    "deleteConfirm": "Query-Set \"{name}\" löschen? Dies kann nicht rückgängig gemacht werden.",
+    "deleteConfirm": "Query-Set \"<name></name>\" löschen? Dies kann nicht rückgängig gemacht werden.",
     "uploadModal": {
       "title": "FASTA hochladen",
       "close": "×",
@@ -1217,8 +1253,8 @@
     "emptyAll": "Noch keine Datasets registriert.",
     "emptyFiltered": "Keine Datasets entsprechen den aktuellen Filtern.",
     "dispatchFirst": "Ersten Export starten",
-    "dispatched": "Export gestartet: {name} (Job {jobId})",
-    "imported": "Dataset per Referenz registriert: {name} ({datasetId})",
+    "dispatched": "Export gestartet: <name></name> (Job {jobId})",
+    "imported": "Dataset per Referenz registriert: <name></name> ({datasetId})",
     "footnote": "Jede Zeile ist ein Dataset-Eintrag. Klick auf den Namen zeigt Schema-/Manifest-Herkunft und verlinkt den Producer-Job.",
     "filters": {
       "family": "PLM-Familie",
@@ -1317,7 +1353,7 @@
       "noEmbeddings": "Keine Embedding-Konfigurationen verfügbar",
       "noSnapshots": "Keine Ontologie-Snapshots verfügbar",
       "nameLabel": "Ausgabename",
-      "useSuggested": "Vorschlag übernehmen: {name}",
+      "useSuggested": "Vorschlag übernehmen: <name></name>",
       "embeddingLabel": "Embedding-Konfiguration",
       "snapshotLabel": "Ontologie-Snapshot",
       "kLabel": "Nachbarn (K)",
@@ -1436,7 +1472,7 @@
       },
       "emptyAll": "Noch keine Experiment-Runs. Erstelle den ersten, um eine Kampagnenerzählung zu starten.",
       "emptyFiltered": "Keine Runs passen zu diesem Status-Filter.",
-      "deleteConfirm": "Experiment-Run \"{name}\" löschen? Das lässt sich nicht rückgängig machen.",
+      "deleteConfirm": "Experiment-Run \"<name></name>\" löschen? Das lässt sich nicht rückgängig machen.",
       "deleteDialog": {
         "title": "Experiment-Run löschen?",
         "body": "Damit wird die Zeile auf dem Server entfernt. Narrative, Hypothese und Findings können nicht wiederhergestellt werden.",
@@ -1447,9 +1483,9 @@
         "close": "Dialog schließen"
       },
       "toasts": {
-        "created": "Experiment-Run \"{name}\" angelegt",
-        "updated": "Experiment-Run \"{name}\" aktualisiert",
-        "deleted": "Experiment-Run \"{name}\" gelöscht"
+        "created": "Experiment-Run \"<name></name>\" angelegt",
+        "updated": "Experiment-Run \"<name></name>\" aktualisiert",
+        "deleted": "Experiment-Run \"<name></name>\" gelöscht"
       },
       "mint": {
         "title": "Neuen Experiment-Run anlegen",
@@ -1458,7 +1494,7 @@
         "submitting": "Lege an…"
       },
       "edit": {
-        "title": "Run bearbeiten: {name}",
+        "title": "Run bearbeiten: <name></name>",
         "subtitle": "Narrative, Status, Tags, Config oder Provenance patchen. Status-Übergänge stempeln started_at / finished_at automatisch serverseitig.",
         "submit": "Änderungen speichern",
         "submitting": "Speichere…"
@@ -1494,8 +1530,10 @@
   },
   "support": {
     "title": "Projekt unterstützen",
+    "loadFailed": "Die Unterstützungsliste konnte gerade nicht geladen werden.",
     "hero": {
       "supportCount": "{count} Personen unterstützen dieses Projekt",
+      "beFirst": "Unterstützen Sie dieses Projekt als Erste oder Erster.",
       "withComments": "{count} mit Kommentaren",
       "anonymous": "{count} anonym"
     },
@@ -1606,6 +1644,7 @@
       "commentPlaceholder": "Kommentar hinterlassen (optional)…",
       "publicNote": "Kommentare und Metriken sind öffentlich.",
       "sendThumbsUp": "👍 Daumen hoch",
+      "failed": "Das ist nicht durchgegangen. Es wurde nichts gespeichert, bitte erneut versuchen.",
       "sending": "Wird gesendet…",
       "thanks": "Danke für die Unterstützung! 🎉",
       "recentComments": "Aktuelle Kommentare",
@@ -1617,7 +1656,7 @@
       "accept": "Ich verstehe und akzeptiere",
       "identification": {
         "heading": "Betreiber",
-        "body": "Dies ist ein nicht-kommerzielles akademisches Forschungs-Deployment, das persönlich und unabhängig betrieben wird. Es stellt KEINEN offiziellen Dienst einer Institution dar."
+        "body": "Dies ist eine nicht-kommerzielle akademische Forschungsinstallation, persönlich und unabhängig betrieben von Francisco Miguel Pérez Canales. Sie stellt KEINEN offiziellen Dienst einer Institution dar."
       },
       "asIs": {
         "heading": "Keine Gewährleistung",
@@ -1629,7 +1668,7 @@
       },
       "privacyLog": {
         "heading": "Datenschutz und Logs",
-        "body": "Keine Konten erforderlich. Der Server protokolliert IP-Adressen und Zeitstempel von Anfragen 30 Tage lang zur Missbrauchsprävention. Keine Tracking-Cookies. Datenschutzanfragen (Auskunft, Löschung, Berichtigung): Issue im GitHub-Repository des Projekts eröffnen."
+        "body": "Keine Konten erforderlich. Der Server protokolliert IP-Adressen und Zeitstempel 30 Tage lang zur Missbrauchsprävention. Keine Tracking-Cookies. Der Verkehr erreicht den Server über ngrok, einen Anbieter aus den Vereinigten Staaten, der damit die Verbindungsmetadaten sieht. Datenschutzanfragen (Auskunft, Löschung, Berichtigung): ein Issue im Projekt-Repository auf GitHub eröffnen."
       },
       "license": {
         "heading": "Lizenz",
@@ -1663,6 +1702,9 @@
     },
     "floatingJobsWidget": {
       "toggleLabel": "Laufende Jobs anzeigen ({count})"
+    },
+    "operatorOnly": {
+      "needsOperator": "Zum Ausführen wird ein Operator-Konto benötigt. Das Formular wird gezeigt, weil die Operation existiert und funktioniert; eingeschränkt ist nur das Absenden."
     }
   },
   "stack": {
@@ -1967,9 +2009,9 @@
     "statusActive": "Aktiv",
     "statusRevoked": "Widerrufen",
     "loadError": "API-Schlussel konnten nicht geladen werden",
-    "revokedToast": "{name} widerrufen",
+    "revokedToast": "<name></name> widerrufen",
     "revokeErrorToast": "Widerruf fehlgeschlagen: {error}",
-    "mintedToast": "{name} erstellt",
+    "mintedToast": "<name></name> erstellt",
     "footnote": "Widerruf ist unwiderruflich. Widerrufene Eintrage bleiben sichtbar, wenn 'Widerrufene Schlussel anzeigen' aktiv ist.",
     "forbiddenTitle": "Nur fur Admins",
     "forbiddenBody": "Diese Seite verwaltet programmatische Zugriffsschlussel und ist auf Operatoren mit Admin-Rolle beschrankt.",
@@ -2050,8 +2092,8 @@
     "scoringConfigCreated": "Scoring-Konfiguration erstellt",
     "annotationsDeleted": "Gelöscht ({count} Annotationen entfernt)",
     "predictionsDeleted": "Gelöscht ({count} Zuordnungen entfernt)",
-    "querySetDeleted": "Gelöscht \"{name}\"",
-    "querySetUploaded": "Query-Set \"{name}\" hochgeladen ({count} Sequenzen)",
+    "querySetDeleted": "Gelöscht \"<name></name>\"",
+    "querySetUploaded": "Query-Set \"<name></name>\" hochgeladen ({count} Sequenzen)",
     "sequencesVacuumed": "{count} verwaiste Sequenz(en) gelöscht",
     "embeddingsVacuumed": "{count} nicht indizierte Embedding(s) gelöscht",
     "presetsCreated": "Voreinstellungen erstellt: {names}",
@@ -2126,7 +2168,7 @@
       "createAccount": "Konto erstellen",
       "loadError": "Profil konnte nicht geladen werden: {message}",
       "title": "Ihr Profil",
-      "subtitle": "Kontodaten von {name}.",
+      "subtitle": "Kontodaten von <name></name>.",
       "signOut": "Abmelden",
       "fields": {
         "username": "Benutzername",

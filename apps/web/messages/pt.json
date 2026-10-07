@@ -32,6 +32,8 @@
     "annotateTooltip": "Enviar sequências FASTA para anotação GO",
     "docs": "Docs",
     "sphinx": "Manual Sphinx",
+    "code": "Código",
+    "codeHint": "Os oito repositórios no GitHub",
     "sphinxHint": "Arquitetura, filas, ORM, operação",
     "swagger": "OpenAPI / Swagger",
     "swaggerHint": "Referência REST interativa",
@@ -123,6 +125,11 @@
     "stageView": "ver",
     "nkCategory": "Categoria NK (No Knowledge) — configuração de avaliação mais exigente",
     "annotateTitle": "Anote suas proteinas",
+    "annotatePausedTitle": "O preditor está pausado",
+    "annotatePausedBody": "A PROTEA está reconstruindo seu corpus de anotações do zero, portanto ainda não há nada contra o que prever. O formulário fica fechado até essa execução terminar, em vez de devolver uma resposta que não poderíamos sustentar.",
+    "annotatePausedIngest": "Em andamento agora, em {asOf}: {read, number} de {releases, number} versões do GOA lidas, dos {gigabytes, number} GB que compõem a série.",
+    "annotatePausedApi": "Explorar a API",
+    "annotatePausedInstrument": "Acompanhar a campanha",
     "annotateCpuModeNotice": "Não há GPU disponível neste momento, por isso anotar uma sequência que ainda não esteja na base de dados corre em CPU e pode demorar bastante mais.",
     "annotateDescription": "Cole suas sequencias de proteinas em formato FASTA e obtenha anotacoes funcionais automaticamente com o melhor metodo disponivel.",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
@@ -152,8 +159,26 @@
   "book": {
     "eyebrow": "PROTEA · Anotação funcional de proteínas baseada em embeddings",
     "boardHeading": "O quadro selado de nove células",
-    "nineCellItalic": "Primeiros em sete de nove; as duas que não, nós explicamos.",
+    "nineCellItalic": "As duas células que não vencemos, nós as explicamos.",
+    "welcomeTitle": "A PROTEA prevê o que uma proteína faz, apenas a partir da sequência",
+    "byline": "Criado e mantido por <name></name>, estudante de doutorado na Universidad de Sevilla e no Centro Andaluz de Biología del Desarrollo (CSIC).",
+    "readTheCode": "Ler o código",
+    "termsAndPrivacy": "Termos e privacidade",
+    "headlineBeingRecomputed": "sendo recalculado",
+    "statApi": "API REST",
+    "statApiValue": "{ops, number} operações · {routes, number} rotas",
+    "statTests": "Testes de backend",
+    "statTestsValue": "{tests, number}",
+    "statData": "Série de anotações",
+    "statDataValue": "{gigabytes, number} GB",
+    "resultLabel": "Resultado externo",
+    "welcomeBody": "Você fornece uma sequência de aminoácidos e ela devolve as funções que provavelmente desempenha, tiradas da Gene Ontology. É uma plataforma em funcionamento, não um artigo, e tudo o que está abaixo roda na máquina que serve esta página.",
+    "welcomeResult": "Ficou em {rank, number}º de {teams, number} equipes no <cafa>{competition}</cafa>, uma competição aberta pontuada pelos seus organizadores, não por nós.",
+    "welcomeValidation": "O método é submetido ao <lafa>benchmark LAFA</lafa> como um contêiner em execução, e não como um arquivo de predições. Antes de afirmar qualquer coisa aqui, reproduzimos a pontuação nós mesmos, com o <evaluator>avaliador do CAFA implantado nesta máquina</evaluator>, um fork <upstream>do publicado</upstream> com a pontuação inalterada, de modo que um terceiro pode regerar qualquer número deste site.",
+    "welcomeCampaign": "Uma nova campanha de dados está reconstruindo o corpus de anotações do zero. Em {asOf} ela já leu {read, number} das {releases, number} versões do banco de anotações da Gene Ontology que compõem a série, {gigabytes, number} GB de arquivos no total, e carregou {proteins, number} entradas de proteína (canônicas mais isoformas), cada uma marcada com a versão de que provém. As ferramentas abaixo estão construídas e funcionando; seus números voltam quando a reconstrução terminar.",
+    "argumentRecord": "O argumento está publicado abaixo por inteiro, tal como foi medido diante do painel LAFA de {frame}.",
     "headlineSentence": "Com o seu enquadramento, o resultado selado é <value></value> em <metric></metric>, primeiro em sete de nove células<note>.</note>",
+    "headlineSentenceWithheld": "Dito com o seu enquadramento, o resultado selado em <metric></metric> está sendo recalculado; primeiros em sete de nove células<note>.</note>",
     "chaptersHeading": "Os quatro pilares, como capítulos",
     "openInstrument": "Abrir o instrumento",
     "annotate": "Anotar uma sequência",
@@ -170,7 +195,12 @@
     "reproduce": "Reproduzir",
     "regenerate": "Regenerar este número",
     "receiptPending": "Comprovativo pendente: não encontrado no instantâneo atual de armazenamento. A afirmação apoia-se no quadro selado até ser regenerada.",
-    "pullReceipt": "Mostrar o comprovativo"
+    "pullReceipt": "Mostrar o comprovativo",
+    "cellCarried": "vencida",
+    "cellFrontier": "fronteira",
+    "boardExplainer": "As posições vêm do painel selado, que é uma avaliação externa de um contêiner submetido e não se move. Os números por trás delas estão retirados enquanto a campanha os recalcula, de modo que cada célula diz de que lado da fronteira está, e não por quanto.",
+    "argumentInEnglish": "O argumento científico a seguir é publicado em inglês, tal como foi escrito. Traduzi-lo alteraria afirmações medidas, e isso não se faz de ânimo leve.",
+    "boardScrollHint": "A tabela rola na horizontal: MF, BP e CC."
   },
   "score": {
     "eyebrow": "Chapter zero",
@@ -241,6 +271,12 @@
   },
   "benchmark": {
     "loadingTitle": "Carregando benchmark…",
+    "title": "Matriz do benchmark",
+    "awaitingTitle": "Construído, aguardando dados",
+    "awaitingBody": "O benchmark está construído e funcionando. Ele compara modelos de linguagem de proteínas nas nove células de avaliação, três regimes de conhecimento cruzados com os três ramos da Gene Ontology, sobre uma divisão temporal sem vazamento. Ainda não tem nada para plotar porque o corpus de anotações contra o qual ele pontua está sendo reconstruído.",
+    "awaitingDetail": "Em {asOf} a campanha já leu {read, number} das {releases, number} versões do GOA da série, {gigabytes, number} GB no total.",
+    "awaitingJobs": "Acompanhar a fila de trabalhos",
+    "awaitingGraph": "Ver o instrumento",
     "loadingHint": "Resolvendo embeddings e matriz.",
     "loadingStepMatrix": "Matriz",
     "loadingStepEmbeddings": "Embeddings",
@@ -1117,7 +1153,7 @@
       "taxonomicProximityHint": "1 / (1 + distância_taxonômica)"
     },
     "configCard": {
-      "deleteConfirm": "Excluir scoring \"{name}\"?",
+      "deleteConfirm": "Excluir scoring \"<name></name>\"?",
       "delete": "Excluir",
       "customEvidenceWeights": "pesos de evidência personalizados",
       "evidenceCodeWeights": "Pesos de código de evidência",
@@ -1183,7 +1219,7 @@
       "created": "Criado"
     },
     "delete": "Excluir",
-    "deleteConfirm": "Excluir query set \"{name}\"? Esta ação não pode ser desfeita.",
+    "deleteConfirm": "Excluir query set \"<name></name>\"? Esta ação não pode ser desfeita.",
     "uploadModal": {
       "title": "Enviar FASTA",
       "close": "×",
@@ -1217,8 +1253,8 @@
     "emptyAll": "Ainda não há datasets registrados.",
     "emptyFiltered": "Nenhum dataset corresponde aos filtros atuais.",
     "dispatchFirst": "Despache a primeira exportação",
-    "dispatched": "Exportação despachada: {name} (job {jobId})",
-    "imported": "Dataset registrado por referência: {name} ({datasetId})",
+    "dispatched": "Exportação despachada: <name></name> (job {jobId})",
+    "imported": "Dataset registrado por referência: <name></name> ({datasetId})",
     "footnote": "Cada linha é um registro Dataset. Clique no nome para inspecionar a procedência (schema/manifest) e ver o job produtor.",
     "filters": {
       "family": "Família PLM",
@@ -1317,7 +1353,7 @@
       "noEmbeddings": "Nenhuma configuração de embedding disponível",
       "noSnapshots": "Nenhum snapshot ontológico disponível",
       "nameLabel": "Nome de saída",
-      "useSuggested": "Usar sugerido: {name}",
+      "useSuggested": "Usar sugerido: <name></name>",
       "embeddingLabel": "Configuração de embedding",
       "snapshotLabel": "Snapshot ontológico",
       "kLabel": "Vizinhos (K)",
@@ -1436,7 +1472,7 @@
       },
       "emptyAll": "Ainda não há execuções. Cria a primeira para iniciar uma narrativa de campanha.",
       "emptyFiltered": "Nenhuma execução corresponde a este filtro de estado.",
-      "deleteConfirm": "Eliminar a execução \"{name}\"? Isto não pode ser desfeito.",
+      "deleteConfirm": "Eliminar a execução \"<name></name>\"? Isto não pode ser desfeito.",
       "deleteDialog": {
         "title": "Eliminar execução de experimento?",
         "body": "Remove a linha do servidor. A narrativa, hipótese e achados não poderão ser recuperados.",
@@ -1447,9 +1483,9 @@
         "close": "Fechar diálogo"
       },
       "toasts": {
-        "created": "Execução \"{name}\" criada",
-        "updated": "Execução \"{name}\" atualizada",
-        "deleted": "Execução \"{name}\" eliminada"
+        "created": "Execução \"<name></name>\" criada",
+        "updated": "Execução \"<name></name>\" atualizada",
+        "deleted": "Execução \"<name></name>\" eliminada"
       },
       "mint": {
         "title": "Criar nova execução de experiência",
@@ -1458,7 +1494,7 @@
         "submitting": "A criar…"
       },
       "edit": {
-        "title": "Editar execução: {name}",
+        "title": "Editar execução: <name></name>",
         "subtitle": "Edita narrativa, estado, tags, config ou proveniência. As transições de estado marcam started_at / finished_at automaticamente no servidor.",
         "submit": "Guardar alterações",
         "submitting": "A guardar…"
@@ -1494,8 +1530,10 @@
   },
   "support": {
     "title": "Apoie o projeto",
+    "loadFailed": "No momento não foi possível carregar o mural de apoios.",
     "hero": {
       "supportCount": "{count} pessoas apoiam este projeto",
+      "beFirst": "Seja a primeira pessoa a apoiar este projeto.",
       "withComments": "{count} com comentários",
       "anonymous": "{count} anônimos"
     },
@@ -1606,6 +1644,7 @@
       "commentPlaceholder": "Deixe um comentário (opcional)…",
       "publicNote": "Comentários e métricas são públicos.",
       "sendThumbsUp": "👍 Apoiar",
+      "failed": "Não foi enviado. Nada foi registrado, tente novamente.",
       "sending": "Enviando…",
       "thanks": "Obrigado pelo apoio! 🎉",
       "recentComments": "Comentários recentes",
@@ -1617,7 +1656,7 @@
       "accept": "Entendo e aceito",
       "identification": {
         "heading": "Responsável",
-        "body": "Este é um deployment de investigação académica sem fins lucrativos, operado de forma pessoal e independente. NÃO constitui um serviço oficial de nenhuma instituição."
+        "body": "Esta é uma implantação acadêmica de pesquisa, sem fins lucrativos, operada pessoal e independentemente por Francisco Miguel Pérez Canales. NÃO constitui um serviço oficial de nenhuma instituição."
       },
       "asIs": {
         "heading": "Sem garantias",
@@ -1629,7 +1668,7 @@
       },
       "privacyLog": {
         "heading": "Privacidade e registros",
-        "body": "Não são necessárias contas. O servidor regista endereços IP e marcas temporais dos pedidos durante 30 dias para prevenção de abusos. Sem cookies de rastreio. Pedidos em matéria de proteção de dados (acesso, supressão, retificação): abre uma issue no repositório do projeto no GitHub."
+        "body": "Não são necessárias contas. O servidor registra endereços IP e carimbos de tempo por 30 dias para prevenção de abuso. Sem cookies de rastreamento. O tráfego chega ao servidor através da ngrok, um provedor dos Estados Unidos, que portanto vê os metadados da conexão. Pedidos de proteção de dados (acesso, eliminação, retificação): abra uma issue no repositório do projeto no GitHub."
       },
       "license": {
         "heading": "Licença",
@@ -1663,6 +1702,9 @@
     },
     "floatingJobsWidget": {
       "toggleLabel": "Ver trabalhos em execução ({count})"
+    },
+    "operatorOnly": {
+      "needsOperator": "Executar isto exige uma conta de operador. O formulário é exibido porque a operação existe e funciona; o que é restrito é o envio."
     }
   },
   "stack": {
@@ -1967,9 +2009,9 @@
     "statusActive": "Ativa",
     "statusRevoked": "Revogada",
     "loadError": "Nao foi possivel carregar as chaves de API",
-    "revokedToast": "Revogada: {name}",
+    "revokedToast": "Revogada: <name></name>",
     "revokeErrorToast": "Falha ao revogar: {error}",
-    "mintedToast": "Chave criada: {name}",
+    "mintedToast": "Chave criada: <name></name>",
     "footnote": "A revogacao e irreversivel. As linhas revogadas continuam visiveis para auditoria com 'Mostrar chaves revogadas' ativo.",
     "forbiddenTitle": "Apenas administradores",
     "forbiddenBody": "Esta pagina gere chaves de acesso programatico e esta restrita a operadores com perfil de administrador.",
@@ -2050,8 +2092,8 @@
     "scoringConfigCreated": "Configuração de scoring criada",
     "annotationsDeleted": "Eliminado ({count} anotações removidas)",
     "predictionsDeleted": "Eliminado ({count} atribuições removidas)",
-    "querySetDeleted": "Eliminado \"{name}\"",
-    "querySetUploaded": "Conjunto de consulta \"{name}\" carregado ({count} sequências)",
+    "querySetDeleted": "Eliminado \"<name></name>\"",
+    "querySetUploaded": "Conjunto de consulta \"<name></name>\" carregado ({count} sequências)",
     "sequencesVacuumed": "Eliminadas {count} sequências órfãs",
     "embeddingsVacuumed": "Eliminados {count} embeddings sem índice",
     "presetsCreated": "Predefinições criadas: {names}",
@@ -2126,7 +2168,7 @@
       "createAccount": "Criar conta",
       "loadError": "Não foi possível carregar o seu perfil: {message}",
       "title": "O seu perfil",
-      "subtitle": "Dados da conta de {name}.",
+      "subtitle": "Dados da conta de <name></name>.",
       "signOut": "Terminar sessão",
       "fields": {
         "username": "Nome de utilizador",

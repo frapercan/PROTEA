@@ -32,6 +32,8 @@
     "annotateTooltip": "Submit your FASTA sequences for GO annotation",
     "docs": "Docs",
     "sphinx": "Sphinx manual",
+    "code": "Code",
+    "codeHint": "The eight repositories on GitHub",
     "sphinxHint": "Architecture, queues, ORM, operations",
     "swagger": "OpenAPI / Swagger",
     "swaggerHint": "Interactive REST reference",
@@ -122,6 +124,11 @@
     "stageView": "view",
     "nkCategory": "NK category (No prior Knowledge) — most demanding evaluation setting",
     "annotateTitle": "Annotate Your Proteins",
+    "annotatePausedTitle": "The predictor is paused",
+    "annotatePausedBody": "PROTEA is rebuilding its annotation corpus from scratch, so there is nothing to predict against yet. The form stays closed until that run finishes, rather than returning an answer we cannot stand behind.",
+    "annotatePausedIngest": "Running now, as of {asOf}: {read, number} of {releases, number} GOA releases read, out of {gigabytes, number} GB in the series.",
+    "annotatePausedApi": "Explore the API",
+    "annotatePausedInstrument": "Watch the campaign run",
     "annotateCpuModeNotice": "No GPU is currently available, so annotating a sequence that is not already in the database runs on CPU and may take noticeably longer.",
     "annotateDescription": "Paste your protein sequences in FASTA format and get functional annotations automatically using the best available method.",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
@@ -151,8 +158,26 @@
   "book": {
     "eyebrow": "PROTEA · Protein functional Embedding-based Annotation",
     "boardHeading": "The sealed nine-cell board",
-    "nineCellItalic": "First in seven of nine; the two we are not, we explain.",
+    "nineCellItalic": "The two cells we do not win, we explain.",
+    "welcomeTitle": "PROTEA predicts what a protein does, from its sequence alone",
+    "byline": "Built and run by <name></name>, PhD student at the Universidad de Sevilla and the Centro Andaluz de Biología del Desarrollo (CSIC).",
+    "readTheCode": "Read the code",
+    "termsAndPrivacy": "Terms and privacy",
+    "headlineBeingRecomputed": "being recomputed",
+    "statApi": "REST API",
+    "statApiValue": "{ops, number} operations · {routes, number} routes",
+    "statTests": "Backend tests",
+    "statTestsValue": "{tests, number}",
+    "statData": "Annotation series",
+    "statDataValue": "{gigabytes, number} GB",
+    "resultLabel": "External result",
+    "welcomeBody": "Give it an amino-acid sequence and it returns the functions that sequence is likely to carry out, drawn from the Gene Ontology. It is a working platform rather than a paper, and everything below runs on the machine serving this page.",
+    "welcomeResult": "It placed <cafa>{rank, number}th of {teams, number} teams in {competition}</cafa>, an open competition scored by its organisers rather than by us.",
+    "welcomeValidation": "The method is submitted to the <lafa>LAFA benchmark</lafa> as a running container rather than as a file of predictions. Before anything is claimed here we reproduce the scoring ourselves, with the <evaluator>CAFA evaluator deployed on this machine</evaluator>, a fork of <upstream>the published one</upstream> with the scoring unchanged, so a third party can regenerate any figure on this site.",
+    "welcomeCampaign": "A new data campaign is rebuilding the annotation corpus from the ground up. As of {asOf} it has read {read, number} of the series' {releases, number} releases of the Gene Ontology Annotation database, which is {gigabytes, number} GB of files in all, and loaded {proteins, number} protein entries (canonical plus isoforms), each tagged with the release it came from. The tools below are built and running; their figures come back when the rebuild finishes.",
+    "argumentRecord": "The argument is published below in full, as it was measured against the LAFA board for {frame}.",
     "headlineSentence": "Stated with its frame, the sealed result is <value></value> on <metric></metric>, first in seven of nine cells<note>.</note>",
+    "headlineSentenceWithheld": "Stated with its frame, the sealed result on <metric></metric> is being recomputed, first in seven of nine cells<note>.</note>",
     "chaptersHeading": "The four pillars, as chapters",
     "openInstrument": "Open the instrument",
     "annotate": "Annotate a sequence",
@@ -169,7 +194,12 @@
     "reproduce": "Reproduce",
     "regenerate": "Regenerate this number",
     "receiptPending": "Receipt pending: not located in the current storage snapshot. The claim rests on the sealed board until it is re-materialised.",
-    "pullReceipt": "Show the receipt"
+    "pullReceipt": "Show the receipt",
+    "cellCarried": "carried",
+    "cellFrontier": "frontier",
+    "boardExplainer": "Positions are from the sealed board, which is an external evaluation of a submitted container and does not move. The figures behind them are withdrawn while the campaign recomputes, so each cell names which side of the frontier it is on and not by how much.",
+    "argumentInEnglish": "",
+    "boardScrollHint": "The table scrolls sideways: MF, BP and CC."
   },
   "score": {
     "eyebrow": "Chapter zero",
@@ -240,6 +270,12 @@
   },
   "benchmark": {
     "loadingTitle": "Loading benchmark…",
+    "title": "Benchmark matrix",
+    "awaitingTitle": "Built, waiting on data",
+    "awaitingBody": "The benchmark is built and running. It compares protein language models across the nine evaluation cells, three knowledge regimes crossed with the three branches of the Gene Ontology, on a leakage-free temporal split. It has nothing to plot yet because the annotation corpus it scores against is being rebuilt.",
+    "awaitingDetail": "As of {asOf} the campaign has read {read, number} of the series' {releases, number} GOA releases, {gigabytes, number} GB in all.",
+    "awaitingJobs": "Watch the job queue",
+    "awaitingGraph": "See the instrument",
     "loadingHint": "Resolving embeddings and matrix.",
     "loadingStepMatrix": "Matrix",
     "loadingStepEmbeddings": "Embeddings",
@@ -1126,7 +1162,7 @@
       "taxonomicProximityHint": "1 / (1 + taxonomic_distance)"
     },
     "configCard": {
-      "deleteConfirm": "Delete scoring config \"{name}\"?",
+      "deleteConfirm": "Delete scoring config \"<name></name>\"?",
       "delete": "Delete",
       "customEvidenceWeights": "custom evidence weights",
       "evidenceCodeWeights": "Evidence-code weights",
@@ -1182,7 +1218,7 @@
       "created": "Created"
     },
     "delete": "Delete",
-    "deleteConfirm": "Delete query set \"{name}\"? This cannot be undone.",
+    "deleteConfirm": "Delete query set \"<name></name>\"? This cannot be undone.",
     "uploadModal": {
       "title": "Upload FASTA",
       "close": "×",
@@ -1216,8 +1252,8 @@
     "emptyAll": "No datasets registered yet.",
     "emptyFiltered": "No datasets match the current filters.",
     "dispatchFirst": "Dispatch the first export",
-    "dispatched": "Export dispatched: {name} (job {jobId})",
-    "imported": "Dataset registered by reference: {name} ({datasetId})",
+    "dispatched": "Export dispatched: <name></name> (job {jobId})",
+    "imported": "Dataset registered by reference: <name></name> ({datasetId})",
     "footnote": "Each row is one Dataset record. Click a name to inspect schema/manifest provenance and link back to the producer job.",
     "filters": {
       "family": "PLM family",
@@ -1322,7 +1358,7 @@
       "noEmbeddings": "No embedding configs available",
       "noSnapshots": "No ontology snapshots available",
       "nameLabel": "Output name",
-      "useSuggested": "Use suggested: {name}",
+      "useSuggested": "Use suggested: <name></name>",
       "embeddingLabel": "Embedding config",
       "snapshotLabel": "Ontology snapshot",
       "kLabel": "Neighbours (K)",
@@ -1435,7 +1471,7 @@
       },
       "emptyAll": "No experiment runs yet. Mint the first one to start a campaign narrative.",
       "emptyFiltered": "No runs match this status filter.",
-      "deleteConfirm": "Delete experiment run \"{name}\"? This cannot be undone.",
+      "deleteConfirm": "Delete experiment run \"<name></name>\"? This cannot be undone.",
       "deleteDialog": {
         "title": "Delete experiment run?",
         "body": "This removes the row from the server. The narrative, hypothesis, and findings cannot be restored.",
@@ -1446,9 +1482,9 @@
         "close": "Close dialog"
       },
       "toasts": {
-        "created": "Experiment run \"{name}\" minted",
-        "updated": "Experiment run \"{name}\" updated",
-        "deleted": "Experiment run \"{name}\" deleted"
+        "created": "Experiment run \"<name></name>\" minted",
+        "updated": "Experiment run \"<name></name>\" updated",
+        "deleted": "Experiment run \"<name></name>\" deleted"
       },
       "mint": {
         "title": "Mint a new experiment run",
@@ -1457,7 +1493,7 @@
         "submitting": "Minting…"
       },
       "edit": {
-        "title": "Edit run: {name}",
+        "title": "Edit run: <name></name>",
         "subtitle": "Patch narrative, status, tags, config, or provenance. Status transitions stamp started_at / finished_at automatically on the server.",
         "submit": "Save changes",
         "submitting": "Saving…"
@@ -1493,8 +1529,10 @@
   },
   "support": {
     "title": "Back the project",
+    "loadFailed": "The support feed could not be loaded just now.",
     "hero": {
       "supportCount": "{count} people back this project",
+      "beFirst": "Be the first to back this project.",
       "withComments": "{count} with comments",
       "anonymous": "{count} anonymous"
     },
@@ -1605,6 +1643,7 @@
       "commentPlaceholder": "Leave a comment (optional)…",
       "publicNote": "Comments and metrics are public.",
       "sendThumbsUp": "👍 Send thumbs up",
+      "failed": "That did not go through. Nothing was recorded, so please try again.",
       "sending": "Sending…",
       "thanks": "Thanks for the support! 🎉",
       "recentComments": "Recent comments",
@@ -1616,7 +1655,7 @@
       "accept": "I understand and accept",
       "identification": {
         "heading": "Operator",
-        "body": "This is a non-commercial academic research deployment, operated personally and independently. It does NOT constitute an official service of any institution."
+        "body": "This is a non-commercial academic research deployment, operated personally and independently by Francisco Miguel Pérez Canales. It does NOT constitute an official service of any institution."
       },
       "asIs": {
         "heading": "No warranty",
@@ -1628,7 +1667,7 @@
       },
       "privacyLog": {
         "heading": "Privacy and logs",
-        "body": "No accounts required. The server logs IP addresses and request timestamps for 30 days for abuse prevention. No tracking cookies. Data protection requests (access, erasure, rectification): open an issue on the project repository on GitHub."
+        "body": "No accounts required. The server logs IP addresses and request timestamps for 30 days for abuse prevention. No tracking cookies. Traffic reaches the server through ngrok, a United States provider, which therefore sees the connection metadata. Data protection requests (access, erasure, rectification): open an issue on the project repository on GitHub."
       },
       "license": {
         "heading": "License",
@@ -1662,6 +1701,9 @@
     },
     "floatingJobsWidget": {
       "toggleLabel": "View running jobs ({count})"
+    },
+    "operatorOnly": {
+      "needsOperator": "Running this needs an operator account. The form is shown because the operation exists and works; it is the dispatch that is restricted."
     }
   },
   "stack": {
@@ -1978,9 +2020,9 @@
     "statusActive": "Active",
     "statusRevoked": "Revoked",
     "loadError": "Could not load API keys",
-    "revokedToast": "Revoked {name}",
+    "revokedToast": "Revoked <name></name>",
     "revokeErrorToast": "Revoke failed: {error}",
-    "mintedToast": "Minted {name}",
+    "mintedToast": "Minted <name></name>",
     "footnote": "Revocation is irreversible. Revoked rows remain visible for audit when 'Show revoked keys' is enabled.",
     "forbiddenTitle": "Admin only",
     "forbiddenBody": "This page manages programmatic access keys and is restricted to operators with the admin role.",
@@ -2049,8 +2091,8 @@
     "scoringConfigCreated": "Scoring config created",
     "annotationsDeleted": "Deleted ({count} annotations removed)",
     "predictionsDeleted": "Deleted ({count} assignments removed)",
-    "querySetDeleted": "Deleted \"{name}\"",
-    "querySetUploaded": "Query set \"{name}\" uploaded ({count} sequences)",
+    "querySetDeleted": "Deleted \"<name></name>\"",
+    "querySetUploaded": "Query set \"<name></name>\" uploaded ({count} sequences)",
     "sequencesVacuumed": "Deleted {count} orphan sequence(s)",
     "embeddingsVacuumed": "Deleted {count} unindexed embedding(s)",
     "presetsCreated": "Presets created: {names}",
@@ -2125,7 +2167,7 @@
       "createAccount": "Create account",
       "loadError": "Could not load your profile: {message}",
       "title": "Your profile",
-      "subtitle": "Account details for {name}.",
+      "subtitle": "Account details for <name></name>.",
       "signOut": "Sign out",
       "fields": {
         "username": "Username",

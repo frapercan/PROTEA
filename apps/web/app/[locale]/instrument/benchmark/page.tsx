@@ -7,6 +7,8 @@ import { useTranslations } from "next-intl";
 import { BenchmarkHeatmap } from "@/components/BenchmarkHeatmap";
 import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import { Skeleton } from "@/components/Skeleton";
+import { AwaitingData, QuietLink } from "@/components/AwaitingData";
+import { CAMPAIGN_STATUS } from "@/lib/campaign";
 import { Tooltip } from "@/components/Tooltip";
 import {
   cellKey,
@@ -351,6 +353,43 @@ export default function BenchmarkPage() {
     );
   }
 
+  // Loaded, and genuinely nothing to show. This branch has to come
+  // BEFORE the loading one, and distinguishing the two is the whole
+  // point: with the corpus empty the matrix returns
+  // {"rows":[],"stages":[]}, so `stage` can never resolve from
+  // matrix.stages, and the loading branch below held for ever. A tool
+  // with no data is not a tool that is loading, and it is not a tool
+  // that is broken, but all three look the same behind a skeleton.
+  if (
+    embeddings !== null &&
+    matrix !== null &&
+    matrix.stages.length === 0 &&
+    matrix.rows.length === 0
+  ) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
+        {/* Every state of this page needs the heading, not just the one
+            with data in it. The h1 lived further down, past the two
+            early returns, so the page a visitor actually meets today had
+            no first-level heading at all. */}
+        <h1 className="mb-6 text-2xl font-bold text-slate-900">{t("title")}</h1>
+        <AwaitingData
+          title={t("awaitingTitle")}
+          body={t("awaitingBody")}
+          detail={t("awaitingDetail", {
+            asOf: CAMPAIGN_STATUS.asOf,
+            read: CAMPAIGN_STATUS.releasesRead,
+            releases: CAMPAIGN_STATUS.goaReleases,
+            gigabytes: CAMPAIGN_STATUS.gafGigabytes,
+          })}
+        >
+          <QuietLink href={`/${locale}/instrument/jobs`}>{t("awaitingJobs")}</QuietLink>
+          <QuietLink href={`/${locale}/instrument`}>{t("awaitingGraph")}</QuietLink>
+        </AwaitingData>
+      </div>
+    );
+  }
+
   if (!embeddings || !matrix || stage === null) {
     // Two-step progress hint: matrix fetch typically dominates (200-1200ms
     // cold, instant when the Next.js 60s cache is warm); the embeddings
@@ -368,6 +407,7 @@ export default function BenchmarkPage() {
         aria-live="polite"
         aria-busy="true"
       >
+        <h1 className="text-2xl font-bold text-slate-900">{t("title")}</h1>
         <div className="space-y-2">
           <p className="text-sm font-semibold text-slate-700">
             {t("loadingTitle")}
@@ -479,9 +519,7 @@ export default function BenchmarkPage() {
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            Benchmark matrix
-          </h1>
+          <h1 className="text-2xl font-bold text-slate-900">{t("title")}</h1>
           <p className="text-sm text-slate-500 mt-1">
             Per-embedding IA-weighted{" "}
             <span className="font-mono">f_micro_w</span> (LAFA / CAFA

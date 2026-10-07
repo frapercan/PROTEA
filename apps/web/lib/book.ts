@@ -311,6 +311,7 @@ export const PILLARS: Pillar[] = [
     receipt: {
       artifact: "storage/feature_necessity/gain_report.json",
       script: "storage/feature_necessity/measure_gain.py",
+      pending: true,
     },
     operation: {
       kind: "script",
@@ -348,6 +349,7 @@ export const PILLARS: Pillar[] = [
     receiptSecondary: {
       artifact: "storage/layer_ablation/crown_result.json",
       script: "storage/layer_ablation/WRITEUP.md",
+      pending: true,
     },
     operation: {
       kind: "job",
@@ -420,10 +422,12 @@ export const PILLARS: Pillar[] = [
     receipt: {
       artifact: "storage/regen_headline/BP_WALL_CHARACTERIZATION.md",
       script: "storage/cooc_experiment/oracle_ceiling.py",
+      pending: true,
     },
     receiptSecondary: {
       artifact: "storage/cooc_experiment/isolate_percell_split.json",
       script: "storage/cooc_experiment/decompose_order_vs_count.py",
+      pending: true,
     },
     operation: {
       kind: "script",

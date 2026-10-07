@@ -18,6 +18,7 @@ export function SupportButton() {
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [failed, setFailed] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -39,17 +40,29 @@ export function SupportButton() {
 
   async function handleSubmit() {
     setSubmitting(true);
+    setFailed(false);
     try {
       const res = await fetch(`${baseUrl()}/support`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ comment: comment.trim() || null }),
       });
+      // It used to read the body and declare success whatever came back.
+      // POST /support required a role until 2026-10-07, so every
+      // anonymous visitor got 401 and was thanked for it: the panel said
+      // "submitted", the count never moved, and nothing was recorded.
+      // A button that lies about writing is worse than one that refuses.
+      if (!res.ok) {
+        setFailed(true);
+        return;
+      }
       const json = await res.json();
       setData((prev) => prev ? { ...prev, count: json.count } : { count: json.count, comments: [] });
       setSubmitted(true);
       setComment("");
       setTimeout(() => setOpen(false), 1500);
+    } catch {
+      setFailed(true);
     } finally {
       setSubmitting(false);
     }
@@ -110,6 +123,11 @@ export function SupportButton() {
                 <p className="text-xs text-slate-600">
                   {t("publicNote")}
                 </p>
+                {failed && (
+                  <p role="alert" className="text-xs font-medium text-red-700">
+                    {t("failed")}
+                  </p>
+                )}
                 <button
                   onClick={handleSubmit}
                   disabled={submitting}

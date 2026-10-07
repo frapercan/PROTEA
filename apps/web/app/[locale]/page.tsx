@@ -1,5 +1,9 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
+import { ARGUMENT_RECORD, AUTHOR, CAMPAIGN_STATUS, EXTERNAL_RESULT, LINKS, PLATFORM } from "@/lib/campaign";
+import { baseUrl } from "@/lib/api";
+import { QuietLink } from "@/components/AwaitingData";
+import { AnnotateForm } from "@/components/AnnotateForm";
 import { NineCellGrid } from "@/components/book/NineCellGrid";
 import { ReceiptFootnote } from "@/components/book/ReceiptFootnote";
 import { CHAPTER_ZERO, HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
@@ -15,9 +19,39 @@ import { CHAPTER_ZERO, HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
  *
  * Server component: the only client island is the pull-a-footnote apparatus.
  */
+/**
+ * The live corpus size, or null when it cannot be read.
+ *
+ * An external audit on 2026-10-07 found four different protein counts on
+ * four pages within the same minute: 745,421, 715,602, 713,318 and
+ * 754673. They were not contradictory, they were unlabelled: the API
+ * reports `total` (canonical entries plus isoforms) and `canonical`
+ * separately, and this page was quoting a hand-written snapshot of the
+ * total that had already gone stale. On a page about data, four numbers
+ * for one quantity reads worse than any of them being wrong.
+ *
+ * Read at request time, with a short timeout, and the dated constant as
+ * the fallback: this figure is the only genuinely live thing on the page
+ * and it should not be the reason it fails to render.
+ */
+async function liveProteinTotal(): Promise<number | null> {
+  try {
+    const res = await fetch(`${baseUrl()}/proteins/stats`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!res.ok) return null;
+    const stats = (await res.json()) as { total?: unknown };
+    return typeof stats.total === "number" ? stats.total : null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function ArgumentPage() {
   const t = await getTranslations("book");
   const locale = await getLocale();
+  const liveTotal = await liveProteinTotal();
 
   // The board gets its own window, and it is the only one this page states.
   //
@@ -37,20 +71,222 @@ export default async function ArgumentPage() {
     .filter(Boolean)
     .join(" · ");
 
+  // The page is wider than its prose on purpose. On a 1830px screen the
+  // old max-w-3xl left roughly 370px of dead gutter on each side of a
+  // 768px column. Widening the text would have been the wrong fix: about
+  // 65 characters is the measure that reads well, and the h1 and the
+  // argument keep it. What the extra room buys is somewhere to PUT
+  // things, so the counted figures, the links and the campaign note move
+  // into a rail beside the opening instead of sitting below the fold.
+  // Every section below the header is pinned back to the reading measure.
   return (
-    <div className="mx-auto max-w-3xl px-1 pb-16">
-      {/* The argument. */}
-      <header className="pt-2 sm:pt-6">
+    <div className="mx-auto max-w-6xl px-1 pb-16">
+      {/* What this is, in the reader's own words, before any of ours.
+          The thesis sentence used to be the h1, which meant the first
+          thing a visitor read was "a taxonomy of orthogonal evidence
+          combined by a calibrated fusion". It is the right sentence for
+          the argument and the wrong one for an opening. It keeps every
+          word, one section down.
+
+          Three things the first draft of this block got wrong, all of
+          them visible the moment it was on screen:
+
+          - The measure was inconsistent. The h1 and the rule spanned the
+            container while every paragraph stopped at max-w-prose, so
+            the body looked narrower than everything around it. One
+            measure now, the container's.
+          - The external result was buried third, with less weight than
+            the campaign note below it. It is the strongest and most
+            checkable claim on the page, so it leads.
+          - The engineering figures were inside prose, where they cannot
+            be scanned. They are a row now.
+
+          Typeset in this page's own language: stone family, serif body,
+          and the understated underlined link it uses everywhere. No
+          filled buttons, and no --muted background: --muted is #57534E,
+          a TEXT colour. */}
+      <header className="grid grid-cols-1 gap-x-14 gap-y-10 pt-2 sm:pt-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="max-w-[46rem]">
         <p className="protea-eyebrow text-[12px] uppercase tracking-wide text-[var(--primary)]">
           {t("eyebrow")}
         </p>
         <h1 className="mt-6 font-serif text-[1.7rem] font-normal leading-[1.42] tracking-tight text-[var(--foreground)] sm:text-[2.05rem] sm:leading-[1.4]">
-          {THESIS_SENTENCE}
+          {t("welcomeTitle")}
         </h1>
+        <p className="mt-5 text-[14px] leading-relaxed text-[var(--muted)]">
+          {t.rich("byline", {
+            name: () => (
+              <a
+                href={LINKS.github}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+              >
+                {AUTHOR.name}
+              </a>
+            ),
+          })}
+          {AUTHOR.orcid ? (
+            <>
+              {" "}
+              <a
+                href={`https://orcid.org/${AUTHOR.orcid}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+              >
+                ORCID
+              </a>
+            </>
+          ) : null}
+        </p>
+        <p className="mt-6 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
+          {t("welcomeBody")}
+        </p>
+
+        {/* The result, given the weight it earns: external, dated,
+            scored by someone else, and checkable in one click. */}
+        <figure className="mt-9 border-t border-[var(--border)] pt-6">
+          <figcaption className="protea-eyebrow text-[11px] uppercase tracking-wide text-[var(--subtle)]">
+            {t("resultLabel")}
+          </figcaption>
+          <p className="mt-3 font-serif text-[1.35rem] leading-snug text-[var(--foreground)] sm:text-[1.5rem]">
+            {t.rich("welcomeResult", {
+              rank: EXTERNAL_RESULT.rank,
+              teams: EXTERNAL_RESULT.teams,
+              competition: EXTERNAL_RESULT.competition,
+              cafa: (chunks) => (
+                <a
+                  href={LINKS.cafaCompetition}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {chunks}
+                </a>
+              ),
+            })}
+          </p>
+          <p className="mt-4 text-[14.5px] leading-relaxed text-[var(--muted)]">
+            {t.rich("welcomeValidation", {
+              lafa: (chunks) => (
+                <a
+                  href={LINKS.lafa}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {chunks}
+                </a>
+              ),
+              evaluator: (chunks) => (
+                <a
+                  href={LINKS.evaluator}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {chunks}
+                </a>
+              ),
+              upstream: (chunks) => (
+                <a
+                  href={LINKS.evaluatorUpstream}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {chunks}
+                </a>
+              ),
+            })}
+          </p>
+        </figure>
+
+        </div>
+
+        {/* The rail: counted figures, where to go, and what is running.
+            One column on a phone, beside the opening on a wide screen. */}
+        <aside className="flex flex-col gap-7 xl:border-l xl:border-[var(--border)] xl:pl-10">
+        <dl className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-3 xl:grid-cols-1">
+          {[
+            [t("statApi"), t("statApiValue", { ops: PLATFORM.apiOperations, routes: PLATFORM.apiRoutes })],
+            [t("statTests"), t("statTestsValue", { tests: PLATFORM.backendTests })],
+            [t("statData"), t("statDataValue", { gigabytes: CAMPAIGN_STATUS.gafGigabytes })],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <dt className="protea-eyebrow text-[11px] uppercase tracking-wide text-[var(--subtle)]">
+                {label}
+              </dt>
+              <dd className="mt-1.5 font-serif text-[18px] text-[var(--foreground)]">{value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <div className="flex flex-wrap gap-x-7 gap-y-3 border-t border-[var(--border)] pt-6 xl:flex-col xl:gap-y-3">
+          <QuietLink href={`/${locale}/instrument`}>{t("openInstrument")}</QuietLink>
+          <QuietLink href={`/${locale}/annotate`}>{t("annotate")}</QuietLink>
+          <QuietLink href={LINKS.repo} external>{t("readTheCode")}</QuietLink>
+          <QuietLink href="/thesis.pdf">{t("thesisPdf")}</QuietLink>
+          <QuietLink href={`/${locale}?policy=1`}>{t("termsAndPrivacy")}</QuietLink>
+        </div>
+
+        <p className="border-l-2 border-[var(--border-strong)] pl-4 text-[13.5px] leading-relaxed text-[var(--subtle)]">
+          {t("welcomeCampaign", {
+            asOf: CAMPAIGN_STATUS.asOf,
+            read: CAMPAIGN_STATUS.releasesRead,
+            releases: CAMPAIGN_STATUS.goaReleases,
+            gigabytes: CAMPAIGN_STATUS.gafGigabytes,
+            proteins: liveTotal ?? CAMPAIGN_STATUS.proteinsAdmitted,
+          })}
+        </p>
+        </aside>
       </header>
 
+      {/* The tool, at the entrance, because that is what this is.
+          The sidebar's call to action pointed at `/#annotate-form` and
+          that anchor did not exist here any more, which is the fossil of
+          this block having lived on the home page before. It reads
+          better here than the sealed board did: a visitor who does not
+          know what a protein annotation is learns more from the form
+          than from a table of withdrawn figures.
+
+          The form renders itself disabled, with its own explanation,
+          while the annotation corpus is rebuilt. Showing it disabled
+          shows the tool; hiding it hid the tool. */}
+      <section id="annotate-form" className="mt-14 scroll-mt-24 border-t border-[var(--border)] pt-10">
+        <AnnotateForm />
+      </section>
+
+      {/* The argument, published in full and dated. Not a word of the
+          prose is edited: it states the LAFA board in the present tense
+          and that was true when written, so the honest move is to say
+          what it was measured against, not to rewrite a researcher's
+          sentences or to make published work read as withheld. */}
+      <section aria-labelledby="argument-heading" className="max-w-3xl mt-14 border-t border-[var(--border)] pt-10">
+        <p className="max-w-prose text-[13px] leading-relaxed text-[var(--subtle)]">
+          {t("argumentRecord", { board: ARGUMENT_RECORD.board, frame: ARGUMENT_RECORD.frame })}
+        </p>
+        {/* Said out loud rather than left as a surprise. From here down the
+            page is the researcher's argument, and it is published in the
+            language it was written in. A reader on /es who hits a wall of
+            English deserves to be told why, instead of concluding the
+            translation is broken. */}
+        {locale !== "en" ? (
+          <p className="mt-3 max-w-prose text-[13px] italic leading-relaxed text-[var(--subtle)]">
+            {t("argumentInEnglish")}
+          </p>
+        ) : null}
+        <h2
+          id="argument-heading"
+          className="mt-5 font-serif text-[1.55rem] font-normal leading-[1.42] tracking-tight text-[var(--foreground)] sm:text-[1.85rem] sm:leading-[1.4]"
+        >
+          {THESIS_SENTENCE}
+        </h2>
+      </section>
+
       {/* Chapter zero: the whole argument, end to end, for a reader barely initiated. */}
-      <section aria-labelledby="ch0-heading" className="mt-12 border-t border-[var(--border)] pt-10">
+      <section aria-labelledby="ch0-heading" className="max-w-3xl mt-12 border-t border-[var(--border)] pt-10">
         <h2 id="ch0-heading" className="sr-only">
           The argument, end to end
         </h2>
@@ -77,14 +313,28 @@ export default async function ArgumentPage() {
       </section>
 
       {/* The hero: the sealed board, typeset as a table. */}
-      <section aria-labelledby="board-heading" className="mt-14 border-t border-[var(--border)] pt-10">
+      <section aria-labelledby="board-heading" className="max-w-3xl mt-14 border-t border-[var(--border)] pt-10">
         <h2 id="board-heading" className="sr-only">
           {t("boardHeading")}
         </h2>
-        <NineCellGrid frameCaption={frameCaption} italicLine={t("nineCellItalic")} />
+        <NineCellGrid
+            frameCaption={frameCaption}
+            italicLine={t("nineCellItalic")}
+            carriedLabel={t("cellCarried")}
+            frontierLabel={t("cellFrontier")}
+            explainer={t("boardExplainer")}
+            scrollHint={t("boardScrollHint")}
+          />
 
         <p className="mt-8 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
-          {t.rich("headlineSentence", {
+          {/* Two sentences, not one with a hole in it.
+              Interpolating the withheld state into "the result is {value}"
+              produced "el resultado sellado es recalculandose" and three
+              more like it: a template with a slot for a NUMBER cannot take
+              a verb, and the four translated pages read as broken. The
+              withheld state gets its own sentence, written to be
+              grammatical in each language. */}
+          {t.rich(HEADLINE.value === null ? "headlineSentenceWithheld" : "headlineSentence", {
             metric: () => <span className="font-mono text-[15px] text-[var(--foreground)]">{HEADLINE.metric}</span>,
             // Withdrawn while the campaign recomputes: the sentence keeps its
             // shape and names the figure as absent, so a reader is told the
@@ -92,7 +342,7 @@ export default async function ArgumentPage() {
             // retracted.
             value: () => (
               <span className="font-semibold italic text-[var(--muted)]">
-                {HEADLINE.value ?? "being recomputed"}
+                {HEADLINE.value ?? t("headlineBeingRecomputed")}
               </span>
             ),
             note: (chunks) => (
@@ -118,7 +368,7 @@ export default async function ArgumentPage() {
       </section>
 
       {/* The four pillars, as chapters. */}
-      <section aria-labelledby="chapters-heading" className="mt-16 border-t border-[var(--border)] pt-10">
+      <section aria-labelledby="chapters-heading" className="max-w-3xl mt-16 border-t border-[var(--border)] pt-10">
         <h2
           id="chapters-heading"
           className="protea-eyebrow text-[12px] uppercase tracking-wide text-[var(--muted)]"
@@ -158,8 +408,13 @@ export default async function ArgumentPage() {
       {/* Quiet footer: the instrument is a tab, not the entrance. */}
       <footer className="mt-14 border-t border-[var(--border)] pt-6">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[14px]">
+          {/* Same label, same destination as the one in the header rail.
+              It used to point at /instrument/benchmark while the rail's
+              pointed at the hub and the annotate panel's pointed at the
+              jobs queue: three links reading "Open the instrument" and
+              going to three different places. */}
           <Link
-            href={`/${locale}/instrument/benchmark`}
+            href={`/${locale}/instrument`}
             className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
           >
             {t("openInstrument")}

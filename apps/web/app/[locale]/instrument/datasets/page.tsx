@@ -34,14 +34,34 @@ function shortSha(s: string | null): string {
   return s.length > 12 ? s.slice(0, 12) : s;
 }
 
+// Deterministic on both sides of hydration.
+//
+// `toLocaleString()` with no locale, and `toLocaleString([])`, take the
+// ENVIRONMENT's locale and time zone. Node resolves to es-ES /
+// Europe/Madrid on this host while the visitor's browser resolves to
+// whatever they have, so the server rendered "754.862" and an
+// English-locale browser rendered "754,862". React then refused to
+// reconcile the tree: that is the #418 an external audit saw on this
+// page on 2026-10-07, and the same cause behind the thousands separator
+// disagreeing from page to page.
+//
+// Pinned to en-GB and UTC rather than to the visitor: a timestamp on an
+// operations page means more when every reader sees the same instant.
+const DATE_FMT = new Intl.DateTimeFormat("en-GB", {
+  dateStyle: "short",
+  timeStyle: "short",
+  timeZone: "UTC",
+});
+const INT_FMT = new Intl.NumberFormat("en-GB");
+
 function formatDate(iso?: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+  return `${DATE_FMT.format(new Date(iso))} UTC`;
 }
 
 function formatInt(n: number | null | undefined): string {
   if (n == null) return "—";
-  return n.toLocaleString();
+  return INT_FMT.format(n);
 }
 
 function trainWindow(pairs: string[]): string {

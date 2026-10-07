@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
+import { LIVE_ANNOTATION_AVAILABLE } from "@/lib/campaign";
+
 const STORAGE_KEY = "protea_policy_accepted_v2";
 
 const SECTION_KEYS = [
@@ -37,8 +39,27 @@ export function UsagePolicyModal() {
   // marks a live-presentation session.
   const searchParams = useSearchParams();
   const isDemo = searchParams?.get("demo") === "1";
+  // `?policy=1` opens it on request. It is what the "Terms and privacy"
+  // link uses, and it is how the text stays reachable while the gate
+  // itself is not being shown.
+  const isRequested = searchParams?.get("policy") === "1";
 
   useEffect(() => {
+    // The gate exists to take consent BEFORE someone submits a sequence.
+    // While the predictor is paused nobody can submit one, so it guards
+    // nothing and costs the first impression: an external audit on
+    // 2026-10-07 found a full-screen legal wall covering the h1 in the
+    // first ten seconds, and on a phone it opened mid-text. Tied to the
+    // same constant the form reads, so the gate comes back with the
+    // predictor. It still opens on request.
+    if (!LIVE_ANNOTATION_AVAILABLE && !isRequested) {
+      setVisible(false);
+      return;
+    }
+    if (isRequested) {
+      setVisible(true);
+      return;
+    }
     // Demo bypass: `?demo=1` pre-accepts the policy so a live presentation
     // is never walled by the legal gate on a fresh tab or refresh. The
     // acceptance is persisted under the same storage key, so once the
@@ -51,7 +72,7 @@ export function UsagePolicyModal() {
       return;
     }
     setVisible(!localStorage.getItem(STORAGE_KEY));
-  }, [isDemo]);
+  }, [isDemo, isRequested]);
 
   const accept = useCallback(() => {
     localStorage.setItem(STORAGE_KEY, "1");

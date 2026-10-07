@@ -15,8 +15,7 @@ import {
   listQuerySets,
   getProteinStats,
   EmbeddingConfig,
-  QuerySet,
-} from "@/lib/api";
+  QuerySet, errorText } from "@/lib/api";
 
 type ModelPreset = {
   value: string;
@@ -170,7 +169,7 @@ const tToast = useTranslations("toasts");
       setCfgDescription("");
       toast(tToast("embeddingConfigCreated"), "success");
     } catch (err: any) {
-      setCfgError(String(err));
+      setCfgError(errorText(err));
     } finally {
       setCfgSubmitting(false);
     }
@@ -188,8 +187,8 @@ const tToast = useTranslations("toasts");
       setConfigs((prev) => prev.filter((c) => c.id !== id));
       toast(tToast("configDeleted"), "info");
     } catch (err: any) {
-      setError(String(err));
-      toast(String(err), "error");
+      setError(errorText(err));
+      toast(errorText(err), "error");
     }
   }
 
@@ -219,8 +218,8 @@ const tToast = useTranslations("toasts");
       setCmpResult(result);
       toast(tToast("computeJobQueued"), "success");
     } catch (err: any) {
-      setCmpError(String(err));
-      toast(String(err), "error");
+      setCmpError(errorText(err));
+      toast(errorText(err), "error");
     } finally {
       setCmpSubmitting(false);
     }

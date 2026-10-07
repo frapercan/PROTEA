@@ -93,7 +93,7 @@ export default function SupportPage() {
       </div>
     );
   }
-  if (!data) return <div className="p-8 text-sm text-red-500">Could not load support data.</div>;
+  if (!data) return <div className="p-8 text-sm text-slate-600">{t("loadFailed")}</div>;
 
   const withComments = data.comments.length;
   const anonymous = data.count - withComments;
@@ -102,14 +102,24 @@ export default function SupportPage() {
     <div className="max-w-2xl space-y-10">
       <h1 className="text-2xl font-bold tracking-tight text-slate-900">{t("title")}</h1>
 
-      {/* Hero */}
+      {/* Hero.
+          This page exists to show that other people back the project, so
+          at zero it was showing a 60px thumbs-up over a giant "0" and
+          then "0 with comments · 0 anonymous": a social-proof panel
+          proving the opposite. At zero it invites instead. */}
       <div className="rounded-2xl border border-blue-100 bg-blue-50 px-8 py-10 text-center space-y-3">
         <div className="text-6xl">👍</div>
-        <div className="text-5xl font-bold text-blue-700">{data.count.toLocaleString()}</div>
-        <div className="text-base text-blue-500 font-medium">{t("hero.supportCount", { count: data.count })}</div>
-        <div className="text-xs text-blue-400 pt-1">
-          {t("hero.withComments", { count: withComments })} · {t("hero.anonymous", { count: anonymous })}
-        </div>
+        {data.count === 0 ? (
+          <p className="text-base font-medium text-blue-700">{t("hero.beFirst")}</p>
+        ) : (
+          <>
+            <div className="text-5xl font-bold text-blue-700">{data.count.toLocaleString()}</div>
+            <div className="text-base text-blue-500 font-medium">{t("hero.supportCount", { count: data.count })}</div>
+            <div className="text-xs text-blue-400 pt-1">
+              {t("hero.withComments", { count: withComments })} · {t("hero.anonymous", { count: anonymous })}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Comments */}
