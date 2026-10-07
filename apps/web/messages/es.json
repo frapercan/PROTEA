@@ -1655,7 +1655,7 @@
       "accept": "Entiendo y acepto",
       "identification": {
         "heading": "Responsable",
-        "body": "Este es un despliegue de investigación académica sin ánimo de lucro, operado de forma personal e independiente. NO constituye un servicio oficial de ninguna institución."
+        "body": "Es un despliegue académico de investigación, sin ánimo de lucro, operado personal e independientemente por Francisco Miguel Pérez Canales. NO constituye un servicio oficial de ninguna institución."
       },
       "asIs": {
         "heading": "Sin garantías",
@@ -1667,7 +1667,7 @@
       },
       "privacyLog": {
         "heading": "Privacidad y registros",
-        "body": "No se requieren cuentas. El servidor registra direcciones IP y marcas de tiempo de las peticiones durante 30 días para la prevención de abusos. Sin cookies de seguimiento. Solicitudes en materia de protección de datos (acceso, supresión, rectificación): abre una incidencia en el repositorio del proyecto en GitHub."
+        "body": "No hacen falta cuentas. El servidor registra direcciones IP y marcas de tiempo durante 30 días para prevenir abusos. Sin cookies de seguimiento. El tráfico llega al servidor a través de ngrok, un proveedor de Estados Unidos, que por tanto ve los metadatos de la conexión. Solicitudes de protección de datos (acceso, supresión, rectificación): abre una incidencia en el repositorio del proyecto en GitHub."
       },
       "license": {
         "heading": "Licencia",

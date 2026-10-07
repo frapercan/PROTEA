@@ -1656,7 +1656,7 @@
       "accept": "Ich verstehe und akzeptiere",
       "identification": {
         "heading": "Betreiber",
-        "body": "Dies ist ein nicht-kommerzielles akademisches Forschungs-Deployment, das persönlich und unabhängig betrieben wird. Es stellt KEINEN offiziellen Dienst einer Institution dar."
+        "body": "Dies ist eine nicht-kommerzielle akademische Forschungsinstallation, persönlich und unabhängig betrieben von Francisco Miguel Pérez Canales. Sie stellt KEINEN offiziellen Dienst einer Institution dar."
       },
       "asIs": {
         "heading": "Keine Gewährleistung",
@@ -1668,7 +1668,7 @@
       },
       "privacyLog": {
         "heading": "Datenschutz und Logs",
-        "body": "Keine Konten erforderlich. Der Server protokolliert IP-Adressen und Zeitstempel von Anfragen 30 Tage lang zur Missbrauchsprävention. Keine Tracking-Cookies. Datenschutzanfragen (Auskunft, Löschung, Berichtigung): Issue im GitHub-Repository des Projekts eröffnen."
+        "body": "Keine Konten erforderlich. Der Server protokolliert IP-Adressen und Zeitstempel 30 Tage lang zur Missbrauchsprävention. Keine Tracking-Cookies. Der Verkehr erreicht den Server über ngrok, einen Anbieter aus den Vereinigten Staaten, der damit die Verbindungsmetadaten sieht. Datenschutzanfragen (Auskunft, Löschung, Berichtigung): ein Issue im Projekt-Repository auf GitHub eröffnen."
       },
       "license": {
         "heading": "Lizenz",
