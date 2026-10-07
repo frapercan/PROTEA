@@ -273,7 +273,6 @@ export function AnnotateForm() {
               read: CAMPAIGN_STATUS.releasesRead,
               releases: CAMPAIGN_STATUS.goaReleases,
               gigabytes: CAMPAIGN_STATUS.gafGigabytes,
-              proteins: CAMPAIGN_STATUS.proteinsAdmitted,
             })}
           >
             <QuietLink href={`${publicBaseUrl()}/docs`} external>

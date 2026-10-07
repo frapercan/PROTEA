@@ -376,7 +376,6 @@ export default function BenchmarkPage() {
             read: CAMPAIGN_STATUS.releasesRead,
             releases: CAMPAIGN_STATUS.goaReleases,
             gigabytes: CAMPAIGN_STATUS.gafGigabytes,
-            proteins: CAMPAIGN_STATUS.proteinsAdmitted,
           })}
         >
           <QuietLink href={`/${locale}/instrument/jobs`}>{t("awaitingJobs")}</QuietLink>

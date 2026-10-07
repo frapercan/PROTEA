@@ -310,7 +310,14 @@ export default async function ArgumentPage() {
         <NineCellGrid frameCaption={frameCaption} italicLine={t("nineCellItalic")} />
 
         <p className="mt-8 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
-          {t.rich("headlineSentence", {
+          {/* Two sentences, not one with a hole in it.
+              Interpolating the withheld state into "the result is {value}"
+              produced "el resultado sellado es recalculandose" and three
+              more like it: a template with a slot for a NUMBER cannot take
+              a verb, and the four translated pages read as broken. The
+              withheld state gets its own sentence, written to be
+              grammatical in each language. */}
+          {t.rich(HEADLINE.value === null ? "headlineSentenceWithheld" : "headlineSentence", {
             metric: () => <span className="font-mono text-[15px] text-[var(--foreground)]">{HEADLINE.metric}</span>,
             // Withdrawn while the campaign recomputes: the sentence keeps its
             // shape and names the figure as absent, so a reader is told the
