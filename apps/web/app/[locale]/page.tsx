@@ -162,6 +162,7 @@ export default async function ArgumentPage() {
         <p className="mt-9 border-l-2 border-[var(--border-strong)] pl-4 text-[13.5px] leading-relaxed text-[var(--subtle)]">
           {t("welcomeCampaign", {
             asOf: CAMPAIGN_STATUS.asOf,
+            read: CAMPAIGN_STATUS.releasesRead,
             releases: CAMPAIGN_STATUS.goaReleases,
             gigabytes: CAMPAIGN_STATUS.gafGigabytes,
             proteins: CAMPAIGN_STATUS.proteinsAdmitted,

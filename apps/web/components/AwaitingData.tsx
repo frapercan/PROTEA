@@ -73,11 +73,19 @@ export function QuietLink({
       </span>
     </>
   );
-  // Internal destinations go through next/link so navigation stays
-  // client-side; an external one needs a plain anchor with the tab and
-  // referrer attributes.
-  return external ? (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
+  // A path with a file extension is not a Next route: /thesis.pdf is
+  // served by the API. next/link PREFETCHES, so routing the thesis link
+  // through it made every visit to the home page download the whole
+  // 1,114,070-byte PDF in the background. Caught by an external audit on
+  // 2026-10-07. Files get a plain anchor.
+  const isFile = /\.[a-z0-9]{2,5}$/i.test(href.split("?")[0]);
+  return external || isFile ? (
+    <a
+      href={href}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noopener noreferrer" : undefined}
+      className={className}
+    >
       {body}
     </a>
   ) : (

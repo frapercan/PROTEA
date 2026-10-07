@@ -40,9 +40,19 @@ export const LIVE_ANNOTATION_AVAILABLE = false;
  */
 export const CAMPAIGN_STATUS = {
   asOf: "2026-10-07",
+  /**
+   * Releases READ so far, of the whole series.
+   *
+   * These were one number until an external reviewer caught it: the copy
+   * said the campaign "has read 75 releases, 802.1 GB of files" when 75
+   * and 802.1 GB are the size of the SERIES and only 60 had been read.
+   * An overstatement on the one page whose argument is that its claims
+   * can be checked. Two fields now, and the copy says "X of Y".
+   */
+  releasesRead: 60,
   /** GOA releases in the series (156 to 235; 206 to 210 were never published). */
   goaReleases: 75,
-  /** Total size of those GAF files, measured by reading all 75 headers. */
+  /** Total size of the whole series, measured by reading all 75 headers. */
   gafGigabytes: 802.1,
   /**
    * Proteins admitted to the corpus so far, each carrying the release that

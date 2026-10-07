@@ -270,6 +270,7 @@ export function AnnotateForm() {
             body={t("annotatePausedBody")}
             detail={t("annotatePausedIngest", {
               asOf: CAMPAIGN_STATUS.asOf,
+              read: CAMPAIGN_STATUS.releasesRead,
               releases: CAMPAIGN_STATUS.goaReleases,
               gigabytes: CAMPAIGN_STATUS.gafGigabytes,
               proteins: CAMPAIGN_STATUS.proteinsAdmitted,
