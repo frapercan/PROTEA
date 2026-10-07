@@ -1,5 +1,7 @@
 "use client";
 
+import { OperatorOnlyNotice, useMayLaunchJobs } from "@/components/OperatorOnly";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
@@ -30,6 +32,7 @@ function shortId(id: string) {
 
 export default function AnnotationsPage() {
   const t = useTranslations("annotations");
+  const mayLaunch = useMayLaunchJobs();
   const tToast = useTranslations("toasts");
   const locale = useLocale();
   const toast = useToast();
@@ -477,8 +480,9 @@ export default function AnnotationsPage() {
                   </Link>
                 </div>
               )}
-              <div className="flex justify-end">
-                <button type="submit" disabled={snapSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
+              <div className="flex items-center justify-between gap-4">
+                {mayLaunch ? <span /> : <OperatorOnlyNotice />}
+                <button type="submit" disabled={snapSubmitting || !mayLaunch} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
                   {snapSubmitting ? t("loadSnapshotTab.launching") : t("loadSnapshotTab.launchJob")}
                 </button>
               </div>
@@ -536,8 +540,9 @@ export default function AnnotationsPage() {
                   </Link>
                 </div>
               )}
-              <div className="flex justify-end">
-                <button type="submit" disabled={goaSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
+              <div className="flex items-center justify-between gap-4">
+                {mayLaunch ? <span /> : <OperatorOnlyNotice />}
+                <button type="submit" disabled={goaSubmitting || !mayLaunch} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
                   {goaSubmitting ? t("loadGoaTab.launching") : t("loadGoaTab.launchJob")}
                 </button>
               </div>
@@ -584,8 +589,9 @@ export default function AnnotationsPage() {
                   </Link>
                 </div>
               )}
-              <div className="flex justify-end">
-                <button type="submit" disabled={qgoSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
+              <div className="flex items-center justify-between gap-4">
+                {mayLaunch ? <span /> : <OperatorOnlyNotice />}
+                <button type="submit" disabled={qgoSubmitting || !mayLaunch} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
                   {qgoSubmitting ? t("loadQuickgoTab.launching") : t("loadQuickgoTab.launchJob")}
                 </button>
               </div>

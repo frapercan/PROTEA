@@ -368,6 +368,11 @@ export default function BenchmarkPage() {
   ) {
     return (
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
+        {/* Every state of this page needs the heading, not just the one
+            with data in it. The h1 lived further down, past the two
+            early returns, so the page a visitor actually meets today had
+            no first-level heading at all. */}
+        <h1 className="mb-6 text-2xl font-bold text-slate-900">{t("title")}</h1>
         <AwaitingData
           title={t("awaitingTitle")}
           body={t("awaitingBody")}
@@ -402,6 +407,7 @@ export default function BenchmarkPage() {
         aria-live="polite"
         aria-busy="true"
       >
+        <h1 className="text-2xl font-bold text-slate-900">{t("title")}</h1>
         <div className="space-y-2">
           <p className="text-sm font-semibold text-slate-700">
             {t("loadingTitle")}
@@ -513,9 +519,7 @@ export default function BenchmarkPage() {
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            Benchmark matrix
-          </h1>
+          <h1 className="text-2xl font-bold text-slate-900">{t("title")}</h1>
           <p className="text-sm text-slate-500 mt-1">
             Per-embedding IA-weighted{" "}
             <span className="font-mono">f_micro_w</span> (LAFA / CAFA

@@ -266,6 +266,7 @@
   },
   "benchmark": {
     "loadingTitle": "Carregando benchmark…",
+    "title": "Matriz do benchmark",
     "awaitingTitle": "Construído, aguardando dados",
     "awaitingBody": "O benchmark está construído e funcionando. Ele compara modelos de linguagem de proteínas nas nove células de avaliação, três regimes de conhecimento cruzados com os três ramos da Gene Ontology, sobre uma divisão temporal sem vazamento. Ainda não tem nada para plotar porque o corpus de anotações contra o qual ele pontua está sendo reconstruído.",
     "awaitingDetail": "Em {asOf} a campanha já leu {read, number} das {releases, number} versões do GOA da série, {gigabytes, number} GB no total.",
@@ -1696,6 +1697,9 @@
     },
     "floatingJobsWidget": {
       "toggleLabel": "Ver trabalhos em execução ({count})"
+    },
+    "operatorOnly": {
+      "needsOperator": "Executar isto exige uma conta de operador. O formulário é exibido porque a operação existe e funciona; o que é restrito é o envio."
     }
   },
   "stack": {

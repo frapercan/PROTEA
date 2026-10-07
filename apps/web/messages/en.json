@@ -265,6 +265,7 @@
   },
   "benchmark": {
     "loadingTitle": "Loading benchmark…",
+    "title": "Benchmark matrix",
     "awaitingTitle": "Built, waiting on data",
     "awaitingBody": "The benchmark is built and running. It compares protein language models across the nine evaluation cells, three knowledge regimes crossed with the three branches of the Gene Ontology, on a leakage-free temporal split. It has nothing to plot yet because the annotation corpus it scores against is being rebuilt.",
     "awaitingDetail": "As of {asOf} the campaign has read {read, number} of the series' {releases, number} GOA releases, {gigabytes, number} GB in all.",
@@ -1695,6 +1696,9 @@
     },
     "floatingJobsWidget": {
       "toggleLabel": "View running jobs ({count})"
+    },
+    "operatorOnly": {
+      "needsOperator": "Running this needs an operator account. The form is shown because the operation exists and works; it is the dispatch that is restricted."
     }
   },
   "stack": {

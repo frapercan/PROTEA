@@ -1,5 +1,7 @@
 "use client";
 
+import { OperatorOnlyNotice, useMayLaunchJobs } from "@/components/OperatorOnly";
+
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
@@ -67,6 +69,7 @@ const tToast = useTranslations("toasts");
   // with 745,421 proteins in the database. Measured 2026-10-07 in the
   // served HTML. The sibling at instrument/annotations starts its flags
   // true and server-renders skeletons, which is the shape to copy.
+  const mayLaunch = useMayLaunchJobs();
   const [loadingBrowse, setLoadingBrowse] = useState(true);
 
   // Stats state
@@ -437,8 +440,9 @@ const tToast = useTranslations("toasts");
                   <Link href={`/${locale}/instrument/jobs/${insertResult.id}`} className="font-mono underline hover:text-green-900">{insertResult.id}</Link>
                 </div>
               )}
-              <div className="flex justify-end">
-                <button type="submit" disabled={insertSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
+              <div className="flex items-center justify-between gap-4">
+                {mayLaunch ? <span /> : <OperatorOnlyNotice />}
+                <button type="submit" disabled={insertSubmitting || !mayLaunch} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
                   {insertSubmitting ? t("insertTab.launching") : t("insertTab.launchJob")}
                 </button>
               </div>
@@ -475,8 +479,9 @@ const tToast = useTranslations("toasts");
                   <Link href={`/${locale}/instrument/jobs/${metaResult.id}`} className="font-mono underline hover:text-green-900">{metaResult.id}</Link>
                 </div>
               )}
-              <div className="flex justify-end">
-                <button type="submit" disabled={metaSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
+              <div className="flex items-center justify-between gap-4">
+                {mayLaunch ? <span /> : <OperatorOnlyNotice />}
+                <button type="submit" disabled={metaSubmitting || !mayLaunch} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
                   {metaSubmitting ? t("metadataTab.launching") : t("metadataTab.launchJob")}
                 </button>
               </div>

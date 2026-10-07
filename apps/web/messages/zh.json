@@ -266,6 +266,7 @@
   },
   "benchmark": {
     "loadingTitle": "正在加载基准…",
+    "title": "基准测试矩阵",
     "awaitingTitle": "已构建，等待数据",
     "awaitingBody": "该基准测试已构建并在运行。它在九个评估单元上比较蛋白质语言模型，即三种知识层级与 Gene Ontology 三个分支的交叉，并基于无泄漏的时间划分。它目前还没有可绘制的内容，因为其评分所依据的注释语料库正在重建。",
     "awaitingDetail": "截至 {asOf}，本轮运行已读取该系列 {releases, number} 个 GOA 版本中的 {read, number} 个，共 {gigabytes, number} GB。",
@@ -1696,6 +1697,9 @@
     },
     "floatingJobsWidget": {
       "toggleLabel": "查看运行中的任务 ({count})"
+    },
+    "operatorOnly": {
+      "needsOperator": "运行此操作需要操作员账号。表单仍然显示，因为该操作确实存在且可用；受限的只是提交。"
     }
   },
   "stack": {

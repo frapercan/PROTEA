@@ -266,6 +266,7 @@
   },
   "benchmark": {
     "loadingTitle": "Benchmark wird geladen…",
+    "title": "Benchmark-Matrix",
     "awaitingTitle": "Gebaut, wartet auf Daten",
     "awaitingBody": "Der Benchmark ist gebaut und läuft. Er vergleicht Protein-Sprachmodelle über die neun Auswertungszellen, drei Wissensregime gekreuzt mit den drei Zweigen der Gene Ontology, auf einer leckfreien zeitlichen Aufteilung. Er hat noch nichts zu zeichnen, weil der Annotationskorpus, gegen den er bewertet, neu aufgebaut wird.",
     "awaitingDetail": "Stand {asOf} hat die Kampagne {read, number} von {releases, number} GOA-Releases der Serie gelesen, insgesamt {gigabytes, number} GB.",
@@ -1696,6 +1697,9 @@
     },
     "floatingJobsWidget": {
       "toggleLabel": "Laufende Jobs anzeigen ({count})"
+    },
+    "operatorOnly": {
+      "needsOperator": "Zum Ausführen wird ein Operator-Konto benötigt. Das Formular wird gezeigt, weil die Operation existiert und funktioniert; eingeschränkt ist nur das Absenden."
     }
   },
   "stack": {
