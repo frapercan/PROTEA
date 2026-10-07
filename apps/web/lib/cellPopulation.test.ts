@@ -84,8 +84,11 @@ describe("populationNote", () => {
   });
 
   it("formats large counts with separators so they can be read at a glance", () => {
-    expect(populationNote(row(6234), [row(6234)]).label).toBe(
-      `over ${(6234).toLocaleString()} proteins`,
-    );
+    // A literal, not `(6234).toLocaleString()`. Building the expectation
+    // by calling the same thing the code calls made this tautological: it
+    // asserted that the function agrees with itself in whatever locale
+    // the test happens to run under, which is how it kept passing while
+    // the separator was missing.
+    expect(populationNote(row(6234), [row(6234)]).label).toBe("over 6,234 proteins");
   });
 });

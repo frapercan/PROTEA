@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount, formatDateTime } from "@/lib/format";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useRef, useState } from "react";
@@ -16,7 +18,7 @@ const TERMINAL = ["succeeded", "failed", "cancelled"];
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "medium" });
+  return formatDateTime(iso);
 }
 
 function formatEta(seconds: number): string {
@@ -58,7 +60,7 @@ function ProgressBar({
     return (
       <div className="mt-2 space-y-1">
         <div className="text-[13px] text-slate-500">
-          <span className="font-medium">{(current ?? 0).toLocaleString()} {unit} processed</span>
+          <span className="font-medium">{formatCount((current ?? 0))} {unit} processed</span>
         </div>
         <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
           <div className="h-2.5 w-1/3 rounded-full bg-blue-400 animate-pulse" />
@@ -70,7 +72,7 @@ function ProgressBar({
   return (
     <div className="mt-2 space-y-1">
       <div className="flex justify-between text-[13px] text-slate-500">
-        <span className="font-medium">{(current ?? 0).toLocaleString()} / {total.toLocaleString()} {unit} ({pct}%)</span>
+        <span className="font-medium">{formatCount((current ?? 0))} / {formatCount(total)} {unit} ({pct}%)</span>
       </div>
       <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
         <div

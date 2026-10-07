@@ -1,3 +1,4 @@
+import { formatCount } from "@/lib/format";
 // How many proteins a benchmark score was computed over, and when that count
 // makes the score incomparable to the ones beside it.
 //
@@ -78,13 +79,13 @@ export function populationNote(
   const comparable = peers.length > 1 && median != null && median > 0;
   const underpopulated = comparable && count < median * POPULATION_SHARE_FLOOR;
 
-  const base = `over ${count.toLocaleString()} proteins`;
+  const base = `over ${formatCount(count)} proteins`;
   return {
     count,
     median,
     underpopulated,
     label: underpopulated
-      ? `${base}, against a median of ${median!.toLocaleString()} here`
+      ? `${base}, against a median of ${formatCount(median!)} here`
       : base,
   };
 }

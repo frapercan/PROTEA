@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useHasRole } from "@/lib/useRole";
@@ -51,7 +53,7 @@ function SummaryTable({ groups }: { groups: DlqGroup[] }) {
               <td className="px-3 py-2 font-mono text-xs text-slate-500">{g.first_death_queue}</td>
               <td className="px-3 py-2 text-xs text-slate-500">{g.age_bucket}</td>
               <td className="px-3 py-2 text-right font-semibold text-slate-800">
-                {g.count.toLocaleString()}
+                {formatCount(g.count)}
               </td>
             </tr>
           ))}
@@ -289,13 +291,13 @@ export default function DlqPage() {
               <span>
                 {t("depth")}:{" "}
                 <span className="font-semibold text-slate-800">
-                  {summary.queue_message_count.toLocaleString()}
+                  {formatCount(summary.queue_message_count)}
                 </span>
               </span>
               <span>
                 {t("peeked")}:{" "}
                 <span className="font-semibold text-slate-800">
-                  {summary.total_peeked.toLocaleString()}
+                  {formatCount(summary.total_peeked)}
                 </span>
               </span>
             </div>

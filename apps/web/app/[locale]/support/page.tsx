@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import { useEffect, useState } from "react";
 import { baseUrl } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
@@ -113,7 +115,7 @@ export default function SupportPage() {
           <p className="text-base font-medium text-blue-700">{t("hero.beFirst")}</p>
         ) : (
           <>
-            <div className="text-5xl font-bold text-blue-700">{data.count.toLocaleString()}</div>
+            <div className="text-5xl font-bold text-blue-700">{formatCount(data.count)}</div>
             <div className="text-base text-blue-500 font-medium">{t("hero.supportCount", { count: data.count })}</div>
             <div className="text-xs text-blue-400 pt-1">
               {t("hero.withComments", { count: withComments })} · {t("hero.anonymous", { count: anonymous })}

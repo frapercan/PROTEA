@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -650,7 +652,7 @@ export default function BenchmarkPage() {
                 <span>
                   <span className="text-blue-500">Δ</span>{" "}
                   <span className="font-mono font-semibold">
-                    {activeEvalSetRow.stats.delta_proteins.toLocaleString()}
+                    {formatCount(activeEvalSetRow.stats.delta_proteins)}
                   </span>{" "}
                   proteins
                 </span>

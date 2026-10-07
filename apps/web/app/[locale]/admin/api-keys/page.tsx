@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDateTime } from "@/lib/format";
+
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
@@ -38,7 +40,7 @@ import { useHasRole, useRole } from "@/lib/useRole";
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    return formatDateTime(iso);
   } catch {
     return iso;
   }

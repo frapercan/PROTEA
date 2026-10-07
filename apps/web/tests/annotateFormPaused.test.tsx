@@ -89,6 +89,8 @@ describe("AnnotateForm, predictor paused", () => {
     const api = screen.getByRole("link", { name: "annotatePausedApi" });
     expect(api.getAttribute("href")).toBe("/api-proxy/docs");
     const instrument = screen.getByRole("link", { name: "annotatePausedInstrument" });
-    expect(instrument.getAttribute("href")).toBe("/en/instrument/graph");
+    // It points at the job queue now, which is the only thing on this
+    // site that is actually running, and its label says so.
+    expect(instrument.getAttribute("href")).toBe("/en/instrument/jobs");
   });
 });

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import { useEffect, useRef, useState } from "react";
 import {
   getEmbeddingsByPlm,
@@ -119,7 +121,7 @@ function CardError({ message }: { message: string }) {
 
 function fmtInt(n: number | null | undefined): string {
   if (n == null) return "—";
-  return n.toLocaleString();
+  return formatCount(n);
 }
 
 // ── 1. Embeddings coverage per PLM ──────────────────────────────────────────
@@ -311,7 +313,7 @@ function SequenceLengthHistogram({ bins }: { bins: SequenceLength["bins"] }) {
               fill="#0ea5e9"
               opacity={0.75}
             >
-              <title>{`${Math.round(b.lo)}-${Math.round(b.hi)} aa: ${b.count.toLocaleString()}`}</title>
+              <title>{`${Math.round(b.lo)}-${Math.round(b.hi)} aa: ${formatCount(b.count)}`}</title>
             </rect>
           </g>
         );
