@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Annotated, Any, NamedTuple
 
 from protea_contracts import GoaAnnotationRecord, GoaStreamPayload
@@ -27,6 +27,7 @@ from protea.core.operations._goa_load_report import (
     _Rejections,
     load_report,
 )
+from protea.core.operations._goa_pages import stream_into_pages
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -410,31 +411,16 @@ class LoadGOAAnnotationsOperation:
         p: LoadGOAAnnotationsPayload,
         store_ctx: _GoaStoreCtx,
         emit: EmitFn,
+        *,
+        prefilter: bool = True,
     ) -> _GoaPageTotals:
         """Stream GAF records, page-flush via ``_flush_page``, return totals.
 
-        Honours ``p.total_limit`` (early break) and ``p.commit_every_page``.
+        Honours ``p.total_limit`` (early break) and ``p.commit_every_page``. The
+        page loop and the accession prefilter live in ``_goa_pages``;
+        ``prefilter=False`` runs the loop without the prefilter.
         """
-        totals = _GoaPageTotals()
-        buffer: list[GoaAnnotationRecord] = []
-        for record in self._stream_gaf(p, emit):
-            totals.lines += 1
-            if p.total_limit is not None and totals.inserted >= p.total_limit:
-                emit(
-                    "load_goa_annotations.limit_reached",
-                    None,
-                    {"total_limit": p.total_limit},
-                    "warning",
-                )
-                break
-            buffer.append(record)
-            if len(buffer) >= p.page_size:
-                self._flush_page(session, buffer, store_ctx, totals, emit)
-                if p.commit_every_page:
-                    session.commit()
-        if buffer:
-            self._flush_page(session, buffer, store_ctx, totals, emit=None)
-        return totals
+        return stream_into_pages(self, session, p, store_ctx, emit, prefilter=prefilter)
 
     def _flush_page(
         self,
@@ -630,20 +616,25 @@ class LoadGOAAnnotationsOperation:
         return mapping
 
     def _stream_gaf(
-        self, p: LoadGOAAnnotationsPayload, emit: EmitFn
+        self,
+        p: LoadGOAAnnotationsPayload,
+        emit: EmitFn,
+        accept: Callable[[list[str]], bool] | None = None,
     ) -> Iterator[GoaAnnotationRecord]:
         """Delegate to the protea-sources GoaSource plugin.
 
         The plugin owns HTTP, gzip decoding, and GAF line parsing; the
         operation owns DB filtering, GO term resolution, dedup, and
         bulk insert. See ``f2a6_real_migration_design.md`` (D-MIGR-01,
-        D-MIGR-02, D-MIGR-06).
+        D-MIGR-02, D-MIGR-06). ``accept`` goes to the plugin unchanged: no
+        record is built for a line it rejects (``_goa_pages``).
         """
         from protea_sources.goa import plugin as goa_plugin
 
         yield from goa_plugin.stream(
             GoaStreamPayload(gaf_url=p.gaf_url, timeout_seconds=p.timeout_seconds),
             emit=emit,
+            accept=accept,
         )
 
     def _store_buffer(
