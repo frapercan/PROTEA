@@ -202,7 +202,7 @@ def _edge_gaf() -> str:
     return "\n".join(lines) + "\n"
 
 
-@pytest.mark.parametrize("page_size", [1, 2, 3, 7, 10, 40, 10000])
+@pytest.mark.parametrize("page_size", [1, 2, 3, 7, 10, 40, 10000, 200000])
 @pytest.mark.parametrize("total_limit", [None, 1, 2, 4])
 @pytest.mark.parametrize("commit_every_page", [True, False])
 def test_edge_gaf_loads_identically(
