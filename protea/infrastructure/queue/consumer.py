@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import signal
+import threading
 import time
 from typing import Any, NamedTuple
 from uuid import UUID
@@ -25,6 +26,11 @@ from protea.infrastructure.queue.publisher import publish_operation, safe_republ
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
 from protea.workers.base_worker import BaseWorker
 from protea.workers.shutdown import HeartbeatLoop, ShutdownGuard
+
+#: How long each pump call blocks before checking on the job thread.
+#: Short enough to answer a heartbeat well inside its interval, long
+#: enough not to spin.
+_PUMP_SECONDS = 5.0
 
 logger = logging.getLogger(__name__)
 _TRACER = get_tracer(__name__)
@@ -269,13 +275,15 @@ class QueueConsumer(Stoppable):
         properties: BasicProperties,
         job_id: UUID,
     ) -> None:
-        """Pre-ack the delivery, invoke the worker, and handle terminal errors.
+        """Invoke the worker, then ack, and handle terminal errors.
 
-        Keeps the pre-ack pattern that protects long-running jobs from
-        RabbitMQ's ``consumer_timeout``. ``RetryLaterError`` is converted
-        into an explicit republish after ``delay_seconds``; unhandled
-        exceptions are logged (the message is already acked, so the queue
-        cannot deadlock — failure bookkeeping lives in the Job row).
+        The delivery is acked AFTER the job, so a busy worker keeps its
+        prefetch window occupied and the broker gives the next message to
+        somebody who can start it. ``RetryLaterError`` is converted into an
+        explicit republish after ``delay_seconds``; unhandled exceptions are
+        logged. The queue cannot deadlock: the ack in the ``finally`` runs on
+        every path, and if even that fails the broker redelivers and
+        ``_claim_job`` refuses the duplicate.
         """
         # T5.1b: open a CONSUMER span linked to the producer via the
         # ``traceparent`` header so the job span stitches under the
@@ -286,11 +294,28 @@ class QueueConsumer(Stoppable):
             span.set_attribute("messaging.operation", "process")
             span.set_attribute("protea.job_id", str(job_id))
 
-            # ACK before execution so long-running jobs don't hit RabbitMQ's
-            # consumer_timeout. The job is already recorded as RUNNING in the DB,
-            # so a worker crash can be detected and recovered externally.
-            channel.basic_ack(delivery_tag=method.delivery_tag)
-            logger.info("Job acked. job_id=%s", job_id)
+            # The ack now waits for the job to finish. The comment that used
+            # to stand here said pre-acking protected long jobs from
+            # RabbitMQ's consumer_timeout, and that was half the picture.
+            #
+            # What it bought: nothing, in practice. The binding timer was
+            # never consumer_timeout but the AMQP heartbeat. Pika sends
+            # heartbeats from its IO loop, ``handle_job`` blocked that loop
+            # for the whole job, and the broker closed the connection two
+            # heartbeat intervals in. Measured on 2026-10-08, mid-campaign:
+            # 75 "missed heartbeats from client, timeout: 600s" in the broker
+            # log and 58 StreamLostError + reconnect cycles in the worker's,
+            # one per long job, for days.
+            #
+            # What it cost: acking on START frees the prefetch window while
+            # the worker is busy, so the broker hands it the next message and
+            # that message sits undelivered for an hour. With a second node
+            # on this queue the second node is starved.
+            #
+            # Both are fixed together, and they have to be: the pump below
+            # keeps the connection alive so this ack can succeed, and holding
+            # the ack keeps the prefetch window occupied so the pump cannot
+            # dispatch a SECOND job re-entrantly into this callback.
 
             # F-OPS-JOBS.1: track in-flight + start the lease heartbeat.
             self._guard.track(job_id)
@@ -299,7 +324,7 @@ class QueueConsumer(Stoppable):
             # "Job failed" was a remote node's entire evidence of success.
             started = time.monotonic()
             try:
-                self._worker.handle_job(job_id)
+                self._run_job_while_pumping(channel, job_id)
                 logger.info(
                     "Job finished. job_id=%s queue=%s elapsed_seconds=%.1f",
                     job_id, self._queue_name, time.monotonic() - started,
@@ -321,6 +346,59 @@ class QueueConsumer(Stoppable):
             finally:
                 self._heartbeat.stop()
                 self._guard.untrack()
+                # Last, and on every path: success, retry-after-republish and
+                # failure alike. Until this runs the broker counts this worker
+                # as busy, which is the whole point.
+                try:
+                    channel.basic_ack(delivery_tag=method.delivery_tag)
+                    logger.info("Job acked. job_id=%s", job_id)
+                except Exception as exc:  # noqa: BLE001 - never lose the worker
+                    # The delivery stays unacked and the broker redelivers it.
+                    # That cannot double-execute: BaseWorker._claim_job is a
+                    # conditional UPDATE on status='queued' and the second
+                    # arrival loses it.
+                    logger.error("Ack failed. job_id=%s error=%s", job_id, exc)
+
+    def _run_job_while_pumping(self, channel: BlockingChannel, job_id: UUID) -> None:
+        """Run the job off the IO thread, pumping AMQP so the link survives.
+
+        ``handle_job`` runs for an hour and never yields, so on the IO thread
+        it starves pika's heartbeat sender and the broker drops the
+        connection. Running it on a worker thread lets this one keep calling
+        ``process_data_events``, which is what answers the heartbeats.
+
+        Safe to thread: the worker builds every Session from a plain
+        ``sessionmaker`` inside the call, and the only AMQP it does is
+        ``publish_job`` / ``publish_operation``, which open their own
+        connection from an URL rather than touching this channel. The two
+        threads never share a pika object.
+
+        The exception is re-raised HERE, on the caller's thread, so the
+        RetryLaterError and failure branches around the call keep working
+        exactly as they did.
+        """
+        box: dict[str, BaseException] = {}
+
+        def _run() -> None:
+            try:
+                self._worker.handle_job(job_id)
+            except BaseException as exc:  # noqa: BLE001 - handed to the caller
+                box["exc"] = exc
+
+        thread = threading.Thread(target=_run, name=f"job-{job_id}", daemon=True)
+        thread.start()
+        while thread.is_alive():
+            try:
+                channel.connection.process_data_events(time_limit=_PUMP_SECONDS)
+            except Exception as exc:  # noqa: BLE001
+                # The link died anyway. Let the job finish and let the ack
+                # fail loudly rather than abandoning work already underway.
+                logger.warning("AMQP pump stopped; job continues. job_id=%s error=%s", job_id, exc)
+                thread.join()
+                break
+        thread.join()
+        if "exc" in box:
+            raise box["exc"]
 
 
 class OperationConsumer(Stoppable):
