@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import { OperatorOnlyNotice, useMayLaunchJobs } from "@/components/OperatorOnly";
 
 import { useEffect, useState, useCallback } from "react";
@@ -35,7 +37,7 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub?: s
   return (
     <div className="rounded-lg border bg-white p-4 shadow-sm">
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-slate-900">{value.toLocaleString()}</p>
+      <p className="mt-1 text-2xl font-bold text-slate-900">{formatCount(value)}</p>
       {sub && <p className="mt-0.5 text-xs text-slate-600">{sub}</p>}
     </div>
   );
@@ -257,7 +259,7 @@ const tToast = useTranslations("toasts");
                 0, so an ungated counter announced "0 proteins" on every
                 cold load of a database holding 745,421 of them. */}
             {!loadingBrowse && (
-              <span className="ml-auto text-sm text-slate-600">{t("browseTab.totalProteins", { count: total.toLocaleString() })}</span>
+              <span className="ml-auto text-sm text-slate-600">{t("browseTab.totalProteins", { count: formatCount(total) })}</span>
             )}
           </div>
 
@@ -288,7 +290,7 @@ const tToast = useTranslations("toasts");
                 <p className="text-xs text-slate-500 truncate">{p.organism ?? "—"}</p>
                 <div className="mt-1 flex gap-3 text-xs text-slate-600">
                   <span>{p.entry_name ?? "—"}</span>
-                  {p.length != null && <span>{p.length.toLocaleString()} aa</span>}
+                  {p.length != null && <span>{formatCount(p.length)} aa</span>}
                 </div>
               </Link>
             ))}
@@ -324,7 +326,7 @@ const tToast = useTranslations("toasts");
                   <div className="text-slate-700 truncate text-sm">{p.entry_name ?? "—"}</div>
                   <div className="font-medium text-slate-800 truncate text-sm">{p.gene_name ?? "—"}</div>
                   <div className="text-sm text-slate-600 truncate">{p.organism ?? "—"}</div>
-                  <div className="text-sm text-slate-700 tabular-nums">{p.length?.toLocaleString() ?? "—"}</div>
+                  <div className="text-sm text-slate-700 tabular-nums">{formatCount(p.length)}</div>
                   <div><ReviewedBadge reviewed={p.reviewed} /></div>
                 </Link>
               ))}
@@ -377,7 +379,7 @@ const tToast = useTranslations("toasts");
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">{t("statsTab.overview")}</p>
                     <div className="grid grid-cols-2 gap-3">
                       <StatCard label={t("statsTab.totalProteins")} value={stats.total} />
-                      <StatCard label={t("statsTab.canonical")} value={stats.canonical} sub={t("statsTab.isoforms", { count: stats.isoforms.toLocaleString() })} />
+                      <StatCard label={t("statsTab.canonical")} value={stats.canonical} sub={t("statsTab.isoforms", { count: formatCount(stats.isoforms) })} />
                       <StatCard label={t("statsTab.reviewed")} value={stats.reviewed} sub={t("statsTab.reviewedSub")} />
                       <StatCard
                         label={t("statsTab.withGoAnnotations")}

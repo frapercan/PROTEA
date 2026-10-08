@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
@@ -170,7 +172,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: t("tabs.overview") },
-    { key: "annotations", label: `${t("tabs.annotations")}${protein.go_annotation_count > 0 ? ` (${protein.go_annotation_count.toLocaleString()})` : ""}` },
+    { key: "annotations", label: `${t("tabs.annotations")}${protein.go_annotation_count > 0 ? ` (${formatCount(protein.go_annotation_count)})` : ""}` },
   ];
 
   return (
@@ -245,7 +247,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
                 {protein.length && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">{t("overviewTab.length")}</span>
-                    <span className="text-slate-800">{protein.length.toLocaleString()} {t("overviewTab.aa")}</span>
+                    <span className="text-slate-800">{formatCount(protein.length)} {t("overviewTab.aa")}</span>
                   </div>
                 )}
                 {protein.sequence_id && (
@@ -280,7 +282,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
                     onClick={() => setActiveTab("annotations")}
                     className={protein.go_annotation_count > 0 ? "text-green-600 font-medium hover:underline" : "text-slate-600 cursor-default"}
                   >
-                    {protein.go_annotation_count > 0 ? protein.go_annotation_count.toLocaleString() : t("overviewTab.none")}
+                    {protein.go_annotation_count > 0 ? formatCount(protein.go_annotation_count) : t("overviewTab.none")}
                   </button>
                 </div>
                 <div className="flex justify-between">

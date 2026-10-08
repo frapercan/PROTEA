@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDateTime } from "@/lib/format";
+
 import { useEffect, useRef, useState } from "react";
 import { createQuerySet, deleteQuerySet, listQuerySets, QuerySet, errorText } from "@/lib/api";
 import { SkeletonTableRow } from "@/components/Skeleton";
@@ -8,7 +10,7 @@ import { useTranslations } from "next-intl";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "medium" });
+  return formatDateTime(iso);
 }
 
 export default function QuerySetsPage() {

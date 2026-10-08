@@ -20,6 +20,7 @@ from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue import _failure_aggregation as _agg
 from protea.infrastructure.queue._deadletter import DLX_NAME, setup_dead_letter
 from protea.infrastructure.queue._host import compute_host
+from protea.infrastructure.queue._job_pump import ack_when_done, run_while_pumping
 from protea.infrastructure.queue._stoppable import Stoppable
 from protea.infrastructure.queue.publisher import publish_operation, safe_republish_job
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
@@ -44,7 +45,6 @@ def _consumer_span(
     ctx = extract_trace_context(properties.headers)
     span_name = f"amqp.process {operation}" if operation else f"amqp.process {queue_name}"
     return _TRACER.start_as_current_span(span_name, context=ctx)
-
 
 
 # CUDA OOM retry policy for OperationConsumer. Configured via QueueTuning
@@ -269,13 +269,15 @@ class QueueConsumer(Stoppable):
         properties: BasicProperties,
         job_id: UUID,
     ) -> None:
-        """Pre-ack the delivery, invoke the worker, and handle terminal errors.
+        """Invoke the worker, then ack, and handle terminal errors.
 
-        Keeps the pre-ack pattern that protects long-running jobs from
-        RabbitMQ's ``consumer_timeout``. ``RetryLaterError`` is converted
-        into an explicit republish after ``delay_seconds``; unhandled
-        exceptions are logged (the message is already acked, so the queue
-        cannot deadlock — failure bookkeeping lives in the Job row).
+        The delivery is acked AFTER the job, so a busy worker keeps its
+        prefetch window occupied and the broker gives the next message to
+        somebody who can start it. ``RetryLaterError`` is converted into an
+        explicit republish after ``delay_seconds``; unhandled exceptions are
+        logged. The queue cannot deadlock: the ack in the ``finally`` runs on
+        every path, and if even that fails the broker redelivers and
+        ``_claim_job`` refuses the duplicate.
         """
         # T5.1b: open a CONSUMER span linked to the producer via the
         # ``traceparent`` header so the job span stitches under the
@@ -286,12 +288,6 @@ class QueueConsumer(Stoppable):
             span.set_attribute("messaging.operation", "process")
             span.set_attribute("protea.job_id", str(job_id))
 
-            # ACK before execution so long-running jobs don't hit RabbitMQ's
-            # consumer_timeout. The job is already recorded as RUNNING in the DB,
-            # so a worker crash can be detected and recovered externally.
-            channel.basic_ack(delivery_tag=method.delivery_tag)
-            logger.info("Job acked. job_id=%s", job_id)
-
             # F-OPS-JOBS.1: track in-flight + start the lease heartbeat.
             self._guard.track(job_id)
             self._heartbeat.start(job_id)
@@ -299,10 +295,12 @@ class QueueConsumer(Stoppable):
             # "Job failed" was a remote node's entire evidence of success.
             started = time.monotonic()
             try:
-                self._worker.handle_job(job_id)
+                run_while_pumping(channel, lambda: self._worker.handle_job(job_id), job_id)
                 logger.info(
                     "Job finished. job_id=%s queue=%s elapsed_seconds=%.1f",
-                    job_id, self._queue_name, time.monotonic() - started,
+                    job_id,
+                    self._queue_name,
+                    time.monotonic() - started,
                 )
             except RetryLaterError as exc:
                 delay = exc.delay_seconds
@@ -321,6 +319,7 @@ class QueueConsumer(Stoppable):
             finally:
                 self._heartbeat.stop()
                 self._guard.untrack()
+                ack_when_done(channel, method, job_id)
 
 
 class OperationConsumer(Stoppable):

@@ -74,9 +74,11 @@ class TestOnMessage:
         self.channel.basic_ack.assert_called_once_with(delivery_tag=42)
         self.channel.basic_nack.assert_not_called()
 
-    def test_worker_failure_acks_before_execution(self):
-        # QueueConsumer ACKs before execution to avoid RabbitMQ consumer_timeout
-        # on long-running jobs. Failed jobs are recorded in the DB; no nack is sent.
+    def test_worker_failure_still_acks(self):
+        # A failed job is recorded in the DB and the delivery is acked, not
+        # nacked: re-running it would not help and the queue must not fill
+        # with poison. The ack happens AFTER execution since 2026-10-08;
+        # test_the_ack_waits_for_the_job pins the ordering.
         consumer = _consumer(_make_worker(raises=RuntimeError("boom")), requeue_on_failure=False)
 
         consumer._on_message(self.channel, _make_method(7), self.properties, _encode(uuid4()))
@@ -84,13 +86,51 @@ class TestOnMessage:
         self.channel.basic_ack.assert_called_once_with(delivery_tag=7)
         self.channel.basic_nack.assert_not_called()
 
-    def test_worker_failure_acks_before_execution_regardless_of_requeue_flag(self):
+    def test_worker_failure_still_acks_regardless_of_requeue_flag(self):
         consumer = _consumer(_make_worker(raises=RuntimeError("boom")), requeue_on_failure=True)
 
         consumer._on_message(self.channel, _make_method(3), self.properties, _encode(uuid4()))
 
         self.channel.basic_ack.assert_called_once_with(delivery_tag=3)
         self.channel.basic_nack.assert_not_called()
+
+    def test_the_ack_waits_for_the_job(self):
+        """The ack must come AFTER handle_job, and nothing asserted that.
+
+        Until 2026-10-08 the delivery was acked before the worker started, to
+        dodge RabbitMQ's consumer_timeout. That freed the prefetch window
+        while the worker was busy, so the broker handed it the next message
+        and the message sat there for the length of an hour-long job; a
+        second node on the same queue got nothing. Every assertion in this
+        file checked the ack's ARGUMENTS and its call COUNT, both of which
+        the move left untouched, so the whole suite passed either way. This
+        is the test that can tell.
+        """
+        order: list[str] = []
+        worker = _make_worker()
+        worker.handle_job.side_effect = lambda *_a, **_k: order.append("job")
+        self.channel.basic_ack.side_effect = lambda *_a, **_k: order.append("ack")
+        consumer = _consumer(worker)
+
+        consumer._on_message(self.channel, _make_method(11), self.properties, _encode(uuid4()))
+
+        assert order == ["job", "ack"]
+
+    def test_a_failing_job_is_still_acked_last(self):
+        order: list[str] = []
+        worker = _make_worker(raises=RuntimeError("boom"))
+
+        def _boom(*_a, **_k):
+            order.append("job")
+            raise RuntimeError("boom")
+
+        worker.handle_job.side_effect = _boom
+        self.channel.basic_ack.side_effect = lambda *_a, **_k: order.append("ack")
+        consumer = _consumer(worker)
+
+        consumer._on_message(self.channel, _make_method(12), self.properties, _encode(uuid4()))
+
+        assert order == ["job", "ack"]
 
     def test_invalid_json_body_nacks_without_requeue(self):
         consumer = _consumer()
@@ -1187,7 +1227,7 @@ class TestQueueConsumerRetryLater:
 
         consumer._on_message(channel, method, props, _encode(job_id))
 
-        # Should ack before execution
+        # Acked, once, after the job.
         channel.basic_ack.assert_called_once_with(delivery_tag=99)
         # Should sleep on the connection
         channel.connection.sleep.assert_called_once_with(30)
@@ -1299,7 +1339,7 @@ class TestQueueConsumerCancellationNack:
 
         consumer._on_message(channel, method, MagicMock(), _encode(uuid4()))
 
-        # Pre-ack pattern preserved; handle_job still called.
+        # Acked once, and handle_job still called.
         channel.basic_ack.assert_called_once_with(delivery_tag=125)
         worker.handle_job.assert_called_once()
         session.close.assert_called_once()

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import { useMemo, useState } from "react";
 import type { AnnotationSet } from "@/lib/api";
 
@@ -80,7 +82,7 @@ function monthTicks(min: Date, max: Date): Date[] {
 function tooltipText(p: Positioned): string {
   const family = SOURCE_LABEL[p.set.source] ?? p.set.source.toUpperCase();
   const v = p.set.source_version ?? "?";
-  const count = p.set.annotation_count?.toLocaleString();
+  const count = p.set.annotation_count == null ? null : formatCount(p.set.annotation_count);
   const countPart = count ? ` . ${count} ann.` : "";
   if (!p.date) {
     return (

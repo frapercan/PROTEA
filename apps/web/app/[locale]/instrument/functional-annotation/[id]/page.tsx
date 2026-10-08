@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -1026,13 +1028,13 @@ const tToast = useTranslations("toasts");
       {activeTab === "proteins" && distribution && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <div className="rounded-lg border bg-white p-3 text-center">
-            <div className="text-xl font-bold text-slate-900 tabular-nums">{proteinTotal.toLocaleString()}</div>
+            <div className="text-xl font-bold text-slate-900 tabular-nums">{formatCount(proteinTotal)}</div>
             <div className="text-xs text-slate-500">Proteins</div>
           </div>
           {(["P", "F", "C"] as const).map((aspect) => (
             <div key={aspect} className="rounded-lg border bg-white p-3 text-center">
               <div className="text-xl font-bold text-slate-900 tabular-nums">
-                {(distribution.aspect_totals[aspect] ?? 0).toLocaleString()}
+                {formatCount((distribution.aspect_totals[aspect] ?? 0))}
               </div>
               <div className="text-xs text-slate-500">{ASPECT_LABELS[aspect]}</div>
             </div>
@@ -1062,7 +1064,7 @@ const tToast = useTranslations("toasts");
                 </button>
               )}
             </form>
-            <span className="text-sm text-slate-600">{proteinTotal.toLocaleString()} proteins</span>
+            <span className="text-sm text-slate-600">{formatCount(proteinTotal)} proteins</span>
           </div>
 
           {/* Mobile card list */}
@@ -1222,7 +1224,7 @@ const tToast = useTranslations("toasts");
                   <div key={asp} className="rounded-lg border bg-white p-4 shadow-sm">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">{ASPECT_LABELS[asp]}</p>
                     <p className="mt-1 text-2xl font-bold text-slate-900">
-                      {(distribution.aspect_totals[asp] ?? 0).toLocaleString()}
+                      {formatCount((distribution.aspect_totals[asp] ?? 0))}
                     </p>
                     <p className="text-xs text-slate-600 mt-0.5">predictions</p>
                   </div>
@@ -1251,7 +1253,7 @@ const tToast = useTranslations("toasts");
                                 style={{ width: `${Math.round((t.count / maxCount) * 100)}%` }}
                               />
                             </div>
-                            <span className="text-xs text-slate-500 w-12 text-right">{t.count.toLocaleString()}</span>
+                            <span className="text-xs text-slate-500 w-12 text-right">{formatCount(t.count)}</span>
                           </div>
                         </div>
                       ))}
