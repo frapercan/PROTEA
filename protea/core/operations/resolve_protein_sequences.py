@@ -98,7 +98,7 @@ from __future__ import annotations
 import time
 from typing import Annotated, Any
 
-from protea_contracts import UniProtProteinRecord
+from protea_contracts import UniProtProteinRecord, compute_sequence_hash
 from pydantic import Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -194,6 +194,7 @@ class ResolveProteinSequencesOperation(Operation):
         if not p.dry_run and candidates:
             self._fetch_sequences(session, candidates, p, emit, outcome)
             self._resolve_merges(session, candidates, p, emit, outcome)
+            self._resolve_retired(session, candidates, p, emit, outcome)
         if not p.dry_run:
             self._backfill_dates(session, p, emit, outcome)
             outcome.artefactos = self._store_artifacts(payload.get("_job_id"), outcome)
@@ -328,9 +329,7 @@ class ResolveProteinSequencesOperation(Operation):
         accession that appears in SEVERAL entries is a demerge, not a merge, and
         that cannot be decided until the whole response has been read.
         """
-        body = self._uniprot.search_secondary_accessions(
-            batch, emit=emit, knobs=self._knobs(p)
-        )
+        body = self._uniprot.search_secondary_accessions(batch, emit=emit, knobs=self._knobs(p))
         candidates, entry_by_acc = candidates_from(body, set(batch))
         records = classify(candidates, outcome.alias, outcome.demerges)
         counts = StoreCounts()
@@ -358,6 +357,139 @@ class ResolveProteinSequencesOperation(Operation):
         )
         return counts
 
+    # ---- pass three: what UniProtKB no longer serves, from UniParc ----
+
+    def _resolve_retired(
+        self,
+        session: Session,
+        candidates: list[str],
+        p: ResolveProteinSequencesPayload,
+        emit: EmitFn,
+        outcome: _FetchOutcome,
+    ) -> None:
+        """Rescue from UniParc the accessions UniProtKB has stopped serving.
+
+        The two passes before this one ask UniProtKB, and UniProtKB answers
+        about entries it still has. An accession it deleted is absent from the
+        batch endpoint while ``X-Total-Results`` counts it, and its own URL
+        answers 200 with an empty body -- so after the merge pass what is left
+        is not "unknown", it is "gone from UniProtKB". UniParc keeps the
+        sequence of every entry UniProtKB has ever held, deleted ones included.
+        Measured 2026-10-11 over a random sample of 600 of the 28.868 a full
+        pass could not place: 600 resolved.
+
+        WHY IT IS WORTH A PASS. The ones missing are not missing at random. By
+        tier over the 74 releases, 9,2% of the proteins that EVER carried
+        experimental evidence have no sequence, and 7,8% of the curated
+        inference tier, against 0,07% of the rest. In an early cut that is 7,5%
+        of the donor bank and in the last one it is 0%, so the hole is a
+        visibility gradient that looks exactly like the bank growing -- which is
+        one of the two things a longitudinal dataset exists to measure.
+        """
+        from protea_sources.uniprot import MAX_UNIPARC_OR_CONDITIONS
+
+        pending = self._still_without_sequence(session, candidates)
+        if not pending:
+            return
+        counts = StoreCounts()
+        recuperadas: set[str] = set()
+        for batch in chunks(pending, MAX_UNIPARC_OR_CONDITIONS):
+            counts.add(self._uniparc_batch(session, batch, p, emit, recuperadas))
+        outcome.recovered_from_uniparc = sorted(recuperadas)
+        outcome.unresolved = sorted(set(pending) - recuperadas)
+        outcome.updated += counts.proteins_updated
+        outcome.inserted += counts.proteins_inserted
+        outcome.sequences += counts.sequences_inserted
+        emit(
+            "resolve_protein_sequences.uniparc",
+            None,
+            {
+                "pending": len(pending),
+                "recovered": len(recuperadas),
+                "unresolved": len(outcome.unresolved),
+            },
+            "info",
+        )
+
+    @staticmethod
+    def _newest_per_accession(tsv: str, pedidas: set[str]) -> dict[str, Any]:
+        """The newest UniParc row for each accession that was asked for.
+
+        Both filters are here because both are decisions. An accession answers
+        one row per sequence version it ever had, and the one with the latest
+        ``last_seen`` is the sequence it held when it disappeared. A row answers
+        for every accession sharing that exact sequence, and only the ones in
+        this batch are ours to write: the rest may be perfectly alive entries
+        belonging to somebody else's question.
+
+        The version suffix is stripped for MATCHING only (``A0A014NDJ0.1`` is
+        the accession ``A0A014NDJ0``), and the row keeps it, so nothing is lost.
+        """
+        from protea_sources.uniprot import parse_uniparc_tsv
+
+        mejor: dict[str, Any] = {}
+        for fila in parse_uniparc_tsv(tsv):
+            for cruda in fila.accessions:
+                acc = cruda.split(".")[0]
+                if acc not in pedidas:
+                    continue
+                previa = mejor.get(acc)
+                if previa is None or fila.last_seen > previa.last_seen:
+                    mejor[acc] = fila
+        return mejor
+
+    def _uniparc_batch(
+        self,
+        session: Session,
+        batch: list[str],
+        p: ResolveProteinSequencesPayload,
+        emit: EmitFn,
+        recuperadas: set[str],
+    ) -> StoreCounts:
+        """One UniParc query, and the two choices it forces.
+
+        WHICH ROW. An accession can answer several, one per sequence version
+        UniParc has ever seen: 670 rows came back for a sample of 600. This
+        takes the one with the latest ``last_seen``, which is the sequence the
+        accession held when it disappeared. The alternative -- the version
+        current at each cut -- would be a better answer and a different corpus:
+        every other protein here carries the sequence UniProt serves TODAY, so
+        picking the newest keeps the whole store on one convention instead of
+        making these 28.868 the only ones with a second rule. The dates are
+        recorded so a later pass can revisit that without asking UniParc again.
+
+        WHICH ACCESSION. Identical sequences share a UPI, so one row answers for
+        entries nobody asked about. Only the ones in this batch are written: the
+        rest are somebody else's accessions and may be perfectly alive.
+
+        ``reviewed`` is left NULL on purpose, see ``store_records``.
+        """
+        tsv = self._uniprot.search_uniparc_tsv(
+            batch,
+            fields="upi,accession,first_seen,last_seen,length,sequence",
+            emit=emit,
+            knobs=self._knobs(p),
+        )
+        mejor = self._newest_per_accession(tsv, set(batch))
+        if not mejor:
+            return StoreCounts()
+        records = [
+            UniProtProteinRecord(
+                accession=acc,
+                canonical_accession=acc,
+                is_canonical=True,
+                reviewed=False,
+                sequence=fila.sequence,
+                length=len(fila.sequence),
+                sequence_hash=compute_sequence_hash(fila.sequence),
+            )
+            for acc, fila in sorted(mejor.items())
+        ]
+        counts = store_records(session, records, emit, asserts_reviewed=False)
+        recuperadas.update(mejor)
+        session.commit()
+        return counts
+
     def _still_without_sequence(self, session: Session, candidates: list[str]) -> list[str]:
         pending: list[str] = []
         for chunk in chunks(candidates, _DB_CHUNK):
@@ -371,7 +503,7 @@ class ResolveProteinSequencesOperation(Operation):
             )
         return sorted(pending)
 
-    # ---- pass three: the dates of everything that already had a sequence ----
+    # ---- pass four: the dates of everything that already had a sequence ----
 
     def _backfill_dates(
         self,

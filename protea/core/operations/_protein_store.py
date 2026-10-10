@@ -69,9 +69,21 @@ class StoreCounts:
 
 
 def store_records(
-    session: Session, records: list[UniProtProteinRecord], emit: EmitFn
+    session: Session,
+    records: list[UniProtProteinRecord],
+    emit: EmitFn,
+    *,
+    asserts_reviewed: bool = True,
 ) -> StoreCounts:
     """Upsert ``records`` as ``sequence`` + ``protein`` rows.
+
+    ``asserts_reviewed=False`` says the source cannot answer the Swiss-Prot
+    question, so ``reviewed`` is left NULL instead of being filled from the
+    record. UniParc is such a source: it keeps sequences, not entry status, and
+    an accession it answers for is one UniProtKB no longer serves, so there is
+    no status to read. Writing ``False`` there would be indistinguishable from a
+    TrEMBL entry UniProt actually called unreviewed, and NULL already means the
+    thing that is true: nobody asked, or nobody could answer.
 
     Does NOT commit: the caller owns the transaction boundary, because the two
     callers want different ones -- ``insert_proteins`` commits per page so an
@@ -129,6 +141,8 @@ def _upsert_proteins(
     existing_prot: dict[str, Protein],
     existing_seq_ids: dict[str, int],
     emit: EmitFn,
+    *,
+    asserts_reviewed: bool = True,
 ) -> tuple[int, int]:
     """Insert new ``Protein`` rows and conservatively patch the existing ones."""
     proteins_inserted = 0
@@ -137,10 +151,12 @@ def _upsert_proteins(
     for r in records:
         seq_id = existing_seq_ids[r.sequence_hash]
         if r.accession in existing_prot:
-            if apply_record_updates(existing_prot[r.accession], r, seq_id):
+            if apply_record_updates(
+                existing_prot[r.accession], r, seq_id, asserts_reviewed=asserts_reviewed
+            ):
                 proteins_updated += 1
         else:
-            to_add.append(build_protein(r, seq_id))
+            to_add.append(build_protein(r, seq_id, asserts_reviewed=asserts_reviewed))
             proteins_inserted += 1
     if to_add:
         emit("db.insert_proteins_start", None, {"rows": len(to_add)}, "info")
@@ -150,7 +166,13 @@ def _upsert_proteins(
     return proteins_inserted, proteins_updated
 
 
-def apply_record_updates(p: Protein, r: UniProtProteinRecord, seq_id: int | None) -> bool:
+def apply_record_updates(
+    p: Protein,
+    r: UniProtProteinRecord,
+    seq_id: int | None,
+    *,
+    asserts_reviewed: bool = True,
+) -> bool:
     """Patch ``p`` from ``r`` without clobbering; return ``True`` if anything changed.
 
     The null-filling is what lets the universe be built in two steps:
@@ -174,7 +196,7 @@ def apply_record_updates(p: Protein, r: UniProtProteinRecord, seq_id: int | None
     if getattr(p, "isoform_index", None) != r.isoform_index:
         p.isoform_index = r.isoform_index
         changed = True
-    if getattr(p, "reviewed", None) is None:
+    if asserts_reviewed and getattr(p, "reviewed", None) is None:
         p.reviewed = r.reviewed
         changed = True
     if getattr(p, "taxonomy_id", None) in (None, "") and r.taxonomy_id:
@@ -192,14 +214,16 @@ def apply_record_updates(p: Protein, r: UniProtProteinRecord, seq_id: int | None
     return changed
 
 
-def build_protein(r: UniProtProteinRecord, seq_id: int | None) -> Protein:
+def build_protein(
+    r: UniProtProteinRecord, seq_id: int | None, *, asserts_reviewed: bool = True
+) -> Protein:
     """A new ``Protein`` row from a UniProt record."""
     return Protein(
         accession=r.accession,
         canonical_accession=r.canonical_accession,
         is_canonical=r.is_canonical,
         isoform_index=r.isoform_index,
-        reviewed=r.reviewed,
+        reviewed=r.reviewed if asserts_reviewed else None,
         entry_name=r.entry_name,
         organism=r.organism,
         taxonomy_id=r.taxonomy_id,

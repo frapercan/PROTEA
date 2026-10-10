@@ -100,8 +100,13 @@ class TestTheTransportBelongsToThePlugin:
         assert not importados & {"requests", "urllib", "http", "httpx", "socket"}, importados
 
     def test_everything_remote_goes_through_the_plugin(self):
-        """The plugin's two methods and no others. A third way out would be another
-        place where the retries can be missing."""
+        """The plugin's three methods and no others. A fourth way out would be
+        another place where the retries can be missing.
+
+        It was two until UniParc was added as the route for what UniProtKB stops
+        serving. The set is spelled out rather than counted so that adding a
+        remote call is a deliberate edit here, which is the whole point: this
+        test is how a private HTTP client gets noticed on the way in."""
         import ast
 
         import protea.core.operations.resolve_protein_sequences as mod
@@ -115,7 +120,11 @@ class TestTheTransportBelongsToThePlugin:
             and isinstance(n.func.value, ast.Attribute)
             and n.func.value.attr == "_uniprot"
         }
-        assert llamadas == {"fetch_accessions_tsv", "search_secondary_accessions"}, llamadas
+        assert llamadas == {
+            "fetch_accessions_tsv",
+            "search_secondary_accessions",
+            "search_uniparc_tsv",
+        }, llamadas
 
     def test_the_duplicated_module_no_longer_exists(self):
         with pytest.raises(ModuleNotFoundError):
@@ -176,8 +185,11 @@ class TestSecondaryAccessions:
             ),
         ):
             op._resolve_merges(
-                MagicMock(), list(requested), ResolveProteinSequencesPayload(),
-                MagicMock(), outcome,
+                MagicMock(),
+                list(requested),
+                ResolveProteinSequencesPayload(),
+                MagicMock(),
+                outcome,
             )
         return outcome, stored
 
@@ -439,9 +451,13 @@ class TestTheAuditDates:
 
         _, from_tsv = _parse_tsv(self._TSV)[0]
         from_json = _audit_dates_of(
-            {"entryAudit": {"firstPublicDate": "1987-08-13",
-                            "lastSequenceUpdateDate": "2003-08-22",
-                            "sequenceVersion": 2}}
+            {
+                "entryAudit": {
+                    "firstPublicDate": "1987-08-13",
+                    "lastSequenceUpdateDate": "2003-08-22",
+                    "sequenceVersion": 2,
+                }
+            }
         )
         assert from_tsv._fields == from_json._fields
         assert from_tsv == from_json
@@ -526,9 +542,7 @@ class TestACappedRunIsNotReadAsComplete:
 
     def test_with_no_cap_the_report_says_so_too(self):
         op = _op()
-        with patch.object(
-            ResolveProteinSequencesOperation, "_without_sequence", return_value=[]
-        ):
+        with patch.object(ResolveProteinSequencesOperation, "_without_sequence", return_value=[]):
             out = op.execute(MagicMock(), {"dry_run": True}, emit=MagicMock())
         assert out.result["limit"] is None
 
@@ -546,12 +560,156 @@ class TestACappedRunIsNotReadAsComplete:
         import uuid
 
         op = _op()
-        with patch.object(
-            ResolveProteinSequencesOperation, "_without_sequence", return_value=[]
-        ):
+        with patch.object(ResolveProteinSequencesOperation, "_without_sequence", return_value=[]):
             out = op.execute(
                 MagicMock(),
                 {"dry_run": True, "_job_id": str(uuid.uuid4())},
                 emit=MagicMock(),
             )
         assert out.result["dry_run"] is True
+
+
+#: A real UniParc answer, trimmed to the two shapes that force a choice: one
+#: accession with two sequence versions, and one row shared by four entries of
+#: which only one was asked for.
+_UP_HEADER = "Entry\tUniProtKB\tFirst seen\tLast seen\tLength\tSequence"
+_UP_VIEJA = "UPI000000AAA1\tQ11111.1\t2011-03-01\t2014-07-17\t4\tAAAA"
+_UP_NUEVA = "UPI000000AAA2\tQ11111.2\t2014-07-18\t2024-07-17\t4\tCCCC"
+_UP_COMPARTIDA = "UPI000000BBB1\tQ22222.1; Z99999.1; Z88888\t2011-03-01\t2026-09-02\t4\tGGGG"
+
+
+class TestUniparcAnswersForWhatUniprotkbDeleted:
+    """The third pass exists because "absent from UniProtKB" is not "gone".
+
+    After the merge pass what is left are accessions UniProt deleted. UniParc
+    keeps their sequences, and they are not missing at random: 9,2% of the
+    proteins that ever carried experimental evidence are in that set, which in
+    an early cut is 7,5% of the donor bank and in the last one is 0%.
+    """
+
+    def _run(self, tsv, batch, *, store=None):
+        op = _op()
+        op._uniprot.search_uniparc_tsv.return_value = tsv
+        contados = []
+
+        def _store(session, records, emit, **kw):
+            contados.append((list(records), kw))
+            return store or StoreCounts()
+
+        recuperadas: set[str] = set()
+        with patch("protea.core.operations.resolve_protein_sequences.store_records", _store):
+            op._uniparc_batch(
+                MagicMock(),
+                batch,
+                ResolveProteinSequencesPayload(),
+                lambda *a, **k: None,
+                recuperadas,
+            )
+        return contados[0] if contados else ([], {}), recuperadas
+
+    def test_the_latest_version_wins_when_an_accession_has_several(self):
+        (records, _), _ = self._run(
+            "\n".join([_UP_HEADER, _UP_VIEJA, _UP_NUEVA]) + "\n", ["Q11111"]
+        )
+        assert [r.accession for r in records] == ["Q11111"]
+        assert records[0].sequence == "CCCC", (
+            "an accession answers one row per sequence version it ever had; this "
+            "takes the one it held when it disappeared, so the whole store stays "
+            "on one convention instead of these being the only rows with a second rule"
+        )
+
+    def test_the_order_of_the_rows_does_not_decide_it(self):
+        (a, _), _ = self._run("\n".join([_UP_HEADER, _UP_VIEJA, _UP_NUEVA]) + "\n", ["Q11111"])
+        (b, _), _ = self._run("\n".join([_UP_HEADER, _UP_NUEVA, _UP_VIEJA]) + "\n", ["Q11111"])
+        assert a[0].sequence == b[0].sequence == "CCCC"
+
+    def test_only_the_accessions_asked_for_are_written(self):
+        (records, _), recuperadas = self._run(
+            "\n".join([_UP_HEADER, _UP_COMPARTIDA]) + "\n", ["Q22222"]
+        )
+        assert [r.accession for r in records] == ["Q22222"]
+        assert recuperadas == {"Q22222"}, (
+            "identical sequences share a UPI, so a row answers for entries nobody "
+            "asked about; Z99999 and Z88888 may be perfectly alive and are not ours "
+            "to overwrite"
+        )
+
+    def test_it_does_not_assert_the_swissprot_status(self):
+        (_, kw), _ = self._run("\n".join([_UP_HEADER, _UP_NUEVA]) + "\n", ["Q11111"])
+        assert kw.get("asserts_reviewed") is False, (
+            "UniParc keeps sequences, not entry status, and the accession is one "
+            "UniProtKB no longer serves; writing False would be indistinguishable "
+            "from an entry UniProt actually called unreviewed"
+        )
+
+    def test_an_accession_uniparc_does_not_know_is_not_invented(self):
+        (records, _), recuperadas = self._run(_UP_HEADER + "\n", ["Q11111"])
+        assert records == [] and recuperadas == set()
+
+    def test_the_length_comes_from_the_sequence_and_not_from_the_column(self):
+        mentira = "UPI000000CCC1\tQ33333.1\t2011-03-01\t2026-09-02\t999\tAAAA"
+        (records, _), _ = self._run("\n".join([_UP_HEADER, mentira]) + "\n", ["Q33333"])
+        assert records[0].length == 4
+
+
+class TestTheThirdPassReportsWhatItRecovered:
+    def test_recovered_and_unresolved_split_the_pending_without_overlap(self):
+        op = _op()
+        op._uniprot.search_uniparc_tsv.return_value = "\n".join([_UP_HEADER, _UP_NUEVA]) + "\n"
+        outcome = _FetchOutcome()
+        with (
+            patch.object(op, "_still_without_sequence", return_value=["Q11111", "Q44444"]),
+            patch(
+                "protea.core.operations.resolve_protein_sequences.store_records",
+                return_value=StoreCounts(),
+            ),
+        ):
+            op._resolve_retired(
+                MagicMock(),
+                ["Q11111", "Q44444"],
+                ResolveProteinSequencesPayload(),
+                lambda *a, **k: None,
+                outcome,
+            )
+        assert outcome.recovered_from_uniparc == ["Q11111"]
+        assert outcome.unresolved == ["Q44444"]
+        assert not set(outcome.recovered_from_uniparc) & set(outcome.unresolved)
+
+    def test_nothing_pending_asks_uniparc_nothing(self):
+        op = _op()
+        outcome = _FetchOutcome()
+        with patch.object(op, "_still_without_sequence", return_value=[]):
+            op._resolve_retired(
+                MagicMock(),
+                ["Q11111"],
+                ResolveProteinSequencesPayload(),
+                lambda *a, **k: None,
+                outcome,
+            )
+        assert not op._uniprot.search_uniparc_tsv.called
+
+    def test_the_pass_runs_after_the_merges_and_not_before(self):
+        fuente = inspect.getsource(ResolveProteinSequencesOperation.execute)
+        assert fuente.index("_resolve_merges") < fuente.index("_resolve_retired"), (
+            "UniParc is the archive: asking it first would recover a sequence for "
+            "an accession that UniProtKB would have resolved as a merge, and the "
+            "merge carries an identity that the archive does not"
+        )
+
+
+class TestADryRunDoesNotReportZeroForWhatItDidNotCount:
+    def test_dates_pending_is_none_in_a_dry_run(self):
+        from protea.core.operations._universe_sources import resolution_report
+
+        r = resolution_report(dry_run=True, outcome=_FetchOutcome(), elapsed=0.1)
+        assert r["dates_pending"] is None, (
+            "the pass that counts them is the one a dry run skips, so 0 read as "
+            "'no dates pending' while 644.659 rows were waiting; a dry run is "
+            "exactly where somebody decides whether the real run is worth starting"
+        )
+
+    def test_the_real_run_still_reports_the_number(self):
+        from protea.core.operations._universe_sources import resolution_report
+
+        r = resolution_report(dry_run=False, outcome=_FetchOutcome(dates_pending=7), elapsed=0.1)
+        assert r["dates_pending"] == 7
