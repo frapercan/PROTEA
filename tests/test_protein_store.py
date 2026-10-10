@@ -159,8 +159,6 @@ class TestStoreRecords:
         assert session.add_all.call_count == 2
 
 
-
-
 class TestTheSequencelessRowIsCompletedLater:
     """The invariant that makes a two-step universe possible.
 
@@ -214,3 +212,53 @@ class TestTheSequencelessRowIsCompletedLater:
         apply_record_updates(row, _make_record(), seq_id=42)
         assert apply_record_updates(row, _make_record(), seq_id=99) is False
         assert row.sequence_id == 42, "the sequence was already there and is not overwritten"
+
+
+class TestASourceThatCannotAnswerTheSwissprotQuestion:
+    """``reviewed`` NULL means nobody asked, or nobody could answer.
+
+    UniParc keeps sequences, not entry status, and the accessions it answers for
+    are ones UniProtKB no longer serves, so there is no status to read. Writing
+    ``False`` there would be indistinguishable from an entry UniProt actually
+    called unreviewed, and the corpus already has 407.697 proteins admitted for
+    having been Swiss-Prot in their day whose evidence is automatic: a wrong
+    ``reviewed`` on top of that is not recoverable afterwards.
+    """
+
+    def _extracted_row(self, accession="P12345"):
+        from protea.infrastructure.orm.models.protein.protein import Protein
+
+        canonical, is_canonical, isoform = Protein.parse_isoform(accession)
+        return Protein(
+            accession=accession,
+            canonical_accession=canonical,
+            is_canonical=is_canonical,
+            isoform_index=isoform,
+            first_admitted_release=156,
+        )
+
+    def test_the_patch_leaves_reviewed_null(self):
+        from protea.core.operations._protein_store import apply_record_updates
+
+        row = self._extracted_row()
+        apply_record_updates(row, _make_record(), seq_id=42, asserts_reviewed=False)
+        assert row.reviewed is None, "a source that cannot answer must not answer"
+        assert row.sequence_id == 42, "everything else it DOES know still lands"
+
+    def test_a_new_row_is_born_with_reviewed_null(self):
+        from protea.core.operations._protein_store import build_protein
+
+        fila = build_protein(_make_record(), seq_id=42, asserts_reviewed=False)
+        assert fila.reviewed is None
+        assert fila.sequence_id == 42
+
+    def test_the_default_still_asserts_it(self):
+        from protea.core.operations._protein_store import apply_record_updates, build_protein
+
+        row = self._extracted_row()
+        apply_record_updates(row, _make_record(), seq_id=42)
+        assert row.reviewed is True, (
+            "the flag is opt-in: the two callers that DO read the status from a "
+            "FASTA header must keep writing it"
+        )
+        assert build_protein(_make_record(), seq_id=42).reviewed is True

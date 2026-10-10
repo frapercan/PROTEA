@@ -85,9 +85,7 @@ TRUTH_CODES = frozenset(EXPERIMENTAL) | {"IC", "TAS"}
 #: whether an embedding neighbourhood captures what curated alignment captures,
 #: without touching the scored truth. Measured on GOA 156: 62,363 proteins enter
 #: by these and by nothing else.
-CURATED_INFERENCE_CODES = frozenset(
-    {"ISS", "ISO", "ISA", "ISM", "IGC", "RCA", "NAS", "IKR", "IRD"}
-)
+CURATED_INFERENCE_CODES = frozenset({"ISS", "ISO", "ISA", "ISM", "IGC", "RCA", "NAS", "IKR", "IRD"})
 
 #: Excluded, each for its own reason, and the reasons are not interchangeable.
 #:
@@ -344,6 +342,11 @@ class _FetchOutcome:
     dates_written: int = 0
     alias: dict[str, str] = field(default_factory=dict)
     unresolved: list[str] = field(default_factory=list)
+    #: Accessions UniProtKB no longer serves and UniParc did. Kept apart from
+    #: ``fetched`` because they are a different claim: ``fetched`` means UniProt
+    #: answered for a live entry, this means the entry is gone and the sequence
+    #: was recovered from the archive.
+    recovered_from_uniparc: list[str] = field(default_factory=list)
     demerges: dict[str, list[str]] = field(default_factory=dict)
     artefactos: dict[str, Any] = field(default_factory=dict)
 
@@ -442,6 +445,12 @@ def resolution_report(
     ``None`` in a dry run rather than ``0``, because "zero recoverable" and "not
     attempted" are not the same thing: an earlier report read 0% recoverable merges
     because ten batches had answered 400 and the failures were tallied as zeroes.
+
+    ``dates_pending`` broke that rule and read ``0`` in a dry run while 644.659
+    rows were waiting, because the pass that counts them is the one a dry run
+    skips. A dry run is exactly where somebody decides whether the real one is
+    worth starting, so the one field that said "nothing to do" was the one that
+    could not know.
     """
     return {
         "candidates": outcome.candidates,
@@ -450,9 +459,10 @@ def resolution_report(
         "proteins_inserted": outcome.inserted,
         "sequences_inserted": outcome.sequences,
         "resolved_as_merge": None if dry_run else len(outcome.alias),
+        "recovered_from_uniparc": None if dry_run else len(outcome.recovered_from_uniparc),
         "not_retrievable": None if dry_run else len(outcome.unresolved),
         "demerged": None if dry_run else len(outcome.demerges),
-        "dates_pending": outcome.dates_pending,
+        "dates_pending": None if dry_run else outcome.dates_pending,
         "dates_backfilled": None if dry_run else outcome.dates_written,
         "artefactos": outcome.artefactos,
         "dry_run": dry_run,
