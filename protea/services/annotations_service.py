@@ -255,10 +255,16 @@ def iter_groundtruth_tsv(
 
     ``category`` is ``"nk"``, ``"lk"``, ``"pk"`` or ``"known"``.
     Each row is ``"<protein>\\t<go_id>\\n"``; sorted by protein then GO id
-    so the output is deterministic. The caller wraps the list in a
-    ``StreamingResponse`` (the materialised list is small enough, a
-    few thousand rows for typical CAFA splits, to fit in memory and
-    keeps the streaming generator simple).
+    so the output is deterministic.
+
+    The list is materialised because the data it comes from already is:
+    :func:`load_evaluation_data_for_set` reads the whole persisted parquet
+    into memory, so streaming the rows out one at a time would not lower
+    the high-water mark. It is NOT small, though -- ``"known"`` on
+    evaluation set ``c35ee267`` is 2.235.489 rows -- so the caller must
+    batch it into blocks instead of handing this straight to a
+    ``StreamingResponse``; see
+    :func:`protea.api.routers.annotations._common.stream_groundtruth`.
 
     Raises :class:`EntityNotFoundError` when the EvaluationSet does
     not resolve.
