@@ -5,6 +5,7 @@ Database and queue are fully mocked -- no real infrastructure required.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -17,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 from protea.api.cache import invalidate as _cache_invalidate
 from protea.api.routers.annotations import router
+from protea.api.routers.annotations._common import _blocks, stream_groundtruth
 
 
 @pytest.fixture(autouse=True)
@@ -810,6 +812,64 @@ class TestDownloadKnownTerms:
         assert resp.status_code == 200
         lines = resp.text.strip().split("\n")
         assert len(lines) == 2
+
+
+# ---------------------------------------------------------------------------
+# Chunking of the GT/known-terms TSV responses
+# ---------------------------------------------------------------------------
+
+
+class TestGroundTruthChunking:
+    """The GT routes must not emit one HTTP chunk per row.
+
+    ``known-terms.tsv`` reaches millions of rows, and one ASGI message per
+    row is what made it take 540 s to serve against localhost.
+    """
+
+    @staticmethod
+    def _rows(n):
+        return [f"P{i:05d}\tGO:{i:07d}\n" for i in range(n)]
+
+    @pytest.mark.parametrize("size", [1, 7, 64, 4096, 1 << 20])
+    def test_blocks_concatenate_back_to_the_input(self, size):
+        rows = self._rows(500)
+        assert "".join(_blocks(rows, size)) == "".join(rows)
+
+    def test_blocks_of_an_empty_input_yield_nothing(self):
+        assert list(_blocks([])) == []
+
+    def test_a_row_longer_than_the_block_is_never_split(self):
+        row = "P1\t" + "GO:0000001," * 5_000 + "\n"
+        assert list(_blocks([row], 64)) == [row]
+
+    def test_the_chunk_count_follows_bytes_and_not_rows(self):
+        rows = self._rows(20_000)
+        size = 64 * 1024
+        chunks = list(_blocks(rows, size))
+        assert len(chunks) <= sum(len(r) for r in rows) // size + 1
+        assert len(chunks) * 100 < len(rows)
+
+    def test_the_response_hands_the_socket_blocks(self):
+        """The wiring, not just the helper: a revert to ``iter(lines)`` fails here."""
+        rows = self._rows(20_000)
+        with (
+            patch("protea.api.routers.annotations._common.session_scope") as scope,
+            patch(
+                "protea.api.routers.annotations._common.iter_groundtruth_tsv",
+                return_value=rows,
+            ),
+        ):
+            scope.return_value.__enter__.return_value = MagicMock()
+            resp = stream_groundtruth(MagicMock(), uuid4(), "known", "known-terms.tsv")
+
+        # Starlette adapts the sync generator into an async one, so drain it
+        # the way the server would.
+        async def drain():
+            return [c async for c in resp.body_iterator]
+
+        chunks = asyncio.run(drain())
+        assert "".join(chunks) == "".join(rows)
+        assert len(chunks) * 100 < len(rows)
 
 
 # ---------------------------------------------------------------------------
