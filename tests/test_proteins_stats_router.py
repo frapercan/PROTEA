@@ -83,6 +83,10 @@ class TestEmbeddingsByPlm:
         # Second branch = the GROUP BY.
         group_q = MagicMock()
         group_q.join.return_value = group_q
+        # The numerator now carries the same two filters as the total, so the
+        # chain has a .filter in it. If this line is removed the test fails,
+        # which is how it pins that the restriction is still there.
+        group_q.filter.return_value = group_q
         group_q.group_by.return_value = group_q
         group_q.order_by.return_value = group_q
         group_q.all.return_value = [
@@ -125,6 +129,8 @@ class TestGoMatrix:
         q = MagicMock()
         session.query.return_value = q
         q.join.return_value = q
+        # The matrix is bounded at the board's mark, so the chain has a .filter.
+        q.filter.return_value = q
         q.group_by.return_value = q
         q.order_by.return_value = q
         q.all.return_value = [
@@ -425,3 +431,99 @@ class TestLaDensidadDescribeUnaReleaseYNoLaSuma:
     def test_agrupa_por_aspecto_y_proteina(self):
         sql = self._sql().lower()
         assert "group by" in sql and "aspect" in sql and "protein_accession" in sql
+
+
+class TestTheStatsDoNotPublishPastTheMark:
+    """These endpoints answer WITHOUT a key, so what they aggregate is public.
+
+    Measured 2026-10-11: ``/proteins/stats/go-density`` served release 235, five
+    past the board's mark and inside the prospective window, to anyone who
+    asked. Aggregates, but a window onto the holdout all the same -- and nobody
+    was watching it. The 2026-08-27 incident was the same shape: not a missing
+    rule, a rule nobody asked.
+    """
+
+    def test_the_helper_actually_restricts(self):
+        from protea.api.routers.proteins_stats import _no_pasada_la_marca
+
+        q = MagicMock()
+        _no_pasada_la_marca(q)
+        assert q.filter.called, "the helper returned the query untouched"
+
+    def test_the_newest_release_lookup_goes_through_it(self):
+        """Not a style check: this is the call that served release 235.
+
+        ``_ultimo_set_goa`` picks the highest-numbered GOA set, and the density
+        card asks it without any bound. The restriction has to be on THAT query,
+        not merely available somewhere in the module.
+        """
+        import inspect
+
+        from protea.api.routers import proteins_stats as mod
+
+        assert "_no_pasada_la_marca" in inspect.getsource(mod._ultimo_set_goa)
+
+    def test_the_limit_is_the_registry_mark_and_not_a_copy(self):
+        from protea.api.routers import proteins_stats as mod
+        from protea.core.split_registry import BOARD_MARK, release
+
+        assert mod.BOARD_MARK is BOARD_MARK
+        assert mod.release(BOARD_MARK).published == release(BOARD_MARK).published, (
+            "two ideas of where the limit is drift apart; the guard and the "
+            "public page have to read the same one"
+        )
+
+    def test_it_bounds_by_date_and_not_by_release_number(self):
+        """``split_registry`` says the identifier is opaque on purpose.
+
+        Its own words: ordering derived from the identifier would break the
+        moment the upstream naming changed, and the dates are what the temporal
+        design actually means. So parsing "v227" into 227 and comparing numbers
+        would be reading the one field the registry asks nobody to read.
+        """
+        import inspect
+
+        from protea.api.routers import proteins_stats as mod
+
+        src = inspect.getsource(mod._no_pasada_la_marca)
+        assert "source_published_at" in src
+        assert "published" in src
+        assert "source_version" not in src
+
+
+class TestExperimentalIsOneDefinition:
+    def test_the_codes_are_imported_and_not_restated(self):
+        from protea.api.routers.proteins_stats import _EXPERIMENTAL_CODES
+        from protea.core.evaluation import _EXP_CODES
+
+        assert set(_EXPERIMENTAL_CODES) == set(_EXP_CODES), (
+            "this page used to carry its own set of six, missing TAS, IC and the "
+            "five high-throughput codes, so its 'experimental' split was a "
+            "different population from the one the evaluation and the IA score"
+        )
+
+    def test_the_high_throughput_codes_are_in(self):
+        from protea.api.routers.proteins_stats import _EXPERIMENTAL_CODES
+
+        for code in ("TAS", "IC", "HTP", "HDA", "HMP", "HGI", "HEP"):
+            assert code in _EXPERIMENTAL_CODES, f"{code} was one of the seven missing"
+
+
+class TestCoverageDividesTwoCountsOfOneThing:
+    def test_the_numerator_carries_the_same_filters_as_the_total(self):
+        """A percentage over 100 was the symptom, not the defect.
+
+        Measured while an embedding pass was running: 700.475 proteins with a
+        vector over a denominator of 576.450 canonical reviewed ones, 121,5%.
+        The numerator counted isoforms, TrEMBL entries and merged accessions
+        that the denominator excludes.
+        """
+        import inspect
+
+        from protea.api.routers import proteins_stats as mod
+
+        src = inspect.getsource(mod._compute_embeddings_by_plm)
+        # Two filter CALLS, not two mentions: the docstring names the population
+        # too, and counting words would pass on a comment alone.
+        assert src.count(".filter(Protein.is_canonical.is_(True))") == 2
+        assert src.count(".filter(Protein.reviewed.is_(True))") == 2
