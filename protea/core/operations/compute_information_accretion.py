@@ -176,11 +176,25 @@ class ComputeInformationAccretionOperation:
         ancestors: dict[str, frozenset[str]],
         emit: EmitFn,
     ) -> tuple[dict[str, set[str]], int, int, set[str]]:
+        # The NOT rows are excluded HERE, in the base string, so both branches
+        # below carry it: a filter appended next to the optional evidence clause
+        # would silently apply only when a regime was asked for.
+        #
+        # Without it a row saying the protein does NOT have the term counts as a
+        # carrier OF that term. The direction of the damage is the bad one: IA is
+        # -log2 of the frequency, so inflating a term's frequency LOWERS the
+        # weight of exactly the terms somebody took the trouble to refute.
+        #
+        # ``not like '%NOT%'`` and not ``!= 'NOT'`` because the column is a
+        # RELATION since GAF 2.2 (release 202 of this series): the real values
+        # are `NOT|enables`, `enables`, `involved_in`. Five other queries under
+        # protea/core spell it this same way; this one was the only one without.
         sql = (
             "select pga.protein_accession, gt.go_id "
             "from protein_go_annotation pga "
             "join go_term gt on gt.id = pga.go_term_id "
-            "where pga.annotation_set_id = :a"
+            "where pga.annotation_set_id = :a "
+            "and (pga.qualifier is null or pga.qualifier not like '%NOT%')"
         )
         params: dict[str, Any] = {"a": annotation_set_id}
         if evidence_codes is not None:
