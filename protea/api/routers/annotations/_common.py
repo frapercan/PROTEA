@@ -70,18 +70,24 @@ def stream_groundtruth(
     per row. Handing ``StreamingResponse`` an iterator over the row list
     makes every row its own ASGI message, and ``known-terms.tsv`` is not
     a few thousand rows: ``"known"`` on evaluation set ``c35ee267`` is
-    2.235.489 of them, 43,6 MB, which took 540 s to serve against
-    localhost with no network in the way.
+    5.206.444 of them, 95.038.180 bytes. Before this, no observed attempt
+    ever finished it.
 
-    MEASURED in-process on 2026-10-11, same rows through a bare
-    ``FastAPI`` app, so no database and no socket:
+    MEASURED END TO END on 2026-10-11 through the live API: the full
+    95.038.180 bytes in 11,2 s, byte-identical to the evaluation's own
+    ``known_terms.tsv`` artifact (sha256 ``25e402106d5698f3...``).
 
-        one chunk per row      172,83 s      0,3 MB/s
-        64 KB blocks             0,21 s    206,7 MB/s
+    And in-process, the same row count through a bare ``FastAPI`` app so
+    neither a database nor a socket is involved:
 
-    823x, on byte-identical output. The cost is the message count, not
-    the data, which is why the fix is batching rather than a faster query
-    or a leaner row.
+        one chunk per row      209,48 s      0,5 MB/s
+        64 KB blocks             0,57 s    180,0 MB/s
+
+    367x, on byte-identical output. The cost is the message count, not the
+    data, which is why the fix is batching rather than a faster query or a
+    leaner row. Treat the in-process ratio as an order of magnitude rather
+    than a constant: the one-chunk-per-row figure moves with machine load,
+    while the end-to-end 11,2 s is the number that describes the service.
     """
     try:
         with session_scope(factory) as session:

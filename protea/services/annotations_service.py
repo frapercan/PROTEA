@@ -261,9 +261,9 @@ def iter_groundtruth_tsv(
     :func:`load_evaluation_data_for_set` reads the whole persisted parquet
     into memory, so streaming the rows out one at a time would not lower
     the high-water mark. It is NOT small, though -- ``"known"`` on
-    evaluation set ``c35ee267`` is 2.235.489 rows -- so the caller must
-    batch it into blocks instead of handing this straight to a
-    ``StreamingResponse``; see
+    evaluation set ``c35ee267`` is 5.206.444 rows, 95 MB, against 12.355
+    for ``"nk"`` on the same set -- so the caller must batch it into blocks
+    instead of handing this straight to a ``StreamingResponse``; see
     :func:`protea.api.routers.annotations._common.stream_groundtruth`.
 
     Raises :class:`EntityNotFoundError` when the EvaluationSet does
