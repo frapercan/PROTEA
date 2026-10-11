@@ -1356,3 +1356,149 @@ class TestGetGoSubgraph:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["nodes"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Information Accretion
+# ---------------------------------------------------------------------------
+
+
+class _IaSet:
+    """A stand-in for the ORM row, carrying only what the service reads."""
+
+    def __init__(self, *, sha="abc", uri="s3://protea/ia/x/IA.tsv"):
+        from uuid import uuid4 as _u
+
+        self.id = _u()
+        self.ontology_snapshot_id = _u()
+        self.annotation_set_id = _u()
+        self.evidence_regime = "experimental"
+        self.content_sha256 = sha
+        self.artifact_uri = uri
+        self.term_count = 39906
+        self.nonzero_count = 39840
+        self.ia_max = 14.59
+        self.ia_mean = 5.2
+        self.created_at = None
+
+
+class TestTheIaDownloadVerifiesWhatItHandsOut:
+    """``_evaluation_artifacts`` refuses to SCORE against drifted bytes.
+
+    A download that skipped the same check would hand out the one copy nobody
+    validated, and the caller would have no way to tell: an IA table looks
+    exactly as plausible whether or not it is the one the row describes.
+    """
+
+    def test_matching_bytes_are_served(self):
+        import hashlib
+
+        from protea.services.annotations_service import fetch_information_accretion_tsv
+
+        data = b"GO:0000001\t0.0\n"
+        ia = _IaSet(sha=hashlib.sha256(data).hexdigest())
+        session, store = MagicMock(), MagicMock()
+        session.get.side_effect = [ia, MagicMock(source_published_at=None)]
+        store.get.return_value = data
+        assert fetch_information_accretion_tsv(session, ia.id, store=store) == data
+
+    def test_drifted_bytes_are_refused_and_name_both_hashes(self):
+        from protea.services.annotations_service import (
+            AnnotationsServiceError,
+            fetch_information_accretion_tsv,
+        )
+
+        ia = _IaSet(sha="0" * 64)
+        session, store = MagicMock(), MagicMock()
+        session.get.side_effect = [ia, MagicMock(source_published_at=None)]
+        store.get.return_value = b"otra cosa"
+        with pytest.raises(AnnotationsServiceError) as e:
+            fetch_information_accretion_tsv(session, ia.id, store=store)
+        assert "0" * 64 in str(e.value), "a mismatch has to name what was expected"
+        assert "drifted" in str(e.value)
+
+    def test_a_set_that_does_not_resolve_is_a_404_at_the_boundary(self):
+        from protea.services.annotations_service import (
+            EntityNotFoundError,
+            fetch_information_accretion_tsv,
+        )
+
+        session = MagicMock()
+        session.get.return_value = None
+        with pytest.raises(EntityNotFoundError):
+            fetch_information_accretion_tsv(session, uuid4(), store=MagicMock())
+
+
+class TestTheIaRoutesDoNotHandOutTheHoldout:
+    """Same reasoning as the public stats page that was serving release 235.
+
+    An IA table is a fact about its release, so handing one out past the mark
+    hands out the holdout. The waiver that lets a window read past it is a
+    deliberate act recorded in one place, not something a download performs.
+    """
+
+    def test_a_set_past_the_mark_is_refused(self):
+        from datetime import timedelta
+
+        from protea.core.split_registry import BOARD_MARK, release
+        from protea.services.annotations_service import (
+            HoldoutArtifactError,
+            fetch_information_accretion_tsv,
+        )
+
+        despues = release(BOARD_MARK).published + timedelta(days=1)
+        ia = _IaSet()
+        session = MagicMock()
+        session.get.side_effect = [ia, MagicMock(source_published_at=despues)]
+        with pytest.raises(HoldoutArtifactError) as e:
+            fetch_information_accretion_tsv(session, ia.id, store=MagicMock())
+        assert BOARD_MARK in str(e.value), "the refusal says which mark it is enforcing"
+
+    def test_a_set_exactly_at_the_mark_is_served(self):
+        """The mark is the last release that informs, not the first that does not."""
+        import hashlib
+
+        from protea.core.split_registry import BOARD_MARK, release
+        from protea.services.annotations_service import fetch_information_accretion_tsv
+
+        data = b"GO:0000001\t0.0\n"
+        ia = _IaSet(sha=hashlib.sha256(data).hexdigest())
+        session, store = MagicMock(), MagicMock()
+        session.get.side_effect = [
+            ia,
+            MagicMock(source_published_at=release(BOARD_MARK).published),
+        ]
+        store.get.return_value = data
+        assert fetch_information_accretion_tsv(session, ia.id, store=store) == data
+
+    def test_the_waiver_path_exists_and_is_explicit(self):
+        """Not a back door: a caller that already holds the waiver can pass it.
+
+        The point is that it cannot happen by accident, not that it cannot
+        happen. ``include_past_mark`` defaults to False and no route sets it.
+        """
+        import inspect
+
+        from protea.api.routers.annotations import evaluation_sets as mod
+        from protea.services.annotations_service import fetch_information_accretion_tsv
+
+        firma = inspect.signature(fetch_information_accretion_tsv)
+        assert firma.parameters["include_past_mark"].default is False
+        assert "include_past_mark" not in inspect.getsource(mod.download_information_accretion_tsv)
+
+    def test_the_listing_hides_them_too(self):
+        """A listing that named them would leak which releases exist past the mark."""
+        import inspect
+
+        from protea.services.annotations_service import (
+            list_information_accretion_sets_data,
+        )
+
+        src = inspect.getsource(list_information_accretion_sets_data)
+        assert "include_past_mark" in src and "source_published_at" in src
+        assert (
+            inspect.signature(list_information_accretion_sets_data)
+            .parameters["include_past_mark"]
+            .default
+            is False
+        )
