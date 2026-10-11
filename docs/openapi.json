@@ -3580,6 +3580,129 @@
         ]
       }
     },
+    "/v1/annotations/information-accretion-sets": {
+      "get": {
+        "description": "The IA tables on record, newest first.\n\nThe two filters are what makes \"the IA of cut r\" a lookup instead of a scan,\nwhich matters because a rolling frame asks that question once per cut.\n\nTables computed on a release past the board's mark are NOT listed. They are\nnot hidden to be tidy: these routes answer to whoever holds a key, and an IA\ntable is as much a fact about its release as the ground truth is.",
+        "operationId": "list_information_accretion_sets_v1_annotations_information_accretion_sets_get",
+        "parameters": [
+          {
+            "description": "Only tables computed on this ontology snapshot.",
+            "in": "query",
+            "name": "ontology_snapshot_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tables computed on this ontology snapshot.",
+              "title": "Ontology Snapshot Id"
+            }
+          },
+          {
+            "description": "Only tables whose corpus is this release, e.g. `220`.",
+            "in": "query",
+            "name": "source_version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tables whose corpus is this release, e.g. `220`.",
+              "title": "Source Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Information Accretion Sets V1 Annotations Information Accretion Sets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Information Accretion tables",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/information-accretion-sets/{ia_set_id}/ia.tsv": {
+      "get": {
+        "description": "The IA table's bytes, checked against the hash its row records.\n\nThe check is the same one ``_evaluation_artifacts`` makes before scoring\nagainst a table: a download that skipped it would hand out the single copy\nnobody validated, and the caller could not tell. A drifted artefact answers\n409 rather than a file.",
+        "operationId": "download_information_accretion_tsv_v1_annotations_information_accretion_sets__ia_set_id__ia_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ia_set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ia Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download an Information Accretion table",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
     "/v1/annotations/sets": {
       "get": {
         "description": "List annotation sets with their annotation counts, newest first.\n\nCached 5 minutes: GROUP BY over protein_go_annotation (80M rows) takes\n6+ seconds. Per-source views are cached independently. Serves the\nlast-known payload on producer failure so a transient DB blip does\nnot surface as a 500.",
