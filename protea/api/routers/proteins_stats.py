@@ -25,11 +25,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import Integer, case, cast, distinct, func, literal
+from sqlalchemy import Date, Integer, case, cast, distinct, func, literal, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached, invalidate
 from protea.api.deps import get_session_factory
+from protea.core.evaluation import _EXP_CODES
+from protea.core.split_registry import BOARD_MARK, release
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
@@ -61,8 +63,12 @@ TTL_GO_DENSITY = 600.0
 TTL_PIPELINE = 60.0
 TTL_DATASETS = 300.0
 
-# Experimental evidence codes (CAFA-style).
-_EXPERIMENTAL_CODES = {"EXP", "IDA", "IMP", "IGI", "IEP", "IPI"}
+# Experimental evidence codes: IMPORTED, never restated. This page used to carry
+# its own set of six, missing TAS, IC and the five high-throughput codes, so the
+# "experimental" split it drew was a different population from the one the
+# evaluation and the IA score. Three parallel definitions of the same word is how
+# two numbers on the same screen stop meaning the same thing.
+_EXPERIMENTAL_CODES = frozenset(_EXP_CODES)
 
 # Histogram bin count for sequence-length panel.
 _SEQ_LEN_BINS = 50
@@ -102,6 +108,12 @@ def _compute_embeddings_by_plm(factory: sessionmaker[Session]) -> dict[str, Any]
             )
             .join(SequenceEmbedding, SequenceEmbedding.embedding_config_id == EmbeddingConfig.id)
             .join(Protein, Protein.sequence_id == SequenceEmbedding.sequence_id)
+            # The SAME two filters as the total below. Without them the numerator
+            # counts isoforms, TrEMBL and merged accessions that the denominator
+            # excludes, and the percentage goes over 100: measured at 121,5% with
+            # 700.475 over 576.450 while an embedding pass was running.
+            .filter(Protein.is_canonical.is_(True))
+            .filter(Protein.reviewed.is_(True))
             .group_by(
                 EmbeddingConfig.id,
                 EmbeddingConfig.model_name,
@@ -134,9 +146,13 @@ def _compute_go_matrix(factory: sessionmaker[Session]) -> dict[str, Any]:
     """Cell = COUNT(*) of (source, version, aspect, experimental?) tuples.
 
     ``experimental`` is the standard CAFA split: True when the row's
-    ``evidence_code`` is one of the 6 high-confidence codes, False otherwise.
-    Returns flat rows so the frontend can pivot on whichever axis it wants
-    (we don't presume one layout).
+    ``evidence_code`` is one of the codes the evaluation scores on, imported
+    rather than restated. Returns flat rows so the frontend can pivot on
+    whichever axis it wants (we don't presume one layout).
+
+    Bounded at the board's mark, like every other card here: the matrix used to
+    carry a column per release up to the newest one loaded, which published
+    counts for the prospective window on a page that answers without a key.
     """
     with session_scope(factory) as session:
         is_exp = func.coalesce(ProteinGOAnnotation.evidence_code, "").in_(_EXPERIMENTAL_CODES)
@@ -150,6 +166,13 @@ def _compute_go_matrix(factory: sessionmaker[Session]) -> dict[str, Any]:
             )
             .join(GOTerm, ProteinGOAnnotation.go_term_id == GOTerm.id)
             .join(AnnotationSet, ProteinGOAnnotation.annotation_set_id == AnnotationSet.id)
+            .filter(
+                or_(
+                    AnnotationSet.source_published_at.is_(None),
+                    cast(AnnotationSet.source_published_at, Date)
+                    <= release(BOARD_MARK).published,
+                )
+            )
             .group_by(
                 AnnotationSet.source,
                 AnnotationSet.source_version,
@@ -286,6 +309,33 @@ def _histogram_bins(session: Session, pmin: int, pmax: int) -> list[dict[str, An
 # ── GO term density per protein per aspect ───────────────────────────────────
 
 
+def _no_pasada_la_marca(query):
+    """Restrict a query over ``annotation_set`` to releases at or before the mark.
+
+    WHY A PUBLIC PAGE NEEDS THIS. These endpoints answer without a key, and the
+    GO-density card picked the highest-numbered release there is: measured
+    2026-10-11 it served release 235, which is five releases past the board's
+    mark and inside the prospective window. Aggregates, yes -- and a window onto
+    the holdout all the same, open to anyone who asks and watched by nobody. The
+    2026-08-27 incident was not a missing rule either; it was a rule nobody
+    asked. A page that publishes past the mark asks nothing.
+
+    BY DATE AND NOT BY NUMBER. ``split_registry`` says the identifier is opaque
+    on purpose -- "ordering derived from the identifier would break the moment
+    the upstream naming changed, and the dates are what the temporal design
+    actually means" -- so this compares ``source_published_at`` against the
+    mark's own ``published``, read from the same registry the guard reads. One
+    idea of where the limit is, in one place.
+    """
+    limite = release(BOARD_MARK).published
+    return query.filter(
+        or_(
+            AnnotationSet.source_published_at.is_(None),
+            cast(AnnotationSet.source_published_at, Date) <= limite,
+        )
+    )
+
+
 def _ultimo_set_goa(session: Session):
     """El annotation_set de GOA mas reciente, por numero de release.
 
@@ -300,8 +350,9 @@ def _ultimo_set_goa(session: Session):
         else_=literal(-1),
     )
     return (
-        session.query(AnnotationSet)
-        .filter(AnnotationSet.source == "goa")
+        _no_pasada_la_marca(
+            session.query(AnnotationSet).filter(AnnotationSet.source == "goa")
+        )
         .order_by(orden.desc())
         .first()
     )
