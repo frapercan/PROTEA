@@ -6,7 +6,7 @@ Wraps the per-setting (NK / LK / PK) loop that:
   2. invokes ``cafaeval.evaluation.cafa_eval`` with signal-safe
      handlers (default SIGTERM/SIGINT during the fork pool), which
      only applies on the main thread -- see
-     :func:`_invoke_cafaeval_signal_safe`,
+     :func:`_default_signals_where_possible`,
   3. parses the dfs_best result,
   4. writes the full cafaeval artifact tree per setting,
   5. emits the ``setting_done`` / ``setting_failed`` audit events.
@@ -21,6 +21,8 @@ import os
 import signal
 import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -175,6 +177,43 @@ def _new_per_protein_sink() -> Any:
     return PerProteinSink()
 
 
+@contextmanager
+def _default_signals_where_possible() -> Iterator[None]:
+    """Restore default SIGTERM/SIGINT for the block, on the main thread only.
+
+    Our ``_handle_stop`` handler only sets a flag without calling
+    ``sys.exit()``, so forked pool children would ignore SIGTERM and
+    ``pool.terminate()`` / ``pool.join()`` would block forever. Resetting to
+    ``SIG_DFL`` for the duration of the call is what avoids that.
+
+    OFF THE MAIN THREAD THE RESET IS SKIPPED, and it has to be: CPython refuses
+    ``signal.signal`` anywhere else with ``ValueError: signal only works in main
+    thread of the main interpreter``, and ``_job_pump`` runs every operation in a
+    per-job thread. So the call that existed to make cafaeval safe was the one
+    thing that made it impossible from a worker, and all three settings died on
+    it, as warnings, under a job that reported success.
+
+    Skipping it is safe rather than merely necessary, because there is no fork
+    pool to protect. :func:`_invoke_cafaeval_signal_safe` always passes
+    ``per_protein_sink``, and cafaeval refuses that sink on its dense path
+    (``NotImplementedError``: "per_protein_sink is only supported by the sparse
+    kernels"). Only the sparse kernels can run, and those fan nothing out --
+    their own comment says a pool is not needed because fork overhead would
+    dominate. The reset is kept for the main thread so a direct in-process call,
+    which could reach the dense kernel with no sink, keeps the behaviour it had.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    old_sigterm = signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    old_sigint = signal.signal(signal.SIGINT, signal.SIG_DFL)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, old_sigterm)
+        signal.signal(signal.SIGINT, old_sigint)
+
+
 def _invoke_cafaeval_signal_safe(
     *,
     ctx: CafaEvalRunContext,
@@ -182,30 +221,7 @@ def _invoke_cafaeval_signal_safe(
     gt_file: str,
     known_file: str | None,
 ) -> tuple[Any, Any, Any]:
-    """Run ``cafa_eval``, restoring default SIGTERM/SIGINT on the main thread.
-
-    Our ``_handle_stop`` handler only sets a flag without calling
-    ``sys.exit()``, so forked pool children would ignore SIGTERM and
-    ``pool.terminate()`` / ``pool.join()`` would block forever. Reset
-    to ``SIG_DFL`` for the duration of the call.
-
-    OFF THE MAIN THREAD THE RESET IS SKIPPED, and it has to be: CPython
-    refuses ``signal.signal`` anywhere else with ``ValueError: signal only
-    works in main thread of the main interpreter``, and ``_job_pump`` runs
-    every operation in a per-job thread. So the call that existed to make
-    cafaeval safe was the one thing that made it impossible from a worker,
-    and all three settings died on it.
-
-    Skipping it is safe rather than merely necessary, because there is no
-    fork pool to protect. This caller always passes ``per_protein_sink``,
-    and cafaeval refuses that sink on its dense path
-    (``NotImplementedError``: "per_protein_sink is only supported by the
-    sparse kernels"). Only the sparse kernels can run, and those fan nothing
-    out -- their own comment says a pool is not needed because fork overhead
-    would dominate. The reset is kept for the main thread so a direct
-    in-process call, which could reach the dense kernel with no sink, keeps
-    the behaviour it had.
-    """
+    """Run ``cafa_eval`` under :func:`_default_signals_where_possible`."""
     from cafaeval.evaluation import cafa_eval
 
     # Collected on every run rather than behind a flag. The cost is one array
@@ -214,10 +230,7 @@ def _invoke_cafaeval_signal_safe(
     # has already been computed.
     sink = _new_per_protein_sink()
 
-    on_main_thread = threading.current_thread() is threading.main_thread()
-    old_sigterm = signal.signal(signal.SIGTERM, signal.SIG_DFL) if on_main_thread else None
-    old_sigint = signal.signal(signal.SIGINT, signal.SIG_DFL) if on_main_thread else None
-    try:
+    with _default_signals_where_possible():
         df, dfs_best = cafa_eval(
             ctx.obo_path,
             pred_dir,
@@ -233,11 +246,7 @@ def _invoke_cafaeval_signal_safe(
             n_cpu=1,
             per_protein_sink=sink,
         )
-        return df, dfs_best, sink
-    finally:
-        if on_main_thread:
-            signal.signal(signal.SIGTERM, old_sigterm)
-            signal.signal(signal.SIGINT, old_sigint)
+    return df, dfs_best, sink
 
 
 def _persist_setting_artifacts(
