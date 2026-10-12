@@ -201,6 +201,71 @@ def _restrict_annotations(annotations: Any, donor_policy: Any) -> Any:
     return annotations
 
 
+def _bank_order() -> tuple[Any, ...]:
+    """The ORDER BY the donor-pool query carries, and why it is a result.
+
+    91 per cent of queries have neighbours at distance ~0 -- themselves, or twins
+    carrying the same sequence -- so candidate terms tie at the k-th slot and the
+    search admits whichever donor comes FIRST in the bank. Without an ORDER BY
+    that is whatever the plan emits. MEASURED on the 219 bank, 142.422 rows,
+    identical rows every time:
+
+        hash join                          89b79ad15383
+        merge join (enable_hashjoin=off)   cf77c750bed5
+        the same rows sorted by accession  cf77c750bed5
+
+    So the plan alone moved ``f_micro_w`` by ~1e-3 per cell, concentrated in CCO
+    and with mixed signs, and the plan turns on statistics and ``work_mem``. The
+    disk cache froze one order and hid it: an identical re-run reproduced to the
+    pair, while a run after the cache expired would not have.
+
+    ``COLLATE "C"``, not the database default. This Postgres runs ``en_US.utf8``,
+    whose glibc collation ignores punctuation on the first pass: it puts
+    ``A0A18`` before ``A0A1-9`` and ``P0DTC21`` before ``P0DTC2-3``.
+    :func:`_aspect_indices` pins its half with Python's ``sorted``, which is
+    codepoint order, so the default collation would leave the two halves of this
+    disagreeing with each other -- and would not be the order an external
+    reproduction picks unprompted either. ``C`` is codepoint.
+
+    ``chunk_index_s`` second, because accession alone is not a total order.
+    ``sequence_embedding`` is one row per (sequence, config, chunk_start), so
+    under ``use_chunking`` every accession appears once per chunk and those rows
+    tie under a sole accession key -- and near-duplicate chunks of one protein
+    are the MOST tie-prone entries in the bank, which is the case this ordering
+    exists for. No config in this campaign chunks today, so it costs nothing now
+    and removes a trap later.
+    """
+    return (Protein.accession.collate("C"), SequenceEmbedding.chunk_index_s)
+
+
+def _pin_annotation_order(
+    aspect_to_go_map: dict[str, dict[str, list[dict[str, Any]]]],
+) -> None:
+    """Sort every per-donor annotation list in place, deterministically.
+
+    Same defect as the pool's, one level down. The lists are appended in whatever
+    order the plan emits, :func:`_build_anno_csr` flattens them into the CSR
+    positionally and ``_csr_lookup`` reads them back in that order, so the order
+    freezes into the on-disk CSR exactly as the pool order did. It reaches the
+    output because a candidate takes its ``evidence_code`` from the first
+    matching row, and the code multiplies the score.
+
+    Sorted here rather than with an ORDER BY because the query that fills these
+    scans 11.160.704 rows for release 219, and a sort that size on this Postgres
+    is the ``work_mem`` spill pathology. These lists hold tens of entries each,
+    so this is linear in rows already in memory.
+    """
+    for asp_map in aspect_to_go_map.values():
+        for anns in asp_map.values():
+            anns.sort(
+                key=lambda a: (
+                    a["go_term_id"],
+                    a["evidence_code"] or "",
+                    a["qualifier"] or "",
+                )
+            )
+
+
 def _aspect_indices(accessions: Any, acc_to_idx: dict[str, int]) -> np.ndarray:
     """Map an aspect's accessions onto unified-pool indices, IN ACCESSION ORDER.
 
@@ -444,24 +509,7 @@ class _ReferenceMixin:
             # spine that quietly included proteins of unknown provenance would
             # not be a reviewed spine.
             query = query.filter(Protein.reviewed.is_(True))
-        # ORDERED, and the order is part of the result rather than a tidiness.
-        # 91 per cent of queries have neighbours at distance ~0 (themselves, or
-        # twins carrying the same sequence), so terms tie at the k-th slot and
-        # the search admits whichever comes first in THIS list. Without an
-        # ORDER BY that is whatever the plan emits. MEASURED on the 219 bank,
-        # 142.422 rows, same rows every time:
-        #
-        #     hash join                         89b79ad15383
-        #     merge join (enable_hashjoin=off)  cf77c750bed5
-        #     the same rows sorted by accession cf77c750bed5
-        #
-        # So the plan alone moved f_micro_w by ~1e-3 per cell, concentrated in
-        # CCO and with mixed signs, and the plan turns on statistics and
-        # ``work_mem``. The disk cache froze one order and hid it: an identical
-        # re-run matched to the pair, while a run after the cache expired would
-        # not have. Accession order is chosen because it is the one an external
-        # reproduction would pick unprompted.
-        return query.order_by(Protein.accession)
+        return query.order_by(*_bank_order())
 
     def _stream_reference_pool(
         self,
@@ -687,4 +735,5 @@ class _ReferenceMixin:
                     "evidence_code": intern_string(evidence_code),
                 }
             )
+        _pin_annotation_order(aspect_to_go_map)
         return aspect_to_accset, aspect_to_go_map

@@ -112,7 +112,27 @@ class RefPoolKey(NamedTuple):
 #:
 #: The epoch is the right instrument for exactly the reason the docstring below
 #: already gives: it does not need anyone to judge which entries are affected.
-_CACHE_EPOCH = 3
+#:
+#: BUMPED TO 4 on 2026-10-12, for the same reason and a different content change:
+#: the reference pool and the per-aspect index arrays are now ORDERED (accession
+#: order, codepoint), where before the order came from the query plan and, for
+#: the aspect indices, from per-process string hashing. The ORDER is part of what
+#: a cached pool contains -- ties at the k-th neighbour are resolved by bank
+#: position, so it moves f_micro_w by ~1e-3 per cell -- but it is invisible to
+#: every guard this cache has. ``_load_from_disk_cache`` validates only
+#: ``len(accessions) == expected_count``, and the row SET did not change; on the
+#: freshness branch even that count is skipped; and the aspect indices are guarded
+#: by ``pool_fingerprint`` computed over the accessions JUST LOADED FROM THE SAME
+#: CACHE, so it is self-referential and validates the stale arrays.
+#:
+#: MEASURED before the bump, on this machine's live cache for
+#: ``e3__e7ba37da...__a4517ed0...__donor-f7658ad59248``: 142.422 cached
+#: accessions, not in accession order; the three ``.pool`` files all read
+#: ``901a354f173edfa9``, which is the fingerprint of that stale order, where the
+#: ordered pool fingerprints to ``dc280304d5dce097``. Without this bump the
+#: ordering fix is a silent no-op on any machine with a warm cache, which is both
+#: of them.
+_CACHE_EPOCH = 4
 
 
 def _cache_key(

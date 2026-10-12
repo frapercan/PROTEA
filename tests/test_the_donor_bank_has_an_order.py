@@ -21,7 +21,7 @@ run after the cache expired would not have. These tests pin the order instead.
 from __future__ import annotations
 
 import uuid
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 from protea_contracts.payloads import DonorPolicy
@@ -42,31 +42,48 @@ def _sql(request: _PoolRequest) -> str:
     return str(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
 
+def _assert_orders_the_outer_select(sql: str) -> None:
+    """The ORDER BY must be the outer query's, and there must be exactly one.
+
+    Asserting ``"protein.accession" in sql.split("order by")[1]`` is NOT enough:
+    ``split`` takes everything after the FIRST occurrence, and an ORDER BY placed
+    inside the annotated subquery is followed by
+    ``) as anon_1 on protein.accession = anon_1.protein_accession``, which
+    contains that substring. So three tests passed with the order pinned on the
+    wrong select, where it orders nothing the pool sees.
+    """
+    low = sql.lower()
+    assert low.count("order by") == 1, "exactly one ORDER BY, on the outer select"
+    tail = low.rsplit("order by", 1)[1]
+    assert "protein.accession" in tail
+    assert "collate" in tail, 'codepoint order, so COLLATE "C" must be in it'
+    assert "chunk_index_s" in tail, "accession alone is not a total order"
+    # Nothing may follow it: a trailing join or filter would mean the ORDER BY
+    # sits on an inner select.
+    assert ")" not in tail.split("chunk_index_s")[-1]
+
+
 class TestTheUnifiedPoolIsOrdered:
     def test_it_orders_by_accession(self) -> None:
-        sql = _sql(_PoolRequest(CFG, ANN)).lower()
-        assert "order by" in sql
-        assert "protein.accession" in sql.split("order by")[1]
+        _assert_orders_the_outer_select(_sql(_PoolRequest(CFG, ANN)))
 
     def test_a_restricted_pool_is_ordered_too(self) -> None:
         """The order must not depend on which policy narrowed the pool."""
         request = _PoolRequest(CFG, ANN, DonorPolicy(evidence_codes=["IDA", "EXP"]))
-        sql = _sql(request).lower()
-        assert "order by" in sql
-        assert "protein.accession" in sql.split("order by")[1]
+        _assert_orders_the_outer_select(_sql(request))
 
     def test_a_reviewed_only_pool_is_ordered_too(self) -> None:
         request = _PoolRequest(CFG, ANN, DonorPolicy(reviewed_only=True))
-        sql = _sql(request).lower()
-        assert "reviewed" in sql
-        assert "order by" in sql
-        assert "protein.accession" in sql.split("order by")[1]
+        sql = _sql(request)
+        assert "reviewed" in sql.lower()
+        _assert_orders_the_outer_select(sql)
 
-    def test_the_order_is_last_so_it_orders_the_whole_pool(self) -> None:
-        """Not inside the annotated subquery, which would order nothing useful."""
-        sql = _sql(_PoolRequest(CFG, ANN)).lower()
-        assert sql.count("order by") == 1
-        assert sql.rstrip().endswith("protein.accession")
+    def test_it_is_not_pinned_on_the_annotated_subquery(self) -> None:
+        """The ORDER BY must outlive the join, not sit inside the subquery."""
+        low = _sql(_PoolRequest(CFG, ANN)).lower()
+        antes, _, despues = low.rpartition("order by")
+        assert "join" in antes, "the join comes before the ORDER BY"
+        assert "join" not in despues, "nothing joins after it"
 
 
 class TestThePerAspectIndexIsOrdered:
@@ -124,7 +141,14 @@ class TestThePerAspectIndexIsOrdered:
         assert list(indices) == expected
 
     def test_it_does_not_keep_the_order_it_was_handed(self, tmp_path) -> None:
-        """The regression: this passed trivially while the set order leaked through."""
+        """The regression, and it fails deterministically without the sort.
+
+        The collector is stubbed to hand the accessions over in REVERSE order,
+        which is exactly what this asserts the output is NOT, so reverting
+        ``sorted(accessions)`` makes it fail every time rather than once in a
+        while. That is the point of stubbing the order instead of trusting a
+        real ``set`` to come out shuffled.
+        """
         written, acc_to_idx = self._run(tmp_path)
         indices = next(iter(written.values()))
         handed = [acc_to_idx[acc] for acc in reversed(self.ACCS)]
@@ -154,3 +178,118 @@ class TestAspectIndicesDirectly:
         out = refmod._aspect_indices([], {"A0A001": 1})
         assert len(out) == 0
         assert out.dtype == np.int32
+
+
+class TestThePerDonorAnnotationListIsOrdered:
+    """The same defect one level down, and it reaches the score.
+
+    These lists are flattened into the on-disk CSR positionally, and a candidate
+    takes its ``evidence_code`` from the first matching row -- and the code
+    multiplies the score. So an unpinned list order is an unpinned score.
+    """
+
+    def test_it_sorts_by_term_then_code_then_qualifier(self) -> None:
+        mapa = {
+            "P": {
+                "A0A001": [
+                    {"go_term_id": 9, "evidence_code": "IDA", "qualifier": None},
+                    {"go_term_id": 2, "evidence_code": "IPI", "qualifier": "enables"},
+                    {"go_term_id": 2, "evidence_code": "EXP", "qualifier": "enables"},
+                ]
+            }
+        }
+        refmod._pin_annotation_order(mapa)
+        assert [a["go_term_id"] for a in mapa["P"]["A0A001"]] == [2, 2, 9]
+        assert [a["evidence_code"] for a in mapa["P"]["A0A001"]] == ["EXP", "IPI", "IDA"]
+
+    def test_a_null_qualifier_does_not_raise(self) -> None:
+        """``qualifier`` is nullable and ``evidence_code`` can be absent too."""
+        mapa = {
+            "F": {
+                "Q1": [
+                    {"go_term_id": 1, "evidence_code": None, "qualifier": None},
+                    {"go_term_id": 1, "evidence_code": "IDA", "qualifier": None},
+                ]
+            }
+        }
+        refmod._pin_annotation_order(mapa)
+        assert [a["evidence_code"] for a in mapa["F"]["Q1"]] == [None, "IDA"]
+
+    def test_it_is_stable_whatever_order_it_is_handed(self) -> None:
+        base = [
+            {"go_term_id": i, "evidence_code": c, "qualifier": None}
+            for i, c in ((5, "IDA"), (1, "EXP"), (3, "IPI"), (1, "IMP"))
+        ]
+        a = {"P": {"X": list(base)}}
+        b = {"P": {"X": list(reversed(base))}}
+        refmod._pin_annotation_order(a)
+        refmod._pin_annotation_order(b)
+        assert a["P"]["X"] == b["P"]["X"]
+
+    def test_an_empty_map_is_fine(self) -> None:
+        mapa: dict = {"P": {}, "F": {"Q1": []}}
+        refmod._pin_annotation_order(mapa)
+        assert mapa == {"P": {}, "F": {"Q1": []}}
+
+
+class TestTheBankOrderCriteria:
+    def test_it_is_accession_then_chunk(self) -> None:
+        criteria = [str(c) for c in refmod._bank_order()]
+        assert len(criteria) == 2
+        assert "accession" in criteria[0]
+        assert "chunk_index_s" in criteria[1]
+
+    def test_the_accession_key_is_codepoint_not_the_db_collation(self) -> None:
+        """glibc en_US.utf8 puts A0A18 before A0A1-9; Python's sorted does not."""
+        assert 'COLLATE "C"' in str(refmod._bank_order()[0])
+
+
+class TestTheCollectorActuallyPinsTheOrder:
+    """The wiring, not just the helper.
+
+    Every test above exercises ``_pin_annotation_order`` directly, so deleting
+    its CALL from ``_collect_aspect_annotations`` left all of them passing. That
+    is the same gap that let the real defects sit: a helper that works, never
+    reached.
+    """
+
+    ROWS = [
+        ("A0A001", "P", 9, None, "IDA"),
+        ("A0A001", "P", 2, "enables", "IPI"),
+        ("A0A001", "P", 2, "enables", "EXP"),
+        ("B0B002", "P", 4, None, "IMP"),
+    ]
+
+    def _collect(self):
+        from protea.core.operations.predict_go_terms._batch_op import (
+            PredictGOTermsBatchOperation,
+        )
+
+        class _Rows(list):
+            def yield_per(self, _n):
+                return self
+
+        query = _Rows(self.ROWS)
+        query.join = lambda *a, **k: query
+        query.filter = lambda *a, **k: query
+        session = MagicMock()
+        session.query.return_value = query
+        with patch.object(refmod, "_restrict_annotations", lambda q, p: q):
+            return PredictGOTermsBatchOperation._collect_aspect_annotations(
+                session, ["P"], ANN, None
+            )
+
+    def test_the_lists_come_back_sorted(self) -> None:
+        """Rows arrive unsorted; the collector must not hand them over that way."""
+        _, go_map = self._collect()
+        assert [a["go_term_id"] for a in go_map["P"]["A0A001"]] == [2, 2, 9]
+        assert [a["evidence_code"] for a in go_map["P"]["A0A001"]] == [
+            "EXP",
+            "IPI",
+            "IDA",
+        ]
+
+    def test_it_still_collects_the_accessions(self) -> None:
+        accset, go_map = self._collect()
+        assert accset["P"] == {"A0A001", "B0B002"}
+        assert set(go_map["P"]) == {"A0A001", "B0B002"}
