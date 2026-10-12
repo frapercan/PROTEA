@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useLocale } from "next-intl";
 import { logout } from "@/lib/authApi";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 /**
  * FARM-AUTH.10 — sign-out landing.
@@ -48,7 +47,6 @@ export default function LogoutPage() {
 
   return (
     <>
-      <Breadcrumbs />
       <div className="mx-auto max-w-md px-4 sm:px-6 py-16">
         <div className="rounded-xl border border-stone-200 bg-white p-8 text-center shadow-sm">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-stone-200 border-t-blue-700" aria-hidden />

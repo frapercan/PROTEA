@@ -14,7 +14,6 @@ import {
   type CreateExperimentRunPayload,
   type UpdateExperimentRunPayload,
 } from "@/lib/api";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
 import { useFocusTrap } from "@/lib/useFocusTrap";
@@ -171,7 +170,6 @@ export default function ExperimentRunsPage() {
 
   return (
     <>
-      <Breadcrumbs />
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>

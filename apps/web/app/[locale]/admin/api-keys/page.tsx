@@ -12,7 +12,6 @@ import {
   type ApiKeyRole,
 } from "@/lib/api";
 import type { Role } from "@/lib/auth";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { NewApiKeyDialog } from "@/components/NewApiKeyDialog";
 import { useToast } from "@/components/Toast";
@@ -143,7 +142,6 @@ export default function ApiKeysAdminPage() {
   if (!hydrated) {
     return (
       <>
-        <Breadcrumbs />
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
           <div className="h-7 w-48 animate-pulse rounded bg-slate-200" />
           <div className="mt-2 h-4 w-72 animate-pulse rounded bg-slate-200/70" />
@@ -162,7 +160,6 @@ export default function ApiKeysAdminPage() {
 
   return (
     <>
-      <Breadcrumbs />
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Header */}
         <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -404,7 +401,6 @@ function ForbiddenPanel({
 }) {
   return (
     <>
-      <Breadcrumbs />
       <div className="max-w-xl mx-auto px-4 sm:px-6 py-12">
         <div
           role="alert"
