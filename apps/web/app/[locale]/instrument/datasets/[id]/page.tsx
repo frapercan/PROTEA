@@ -16,7 +16,6 @@ import {
   type OntologySnapshot,
   type DatasetAspectStats,
 } from "@/lib/api";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Skeleton } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
 
@@ -245,7 +244,6 @@ export default function DatasetDetail({ params }: { params: Promise<{ id: string
   if (error) {
     return (
       <>
-        <Breadcrumbs />
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12">
           <div className="rounded-lg border border-red-200 bg-red-50 p-6">
             <p className="text-red-800 text-sm">{error}</p>
@@ -261,7 +259,6 @@ export default function DatasetDetail({ params }: { params: Promise<{ id: string
   if (!dataset) {
     return (
       <>
-        <Breadcrumbs />
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-4">
           <Skeleton className="h-8 w-2/3" />
           <Skeleton className="h-4 w-1/2" />
@@ -277,7 +274,6 @@ export default function DatasetDetail({ params }: { params: Promise<{ id: string
 
   return (
     <>
-      <Breadcrumbs />
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Header */}
         <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">

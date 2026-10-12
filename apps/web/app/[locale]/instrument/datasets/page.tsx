@@ -9,7 +9,6 @@ import {
   type Dataset,
   type EmbeddingConfig,
 } from "@/lib/api";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { NewDatasetDialog } from "@/components/NewDatasetDialog";
 import { useToast } from "@/components/Toast";
@@ -219,7 +218,6 @@ export default function DatasetsPage() {
 
   return (
     <>
-      <Breadcrumbs />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Header */}
         <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">

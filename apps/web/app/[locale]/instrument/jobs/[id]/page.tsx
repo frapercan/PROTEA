@@ -11,7 +11,6 @@ import { EventTimeline } from "@/components/EventTimeline";
 import { Skeleton, SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
 import { useLocale, useTranslations } from "next-intl";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CommentsThread } from "@/components/CommentsThread";
 
 const TERMINAL = ["succeeded", "failed", "cancelled"];
@@ -177,7 +176,6 @@ const tToast = useTranslations("toasts");
   return (
     <div>
       {/* Header */}
-      <Breadcrumbs />
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">{t("jobDetail.title")}</h1>
         {isLive && (

@@ -8,7 +8,6 @@ import { notFound } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   getPredictionSet,
   getPredictionSetProteins,
@@ -951,7 +950,6 @@ const tToast = useTranslations("toasts");
   return (
     <>
       <div className="mb-6 space-y-3">
-        <Breadcrumbs />
         <div>
           <h1 className="text-xl font-semibold mt-2">
             Prediction Set <span className="font-mono text-base text-slate-500">{shortId(setId)}…</span>

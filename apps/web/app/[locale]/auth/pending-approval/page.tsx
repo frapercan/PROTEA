@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 /**
  * FARM-AUTH.10 — post-signup "thanks, wait for approval" landing.
@@ -17,7 +16,6 @@ export default function PendingApprovalPage() {
   const t = useTranslations("auth.pendingApproval");
   return (
     <>
-      <Breadcrumbs />
       <div className="mx-auto max-w-md px-4 sm:px-6 py-12">
         <div className="rounded-xl border border-stone-200 bg-white p-8 text-center shadow-sm">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 ring-1 ring-inset ring-amber-200">
