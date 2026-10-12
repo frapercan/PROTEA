@@ -201,6 +201,31 @@ def _restrict_annotations(annotations: Any, donor_policy: Any) -> Any:
     return annotations
 
 
+def _aspect_indices(accessions: Any, acc_to_idx: dict[str, int]) -> np.ndarray:
+    """Map an aspect's accessions onto unified-pool indices, IN ACCESSION ORDER.
+
+    The sort is load-bearing, not tidiness. This array IS the per-aspect bank
+    order, and candidate terms tie at the k-th neighbour often enough for the
+    order to decide which donors are admitted: 91 per cent of queries have
+    neighbours at distance ~0, themselves or twins carrying the same sequence.
+
+    Its caller hands over a ``set`` of accession STRINGS, and CPython
+    randomises string hashing per process unless PYTHONHASHSEED is pinned,
+    which it is not here. So iterating that set gave a different bank order on
+    EVERY WORKER RESTART that rebuilt this cache -- worse than the unified
+    pool's plan-dependence, which at least only moves when the plan does.
+    Verified by running the same eight accessions through three interpreters
+    and getting three orders.
+
+    Sorting the accessions rather than the resulting indices keeps this correct
+    whatever order the unified pool happens to be in.
+    """
+    return np.array(
+        [acc_to_idx[acc] for acc in sorted(accessions) if acc in acc_to_idx],
+        dtype=np.int32,
+    )
+
+
 class _ReferenceMixin:
     """Reference-pool cache management methods.
 
@@ -419,7 +444,24 @@ class _ReferenceMixin:
             # spine that quietly included proteins of unknown provenance would
             # not be a reviewed spine.
             query = query.filter(Protein.reviewed.is_(True))
-        return query
+        # ORDERED, and the order is part of the result rather than a tidiness.
+        # 91 per cent of queries have neighbours at distance ~0 (themselves, or
+        # twins carrying the same sequence), so terms tie at the k-th slot and
+        # the search admits whichever comes first in THIS list. Without an
+        # ORDER BY that is whatever the plan emits. MEASURED on the 219 bank,
+        # 142.422 rows, same rows every time:
+        #
+        #     hash join                         89b79ad15383
+        #     merge join (enable_hashjoin=off)  cf77c750bed5
+        #     the same rows sorted by accession cf77c750bed5
+        #
+        # So the plan alone moved f_micro_w by ~1e-3 per cell, concentrated in
+        # CCO and with mixed signs, and the plan turns on statistics and
+        # ``work_mem``. The disk cache froze one order and hid it: an identical
+        # re-run matched to the pair, while a run after the cache expired would
+        # not have. Accession order is chosen because it is the one an external
+        # reproduction would pick unprompted.
+        return query.order_by(Protein.accession)
 
     def _stream_reference_pool(
         self,
@@ -587,10 +629,7 @@ class _ReferenceMixin:
         )
         for asp in missing_aspects:
             idx_path = _aspect_index_path(ecid, asid, asp, d)
-            indices = np.array(
-                [acc_to_idx[acc] for acc in aspect_to_accset[asp] if acc in acc_to_idx],
-                dtype=np.int32,
-            )
+            indices = _aspect_indices(aspect_to_accset[asp], acc_to_idx)
             idx_path.parent.mkdir(parents=True, exist_ok=True)
             np.save(idx_path, indices)
             _aspect_index_pool_path(ecid, asid, asp, d).write_text(

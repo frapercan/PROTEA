@@ -1860,11 +1860,18 @@ class TestCollectAspectAnnotations:
 class TestReferencePoolQuery:
     def test_builds_subquery(self) -> None:
         """Smoke check: the helper composes the right join chain on the
-        provided session.query without raising."""
+        provided session.query without raising, and orders the result.
+
+        The order is not decoration: see
+        tests/test_the_donor_bank_has_an_order.py for why the bank's order
+        changes the metrics.
+        """
         op = PredictGOTermsBatchOperation()
         session = MagicMock()
         out = op._reference_pool_query(session, _PoolRequest(uuid.uuid4(), uuid.uuid4()))
-        assert out is session.query.return_value.join.return_value.join.return_value
+        joined = session.query.return_value.join.return_value.join.return_value
+        assert out is joined.order_by.return_value
+        joined.order_by.assert_called_once()
 
 
 class TestAspectKnnPreSearchEmptyBank:
