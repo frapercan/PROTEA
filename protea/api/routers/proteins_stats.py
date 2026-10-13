@@ -85,15 +85,19 @@ def _compute_embeddings_by_plm(factory: sessionmaker[Session]) -> dict[str, Any]
 
     GROUPs ``sequence_embedding`` by ``embedding_config_id``, JOINs back to
     ``protein`` via ``sequence_id`` so the count reflects PROTEIN coverage
-    (sequence-dedup is folded back out). Total uses the canonical Swiss-Prot
-    population (``is_canonical=True AND reviewed=True``) so the percent
-    matches what the surrounding cards report.
+    (sequence-dedup is folded back out).
+
+    THE POPULATION IS THE CANONICAL CORPUS, not the Swiss-Prot spine. Both
+    sides carried ``reviewed=True``, making the arithmetic honest about the
+    wrong thing: 576.450 at 100,0% while 746.014 canonical proteins exist and
+    all of them are embedded. ``reviewed`` had been added to stop a measured
+    121,5%, whose cause was an unaligned numerator, so aligning both sides on
+    ``is_canonical`` alone fixes it without hiding 169.564 proteins.
     """
     with session_scope(factory) as session:
         total = (
             session.query(func.count(Protein.accession))
             .filter(Protein.is_canonical.is_(True))
-            .filter(Protein.reviewed.is_(True))
             .scalar()
             or 0
         )
@@ -108,12 +112,11 @@ def _compute_embeddings_by_plm(factory: sessionmaker[Session]) -> dict[str, Any]
             )
             .join(SequenceEmbedding, SequenceEmbedding.embedding_config_id == EmbeddingConfig.id)
             .join(Protein, Protein.sequence_id == SequenceEmbedding.sequence_id)
-            # The SAME two filters as the total below. Without them the numerator
-            # counts isoforms, TrEMBL and merged accessions that the denominator
-            # excludes, and the percentage goes over 100: measured at 121,5% with
-            # 700.475 over 576.450 while an embedding pass was running.
+            # The SAME filter as the total above. Without it the numerator counts
+            # isoforms that the denominator excludes and the percentage goes over
+            # 100: measured at 121,5%, 700.475 over 576.450, while an embedding
+            # pass was running.
             .filter(Protein.is_canonical.is_(True))
-            .filter(Protein.reviewed.is_(True))
             .group_by(
                 EmbeddingConfig.id,
                 EmbeddingConfig.model_name,
@@ -204,17 +207,32 @@ def _compute_taxonomy_top(factory: sessionmaker[Session]) -> dict[str, Any]:
     Only counts canonical rows so isoforms don't double-weight an organism.
     Returns ``taxonomy_id`` alongside the human-readable ``organism`` so the
     frontend can deep-link to a UniProt taxonomy page.
+
+    GROUPED BY TAXON, NOT BY NAME. The two load paths spell an organism
+    differently -- the Swiss-Prot path writes ``Homo sapiens`` and the TSV path
+    ``Homo sapiens (Human)`` -- so grouping by the string split one organism
+    into two bars and ranked the halves. 726 taxa carry more than one name, and
+    every one of the top six did, so the ordering was wrong from the top down:
+    taxon 9606 is 41.823 canonical proteins and showed as 21.387 and 20.436.
+
+    The taxon is the identity and the name is a label, so the label is picked
+    with ``min`` to keep it deterministic rather than whichever row the plan
+    happened to emit. Rows with no taxon are excluded for the same reason they
+    always were excluded by the ``organism`` filter: the 28.868 deleted
+    UniProtKB entries carry neither, and collapsing them into one unnamed bar
+    would invent an organism.
     """
     with session_scope(factory) as session:
         rows = (
             session.query(
-                Protein.organism,
+                func.min(Protein.organism),
                 Protein.taxonomy_id,
                 func.count(Protein.accession),
             )
             .filter(Protein.is_canonical.is_(True))
             .filter(Protein.organism.is_not(None))
-            .group_by(Protein.organism, Protein.taxonomy_id)
+            .filter(Protein.taxonomy_id.is_not(None))
+            .group_by(Protein.taxonomy_id)
             .order_by(func.count(Protein.accession).desc())
             .limit(20)
             .all()
