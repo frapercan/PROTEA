@@ -2358,3 +2358,101 @@ class TestAnEmptySettingFailsTheJob:
 
         assert set(out) == {"NK", "LK", "PK"}
         assert out["NK"] == {"bpo": {"f": 1}}
+
+
+# ---------------------------------------------------------------------------
+# A cyclic snapshot cannot be scored, and should say so by name
+# ---------------------------------------------------------------------------
+
+
+class TestACyclicSnapshotIsRefusedByName:
+    """cafaeval dies on a cycle with a message that names nothing.
+
+    ``Graph.top_sort`` is Kahn's algorithm and raises
+    ``Exception("The sparse matrix doesn't represent an acyclic graph")`` from
+    inside ``Graph.__init__``, so the run dies while PARSING the obo. Verified
+    against the real file: ``obo_parser`` on ``releases/2024-06-10`` raises
+    exactly that, and the snapshot of release 221 closes two triangles.
+
+    This does not make a cyclic snapshot scoreable. It makes the refusal
+    legible, and moves it before a 31 MB download and a ground-truth write.
+    """
+
+    @staticmethod
+    def _session(parent_rows):
+        session = MagicMock()
+        session.execute.return_value = parent_rows
+        return session
+
+    @staticmethod
+    def _snapshot():
+        return SimpleNamespace(id=uuid.uuid4(), obo_version="releases/2024-06-10")
+
+    def test_an_acyclic_snapshot_passes_silently(self) -> None:
+        from protea.core.operations.run_cafa_evaluation import _refuse_a_cyclic_snapshot
+
+        emitted: list[str] = []
+        _refuse_a_cyclic_snapshot(
+            self._session([("GO:2", "GO:1"), ("GO:3", "GO:2")]),
+            self._snapshot(),
+            lambda code, *a, **k: emitted.append(code),
+        )
+        assert emitted == []
+
+    def test_a_cycle_raises_naming_the_snapshot_and_the_terms(self) -> None:
+        from protea.core.operations.run_cafa_evaluation import _refuse_a_cyclic_snapshot
+
+        snap = self._snapshot()
+        with pytest.raises(ValueError) as exc:
+            _refuse_a_cyclic_snapshot(
+                self._session([("GO:1", "GO:2"), ("GO:2", "GO:3"), ("GO:3", "GO:1")]),
+                snap,
+                lambda *a, **k: None,
+            )
+        mensaje = str(exc.value)
+        assert str(snap.id) in mensaje
+        assert "releases/2024-06-10" in mensaje
+        for t in ("GO:1", "GO:2", "GO:3"):
+            assert t in mensaje
+
+    def test_it_says_the_ia_of_the_same_snapshot_can_still_be_computed(self) -> None:
+        """So nobody concludes the snapshot is unusable for everything."""
+        from protea.core.operations.run_cafa_evaluation import _refuse_a_cyclic_snapshot
+
+        with pytest.raises(ValueError, match="compute_information_accretion"):
+            _refuse_a_cyclic_snapshot(
+                self._session([("GO:1", "GO:2"), ("GO:2", "GO:1")]),
+                self._snapshot(),
+                lambda *a, **k: None,
+            )
+
+    def test_it_emits_an_error_event_with_the_terms(self) -> None:
+        from protea.core.operations.run_cafa_evaluation import _refuse_a_cyclic_snapshot
+
+        eventos: list[tuple] = []
+
+        def emit(code, message=None, data=None, level="info"):
+            eventos.append((code, data, level))
+
+        with pytest.raises(ValueError):
+            _refuse_a_cyclic_snapshot(
+                self._session([("GO:1", "GO:2"), ("GO:2", "GO:1")]),
+                self._snapshot(),
+                emit,
+            )
+        assert len(eventos) == 1
+        code, data, level = eventos[0]
+        assert code == "run_cafa_evaluation.cyclic_snapshot"
+        assert level == "error"
+        assert data["components"] == 1
+        assert data["terms"] == ["GO:1", "GO:2"]
+
+    def test_the_staging_step_calls_it_before_touching_the_obo(self) -> None:
+        """The wiring: refusing after the download would still be a 31 MB wait."""
+        import inspect
+
+        from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
+
+        src = inspect.getsource(RunCafaEvaluationOperation._stage_evaluator_inputs)
+        assert "_refuse_a_cyclic_snapshot(" in src
+        assert src.index("_refuse_a_cyclic_snapshot(") < src.index("resolve_obo(")

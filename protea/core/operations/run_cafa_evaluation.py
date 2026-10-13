@@ -3,9 +3,11 @@ from __future__ import annotations
 import os
 import tempfile
 import uuid
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from protea.core._evaluation_leakage import refuse_uncertifiable_encoding
@@ -16,6 +18,7 @@ from protea.core.band_registry import (
 )
 from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.evaluation import load_evaluation_data_for_set
+from protea.core.ia import PROPAGATE_RELATIONS, strongly_connected_components
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
 from protea.core.operations import _run_cafa_summary as _summary
@@ -64,6 +67,65 @@ from protea.infrastructure.orm.models.embedding.prediction_set import Prediction
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import ArtifactStore, get_artifact_store
+
+
+def _refuse_a_cyclic_snapshot(session: Session, snapshot: Any, emit: EmitFn) -> None:
+    """Refuse a snapshot whose True Path Rule edges close a cycle, by name.
+
+    cafaeval cannot score one. ``Graph.top_sort`` is Kahn's algorithm and raises
+    ``Exception("The sparse matrix doesn't represent an acyclic graph")`` from
+    inside ``Graph.__init__``, so the run dies while parsing the OBO, with a
+    message that names neither the snapshot nor a term. Reproduced on the real
+    file: ``obo_parser`` on ``releases/2024-06-10`` raises exactly that.
+
+    This says which snapshot and which terms, and says it BEFORE a 31 MB
+    download and a ground-truth write. It does not fix anything: condensing the
+    cycle for scoring is a separate decision, and until it is taken a cyclic
+    snapshot has no score. What it stops is an operator reading an opaque
+    exception and looking for the fault in the predictions.
+
+    The check runs against the relationship table rather than the OBO because
+    the answer is the same and the table is already indexed by snapshot: no
+    parse, no download. ``compute_information_accretion`` CONDENSES the same
+    cycles rather than refusing them, because an IA over a condensed component
+    is well defined (PR #1011) while a cafaeval traversal order is not yet.
+    """
+    components = strongly_connected_components(_parent_edges(session, snapshot.id))
+    if not components:
+        return
+    terms = sorted(t for comp in components for t in comp)
+    emit(
+        "run_cafa_evaluation.cyclic_snapshot",
+        None,
+        {"snapshot_id": str(snapshot.id), "obo_version": snapshot.obo_version,
+         "components": len(components), "terms": terms},
+        "error",
+    )
+    raise ValueError(
+        f"ontology snapshot {snapshot.id} ({snapshot.obo_version}) has "
+        f"{len(components)} True Path Rule cycle(s) over {len(terms)} terms "
+        f"({', '.join(terms[:8])}); cafaeval's top_sort cannot order it, so "
+        f"this transition cannot be scored. The IA of the same snapshot CAN be "
+        f"computed: compute_information_accretion condenses the cycles."
+    )
+
+
+def _parent_edges(session: Session, snapshot_id: Any) -> dict[str, set[str]]:
+    """``child -> {parent}`` over the True Path Rule edges of one snapshot."""
+    rows = session.execute(
+        text(
+            "select c.go_id, p.go_id "
+            "from go_term_relationship r "
+            "join go_term c on c.id = r.child_go_term_id "
+            "join go_term p on p.id = r.parent_go_term_id "
+            "where r.ontology_snapshot_id = :s and r.relation_type in :rels"
+        ).bindparams(bindparam("rels", expanding=True)),
+        {"s": snapshot_id, "rels": list(PROPAGATE_RELATIONS)},
+    )
+    parents: dict[str, set[str]] = defaultdict(set)
+    for child, parent in rows:
+        parents[child].add(parent)
+    return dict(parents)
 
 
 class RunCafaEvaluationOperation:
@@ -319,6 +381,7 @@ class RunCafaEvaluationOperation:
         filesystem and the store, and bundling only names what was staged.
         """
         inputs = ctx.inputs
+        _refuse_a_cyclic_snapshot(session, inputs.snapshot, emit)
         tmpdir = str(artifacts_root.parent)
         obo_path = resolve_obo(tmpdir, inputs.snapshot, emit)
         ia_path = self._resolve_and_gate_ia(tmpdir, inputs.snapshot, p, emit, session)
