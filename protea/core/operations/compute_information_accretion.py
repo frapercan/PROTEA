@@ -39,7 +39,12 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.ia import PROPAGATE_RELATIONS, build_ancestors, term_ia
+from protea.core.ia import (
+    PROPAGATE_RELATIONS,
+    build_ancestors,
+    ia_over_components,
+    strongly_connected_components,
+)
 from protea.core.ia_regimes import DEFAULT_REGIME, EVIDENCE_REGIMES, resolve_regime
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -244,12 +249,13 @@ class ComputeInformationAccretionOperation:
         one check that needed ninety-seven lines.
         """
         drop_rate = self._gate_corpus(raw, dropped, max_drop_rate_pct)
-        self._gate_acyclic(dag)
+        components, in_cycles = self._gate_components(dag)
         self._gate_propagation(dag)
         roots, nonzero = self._gate_values(dag)
         return {
             "drop_rate_pct": drop_rate,
-            "cycles": 0,
+            "cycles": components,
+            "terms_in_cycles": in_cycles,
             "tpr_violations": 0,
             "roots": roots,
             "nonzero": nonzero,
@@ -275,18 +281,35 @@ class ComputeInformationAccretionOperation:
         return drop_rate
 
     @staticmethod
-    def _gate_acyclic(dag: _Dag) -> None:
-        """A term must not be its own strict ancestor."""
-        cycles = [
-            t for t in dag.terms
-            if t in dag.parents
-            and t in {a for p in dag.parents[t] for a in dag.ancestors.get(p, frozenset())}
-        ]
-        if cycles:
-            raise InformationAccretionGateError(
-                f"{len(cycles)} terms participate in a True Path Rule cycle, "
-                f"e.g. {cycles[:5]}; the DAG is not acyclic"
-            )
+    def _gate_components(dag: _Dag) -> tuple[int, int]:
+        """Cycles are condensed, not refused. Returns (components, terms in them).
+
+        This used to raise. Refusing was right while every snapshot was acyclic
+        and a cycle could only mean a broken load, and it stopped being right
+        when a real one turned up: the ontology of release 221
+        (``releases/2024-06-10``) closes two triangles among
+        ``GO:0045257/0045273/0045281`` and ``GO:0045258/0045274/0045282``,
+        mixing ``is_a`` and ``part_of``. One snapshot of the 61 across
+        156..227. Refusing there does not protect a number, it withholds one.
+
+        What IS still refused is a cycle whose members disagree about their
+        proteins. Propagation closes over reachability, so members of a cycle
+        are ancestors of one another and MUST carry the same protein set;
+        :func:`ia_over_components` measures the whole component through one
+        member and would quietly weigh the wrong population if that failed.
+        The invariant is cheap to check and impossible to notice otherwise.
+        """
+        components = strongly_connected_components(dag.parents)
+        for comp in components:
+            sizes = {len(dag.proteins_per_term.get(t, set())) for t in comp}
+            if len(sizes) > 1:
+                raise InformationAccretionGateError(
+                    f"the {len(comp)} terms of a True Path Rule cycle "
+                    f"({sorted(comp)[:5]}) do not share a protein set "
+                    f"(sizes {sorted(sizes)}); members of a cycle are ancestors "
+                    f"of one another, so propagation should have equalised them"
+                )
+        return len(components), sum(len(c) for c in components)
 
     @staticmethod
     def _gate_propagation(dag: _Dag) -> None:
@@ -584,7 +607,7 @@ class ComputeInformationAccretionOperation:
             "info",
         )
 
-        ia = {t: term_ia(t, parents.get(t), proteins_per_term) for t in terms}
+        ia = ia_over_components(terms, parents, proteins_per_term)
 
         dag = _Dag(terms, parents, ancestors, proteins_per_term, ia)
         gate_stats = self._gate(dag, raw, dropped, p.max_drop_rate_pct)

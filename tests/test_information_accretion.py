@@ -237,14 +237,40 @@ def test_gate_accepts_drop_rate_under_the_limit() -> None:
     _gate(raw=1000, dropped=5)  # 0.5 percent, under the 1.0 default
 
 
-def test_gate_rejects_a_cycle() -> None:
-    parents = {"A": {"B"}, "B": {"A"}}
+def test_gate_accepts_a_cycle_and_counts_it() -> None:
+    """This used to refuse, and refusing stopped being right.
+
+    Refusing was correct while every snapshot was acyclic, because a cycle
+    could then only mean a broken load. Release 221 has two real ones, so
+    refusing there withholds a number instead of protecting one. The cycle is
+    condensed and reported.
+    """
+    parents = {"A": {"B"}, "B": {"A", "X"}}
     ancestors = build_ancestors(parents)
-    with pytest.raises(InformationAccretionGateError, match="cycle"):
+    stats = _gate(
+        terms=["A", "B", "X"], parents=parents, ancestors=ancestors,
+        proteins_per_term={"A": {"p"}, "B": {"p"}, "X": {"p", "q"}},
+        ia={"A": 0.25, "B": 0.25, "X": 0.0},
+    )
+    assert stats["cycles"] == 1
+    assert stats["terms_in_cycles"] == 2
+
+
+def test_gate_rejects_a_cycle_whose_members_disagree() -> None:
+    """What IS still refused, because it means propagation did not close.
+
+    Members of a cycle are ancestors of one another, so reachability
+    propagation must give them the same protein set. If it did not, the
+    component's IA is measured through one member against the wrong
+    population, and nothing downstream would show it.
+    """
+    parents = {"A": {"B"}, "B": {"A", "X"}}
+    ancestors = build_ancestors(parents)
+    with pytest.raises(InformationAccretionGateError, match="do not share a protein set"):
         _gate(
-            terms=["A", "B"], parents=parents, ancestors=ancestors,
-            proteins_per_term={"A": {"p"}, "B": {"p"}},
-            ia={"A": 0.0, "B": 0.0},
+            terms=["A", "B", "X"], parents=parents, ancestors=ancestors,
+            proteins_per_term={"A": {"p", "q"}, "B": {"p"}, "X": {"p", "q"}},
+            ia={"A": 0.0, "B": 0.0, "X": 0.0},
         )
 
 
