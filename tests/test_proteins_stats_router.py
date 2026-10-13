@@ -510,20 +510,96 @@ class TestExperimentalIsOneDefinition:
 
 
 class TestCoverageDividesTwoCountsOfOneThing:
-    def test_the_numerator_carries_the_same_filters_as_the_total(self):
-        """A percentage over 100 was the symptom, not the defect.
+    """A percentage over 100 was the symptom; two populations was the defect.
 
-        Measured while an embedding pass was running: 700.475 proteins with a
-        vector over a denominator of 576.450 canonical reviewed ones, 121,5%.
-        The numerator counted isoforms, TrEMBL entries and merged accessions
-        that the denominator excludes.
+    Measured while an embedding pass was running: 700.475 proteins with a
+    vector over a denominator of 576.450 canonical reviewed ones, 121,5%. The
+    first fix aligned both sides on ``is_canonical AND reviewed``, which made
+    the arithmetic honest about the wrong thing: it then reported 576.450 at
+    100,0% while 746.014 canonical proteins exist and every one of them is
+    embedded. Aligning on ``is_canonical`` alone keeps the percentage sound
+    and stops the card hiding 169.564 proteins.
+    """
+
+    @staticmethod
+    def _filtros(fuente: str) -> set[str]:
+        """The ``Protein.<col>`` each ``.filter(...)`` names, as a set."""
+        import re
+
+        return set(re.findall(r"\.filter\((Protein\.\w+)\.", fuente))
+
+    def test_both_sides_count_the_same_population(self):
+        """The invariant, stated once instead of by counting a literal twice.
+
+        The previous version asserted that a particular filter appeared twice
+        in the source, so it had to be edited whenever the population changed
+        and said nothing about the two sides agreeing. What matters is that
+        they agree.
         """
         import inspect
 
         from protea.api.routers import proteins_stats as mod
 
         src = inspect.getsource(mod._compute_embeddings_by_plm)
-        # Two filter CALLS, not two mentions: the docstring names the population
-        # too, and counting words would pass on a comment alone.
-        assert src.count(".filter(Protein.is_canonical.is_(True))") == 2
-        assert src.count(".filter(Protein.reviewed.is_(True))") == 2
+        total, numerador = src.split("rows = (", 1)
+        assert self._filtros(total) == self._filtros(numerador), (
+            "numerator and denominator filter on different populations"
+        )
+
+    def test_the_population_is_the_canonical_corpus(self):
+        """Canonical, and NOT narrowed to the Swiss-Prot spine.
+
+        ``is_canonical`` because an isoform shares its parent's sequence and
+        would count as separate coverage of the same thing.
+        """
+        import inspect
+
+        from protea.api.routers import proteins_stats as mod
+
+        src = inspect.getsource(mod._compute_embeddings_by_plm)
+        total, numerador = src.split("rows = (", 1)
+        assert self._filtros(total) == {"Protein.is_canonical"}
+        assert "Protein.reviewed" not in self._filtros(numerador)
+
+
+class TestOneOrganismIsOneBar:
+    """The ranking grouped by NAME, and the two load paths disagree on names.
+
+    The Swiss-Prot path writes ``Homo sapiens`` and the TSV path
+    ``Homo sapiens (Human)``, so taxon 9606 appeared as two bars and the
+    ranking compared halves against wholes. Measured on the live corpus: 726
+    taxa carry more than one name, and every one of the top six did, so the
+    order was wrong from the top down -- 41.823 canonical proteins showed as
+    21.387 and 20.436.
+    """
+
+    @staticmethod
+    def _sql() -> str:
+        import inspect
+
+        from protea.api.routers import proteins_stats as mod
+
+        return inspect.getsource(mod._compute_taxonomy_top)
+
+    def test_it_groups_by_taxon_and_not_by_name(self):
+        src = self._sql()
+        assert ".group_by(Protein.taxonomy_id)" in src
+        assert "Protein.organism, Protein.taxonomy_id" not in src
+
+    def test_the_name_is_aggregated_so_two_spellings_cannot_split_a_taxon(self):
+        """Selecting the bare column would make the group key include it again."""
+        src = self._sql()
+        assert "func.min(Protein.organism)" in src
+
+    def test_rows_with_no_taxon_are_excluded(self):
+        """Otherwise the 28.868 deleted entries collapse into one unnamed bar.
+
+        They carry neither organism nor taxonomy_id, so the organism filter
+        already removed them; this states it of the new group key too.
+        """
+        src = self._sql()
+        assert ".filter(Protein.taxonomy_id.is_not(None))" in src
+
+    def test_isoforms_still_do_not_double_weight(self):
+        src = self._sql()
+        assert ".filter(Protein.is_canonical.is_(True))" in src
