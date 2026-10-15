@@ -26,6 +26,40 @@ def _default_ttl() -> float:
 _lock = threading.Lock()
 _store: dict[str, tuple[float, Any]] = {}
 
+#: One lock per key, so only ONE producer runs per key at a time.
+#:
+#: Without this, ``cached`` released ``_lock`` before calling the producer, so
+#: every concurrent caller on a cold or expired key ran its own copy. MEASURED
+#: on the live API over 30 minutes of passive sampling of ``pg_stat_activity``:
+#: the GO annotation matrix ran 8 times, median 137 s, max 171 s, for 1.167 s
+#: of 1.800 -- the machine spent 65 per cent of wall time recomputing one
+#: aggregate, with two parallel workers each time. The refresh loop alone would
+#: have run it about 2,6 times; the rest were public page views arriving while
+#: it was already in flight, each starting another copy of the same query.
+#:
+#: Never cleared. The key set is the fixed list of cached aggregates, so the
+#: dict is bounded by it, and dropping a lock that a producer still holds would
+#: reintroduce exactly the race this closes.
+_key_locks: dict[str, threading.Lock] = {}
+
+
+def _lock_for(key: str) -> threading.Lock:
+    """The producer lock for ``key``, created once."""
+    with _lock:
+        existing = _key_locks.get(key)
+        if existing is None:
+            existing = _key_locks[key] = threading.Lock()
+        return existing
+
+
+def _fresh(key: str, now: float) -> tuple[bool, Any]:
+    """``(hit, value)`` for a live entry, plus the stale one for the caller."""
+    with _lock:
+        entry = _store.get(key)
+    if entry is None:
+        return False, None
+    return entry[0] > now, entry[1]
+
 
 def cached(
     key: str,
@@ -40,21 +74,51 @@ def cached(
     prior value is still in the store (even if expired), return the stale
     value instead of propagating; lets cold-cache hangs degrade to a slightly
     out-of-date payload rather than a 500.
+
+    ONE PRODUCER PER KEY. A second caller arriving while a producer is in
+    flight does not start its own: it takes the stale value if there is one,
+    and otherwise waits for the one that is running. Serving stale rather than
+    blocking is the right trade here and not a shortcut -- the producers this
+    cache exists for take tens of seconds, and ``app._refresh_interval``'s own
+    comment names the 30 s ngrok upstream deadline, so a caller made to wait
+    for a 137 s aggregate gets a timeout, not a fresher answer.
+
+    The expiry is dated from BEFORE the producer ran, deliberately. The value
+    describes the database as of the query's start, so a slow producer should
+    not buy itself extra lifetime; a 137 s producer under a 600 s ttl yields an
+    entry good for the remaining 463 s.
     """
     now = time.monotonic()
-    with _lock:
-        hit = _store.get(key)
-        if hit is not None and hit[0] > now:
-            return hit[1]
+    live, value = _fresh(key, now)
+    if live:
+        return value
+
+    mine = _lock_for(key)
+    if not mine.acquire(blocking=False):
+        # Someone is already producing this key.
+        if value is not None:
+            return value
+        # Nothing to serve: wait for them rather than start a second copy.
+        with mine:
+            _, value = _fresh(key, time.monotonic())
+            return value
     try:
-        value = producer()
-    except Exception:
-        if serve_stale_on_error and hit is not None:
-            return hit[1]
-        raise
-    with _lock:
-        _store[key] = (now + ttl, value)
-    return value
+        # Re-check under the producer lock: the holder we may have queued
+        # behind could have just stored a fresh value.
+        live, fresh_value = _fresh(key, time.monotonic())
+        if live:
+            return fresh_value
+        try:
+            produced = producer()
+        except Exception:
+            if serve_stale_on_error and value is not None:
+                return value
+            raise
+        with _lock:
+            _store[key] = (now + ttl, produced)
+        return produced
+    finally:
+        mine.release()
 
 
 def get_last_known(key: str) -> Any | None:
