@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import Date, Integer, case, cast, distinct, func, literal, or_
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached, invalidate
+from protea.api.cache import cached, refresh
 from protea.api.deps import get_session_factory
 from protea.core.evaluation import _EXP_CODES
 from protea.core.split_registry import BOARD_MARK, release
@@ -569,11 +569,18 @@ def prewarm_all(factory: sessionmaker[Session]) -> None:
 
     Per-section failures are swallowed so a single slow query does not
     starve the rest of the dashboard.
+
+    Through :func:`refresh`, so the previous value stays servable for the
+    whole recompute instead of the key being empty while it runs.
+
+    That mattered most here, because this loop walks SEVEN sections and the
+    slowest of them was measured at a median of 137 s. Dropping each key
+    before producing its replacement left the dashboard without a value to
+    serve for most of every cycle, on keys that were never missing.
     """
     for key, ttl, fn in _sections():
-        invalidate(key)
         try:
-            cached(key, ttl, _make_compute(fn, factory))
+            refresh(key, ttl, _make_compute(fn, factory))
         except Exception:  # pragma: no cover - logged by caller
             pass
 

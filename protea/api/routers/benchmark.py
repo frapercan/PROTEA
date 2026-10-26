@@ -46,7 +46,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
-from protea.api.cache import cached, invalidate
+from protea.api.cache import cached, refresh
 from protea.api.deps import get_benchmark_config, get_session_factory
 from protea.api.metrics import PRIMARY_METRIC, per_task_aggregate, primary_cell_score
 from protea.api.stages import RERANKER_STAGE as _RERANKER_STAGE
@@ -317,8 +317,7 @@ def prewarm_benchmark_embeddings(
 
     project_root = Path(__file__).resolve().parents[3]
     cfg = load_benchmark_config(project_root)
-    invalidate(BENCHMARK_EMBEDDINGS_CACHE_KEY)
-    return cached(
+    return refresh(
         BENCHMARK_EMBEDDINGS_CACHE_KEY,
         BENCHMARK_EMBEDDINGS_TTL_SECONDS,
         lambda: _compute_benchmark_embeddings(factory, cfg.hidden_embeddings),

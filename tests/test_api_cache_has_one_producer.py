@@ -17,7 +17,7 @@ from __future__ import annotations
 import threading
 import time
 
-from protea.api.cache import cached, get_last_known, invalidate
+from protea.api.cache import cached, get_last_known, invalidate, refresh
 
 
 def _concurrent(n: int, key: str, ttl: float, producer, delay: float = 0.0):
@@ -207,3 +207,158 @@ class TestTheRecheckUnderTheProducerLock:
 
         assert got == "mio"
         assert veces == [1]
+
+
+class TestRefreshDoesNotEmptyTheStore:
+    """A prewarm must not drop a good value before it has a better one.
+
+    Every ``prewarm_*`` used to be ``invalidate(key)`` then ``cached(...)``.
+    The drop happens FIRST, so for however long the producer runs the key is
+    absent. Measured on the live API: the annotation-set listing takes a median
+    of 145 s and the loop fires every 385 s, so the public endpoint had nothing
+    to serve for ~38 per cent of wall time on a key that was never missing.
+    """
+
+    def setup_method(self) -> None:
+        invalidate()
+
+    def test_the_previous_value_is_servable_for_the_whole_recompute(self) -> None:
+        """The regression. With invalidate-then-cached this read None."""
+        cached("k", 60, lambda: "viejo")
+        visto: list = []
+        arrancado = threading.Event()
+
+        def lento():
+            arrancado.set()
+            time.sleep(0.4)
+            return "nuevo"
+
+        t = threading.Thread(target=lambda: refresh("k", 60, lento))
+        t.start()
+        arrancado.wait(2)
+        time.sleep(0.05)
+        visto.append(get_last_known("k"))
+        t.join()
+
+        assert visto == ["viejo"], "the key was empty while the producer ran"
+        assert get_last_known("k") == "nuevo"
+
+    def test_a_reader_gets_the_stale_value_rather_than_blocking(self) -> None:
+        """Together with one-producer-per-key: the reader is served, not queued."""
+        cached("k", 0.001, lambda: "viejo")
+        time.sleep(0.01)
+        arrancado = threading.Event()
+
+        def lento():
+            arrancado.set()
+            time.sleep(0.4)
+            return "nuevo"
+
+        t = threading.Thread(target=lambda: refresh("k", 60, lento))
+        t.start()
+        arrancado.wait(2)
+        time.sleep(0.05)
+        inicio = time.perf_counter()
+        got = cached("k", 60, lambda: "del lector")
+        espera = time.perf_counter() - inicio
+        t.join()
+
+        assert got == "viejo"
+        assert espera < 0.2, "the reader blocked on the refresh"
+
+    def test_it_always_produces_even_when_the_entry_is_live(self) -> None:
+        """Skipping on a live entry would let it expire before the next tick."""
+        cached("k", 60, lambda: "viejo")
+        assert refresh("k", 60, lambda: "nuevo") == "nuevo"
+        assert get_last_known("k") == "nuevo"
+
+    def test_only_one_producer_runs_per_key(self) -> None:
+        veces: list[int] = []
+
+        def lento():
+            veces.append(1)
+            time.sleep(0.3)
+            return "v"
+
+        hilos = [threading.Thread(target=lambda: refresh("k", 60, lento)) for _ in range(3)]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
+        assert len(veces) == 3, "refresh always produces; the lock serialises them"
+        assert get_last_known("k") == "v"
+
+    def test_a_failing_producer_leaves_the_previous_value(self) -> None:
+        """And releases the lock, or the key deadlocks forever."""
+        import pytest
+
+        cached("k", 60, lambda: "viejo")
+        with pytest.raises(RuntimeError):
+            refresh("k", 60, lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        assert get_last_known("k") == "viejo"
+        assert refresh("k", 60, lambda: "nuevo") == "nuevo"
+
+
+class TestNoPrewarmDropsItsKeyFirst:
+    """The wiring across the seven prewarms, not just the primitive."""
+
+    FICHEROS = (
+        "protea/api/routers/proteins_stats.py",
+        "protea/api/routers/proteins.py",
+        "protea/api/routers/annotations/sets.py",
+        "protea/api/routers/annotations/snapshots.py",
+        "protea/api/routers/embeddings.py",
+        "protea/api/routers/benchmark.py",
+    )
+
+    def test_no_prewarm_calls_invalidate_before_producing(self) -> None:
+        import pathlib
+        import re
+
+        raiz = pathlib.Path(__file__).resolve().parents[1]
+        culpables = []
+        for f in self.FICHEROS:
+            src = (raiz / f).read_text()
+            for m in re.finditer(r"def (prewarm_\w+)\(", src):
+                cuerpo = src[m.start() : src.find("\ndef ", m.end())]
+                if "invalidate(" in cuerpo:
+                    culpables.append(f"{f}::{m.group(1)}")
+        assert culpables == [], f"these drop the key before producing: {culpables}"
+
+    def test_every_prewarm_that_caches_goes_through_refresh(self) -> None:
+        """Only the ones that write the in-process cache are in scope.
+
+        ``prewarm_benchmark_matrix`` is deliberately not: it holds no key and
+        warms Postgres's buffer cache by running the query, so there is nothing
+        to drop and nothing to swap. An earlier version of this test required
+        ``refresh`` of every ``prewarm_*`` and flagged it, which is the test
+        being wrong rather than the code.
+        """
+        import pathlib
+        import re
+
+        raiz = pathlib.Path(__file__).resolve().parents[1]
+        sin_refresh = []
+        for f in self.FICHEROS:
+            src = (raiz / f).read_text()
+            for m in re.finditer(r"def (prewarm_\w+)\(", src):
+                cuerpo = src[m.start() : src.find("\ndef ", m.end())]
+                toca_la_cache = "cached(" in cuerpo or "refresh(" in cuerpo or "invalidate(" in cuerpo
+                if toca_la_cache and "refresh(" not in cuerpo:
+                    sin_refresh.append(f"{f}::{m.group(1)}")
+        assert sin_refresh == [], f"these cache without refresh(): {sin_refresh}"
+
+    def test_the_scope_is_not_empty(self) -> None:
+        """Guards the test above: a filter that matched nothing would pass."""
+        import pathlib
+        import re
+
+        raiz = pathlib.Path(__file__).resolve().parents[1]
+        con_refresh = 0
+        for f in self.FICHEROS:
+            src = (raiz / f).read_text()
+            for m in re.finditer(r"def prewarm_\w+\(", src):
+                cuerpo = src[m.start() : src.find("\ndef ", m.end())]
+                if "refresh(" in cuerpo:
+                    con_refresh += 1
+        assert con_refresh == 7, f"expected the seven caching prewarms, found {con_refresh}"
