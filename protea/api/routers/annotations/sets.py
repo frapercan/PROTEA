@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached, invalidate
+from protea.api.cache import cached, invalidate, refresh
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsPayload
@@ -71,10 +71,12 @@ def prewarm_annotation_sets(
     """Recompute and store the unfiltered ``annotations:sets:*`` view; used by
     the app startup hook and the background refresh loop. Only the unfiltered
     variant is prewarmed because the per-source views are computed on demand
-    and rarely hit cold."""
+    and rarely hit cold.
+
+    Through :func:`refresh`, so the previous value stays servable for the
+    whole recompute instead of the key being empty while it runs."""
     key = _annotation_sets_cache_key(None)
-    invalidate(key)
-    return cached(
+    return refresh(
         key,
         ANNOTATION_SETS_TTL_SECONDS,
         lambda: _compute_annotation_sets(factory, None),

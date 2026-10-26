@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached, invalidate
+from protea.api.cache import cached, refresh
 from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -139,10 +139,12 @@ def get_protein_stats(
 
 def prewarm_protein_stats(factory: sessionmaker[Session]) -> dict[str, Any]:
     """Recompute and store ``proteins:stats``; used by the app startup hook
-    and the background refresh loop. Always bypasses the existing entry so
-    the cache is refilled with fresh counts before the old TTL expires."""
-    invalidate(PROTEIN_STATS_CACHE_KEY)
-    return cached(
+    and the background refresh loop. Always recomputes, so the cache is
+    refilled with fresh counts before the old TTL expires.
+
+    Through :func:`refresh`, so the previous value stays servable for the
+    whole recompute instead of the key being empty while it runs."""
+    return refresh(
         PROTEIN_STATS_CACHE_KEY,
         PROTEIN_STATS_TTL_SECONDS,
         lambda: _compute_protein_stats(factory),

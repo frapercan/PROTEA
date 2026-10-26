@@ -121,6 +121,46 @@ def cached(
         mine.release()
 
 
+def refresh(key: str, ttl: float, producer: Callable[[], Any]) -> Any:
+    """Recompute ``key`` on schedule WITHOUT emptying the store meanwhile.
+
+    This is what a prewarm loop wants, and it is not ``invalidate`` followed by
+    ``cached``. That pair was the shape every ``prewarm_*`` used, and it has a
+    window: the drop happens FIRST, so for however long the producer runs there
+    is nothing in the store at all. The producers this cache exists for take
+    tens of seconds -- the annotation-set listing was measured at a median of
+    145 s, once every 385 s -- so the public endpoint had no value to serve for
+    roughly 38 per cent of wall time, on a key that was never actually missing.
+
+    Before one producer per key existed that window was a stampede. Since
+    :func:`cached` serves the stale value to a caller that arrives while a
+    producer runs, the window became a wait instead -- and a wait of 145 s is a
+    timeout, because ``app._refresh_interval``'s own comment names the 30 s
+    ngrok upstream deadline. Either way the cause is the same: dropping a good
+    value before having a better one.
+
+    So: produce first, swap after. The previous value stays live and servable
+    for the whole recompute, and callers never see the key absent.
+
+    The producer lock is held for the duration, so a caller whose entry expires
+    mid-refresh takes the stale value from :func:`cached` rather than starting a
+    second copy of the same query. The expiry is dated from before the producer
+    ran, like ``cached``, for the same reason: the value describes the database
+    as of the query's start.
+
+    Unlike ``cached`` this ALWAYS produces. A refresh loop that skipped because
+    the entry was still live would let it expire before the next tick and hand
+    the cold path to whoever arrived next, which is the thing prewarming exists
+    to prevent.
+    """
+    now = time.monotonic()
+    with _lock_for(key):
+        value = producer()
+        with _lock:
+            _store[key] = (now + ttl, value)
+    return value
+
+
 def get_last_known(key: str) -> Any | None:
     """Return the last cached value for ``key``, ignoring TTL; ``None`` if absent."""
     with _lock:
@@ -137,4 +177,4 @@ def invalidate(key: str | None = None) -> None:
             _store.pop(key, None)
 
 
-__all__ = ["cached", "get_last_known", "invalidate", "_default_ttl"]
+__all__ = ["cached", "get_last_known", "invalidate", "refresh", "_default_ttl"]
