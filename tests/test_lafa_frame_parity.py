@@ -275,7 +275,10 @@ class TestSyntheticFrameParity:
 # Opt-in: real LAFA leaderboard parity (skipped in CI; the proof on record)
 # ---------------------------------------------------------------------------
 
-_THESIS_ROOT = Path("/home/frapercan/Thesis2")
+# The thesis checkout differs per machine, so the root is configurable and
+# the end-to-end layer is not silently unreachable: hardcoded, this test
+# skipped unconditionally on any host that is not the original laptop.
+_THESIS_ROOT = Path(os.environ.get("PROTEA_THESIS_ROOT", "/home/frapercan/Thesis2"))
 _LAFA_RELEASE = _THESIS_ROOT / "CAFA_forever/data/releases/Sep_2025_Mar_2026"
 _LAFA_T0 = _THESIS_ROOT / "protea-lafa-knn/lafa_t0_Sep_2025"
 _LAFA_PRED = _THESIS_ROOT / "protea-lafa-knn/predictions_7401.tsv"
@@ -297,7 +300,8 @@ _LAFA_FILES_PRESENT = _LAFA_RELEASE.is_dir() and _LAFA_T0.is_dir() and _LAFA_PRE
     reason=(
         "real LAFA leaderboard files not present; this is the opt-in "
         "end-to-end proof, run locally with the Sep_2025_Mar_2026 release "
-        "and protea-lafa-knn checkout on disk"
+        "and protea-lafa-knn checkout on disk, pointing PROTEA_THESIS_ROOT "
+        f"at the checkout (currently {_THESIS_ROOT})"
     ),
 )
 def test_real_lafa_leaderboard_parity(tmp_path: Path):
