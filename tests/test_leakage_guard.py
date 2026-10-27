@@ -11,7 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from protea.core.leakage_guard import Frame, LeakageRefusal, check_training_cut
+from protea.core.leakage_guard import (
+    VERDICTS,
+    Frame,
+    LeakageRefusal,
+    check_training_cut,
+    training_cut_verdict,
+)
 
 WINDOW = Frame(start=220, end=230)
 
@@ -79,3 +85,58 @@ def test_the_name_travels_into_the_message():
         check_training_cut(
             fitted=True, training_release=227, frame=WINDOW, name="sparse pooled"
         )
+
+
+# ---------------------------------------------------------------------------
+# The verdict a read surface shows, and the refusal, are one rule
+# ---------------------------------------------------------------------------
+
+
+class TestTheVerdictAndTheRefusalCannotDisagree:
+    """The matrix has to SHOW this answer for every arm of every window.
+
+    Raising is not an option there: a grid of cells cannot stop at the first
+    contaminated one. So the four states got a name and the guard refuses ON
+    THE VERDICT instead of repeating the comparison. A screen that computed
+    the same rule a second time would be a second rule, and the two would
+    drift the first time the boundary was argued about again.
+    """
+
+    @pytest.mark.parametrize(
+        ("fitted", "cut", "expected"),
+        [
+            (False, None, "not_fitted"),
+            (False, 211, "not_fitted"),
+            (True, None, "undeclared"),
+            (True, 220, "clean"),
+            (True, 221, "contaminated"),
+            (True, 230, "contaminated"),
+            (True, 231, "clean"),
+            (True, 205, "clean"),
+        ],
+    )
+    def test_the_four_states_on_a_220_to_230_frame(
+        self, fitted: bool, cut: int | None, expected: str
+    ) -> None:
+        got = training_cut_verdict(fitted=fitted, training_release=cut, frame=Frame(220, 230))
+        assert got == expected
+        assert got in VERDICTS
+
+    @pytest.mark.parametrize("cut", [None, 221, 225, 230])
+    def test_every_verdict_the_guard_refuses(self, cut: int | None) -> None:
+        with pytest.raises(LeakageRefusal):
+            check_training_cut(fitted=True, training_release=cut, frame=Frame(220, 230))
+
+    @pytest.mark.parametrize(("fitted", "cut"), [(False, None), (True, 220), (True, 231)])
+    def test_every_verdict_the_guard_allows(self, fitted: bool, cut: int | None) -> None:
+        check_training_cut(fitted=fitted, training_release=cut, frame=Frame(220, 230))
+
+    def test_the_boundary_is_the_frame_start_and_it_is_inclusive(self) -> None:
+        # The encoder is entitled to the state of the world at t0; the terms
+        # gained after it are what the frame scores.
+        assert training_cut_verdict(
+            fitted=True, training_release=220, frame=Frame(220, 230)
+        ) == "clean"
+        assert training_cut_verdict(
+            fitted=True, training_release=221, frame=Frame(220, 230)
+        ) == "contaminated"

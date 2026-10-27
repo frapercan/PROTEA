@@ -43,6 +43,38 @@ class Frame:
     end: int
 
 
+#: The four states, as a read surface names them. ``check_training_cut``
+#: refuses the middle two and allows the outer two, and it decides which by
+#: calling :func:`training_cut_verdict`, so the refusal and the badge cannot
+#: disagree. That was the point of writing this: a screen that computed the
+#: same rule a second time would be a second rule.
+VERDICTS: tuple[str, ...] = ("not_fitted", "undeclared", "contaminated", "clean")
+
+
+def training_cut_verdict(
+    *, fitted: bool, training_release: int | None, frame: Frame
+) -> str:
+    """Which of the four states this arm is in on this frame.
+
+    Written for a surface that has to SHOW the answer for every arm of every
+    window at once, where raising is not an option: a matrix of cells cannot
+    stop at the first contaminated one. The guard below then refuses on this
+    verdict instead of repeating the comparison.
+
+    The boundary is deliberate and lives here, once. A cut AT the frame start
+    is clean: the encoder saw the state of the world at t0, which is what
+    every arm is entitled to. A cut one release later is not, because the
+    terms gained in between are part of what the frame scores.
+    """
+    if not fitted:
+        return "not_fitted"
+    if training_release is None:
+        return "undeclared"
+    if frame.start < training_release <= frame.end:
+        return "contaminated"
+    return "clean"
+
+
 def check_training_cut(
     *,
     fitted: bool,
@@ -55,23 +87,20 @@ def check_training_cut(
     ``training_release`` is the release ordinal the encoding was fitted
     against, or None if it declares none.
     """
-    if not fitted:
+    verdict = training_cut_verdict(
+        fitted=fitted, training_release=training_release, frame=frame
+    )
+    if verdict == "not_fitted":
         # A pretrained backbone saw none of our annotations. It has no cut
         # to declare and declaring one would be false.
         return
-
-    if training_release is None:
+    if verdict == "undeclared":
         raise LeakageRefusal(
             f"{name} is fitted but declares no training release, so it cannot be "
             f"certified clean or contaminated for the {frame.start} to {frame.end} "
             "frame. Record the annotation set it was fitted against, or refit it."
         )
-
-    # The boundary is deliberate. A cut AT the frame start is allowed: the
-    # encoder saw the state of the world at t0, which is what every arm
-    # is entitled to. A cut one release later is not, because the terms
-    # gained in between are part of what the frame scores.
-    if frame.start < training_release <= frame.end:
+    if verdict == "contaminated":
         raise LeakageRefusal(
             f"{name} was fitted on release {training_release}, which lies inside the "
             f"{frame.start} to {frame.end} frame. The terms gained between "
@@ -80,4 +109,10 @@ def check_training_cut(
         )
 
 
-__all__ = ["Frame", "LeakageRefusal", "check_training_cut"]
+__all__ = [
+    "VERDICTS",
+    "Frame",
+    "LeakageRefusal",
+    "check_training_cut",
+    "training_cut_verdict",
+]

@@ -49,6 +49,7 @@ from sqlalchemy.orm import Session, aliased, sessionmaker
 from protea.api.cache import cached, refresh
 from protea.api.deps import get_benchmark_config, get_session_factory
 from protea.api.metrics import PRIMARY_METRIC, per_task_aggregate, primary_cell_score
+from protea.api.routers._leak_badge import stamp_leak_verdicts
 from protea.api.stages import RERANKER_STAGE as _RERANKER_STAGE
 from protea.api.stages import StageKind  # noqa: F401  (re-exported for type hints)
 from protea.api.stages import stage_kind as _stage_kind
@@ -184,6 +185,11 @@ def _make_leaderboard(
             "temporal_window": entry.get("temporal_window"),
             "arms_enabled": entry.get("arms_enabled"),
             "leakage_role": entry.get("leakage_role"),
+            # The winner carries its verdict. A leaderboard that showed a
+            # contaminated cell on top without saying so is the worst case
+            # this badge exists for.
+            "leak": entry.get("leak"),
+            "training_release": entry.get("training_release"),
             "prediction_set_status": entry.get("prediction_set_status"),
             "self_hit_rate": entry.get("self_hit_rate"),
         }
@@ -388,6 +394,10 @@ def get_benchmark_matrix(
             if stage is not None:
                 agg = _aggregate_benchmark_matrix(session, evaluation_set_id, cfg, stage, k)
         eval_sets_payload = _load_eval_set_metadata(session, agg.eval_set_ids, cfg)
+        # Computed, not read off the row: ``leakage_role`` is a label the
+        # caller stamped, and whether THIS arm may be read on THIS window is
+        # a comparison between its training cut and the window's two ends.
+        stamp_leak_verdicts(session, agg.best.values(), eval_sets_payload)
     return _build_matrix_response(agg, eval_sets_payload, cfg, evaluation_set_id, stage, k)
 
 
