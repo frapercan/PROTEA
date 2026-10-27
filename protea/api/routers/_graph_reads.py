@@ -312,9 +312,24 @@ _Q_RESULTS = text(
            -- attributable when it carries a digest of those parameters.
            er.frame_digest              AS frame,
            ps.embedding_config_id::text AS embedding_config_id,
-           ps.annotation_set_id::text   AS annotation_set_id
+           ps.annotation_set_id::text   AS annotation_set_id,
+           -- WHICH query set and WHICH accretion table THIS result was read
+           -- over. Both used to be answered globally, by the first row in the
+           -- record that anything had ever used, so a window whose own results
+           -- resolved neither got described by another window's.
+           --
+           -- Null in either is a FACT and is published as one. An ingested
+           -- method carries no query set, and the weighting of any arm lives
+           -- only in the producing job's payload, because no column on
+           -- ``evaluation_result`` records it.
+           ps.query_set_id::text        AS query_set_id,
+           j.payload ->> 'information_accretion_set_id' AS accretion_id
     FROM evaluation_result er
     LEFT JOIN prediction_set ps ON ps.id = er.prediction_set_id
+    -- LEFT, like the join above it: a result whose producing job is gone still
+    -- happened, and an inner join here would lose it from every count on this
+    -- page while the row sat in the table.
+    LEFT JOIN job j ON j.id = er.job_id
     ORDER BY er.created_at
     """
 )

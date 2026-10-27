@@ -329,6 +329,12 @@ def populated_record(levels: dict[str, float]) -> dict[str, list[dict[str, Any]]
             "embedding_config_id": "ec-1",
             "annotation_set_id": "bank-1",
             "created_on": f"2026-10-{21 + index:02d}",
+            # Which query set and which accretion table THIS result was read
+            # over. The frame block used to answer both from the oldest in-use
+            # row in the whole record, so a window whose own results resolved
+            # neither was described by another window's.
+            "query_set_id": "qs-1",
+            "accretion_id": "ia-1",
         }
         for index, name in enumerate(levels)
     ]
@@ -2085,3 +2091,148 @@ class TestTheAxisReadsTheRowsTheCountReads:
             for crossing in node["crossings"]:
                 assert crossing["threshold"] in THRESHOLDS
                 assert crossing["on"] is None or re.fullmatch(r"\d{4}-\d{2}-\d{2}", crossing["on"])
+
+
+class TestTheFrameDescribesItsOwnWindow:
+    """What the panels were drawn from is a fact about THIS window.
+
+    Both of these were read as the first catalogue row carrying ``in_use``: the
+    oldest thing in the whole record that anything had ever used, with nothing
+    in the expression mentioning the window. On the live record that made the
+    frame for the titular 211->227 window publish ``delta-219-220-t0-c787b26a94ac``,
+    a query set of 5.810 entries belonging to the 219->220 window. A reader
+    concluded the headline number had been measured over 5.810 targets named
+    for a different pair of releases.
+    """
+
+    def _two_windows(self) -> dict[str, list[dict[str, Any]]]:
+        """Two windows, each with its own query set, the other's set older.
+
+        The shape that exposes it, and it has to be this shape: with one query
+        set in the record the wrong expression and the right one agree, so a
+        single-window fixture proves nothing about either.
+        """
+        record = populated_record({"a": 0.1, "b": 0.2})
+        # ``eval-1`` FIRST, because the graph reads its window from the head of
+        # this list and the head is what the frame block describes. Putting the
+        # other window first tests the other window.
+        record["evaluation_sets"] = [
+            record["evaluation_sets"][0],
+            {**record["evaluation_sets"][0], "id": "eval-2", "window_from": "219"},
+        ]
+        record["query_sets"] = [
+            # First in the list, as the query's ``ORDER BY created_at`` puts the
+            # oldest, and in use by the OTHER window.
+            {
+                "id": "qs-old",
+                "name": "delta-219-220",
+                "entries": 5810,
+                "in_use": True,
+                "first_used_on": "2026-10-11",
+            },
+            {
+                "id": "qs-1",
+                "name": "dianas-valid",
+                "entries": 63734,
+                "in_use": True,
+                "first_used_on": "2026-10-27",
+            },
+        ]
+        record["results"] = [
+            {
+                **record["results"][0],
+                "id": "r-old",
+                "evaluation_set_id": "eval-2",
+                "query_set_id": "qs-old",
+                "accretion_id": "ia-1",
+            },
+            {
+                **record["results"][0],
+                "id": "r-mine",
+                "query_set_id": "qs-1",
+                "accretion_id": "ia-1",
+            },
+        ]
+        return record
+
+    def test_the_frame_names_the_query_set_its_own_results_used(self) -> None:
+        """Not the oldest in the record, and not the other window's."""
+        frame = build_graph(self._two_windows())["frame"]
+        assert frame["query_set"]["name"] == "dianas-valid"
+        assert frame["query_set"]["entries"] == 63734
+        assert frame["query_set_absent"] is None
+
+    def test_a_window_whose_results_name_none_says_so_and_does_not_borrow(self) -> None:
+        """The titular window's state, and the whole reason null needs a reason.
+
+        Its results come from an ingested method, which carries no query set at
+        all. Null alone cannot be told from nobody having looked, so the block
+        carries the account beside it, as a blocked node carries its reason.
+        """
+        record = self._two_windows()
+        for row in record["results"]:
+            if row["evaluation_set_id"] != "eval-2":
+                row["query_set_id"] = None
+        frame = build_graph(record)["frame"]
+        assert frame["query_set"] is None
+        assert "ingested method" in frame["query_set_absent"]
+        assert "no query set" in frame["query_set_absent"]
+
+    def test_two_query_sets_under_one_window_is_refused_not_resolved(self) -> None:
+        """Two populations under one block, and printing one describes half of it."""
+        record = self._two_windows()
+        record["results"] = [
+            {**record["results"][1], "id": "r-a", "query_set_id": "qs-1"},
+            {**record["results"][1], "id": "r-b", "query_set_id": "qs-old"},
+        ]
+        frame = build_graph(record)["frame"]
+        assert frame["query_set"] is None
+        assert "2 different query sets" in frame["query_set_absent"]
+
+    def test_some_naming_one_and_some_naming_none_is_not_a_window_with_one(self) -> None:
+        """The live record's accretion state on the titular window, exactly.
+
+        One of its two results names an accretion table and the other does not,
+        so no single row describes them together. Printing the one that is there
+        would attribute both numbers to a weighting only one of them had.
+        """
+        record = self._two_windows()
+        record["results"] = [
+            {**record["results"][1], "id": "r-a", "accretion_id": "ia-1"},
+            {**record["results"][1], "id": "r-b", "accretion_id": None},
+        ]
+        frame = build_graph(record)["frame"]
+        assert frame["information_accretion_set"] is None
+        assert (
+            "1 of this window's 2 results name no accretion table"
+            in (frame["information_accretion_absent"])
+        )
+
+    def test_a_named_row_absent_from_the_record_is_named_as_missing(self) -> None:
+        """A result pointing at a query set this page did not read.
+
+        Falling back to any row in the catalogue would describe the panels with
+        a population that was never theirs, which is the whole defect.
+        """
+        record = self._two_windows()
+        for row in record["results"]:
+            row["query_set_id"] = "qs-gone"
+        frame = build_graph(record)["frame"]
+        assert frame["query_set"] is None
+        assert "not in the record" in frame["query_set_absent"]
+
+    def test_declared_cannot_be_true_while_this_window_resolves_neither(self) -> None:
+        """``declared`` says a reader has nothing to guess, so it has to get stricter.
+
+        With the old expression almost any populated record resolved both, so
+        the flag could report a frame fully recoverable while the window's own
+        query set was unrecoverable, which is the exact state it exists to
+        report.
+        """
+        record = self._two_windows()
+        for row in record["results"]:
+            row["frame"], row["query_set_id"] = "lafa", None
+        frame = build_graph(record)["frame"]
+        assert frame["sealed_rows"] == 2
+        assert frame["declared"] is False
+        assert frame["query_set_absent"] is not None
