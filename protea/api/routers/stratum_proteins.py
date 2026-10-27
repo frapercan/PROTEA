@@ -123,7 +123,7 @@ _LENGTHS = text(
 #: them would be choosing blind.
 _ARM = text(
     with_arm_identity(
-    """
+        """
     SELECT er.prediction_set_id::text          AS prediction_set_id,
            sc.name                             AS scoring_name,
            COALESCE(ec.display_name, ec.model_name) AS embedding_name,

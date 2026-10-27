@@ -483,6 +483,11 @@ def climbed(edge: Edge) -> tuple[str, ...]:
 def crossings_of(edge: Edge) -> tuple[Crossing, ...]:
     """The temporal axis of one node: every rung it climbed, in order, dated.
 
+    This is what reaches the response as the node's ``crossings``: the one key of
+    a node that reports anything but the present tense. A reader with the word
+    alone cannot tell a node that was blocked last month from one that has always
+    stood where it stands.
+
     Truncates at the last rung climbed, so a date handed to every node for a
     comparison declared once reaches only the nodes whose word read it.
 
@@ -560,13 +565,6 @@ def _node(
     was decided, and a reader who cannot see the value cannot tell an inherited
     default from a deliberate choice that happens to be unmeasured. Both read
     ``inherited`` and only one of them is a surprise.
-
-    ``crossings`` is the node's own temporal axis: the rungs of the ladder it has
-    climbed, in order, each with the date the record puts on it. It is the one key
-    here that reports anything but the present tense, and it is derived from the
-    same fields as ``strength`` rather than carried beside them, so the two cannot
-    come apart. A reader with the word alone cannot tell a node that was blocked
-    last month from one that has always stood where it stands.
 
     ``floor``, ``separated`` and ``floor_refusal`` are the comparison the
     strength was decided on, which the strength itself cannot report. ``chosen``

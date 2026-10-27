@@ -115,9 +115,7 @@ def newest_window(
     incomplete payload returns nothing and the empty grid makes it visible.
     """
     with_rows = {str(r["evaluation_set_id"]) for r in rows}
-    dated = [
-        e for e in eval_sets_payload if str(e.get("id")) in with_rows and e.get("created_at")
-    ]
+    dated = [e for e in eval_sets_payload if str(e.get("id")) in with_rows and e.get("created_at")]
     if not dated:
         return None
     return str(max(dated, key=lambda e: str(e["created_at"]))["id"])
