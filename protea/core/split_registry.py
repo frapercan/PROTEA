@@ -49,7 +49,10 @@ __all__ = [
     "ReleaseWindow",
     "Split",
     "HoldoutTouchedError",
+    "HOLDOUT_BAND_END",
     "HOLDOUT_WAIVER",
+    "PROSPECTIVE_DECLARATION",
+    "refuse_unless_beyond_the_spent_band",
     "SplitLeakError",
     "SplitName",
     "SplitUndecidedError",
@@ -135,6 +138,12 @@ RELEASES: tuple[Release, ...] = tuple(
             Release(date(2026, 4, 30), "v232"),
             Release(date(2026, 6, 2), "v233"),
             Release(date(2026, 6, 17), "v234"),
+            # Added 2026-10-27 for the prospective band below. Published date
+            # read from ``annotation_set.source_published_at`` of the corpus
+            # this platform holds (8.118.592 rows), not inferred from the
+            # cadence: the gap from v234 is 22 days and the gaps around it run
+            # from 15 to 115, so there is nothing to infer it from.
+            Release(date(2026, 7, 9), "v235"),
         )
     )
 )
@@ -482,9 +491,75 @@ def window_reads_past_the_mark(end_published: date) -> bool:
 #: flag that gets set by reflex, and this one may be used once.
 HOLDOUT_WAIVER = "this is the single declared pass on the holdout"
 
+#: The release the spent holdout band ENDS at.
+#:
+#: The single pass was spent on 2026-10-27: ``evaluation_set cb46395a`` is the
+#: 227 -> 230 window, built with :data:`HOLDOUT_WAIVER` in its job payload and
+#: declared ``window_role = test``. That band is read and it stays read.
+HOLDOUT_BAND_END = "v230"
+
+#: What a caller must say, verbatim, to open a band BEYOND the spent holdout.
+#:
+#: The mark says where selection stops; it does not say that everything after
+#: it is one single band. What :data:`HOLDOUT_WAIVER` protects is looking at
+#: the same held-out data twice -- look, tune, look again -- which is the
+#: failure that cost 594 results on 2026-08-27. A band that does not overlap
+#: anything already scored cannot be that failure, and refusing it would mean
+#: the platform can never report on data newer than the one band it already
+#: spent, which is the opposite of what a prospective test is for.
+#:
+#: So this is a second sentence and not a second use of the first. Reusing
+#: ``HOLDOUT_WAIVER`` here would make the record false: that sentence says of
+#: itself that it is the single pass, and it is already written on a row.
+#:
+#: It is honoured ONLY for a window that begins at or after
+#: :data:`HOLDOUT_BAND_END`. A window that starts earlier and ends later
+#: STRADDLES the spent band, and a straddle is exactly the shape of the
+#: 220 -> 230 windows that were deleted in August: the union of a window used
+#: for selection and the one held back. See :func:`assert_window_may_inform`.
+PROSPECTIVE_DECLARATION = "this band begins after the holdout and selects nothing"
+
+
+def refuse_unless_beyond_the_spent_band(
+    start_published: date | None, *, context: str = ""
+) -> None:
+    """Raise unless a band's START puts it past the spent holdout band.
+
+    The one check behind :data:`PROSPECTIVE_DECLARATION`, and the reason that
+    declaration is safe at all. Its own function because the straddle is the
+    case worth naming: a window that begins before the band ends and finishes
+    after it is the union of a window used for selection and the one held back,
+    which is the exact shape of the 220 -> 230 windows deleted on 2026-08-27.
+    """
+    band_end = release(HOLDOUT_BAND_END).published
+    if start_published is None:
+        raise HoldoutTouchedError(
+            f"{context}: the prospective declaration was claimed without the date the "
+            "window BEGINS at, and that date is the whole of what makes it safe. A band "
+            "beyond the holdout is one that cannot reach it; without the start there is "
+            "nothing to check that against, and a declaration that cannot be checked is a "
+            "declaration that will be claimed for the window it was written to refuse."
+        )
+    if start_published < band_end:
+        raise HoldoutTouchedError(
+            f"{context}: this window begins {start_published.isoformat()}, before the spent "
+            f"holdout band ends ({HOLDOUT_BAND_END}, {band_end.isoformat()}), so it "
+            f"STRADDLES the band whose single pass is already written on evaluation_set "
+            f"cb46395a. That is the shape of the 220 -> 230 windows deleted on 2026-08-27: "
+            f"the union of a window used for selection and the one held back. The "
+            f"prospective declaration is for a band that begins at or after "
+            f"{HOLDOUT_BAND_END}; this one has to be narrowed, or it is a second look at "
+            f"the holdout under another name."
+        )
+
 
 def assert_window_may_inform(
-    end_published: date, *, waiver: str | None = None, context: str = ""
+    end_published: date,
+    *,
+    waiver: str | None = None,
+    context: str = "",
+    start_published: date | None = None,
+    declaration: str | None = None,
 ) -> None:
     """Raise unless this window may inform a decision, or the waiver is claimed.
 
@@ -511,6 +586,9 @@ def assert_window_may_inform(
         return
     if waiver == HOLDOUT_WAIVER:
         return
+    if declaration == PROSPECTIVE_DECLARATION:
+        refuse_unless_beyond_the_spent_band(start_published, context=context)
+        return
     where = f"{context}: " if context else ""
     raise HoldoutTouchedError(
         f"{where}this window ends {end_published.isoformat()}, after the board's mark "
@@ -518,7 +596,10 @@ def assert_window_may_inform(
         f"reads the holdout. The validation split is scored by the board and informs "
         f"nothing; every parameter, threshold and design decision is selected strictly "
         f"earlier. If this IS the single declared pass on the holdout, say so by passing "
-        f"the waiver verbatim: {HOLDOUT_WAIVER!r}. It is deliberately a sentence and not "
+        f"the waiver verbatim: {HOLDOUT_WAIVER!r}. If instead this is a band BEYOND the "
+        f"spent holdout -- one that begins at or after {HOLDOUT_BAND_END} and selects "
+        f"nothing -- say that verbatim: {PROSPECTIVE_DECLARATION!r}. It is deliberately a "
+        "sentence and not "
         f"a flag, because it may be used once and should not be settable by reflex."
     )
 

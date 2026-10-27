@@ -16,13 +16,47 @@ to find the date it needs in the database.
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import NamedTuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn
-from protea.core.split_registry import assert_window_may_inform
+from protea.core.split_registry import (
+    HOLDOUT_WAIVER,
+    PROSPECTIVE_DECLARATION,
+    assert_window_may_inform,
+)
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+
+
+class Claim(NamedTuple):
+    """What a caller says about a window that reads past the board's mark.
+
+    The two sentences travel as one object because they are mutually
+    exclusive and nothing else would say so. ``HOLDOUT_WAIVER`` means "this is
+    the single pass on the held-back band"; ``PROSPECTIVE_DECLARATION`` means
+    "this band begins after that one and selects nothing". A caller passing
+    both is claiming two different things about one window, and the guard
+    checks the waiver first, so the declaration would be silently ignored and
+    a straddle would pass under a sentence that was never checked.
+    """
+
+    waiver: str | None = None
+    declaration: str | None = None
+
+    def validated(self) -> Claim:
+        """Refuse a caller that claimed both, rather than preferring one."""
+        if self.waiver == HOLDOUT_WAIVER and self.declaration == PROSPECTIVE_DECLARATION:
+            raise ValueError(
+                "both the holdout waiver and the prospective declaration were claimed for "
+                "one window. They are different claims: the waiver spends the single pass "
+                "on the held-back band, the declaration asserts the band begins after it. "
+                "Pass exactly one, because the guard would check the waiver and ignore the "
+                "declaration, and a window that straddles the band would then pass under a "
+                "sentence nothing verified."
+            )
+        return self
 
 
 def _as_date(value: date | datetime) -> date:
@@ -30,7 +64,12 @@ def _as_date(value: date | datetime) -> date:
 
 
 def refuse_if_the_set_reads_the_holdout(
-    new_set: AnnotationSet | None, *, waiver: str | None, context: str, emit: EmitFn | None = None
+    new_set: AnnotationSet | None,
+    *,
+    claim: Claim,
+    context: str,
+    emit: EmitFn | None = None,
+    old_set: AnnotationSet | None = None,
 ) -> None:
     """The rule, for a caller that already holds the corpus it is ending at.
 
@@ -61,10 +100,19 @@ def refuse_if_the_set_reads_the_holdout(
                 "warning",
             )
         return
+    # The START travels too, and only for the prospective arm. A band beyond
+    # the holdout is one that cannot reach it, so the date it begins at is the
+    # whole of what makes it safe; see split_registry.PROSPECTIVE_DECLARATION.
+    start = None
+    if old_set is not None and old_set.source_published_at is not None:
+        start = _as_date(old_set.source_published_at)
+    claim = claim.validated()
     assert_window_may_inform(
         _as_date(new_set.source_published_at),
-        waiver=waiver,
+        waiver=claim.waiver,
         context=f"{context} {new_set.source_version}",
+        start_published=start,
+        declaration=claim.declaration,
     )
 
 
@@ -72,9 +120,10 @@ def refuse_if_it_reads_the_holdout(
     session: Session,
     new_annotation_set_id: UUID,
     *,
-    waiver: str | None,
+    claim: Claim,
     context: str,
     emit: EmitFn | None = None,
+    old_annotation_set_id: UUID | None = None,
 ) -> None:
     """Raise unless the window ending at this corpus may inform a decision.
 
@@ -89,7 +138,12 @@ def refuse_if_it_reads_the_holdout(
     """
     refuse_if_the_set_reads_the_holdout(
         session.get(AnnotationSet, new_annotation_set_id),
-        waiver=waiver,
+        claim=claim,
         context=context,
         emit=emit,
+        old_set=(
+            None
+            if old_annotation_set_id is None
+            else session.get(AnnotationSet, old_annotation_set_id)
+        ),
     )

@@ -25,7 +25,7 @@ from protea.core.operations._evaluation_artifacts import (
     resolve_ia_file,
     resolve_obo,
 )
-from protea.core.operations._holdout_guard import refuse_if_it_reads_the_holdout
+from protea.core.operations._holdout_guard import Claim, refuse_if_it_reads_the_holdout
 from protea.core.operations._run_cafa_eval_driver import (
     CafaEvalRunContext,
     evaluate_all_settings,
@@ -238,7 +238,8 @@ class RunCafaEvaluationOperation:
         refuse_if_it_reads_the_holdout(
             session,
             eval_set.new_annotation_set_id,
-            waiver=p.holdout_waiver,
+            claim=Claim(p.holdout_waiver, p.prospective_declaration),
+            old_annotation_set_id=eval_set.old_annotation_set_id,
             context="scoring at",
             emit=emit,
         )
