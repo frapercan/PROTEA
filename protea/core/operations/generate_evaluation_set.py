@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evaluation import (
+    GAIN_RULES,
     TRUTH_PROFILES,
     ReconciledWindow,
     compute_evaluation_data,
@@ -48,6 +49,7 @@ class _Identity(NamedTuple):
     old_native: uuid.UUID
     new_native: uuid.UUID
     truth_profile: str = TRUTH_PROFILES[0]
+    toi_rule: str = GAIN_RULES[0]
 
 
 class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
@@ -76,12 +78,25 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     # identity, so asking for the other profile over the same two corpora
     # builds a second window rather than colliding with the first.
     truth_profile: str = TRUTH_PROFILES[0]
+    # Which terms the GAIN may contain. ``pivot_terms`` (the default) is what
+    # every stored window did; ``live_in_both_ends`` restricts it before the
+    # delta is classified, which is what the lab's frame does. Independent of
+    # the profile: the projection decides what a gain CAN be, this decides
+    # which gains COUNT.
+    toi_rule: str = GAIN_RULES[0]
 
     @field_validator("truth_profile")
     @classmethod
     def _known_profile(cls, value: str) -> str:
         if value not in TRUTH_PROFILES:
             raise ValueError(f"unknown truth_profile {value!r}; expected one of {TRUTH_PROFILES}")
+        return value
+
+    @field_validator("toi_rule")
+    @classmethod
+    def _known_gain_rule(cls, value: str) -> str:
+        if value not in GAIN_RULES:
+            raise ValueError(f"unknown toi_rule {value!r}; expected one of {GAIN_RULES}")
         return value
     #: The sentence a caller must repeat verbatim to build a window that reads
     #: past the board's mark. Deliberately not a boolean: the holdout is meant
@@ -174,7 +189,13 @@ class GenerateEvaluationSetOperation:
         mode = self._delta_mode(old_set, new_set, old_native, new_native, pivot_id)
 
         ident = _Identity(
-            old_set_id, new_set_id, pivot_id, old_native, new_native, p.truth_profile
+            old_set_id,
+            new_set_id,
+            pivot_id,
+            old_native,
+            new_native,
+            p.truth_profile,
+            p.toi_rule,
         )
         short = self._maybe_reuse_existing(session, ident, p.window_role, emit)
         if short is not None:
@@ -190,6 +211,7 @@ class GenerateEvaluationSetOperation:
             old_native_snapshot_id=old_native,
             new_native_snapshot_id=new_native,
             truth_profile=p.truth_profile,
+            toi_rule=p.toi_rule,
             stats=stats,
             window_role=p.window_role,
             job_id=job_id_from_payload(payload),
@@ -262,7 +284,7 @@ class GenerateEvaluationSetOperation:
         emit(
             "generate_evaluation_set.computing_delta",
             None,
-            {"mode": mode, "truth_profile": ident.truth_profile},
+            {"mode": mode, "truth_profile": ident.truth_profile, "toi_rule": ident.toi_rule},
             "info",
         )
         if mode == "same_snapshot":
@@ -279,12 +301,14 @@ class GenerateEvaluationSetOperation:
                     ident.new_native,
                     ident.pivot_id,
                     ident.truth_profile,
+                    ident.toi_rule,
                 ),
             )
         stats = data.stats()
         stats["mode"] = mode
         stats["pivot_ontology_snapshot_id"] = str(ident.pivot_id)
         stats["truth_profile"] = ident.truth_profile
+        stats["toi_rule"] = ident.toi_rule
         emit("generate_evaluation_set.delta_done", None, stats, "info")
         return data, stats
 
@@ -341,6 +365,7 @@ class GenerateEvaluationSetOperation:
                 old_native_snapshot_id=ident.old_native,
                 new_native_snapshot_id=ident.new_native,
                 truth_profile=ident.truth_profile,
+                toi_rule=ident.toi_rule,
             )
             .one_or_none()
         )

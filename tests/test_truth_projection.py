@@ -112,6 +112,17 @@ class TestWhatItDoesToTheDirectAnnotations:
         assert raw == {"P1": {"GO:A", "GO:B"}}
         assert (report.entries, report.pairs, report.proteins) == (1, 2, 1)
 
+    def test_the_landings_are_not_pruned_to_the_most_specific(self) -> None:
+        # Read from the lab's code rather than assumed: first_live_ancestors
+        # adds every live term a step reaches and only keeps climbing
+        # through the ones that are not live. If one landing is an ancestor
+        # of another, BOTH stay. Pruning would have been a plausible
+        # optimisation and it is not the rule.
+        parents = {"GO:N": {"GO:B", "GO:A"}, "GO:B": {"GO:A"}}
+        aspect = {"GO:N": "F", "GO:A": "F", "GO:B": "F"}
+        graph = _graph(parents=parents, aspect=aspect, live=set(aspect))
+        assert first_live_ancestors("GO:N", graph, {"GO:A", "GO:B"}) == {"GO:A", "GO:B"}
+
     def test_what_lands_nowhere_is_discarded_and_counted(self) -> None:
         # A gain the old ontology cannot express at all. Losing it is the
         # rule; losing it in silence is what the counter is for.
@@ -137,7 +148,9 @@ class TestWhatItDoesToTheDirectAnnotations:
     def test_a_landing_the_protein_already_had_is_not_a_special_case(self) -> None:
         # The delta subtracts the two sides afterwards and a term present at
         # both ends vanishes there. Handling it here would duplicate the
-        # subtraction in a second place.
+        # subtraction in a second place. It also still counts as a projected
+        # pair, because the count is taken before the projection is merged
+        # with the protein's other direct terms, which is what the lab does.
         raw = {"P1": {"GO:NEW", "GO:B"}}
         report = project_direct_annotations(raw, _graph(), TARGET)
         assert raw == {"P1": {"GO:A", "GO:B"}}
@@ -149,12 +162,46 @@ class TestWhatItDoesToTheDirectAnnotations:
         assert (report.proteins, report.entries) == (1, 2)
 
     def test_a_landing_inside_the_binding_subtree_is_counted(self) -> None:
-        # The lab reports zero of these on this window. A non-zero would mean
-        # the projection is feeding the binding rule terms it did not see,
-        # and the binding rule runs right after.
+        # Informative, not a problem: it stays a direct F term and the
+        # binding rule then runs over the already-projected directs.
         graph = _graph(binding=frozenset({"GO:A"}))
         report = project_direct_annotations({"P1": {"GO:NEW"}}, graph, TARGET)
         assert report.binding_landings == 1
+
+    def test_an_entry_that_straddles_the_binding_subtree_is_the_mixed_one(self) -> None:
+        # The lab's counter is this one, and their zero says no entry on the
+        # long window lands on both sides. GO:NEW lands on A and B; with
+        # only A inside, the entry straddles.
+        graph = _graph(binding=frozenset({"GO:A"}))
+        report = project_direct_annotations({"P1": {"GO:NEW"}}, graph, TARGET)
+        assert report.binding_mixed == 1
+
+    def test_an_entry_entirely_inside_it_is_not_mixed(self) -> None:
+        graph = _graph(binding=frozenset({"GO:A", "GO:B"}))
+        report = project_direct_annotations({"P1": {"GO:NEW"}}, graph, TARGET)
+        assert (report.binding_mixed, report.binding_landings) == (0, 2)
+
+    def test_pairs_are_unique_per_protein_and_not_per_entry(self) -> None:
+        # Two new terms of the same protein landing on the same ancestor
+        # count ONCE, which is what the lab's projection.nnz counts: a
+        # boolean matrix product, where a cell is a cell. Counting
+        # (entry, landing) reported 4,050 against their 3,821 on the long
+        # window, and the whole difference was this double counting.
+        parents = {"GO:N1": {"GO:A"}, "GO:N2": {"GO:A"}}
+        aspect = {"GO:N1": "F", "GO:N2": "F", "GO:A": "F"}
+        graph = _graph(parents=parents, aspect=aspect, live=set(aspect))
+        report = project_direct_annotations({"P1": {"GO:N1", "GO:N2"}}, graph, {"GO:A"})
+        assert (report.entries, report.pairs) == (2, 1)
+
+    def test_the_same_ancestor_for_two_proteins_counts_twice(self) -> None:
+        # Unique per PROTEIN, not globally: the pair is (protein, ancestor).
+        parents = {"GO:N1": {"GO:A"}}
+        aspect = {"GO:N1": "F", "GO:A": "F"}
+        graph = _graph(parents=parents, aspect=aspect, live=set(aspect))
+        report = project_direct_annotations(
+            {"P1": {"GO:N1"}, "P2": {"GO:N1"}}, graph, {"GO:A"}
+        )
+        assert (report.entries, report.pairs, report.proteins) == (2, 2, 2)
 
     def test_the_report_names_every_counter_the_lab_publishes(self) -> None:
         keys = project_direct_annotations({}, _graph(), TARGET).as_dict()
@@ -164,6 +211,7 @@ class TestWhatItDoesToTheDirectAnnotations:
             "projected_discarded",
             "projected_proteins",
             "projected_not_live_at_t1",
+            "projected_binding_mixed",
             "projected_binding_landings",
         }
 
@@ -193,7 +241,7 @@ class TestWhereTheRuleIsAllowedToRun:
         assert source.index("project_direct_annotations") < source.index("_drop_binding_only")
 
     def test_the_profile_vocabulary_is_closed_and_defaults_to_today(self) -> None:
-        from protea.core.evaluation import TRUTH_PROFILES, ReconciledWindow
+        from protea.core._truth_rules import TRUTH_PROFILES, ReconciledWindow
 
         assert TRUTH_PROFILES == ("as_closed", "projected")
         window = ReconciledWindow(1, 2, 3, 4, 5)  # type: ignore[arg-type]
@@ -259,7 +307,7 @@ class TestWhichGraphItClimbs:
     T1_GRAPH = "graph-of-2025-07-22"
 
     def _window(self):
-        from protea.core.evaluation import ReconciledWindow
+        from protea.core._truth_rules import ReconciledWindow
 
         # Both native fields collapsed onto t0, as the real window's are.
         return ReconciledWindow(
@@ -281,7 +329,7 @@ class TestWhichGraphItClimbs:
         return _Session()
 
     def test_it_reads_the_annotation_sets_and_not_the_native_fields(self, monkeypatch) -> None:
-        import protea.core.evaluation as ev
+        import protea.core._truth_rules as ev
 
         asked: list[str] = []
 
@@ -304,7 +352,7 @@ class TestWhichGraphItClimbs:
     def test_a_window_whose_corpus_is_gone_raises(self) -> None:
         import pytest
 
-        import protea.core.evaluation as ev
+        import protea.core._truth_rules as ev
 
         class _Empty:
             def get(self, _model, _ident):
@@ -316,7 +364,7 @@ class TestWhichGraphItClimbs:
     def test_the_binding_closure_also_comes_from_t1(self, monkeypatch) -> None:
         # It feeds a counter about the binding rule, which runs on the t1
         # side right after; the subtree is not a constant across the series.
-        import protea.core.evaluation as ev
+        import protea.core._truth_rules as ev
 
         asked: list[str] = []
         monkeypatch.setattr(
@@ -331,3 +379,75 @@ class TestWhichGraphItClimbs:
         monkeypatch.setattr(ev, "_load_children_by_go_id", _children)
         ev._projection_request(self._session(), self._window())
         assert asked == [self.T1_GRAPH]
+
+
+class TestTheGainIsRestrictedBeforeItIsClassified:
+    """``kept = (new & toi) | (new & old)``, and each clause is a decision.
+
+    The lab's rule, from ``single_truth``: "only the gains are cut: the
+    categories come from the whole known state at q, and removed stays
+    old - new". It is the second of the two causes between PROTEA's delta and
+    theirs, and the only one that is not ``replaced_by``: on 211 -> 227 it is
+    one protein, ``Q9FNK4``, whose four gains were alive in 2022 and are
+    obsolete in 2025, so they fall outside the terms of interest and the
+    protein is not a target at all.
+
+    It does not move the figure -- cafaeval discards a protein with no truth
+    inside the terms of interest either way -- it moves the COUNTS, which is
+    what a published population is.
+    """
+
+    TOI = {"GO:0000001", "GO:0000002"}
+
+    def _trim(self, new, old):
+        from protea.core._truth_rules import _keep_within_toi
+
+        return _keep_within_toi(new, old, self.TOI)
+
+    def test_a_gain_outside_the_terms_of_interest_is_dropped(self) -> None:
+        kept = self._trim({"P1": {"F": {"GO:0009999"}}}, {})
+        assert kept == {}
+
+    def test_a_gain_inside_them_survives(self) -> None:
+        kept = self._trim({"P1": {"F": {"GO:0000001"}}}, {})
+        assert kept == {"P1": {"F": {"GO:0000001"}}}
+
+    def test_a_term_already_known_survives_even_from_outside(self) -> None:
+        # Otherwise removed = old - new would acquire a loss the restriction
+        # invented: the protein never lost it, we stopped looking at it.
+        kept = self._trim({"P1": {"F": {"GO:0009999"}}}, {"P1": {"F": {"GO:0009999"}}})
+        assert kept == {"P1": {"F": {"GO:0009999"}}}
+
+    def test_the_old_side_is_not_trimmed(self) -> None:
+        # The classification reads t0 WHOLE, which is what keeps a protein in
+        # PK rather than LK: a term outside the terms of interest that it
+        # already had still makes that aspect non-empty. This is why the
+        # function takes old and returns only new.
+        old = {"P1": {"F": {"GO:0009999"}}}
+        self._trim({"P1": {"F": {"GO:0000001"}}}, old)
+        assert old == {"P1": {"F": {"GO:0009999"}}}
+
+    def test_an_aspect_left_empty_is_dropped_and_not_left_blank(self) -> None:
+        kept = self._trim({"P1": {"F": {"GO:0009999"}, "P": {"GO:0000002"}}}, {})
+        assert kept == {"P1": {"P": {"GO:0000002"}}}
+
+    def test_the_default_rule_does_not_restrict_anything(self) -> None:
+        from protea.core._truth_rules import GAIN_RULES
+
+        assert GAIN_RULES[0] == "pivot_terms"
+        assert GAIN_RULES == ("pivot_terms", "live_in_both_ends")
+
+    def test_the_rule_is_read_from_the_window_and_defaults_to_today(self) -> None:
+        from protea.core._truth_rules import GAIN_RULES, ReconciledWindow
+
+        window = ReconciledWindow(1, 2, 3, 4, 5)  # type: ignore[arg-type]
+        assert window.toi_rule == GAIN_RULES[0]
+
+    def test_the_two_rules_are_independent(self) -> None:
+        # Four combinations, not two: the projection decides what a gain CAN
+        # be and the restriction decides which gains COUNT. Folding them into
+        # one field would be the single-field comparison this project keeps
+        # paying for.
+        from protea.core._truth_rules import GAIN_RULES, TRUTH_PROFILES
+
+        assert len(TRUTH_PROFILES) * len(GAIN_RULES) == 4

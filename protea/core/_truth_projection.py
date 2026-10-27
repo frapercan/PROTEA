@@ -89,7 +89,17 @@ class Projection(NamedTuple):
 
     #: (protein, term) entries that were projected away.
     entries: int = 0
-    #: (protein, ancestor) pairs the projection produced.
+    #: UNIQUE (protein, ancestor) pairs the projection produced, counted
+    #: after a protein's entries are pooled. Two new terms of the same
+    #: protein that land on the same ancestor count once, which is what the
+    #: lab's ``projection.nnz`` counts: it is a boolean matrix product and a
+    #: cell is a cell. Counting (entry, landing) instead reported 4,050
+    #: against their 3,821 on the long window, a difference that was nothing
+    #: but the double counting.
+    #:
+    #: A landing the protein already had as a direct annotation DOES count
+    #: here, because the count is taken before the projection is merged with
+    #: the rest of its direct terms.
     pairs: int = 0
     #: Entries no path could land: the gain is lost and counted.
     discarded: int = 0
@@ -97,9 +107,16 @@ class Projection(NamedTuple):
     proteins: int = 0
     #: Terms that were not live at t1, so they never qualified to project.
     not_live_at_t1: int = 0
-    #: Projected ancestors that landed inside the protein-binding subtree.
-    #: The lab reports zero for this window; a non-zero would mean the
-    #: projection is feeding the binding rule terms it did not see before.
+    #: Entries whose landings fall on BOTH sides of the protein-binding
+    #: subtree, some inside and some outside. This is what the lab's
+    #: ``projected_binding_mixed`` counts, and their zero on the long window
+    #: says no entry straddles it. An entry with ALL of its landings inside
+    #: is not mixed and does not count here.
+    binding_mixed: int = 0
+    #: Projected ancestors that landed inside that subtree at all. Not the
+    #: lab's counter and not a problem: four of them on the long window, and
+    #: they stay as direct F terms, after which the binding rule runs over
+    #: the already-projected directs like it does for any other.
     binding_landings: int = 0
 
     def as_dict(self) -> dict[str, int]:
@@ -109,6 +126,7 @@ class Projection(NamedTuple):
             "projected_discarded": self.discarded,
             "projected_proteins": self.proteins,
             "projected_not_live_at_t1": self.not_live_at_t1,
+            "projected_binding_mixed": self.binding_mixed,
             "projected_binding_landings": self.binding_landings,
         }
 
@@ -155,9 +173,11 @@ def project_direct_annotations(
     rule and before any propagation, which is the only point where the
     substitution means what the rule says.
     """
-    entries = pairs = discarded = proteins = not_live = binding_hits = 0
+    entries = pairs = discarded = proteins = not_live = 0
+    mixed = binding_hits = 0
     for protein, terms in raw.items():
         keep: set[str] = set()
+        landed_here: set[str] = set()
         changed = False
         for term in terms:
             if term in target:
@@ -176,11 +196,16 @@ def project_direct_annotations(
             if not landings:
                 discarded += 1
                 continue
-            pairs += len(landings)
-            binding_hits += len(landings & graph.binding)
+            inside = landings & graph.binding
+            if inside and inside != landings:
+                mixed += 1
+            binding_hits += len(inside)
+            landed_here |= landings
             keep |= landings
         if changed:
             proteins += 1
+            # Pooled per protein, not per entry: see Projection.pairs.
+            pairs += len(landed_here)
             raw[protein] = keep
     return Projection(
         entries=entries,
@@ -188,5 +213,6 @@ def project_direct_annotations(
         discarded=discarded,
         proteins=proteins,
         not_live_at_t1=not_live,
+        binding_mixed=mixed,
         binding_landings=binding_hits,
     )
