@@ -70,6 +70,20 @@ class Graph(NamedTuple):
     binding: frozenset[str] = frozenset()
 
 
+class Request(NamedTuple):
+    """A projection, resolved: which graph to climb and where to land.
+
+    Built by the caller, not by the side that applies it, because WHICH
+    snapshots these two come from is the whole question. See
+    :func:`protea.core.evaluation._projection_request`.
+    """
+
+    #: The t1 side's own ontology.
+    graph: Graph
+    #: The t0 side's live ids: the landings.
+    target: set[str]
+
+
 class Projection(NamedTuple):
     """What the projection did, in numbers that can be compared with the lab's."""
 
