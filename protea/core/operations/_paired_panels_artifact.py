@@ -54,10 +54,19 @@ columns.
   presence first and equality second.
 
 A new filename rather than a widened old one, deliberately. Changing
-``per_protein.parquet`` in place would break ``stratify_evaluation``, which is
-the one thing reading it today, and it would make an old file and a new file
-indistinguishable by name, which is the detection problem made permanently
-unsolvable. The name is not the detection either: the legacy table renamed and
+``per_protein.parquet`` in place would have broken its readers, and it would
+make an old file and a new file indistinguishable by name, which is the
+detection problem made permanently unsolvable.
+
+``stratify_evaluation`` was named here as "the one thing reading it today" and
+is not one of them any more: it reads the grid as of 2026-10-27, and so does
+``stratum_proteins``. After that move the only modules naming the legacy file
+are this one and ``audit_per_protein_artifacts``, both of which name it in
+order to REFUSE it, while ``_run_cafa_eval_driver`` still writes it for a
+weighted run. An artefact whose only readers exist to reject it is worth
+deleting at the producer, and that deletion is a separate change: the stored
+legacy files on past results stay either way, and they are what the audit
+counts. The name is not the detection either: the legacy table renamed and
 broadcast across the columns is caught by :func:`_check_curve_varies`, on the
 content, because a name is a claim and a constant curve is evidence.
 """

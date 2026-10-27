@@ -8,16 +8,24 @@ the driver has no database session and should not grow one, the evaluation path
 is long and should not get longer, and the evaluations already on disk deserve
 to be stratified without being rerun.
 
-IT USED TO READ `per_protein.parquet`, WHICH NOTHING WRITES. That file is the
-legacy artefact `audit_per_protein_artifacts` exists to refuse: it was sliced
-at one tau and its rows were never filtered on ground truth. The producer moved
-to the grid and the paired-panels operation moved with it; this one did not, and
-nobody noticed because `_settings_from_store` treats an absent file as a setting
-that was not evaluated. So it returned an empty list, pooled nothing, and
-reported success. Measured 2026-10-27: zero jobs had ever run it, and six run
-that night over the five stored results found 0 settings on every one of them
-while the store held three grid files per result. Hence the refusal at the end
-of `execute`: an operation that pooled nothing now says so.
+IT USED TO READ `per_protein.parquet`, WHICH ONLY A WEIGHTED RUN WRITES. This
+said "which nothing writes" when it was first committed, and that was wrong:
+`_run_cafa_eval_driver` still writes the file, but through `rows_from_sink`,
+which keeps the weighted variant alone -- so a run with no
+`information_accretion_set_id` produces no weighted records, writes nothing,
+and emits `per_protein_empty` as a warning. Measured over the seven scoring
+runs on this deployment, four weighted runs wrote three files each and three
+unweighted runs wrote none.
+
+That file is also the legacy artefact `audit_per_protein_artifacts` exists to
+refuse: it is sliced at one tau and its rows were never filtered on ground
+truth. The producer added the grid and the paired-panels operation moved to it;
+this one did not, and nobody noticed because `_settings_from_store` treats an
+absent file as a setting that was not evaluated. So it returned an empty list,
+pooled nothing, and reported success. Measured 2026-10-27: zero jobs had ever
+run it, and six run that night over the five stored results found 0 settings on
+every one of them while the store held three grid files per result. Hence the
+refusal at the end of `execute`: an operation that pooled nothing now says so.
 
 Pooling is micro. The mean of per-protein F is a macro average and would be a
 different number under the same name; :func:`micro_cells` does the summing.

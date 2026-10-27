@@ -207,7 +207,107 @@ class _Placed:
         return sum(1 for r in self.rows if r["length_band"] is not None)
 
 
-def _validated_cell(at: _Where, sort: str) -> tuple[str, str]:
+def _scored_zero(rows: list[dict[str, Any]]) -> int:
+    """How many of the cell the run scored nothing at all on.
+
+    A count and not an average, so it says nothing the pooled cell already
+    says: a cell reading 0.09 over 375 proteins is one claim when the mass is
+    spread and a different one when two thirds of it is exactly zero, and the
+    pooled number cannot tell them apart. It is also what makes the default
+    ordering readable: a page of zeros is a finding once the reader knows how
+    many there are, and a mystery until then.
+
+    Its own function because it was one line inside the endpoint reading
+    ``r["f_w"]``, and when the row's metric lost that suffix nothing caught the
+    stale key: ruff cannot see into a dict subscript and no test reached the
+    line. A KeyError on every request, found by reading the function and not
+    by running it.
+    """
+    return sum(1 for r in rows if r["f"] == 0.0)
+
+
+class _Cell(NamedTuple):
+    """Which panel was asked for, in the two vocabularies it has.
+
+    ``setting`` is the knowledge category as the directory names it and
+    ``namespace`` is the aspect as cafaeval names it. Both are needed and they
+    are not derivable from each other without a table, so they travel
+    together from the one place that validates them.
+    """
+
+    setting: str
+    namespace: str
+
+
+class _Counted(NamedTuple):
+    """The page, and every count that frames it.
+
+    Four populations and a page. Loose, this was five arguments of the ten
+    that made the response builder the widest signature in the module; named,
+    it is the thing the endpoint spent its whole body computing.
+    """
+
+    placed: _Placed
+    rows: list[dict[str, Any]]
+    page: list[dict[str, Any]]
+    scored_zero: int
+
+
+def _response(
+    result_id: uuid.UUID,
+    arm: Any,
+    counted: _Counted,
+    cell: _Cell,
+    at: _Where,
+    page_of: _Page,
+) -> dict[str, Any]:
+    """The page, and the counts that frame it.
+
+    The counts are four and they are deliberately not one.
+    ``panel_population`` is every protein the artefact scored in this cell,
+    which is the number the panel prints. ``placed`` is how many of them could
+    be put on the retrieval axes. ``matched`` is how many survive the bands the
+    caller pinned. ``returned`` is how many are on this page. A single total
+    would collapse a retrieval gap, a filter and a page size into one number
+    that answers none of the three questions.
+    """
+    placed = counted.placed
+    return {
+        "evaluation_result_id": str(result_id),
+        "arm": {
+            "prediction_set_id": arm["prediction_set_id"],
+            "embedding_name": arm["embedding_name"],
+            "scoring_name": arm["scoring_name"],
+            "donor_policy": arm["donor_policy"],
+            "depth": arm["depth"],
+            "metric": arm["metric"],
+        },
+        "setting": cell.setting,
+        "where": {
+            "category": cell.setting,
+            "aspect": _ASPECT_FOR_NAMESPACE[cell.namespace].cafa,
+            "length": at.length,
+            "homology": at.homology,
+        },
+        "tau": placed.tau,
+        "panel_population": len(placed.rows),
+        "placed": placed.placed,
+        "unplaced": {
+            "no_donor": placed.no_donor,
+            "no_length": placed.no_length,
+            "off_scale": placed.off_scale,
+        },
+        "matched": len(counted.rows),
+        "scored_zero": counted.scored_zero,
+        "returned": len(counted.page),
+        "offset": page_of.offset,
+        "limit": page_of.limit,
+        "sort": page_of.sort,
+        "proteins": counted.page,
+    }
+
+
+def _validated_cell(at: _Where, sort: str) -> _Cell:
     """The setting, the namespace and the sort, or a 422 naming the vocabulary.
 
     Three refusals that were inline and are the same kind of thing: a caller
@@ -223,7 +323,7 @@ def _validated_cell(at: _Where, sort: str) -> tuple[str, str]:
         raise HTTPException(
             status_code=422, detail=f"sort {sort!r} is not one of {', '.join(_SORTS)}"
         )
-    return at.setting.upper(), _namespace_for(at.aspect)
+    return _Cell(at.setting.upper(), _namespace_for(at.aspect))
 
 
 def _panel_keys(store: Any, result_id: uuid.UUID, setting: str) -> tuple[str, str]:
@@ -517,6 +617,20 @@ def _ordered(rows: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
 
 
 @dataclass
+class _Page:
+    """How much of the page to serve, and in what order.
+
+    A dependency object rather than three loose query parameters, for the same
+    reason :class:`_Where` is one: they are read together, they are validated
+    together, and the endpoint's signature had seven arguments without them.
+    """
+
+    sort: str = Query(default="f_asc", description=f"One of: {', '.join(_SORTS)}.")
+    limit: int = Query(default=100, ge=1, le=500, description="Rows on this page.")
+    offset: int = Query(default=0, ge=0, description="Rows to skip.")
+
+
+@dataclass
 class _Where:
     """The cell to open, as query parameters."""
 
@@ -553,9 +667,7 @@ class _Where:
 def stratum_proteins(
     evaluation_result_id: uuid.UUID,
     at: _Where = Depends(),
-    sort: str = Query(default="f_asc", description=f"One of: {', '.join(_SORTS)}."),
-    limit: int = Query(default=100, ge=1, le=500, description="Rows on this page."),
-    offset: int = Query(default=0, ge=0, description="Rows to skip."),
+    page_of: _Page = Depends(),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     settings: Any = Depends(get_settings),
 ) -> dict[str, Any]:
@@ -569,7 +681,8 @@ def stratum_proteins(
     retrieval gap, a filter and a page size into one number that answers none
     of the three questions.
     """
-    setting, namespace = _validated_cell(at, sort)
+    cell = _validated_cell(at, page_of.sort)
+    setting, namespace = cell
     try:
         store = get_artifact_store(settings)
     except ArtifactStoreUnavailable as exc:  # pragma: no cover - config failure
@@ -621,47 +734,15 @@ def stratum_proteins(
     if at.homology is not None:
         rows = [r for r in rows if r["homology_band"] == at.homology]
 
-    page = _ordered(rows, sort)[offset : offset + limit]
+    page = _ordered(rows, page_of.sort)[page_of.offset : page_of.offset + page_of.limit]
 
-    # How many of the cell the run scored nothing at all on. A count and not an
-    # average, so it says nothing the pooled cell already says: a cell reading
-    # 0.09 over 375 proteins is one claim when the mass is spread and a
-    # different one when two thirds of it is exactly zero, and the pooled
-    # number cannot tell them apart. It is also what makes the default
-    # ordering readable: a page of zeros is a finding once the reader knows
-    # how many there are, and a mystery until then.
-    scored_zero = sum(1 for r in rows if r["f_w"] == 0.0)
+    scored_zero = _scored_zero(rows)
 
-    return {
-        "evaluation_result_id": str(evaluation_result_id),
-        "arm": {
-            "prediction_set_id": prediction_set_id,
-            "embedding_name": arm["embedding_name"],
-            "scoring_name": arm["scoring_name"],
-            "donor_policy": arm["donor_policy"],
-            "depth": arm["depth"],
-            "metric": arm["metric"],
-        },
-        "setting": setting,
-        "where": {
-            "category": setting,
-            "aspect": _ASPECT_FOR_NAMESPACE[namespace].cafa,
-            "length": at.length,
-            "homology": at.homology,
-        },
-        "tau": placed.tau,
-        "panel_population": len(placed.rows),
-        "placed": placed.placed,
-        "unplaced": {
-            "no_donor": placed.no_donor,
-            "no_length": placed.no_length,
-            "off_scale": placed.off_scale,
-        },
-        "matched": len(rows),
-        "scored_zero": scored_zero,
-        "returned": len(page),
-        "offset": offset,
-        "limit": limit,
-        "sort": sort,
-        "proteins": page,
-    }
+    return _response(
+        evaluation_result_id,
+        arm,
+        _Counted(placed, rows, page, scored_zero),
+        cell,
+        at,
+        page_of,
+    )

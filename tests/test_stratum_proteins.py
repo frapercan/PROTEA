@@ -223,13 +223,22 @@ def test_the_cell_says_how_much_of_it_scored_nothing():
     # knows how many there are and a mystery until then.
     import inspect
 
-    from protea.api.routers.stratum_proteins import stratum_proteins
+    from protea.api.routers.stratum_proteins import _response, _scored_zero
 
-    src = inspect.getsource(stratum_proteins)
-    assert '"scored_zero"' in src
-    # A count, never a rate. A share would be a pooled statistic over the cell,
-    # which is the collapse this project refuses.
-    assert 'scored_zero = sum(1 for r in rows if r["f_w"] == 0.0)' in src
+    # The count reaches the payload under its own name.
+    assert '"scored_zero"' in inspect.getsource(_response)
+
+    # A count, never a rate. A share would be a pooled statistic over the
+    # cell, which is the collapse this project refuses.
+    #
+    # Asserted on the FUNCTION and not on a source line. This test used to pin
+    # the exact expression ``sum(1 for r in rows if r["f_w"] == 0.0)``, and
+    # when the row's metric lost its ``_w`` suffix the assertion went stale
+    # while saying nothing about whether the count was still right. A test
+    # that pins text is debt of the same kind it is meant to catch.
+    counted = _scored_zero([_row("P1", f=0.0), _row("P2", f=0.4), _row("P3", f=0.0)])
+    assert counted == 2
+    assert isinstance(counted, int)
 
 
 def test_the_module_does_not_claim_the_two_panel_counts_are_equal():
@@ -386,3 +395,26 @@ def test_the_endpoint_asks_for_the_grid_and_the_best_f_table():
     # endpoint moved; what must not survive is a key built from it.
     assert "per_protein.parquet" not in source
     assert "per_protein.parquet" not in inspect.getsource(module._sliced_at_the_published_tau)
+
+
+def test_the_zero_count_reads_the_metric_by_its_current_name():
+    """The regression for a KeyError that shipped inside a rename.
+
+    ``scored_zero`` was one line in the endpoint reading ``r["f_w"]``. The
+    row's metric lost that suffix when the variant started travelling beside
+    it, and nothing caught the stale key: ruff cannot see into a dict
+    subscript, and no test reached the line. Every request would have raised.
+    """
+    from protea.api.routers.stratum_proteins import _scored_zero
+
+    rows = [_row("P1", f=0.0), _row("P2", f=0.4), _row("P3", f=0.0)]
+    assert _scored_zero(rows) == 2
+
+
+def test_the_zero_count_is_a_count_and_not_a_share():
+    # A share would be the pooled number again. The point of this one is that
+    # a cell at 0.09 over 375 proteins is a different claim when two thirds of
+    # the mass is exactly zero, and the pooled number cannot say which.
+    from protea.api.routers.stratum_proteins import _scored_zero
+
+    assert _scored_zero([_row("P1", f=0.0)] * 4) == 4
