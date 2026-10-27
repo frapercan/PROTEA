@@ -148,7 +148,7 @@ class TestItIsOneRuleAndNotTwo:
         assert source.index("stamp_leak_verdicts") < source.index("_build_matrix_response")
 
     def test_the_winner_carries_its_verdict(self) -> None:
-        from protea.api.routers.benchmark import _make_leaderboard
+        from protea.api.routers._benchmark_grid import make_leaderboard
 
         row = {
             "category": "nk",
@@ -167,6 +167,9 @@ class TestItIsOneRuleAndNotTwo:
             "leak": "contaminated",
             "training_release": 221,
         }
-        board = _make_leaderboard([row], ("nk",), ("F",))
+        # ``window`` is required now: a grid belongs to one evaluation set,
+        # because the per-cell maximum used to run over every stored window
+        # and each cell could land on a different one.
+        board = make_leaderboard([row], ("nk",), ("F",), window=row["evaluation_set_id"])
         assert board[0]["leak"] == "contaminated"
         assert board[0]["training_release"] == 221

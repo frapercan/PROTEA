@@ -49,6 +49,7 @@ from sqlalchemy.orm import Session, aliased, sessionmaker
 from protea.api.cache import cached, refresh
 from protea.api.deps import get_benchmark_config, get_session_factory
 from protea.api.metrics import PRIMARY_METRIC, per_task_aggregate, primary_cell_score
+from protea.api.routers._benchmark_grid import make_leaderboard, newest_window
 from protea.api.routers._leak_badge import stamp_leak_verdicts
 from protea.api.stages import RERANKER_STAGE as _RERANKER_STAGE
 from protea.api.stages import StageKind  # noqa: F401  (re-exported for type hints)
@@ -136,67 +137,6 @@ def _embedding_display(cfg: EmbeddingConfig) -> dict[str, Any]:
         "family": cfg.family or cfg.model_backend,
         "param_count": cfg.param_count,
     }
-
-
-def _make_leaderboard(
-    rows: list[dict[str, Any]],
-    categories: tuple[str, ...] | list[str],
-    aspects: tuple[str, ...] | list[str],
-) -> list[dict[str, Any]]:
-    """Cross-model best-cell leaderboard per ``(category, aspect)`` cell.
-
-    Iterates a flat list of row dicts (each containing at least ``category``,
-    ``aspect`` and ``primary``) and returns one entry per cell with the
-    winning embedding / stage / K, in canonical (categories × aspects) order.
-    The winner is the cell with the highest IA-weighted ``primary`` metric
-    (``f_micro_w``, fmax fallback for legacy rows). This is the *best-cell*
-    maximum and must be labelled as such by the front-end, never as the
-    headline number (winner's-curse, FIX-METRIC-IA).
-    """
-    leaderboard: dict[tuple[str, str], dict[str, Any]] = {}
-    for r in rows:
-        lkey = (r["category"], r["aspect"])
-        cur = leaderboard.get(lkey)
-        if cur is None or r["primary"] > cur["primary"]:
-            leaderboard[lkey] = r
-    return [
-        {
-            "category": cat,
-            "aspect": asp,
-            "primary": entry["primary"],
-            "primary_metric": entry["primary_metric"],
-            "f_micro_w": entry.get("f_micro_w"),
-            "f_micro": entry.get("f_micro"),
-            "fmax_w": entry.get("fmax_w"),
-            "fmax": entry["fmax"],
-            "precision_w": entry.get("precision_w"),
-            "recall_w": entry.get("recall_w"),
-            "precision": entry["precision"],
-            "recall": entry["recall"],
-            "coverage_w": entry.get("coverage_w"),
-            "coverage": entry["coverage"],
-            "embedding_config_id": entry["embedding_config_id"],
-            "k": entry["k"],
-            "stage": entry["stage"],
-            "evaluation_result_id": entry["evaluation_result_id"],
-            "evaluation_set_id": entry["evaluation_set_id"],
-            # F-METHOD-EVAL-SURFACE provenance for the winning cell.
-            "frame": entry.get("frame"),
-            "temporal_window": entry.get("temporal_window"),
-            "arms_enabled": entry.get("arms_enabled"),
-            "leakage_role": entry.get("leakage_role"),
-            # The winner carries its verdict. A leaderboard that showed a
-            # contaminated cell on top without saying so is the worst case
-            # this badge exists for.
-            "leak": entry.get("leak"),
-            "training_release": entry.get("training_release"),
-            "prediction_set_status": entry.get("prediction_set_status"),
-            "self_hit_rate": entry.get("self_hit_rate"),
-        }
-        for cat in categories
-        for asp in aspects
-        if (entry := leaderboard.get((cat, asp))) is not None
-    ]
 
 
 def _per_task_aggregate(
@@ -421,6 +361,46 @@ def prewarm_benchmark_matrix(
         _aggregate_benchmark_matrix(session, None, cfg, None, None)
 
 
+class _Grids(NamedTuple):
+    """The two nine-cell grids and the one window they are both about."""
+
+    per_cell: list[dict[str, Any]]
+    per_cell_global: list[dict[str, Any]]
+    window: str | None
+
+
+def _grids(
+    agg: _BenchAggregation,
+    rows: list[dict[str, Any]],
+    eval_sets_payload: list[dict[str, Any]],
+    cfg: BenchmarkConfig,
+    evaluation_set_id: uuid.UUID | None,
+) -> _Grids:
+    """Both leaderboards, over ONE window decided here and once.
+
+    The caller's pin when there is one, else the newest window with rows. It
+    used to be whatever each cell's own maximum landed on, which is nine
+    measurements in one grid; see ``_benchmark_grid``.
+
+    Two leaderboards and not one: the first matches the main table under the
+    current stage and K, the second runs over every stage and K so a reader
+    can ask "is this the absolute champion?" without the answer moving as
+    filters change. Both are about the same window.
+    """
+    window = (
+        str(evaluation_set_id)
+        if evaluation_set_id
+        else newest_window(eval_sets_payload, rows)
+    )
+    return _Grids(
+        make_leaderboard(rows, cfg.categories, cfg.aspects, window=window),
+        make_leaderboard(
+            list(agg.best_global.values()), cfg.categories, cfg.aspects, window=window
+        ),
+        window,
+    )
+
+
 def _build_matrix_response(
     agg: _BenchAggregation,
     eval_sets_payload: list[dict[str, Any]],
@@ -454,13 +434,8 @@ def _build_matrix_response(
             r["aspect"],
         ),
     )
-    # Two leaderboards: one for the user's current selection (matches the
-    # main table), one global across every stage/K (constant across filter
-    # changes — anchors the "is this the absolute champion?" read).
-    best_per_cell = _make_leaderboard(rows, cfg.categories, cfg.aspects)
-    best_per_cell_global = _make_leaderboard(
-        list(agg.best_global.values()), cfg.categories, cfg.aspects
-    )
+    grids = _grids(agg, rows, eval_sets_payload, cfg, evaluation_set_id)
+    best_per_cell, best_per_cell_global, grid_window = grids
     per_task = _per_task_aggregate(rows, cfg.categories, cfg.aspects)
     return {
         "rows": rows,
@@ -475,6 +450,9 @@ def _build_matrix_response(
         "per_task": per_task,
         "best_per_cell": best_per_cell,
         "best_per_cell_global": best_per_cell_global,
+        # The window both grids belong to: without it a reader cannot tell
+        # whether the nine cells are one measurement or nine.
+        "grid_evaluation_set_id": grid_window,
         "filters": {
             "evaluation_set_id": str(evaluation_set_id) if evaluation_set_id else None,
             "stage": stage,
