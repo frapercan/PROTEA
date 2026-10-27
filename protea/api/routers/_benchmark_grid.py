@@ -105,13 +105,19 @@ def newest_window(
     Among those that have rows the newest wins, because a reader with no
     opinion is asking what the current answer is. ``None`` when nothing has
     rows, and the grids then come back empty, which is the honest shape.
+
+    ``None`` ALSO when no candidate carries a ``created_at``, and that is not
+    a technicality. Without the date this sorted on empty strings, kept the
+    payload's own order and returned whatever was first: measured on the
+    deployed API, ``ea94e57e`` (02:17) over ``ea0f4334`` (17:39), so the
+    screen printed the older window's nine cells as the current answer.
+    Picking arbitrarily is the defect this function exists to remove, so an
+    incomplete payload returns nothing and the empty grid makes it visible.
     """
     with_rows = {str(r["evaluation_set_id"]) for r in rows}
-    ordered = sorted(
-        (e for e in eval_sets_payload if str(e.get("id")) in with_rows),
-        key=lambda e: str(e.get("created_at") or ""),
-        reverse=True,
-    )
-    if ordered:
-        return str(ordered[0]["id"])
-    return next(iter(sorted(with_rows)), None)
+    dated = [
+        e for e in eval_sets_payload if str(e.get("id")) in with_rows and e.get("created_at")
+    ]
+    if not dated:
+        return None
+    return str(max(dated, key=lambda e: str(e["created_at"]))["id"])

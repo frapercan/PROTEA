@@ -741,6 +741,14 @@ def _load_eval_set_metadata(
                 "new_source_version": new_sv,
                 "old_obo_version": old_obo,
                 "new_obo_version": new_obo,
+                # When the window was built. Needed and not decoration: the
+                # grid's default window is the newest one WITH rows, and
+                # without this the chooser had nothing to sort on. Measured
+                # on the deployed API: it fell back to payload order and
+                # picked ea94e57e (02:17) over ea0f4334 (17:39), so the
+                # screen printed the older window's nine cells as the
+                # current answer.
+                "created_at": es.created_at.isoformat() if es.created_at else None,
                 "stats": es.stats or {},
             }
         )

@@ -113,3 +113,42 @@ class TestWhichWindowAGridDefaultsTo:
 
     def test_nothing_measured_means_nothing_to_show(self) -> None:
         assert newest_window([{"id": NUEVA, "created_at": "2026-10-27T00:00:00Z"}], []) is None
+
+    def test_a_payload_with_no_dates_picks_NOTHING(self) -> None:
+        """The regression that shipped. The payload carried no ``created_at``,
+        so the sort ran on empty strings, kept the payload's own order and
+        returned the first entry: on the deployed API that was ea94e57e at
+        02:17 over ea0f4334 at 17:39, and the screen printed the older
+        window's nine cells as the current answer.
+
+        Returning nothing makes an incomplete payload visible. Returning the
+        first entry is the defect this function exists to remove, dressed as
+        a fallback.
+        """
+        payload = [{"id": VIEJA}, {"id": NUEVA}]
+        rows = [_row(VIEJA, "NK", "BPO", 0.9), _row(NUEVA, "NK", "BPO", 0.4)]
+        assert newest_window(payload, rows) is None
+
+    def test_one_dated_candidate_among_undated_ones_still_wins(self) -> None:
+        # Not all-or-nothing: a payload where only some entries are dated
+        # still has an answer, and it is the dated one rather than the first.
+        payload = [{"id": VIEJA}, {"id": NUEVA, "created_at": "2026-10-27T17:39:00Z"}]
+        rows = [_row(VIEJA, "NK", "BPO", 0.9), _row(NUEVA, "NK", "BPO", 0.4)]
+        assert newest_window(payload, rows) == NUEVA
+
+
+class TestThePayloadCarriesTheDate:
+    """The other half: the date has to BE there, or the chooser has nothing.
+
+    Both halves are needed and neither is enough. The chooser was correct and
+    the payload was missing one key, and the result was an arbitrary window on
+    the screen, which is the same outcome as having no chooser at all.
+    """
+
+    def test_the_metadata_loader_emits_created_at(self) -> None:
+        import inspect
+
+        from protea.api.routers import benchmark as module
+
+        source = inspect.getsource(module._load_eval_set_metadata)
+        assert '"created_at"' in source
