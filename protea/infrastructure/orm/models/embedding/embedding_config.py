@@ -149,7 +149,16 @@ class EmbeddingConfig(Base):
     #: Residues the model sees. NULL means full length: no truncation was
     #: applied. A sentinel integer would make the recipe a function of the
     #: corpus, and max_length is an identity field.
-    max_length: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1022)
+    #: Where the sequence is truncated, or NULL for no truncation at all
+    #: (migration ``b4e82f17c9a3``). NO python-side default any more, and the
+    #: reason is :func:`_derive_id_from_recipe`: this is an identity field,
+    #: the id is derived in ``before_insert``, and a default applied AFTER
+    #: that produced a row whose id described a recipe the row did not hold.
+    #: Measured: a config created with ``max_length: null`` got the id
+    #: derived from NULL, ``f3a7fe16-...``, and stored 1022, whose own recipe
+    #: derives ``556c8ebc-...``. The listener fills the default now, before
+    #: it hashes.
+    max_length: Mapped[int | None] = mapped_column(Integer, nullable=True)
     use_chunking: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=512)
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -205,6 +214,24 @@ class EmbeddingConfig(Base):
         )
 
 
+#: What an omitted ``max_length`` means. Not a column default: see
+#: :func:`_derive_id_from_recipe`.
+_DEFAULT_MAX_LENGTH = 1022
+
+
+def _was_not_set(target: EmbeddingConfig, field: str) -> bool:
+    """Whether ``field`` was never assigned, as opposed to assigned ``None``.
+
+    ``None`` cannot answer this on its own, and that is exactly how the
+    defect got in: a column default treats "absent" and "explicitly null" as
+    the same thing, and for an identity field they are opposite statements.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    history = sa_inspect(target).attrs[field].history
+    return not history.added and not history.unchanged
+
+
 @event.listens_for(EmbeddingConfig, "before_insert")
 def _derive_id_from_recipe(_mapper, _connection, target: EmbeddingConfig) -> None:
     """Give every new config the id its own recipe derives.
@@ -222,6 +249,21 @@ def _derive_id_from_recipe(_mapper, _connection, target: EmbeddingConfig) -> Non
 
     An explicitly supplied id is honoured, so a migration or a repair script can
     still place a row deliberately.
+
+    IT ALSO FILLS ``max_length``, AND THAT IS NOT A SIDE ERRAND. The column
+    used to carry ``default=1022``, which SQLAlchemy applies at INSERT, i.e.
+    AFTER this listener has hashed the recipe. While NULL was impossible that
+    was harmless. Migration ``b4e82f17c9a3`` made NULL mean "no truncation",
+    and the first configuration created that way got an id derived from NULL
+    and a row holding 1022: an id that does not describe its own recipe,
+    which is the one property this derivation exists to provide.
+
+    Resolved here instead, before the hash, by asking whether the attribute
+    was SET rather than whether it is None -- the two are different and the
+    default could not tell them apart. An omitted ``max_length`` still means
+    1022, so every id minted so far stays valid; an explicit NULL survives.
     """
+    if _was_not_set(target, "max_length"):
+        target.max_length = _DEFAULT_MAX_LENGTH
     if target.id is None:
         target.id = derive_embedding_config_id(target)
