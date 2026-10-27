@@ -58,6 +58,35 @@ PositiveInt = Annotated[int, Field(gt=0)]
 #: The scoring preset is deliberately NOT here. It is a level, not a frame: the
 #: frame is what is held still while levels vary, and folding a level into it
 #: would give every level its own frame and make the seal say nothing.
+#:
+#: The last three were missing, and their absence was not hypothetical. Three
+#: stored results share all six of the fields above -- one window, one pivot,
+#: one accretion set, all three caps null -- and sealed to one digest,
+#: ``f-2ccee8875ed1f2869baea769``. One of them ran with
+#: ``restrict_gt_to_predicted`` at its default and the other two with it off,
+#: so one scored the predicted cohort and two scored the whole ground truth.
+#: Two of those rows carry 107 proteins. The seal called all three comparable.
+#:
+#: Each of the three changes the number without being any part of the method:
+#:
+#: * ``restrict_gt_to_predicted`` decides the population. It is the cohort, and
+#:   a cohort difference read through a seal that cannot see it is published as
+#:   a method difference.
+#: * ``th_step`` is the threshold grid cafaeval sweeps. A finer grid optimises
+#:   over more candidate thresholds and reports a higher Fmax, which the
+#:   payload's own field documentation says breaks numeric parity with LAFA.
+#: * ``toi_file`` decides which terms count toward precision and recall at all.
+#:   Null means the terms were derived from the pivot snapshot, which is a
+#:   different frame from any supplied file.
+#:
+#: ``toi_file`` is sealed as the PATH, which is weaker than the thing that
+#: matters: two different files written to one path seal alike, and one file
+#: copied to two paths seals twice. That is the same weakness ``ia_file`` has
+#: and the reason ``information_accretion_set_id`` is preferred over it, so the
+#: terms of interest want the same treatment -- a row with a content hash --
+#: rather than a better string. Until then the path is recorded, because a
+#: field that changes the number and is absent from the seal is worse than one
+#: recorded imperfectly.
 _FRAME_FIELDS: tuple[str, ...] = (
     "evaluation_set_id",
     "pivot_snapshot_id",
@@ -65,7 +94,38 @@ _FRAME_FIELDS: tuple[str, ...] = (
     "temporal_window",
     "max_terms",
     "max_distance",
+    "restrict_gt_to_predicted",
+    "th_step",
+    "toi_file",
 )
+
+#: Fields whose absence from a payload means the payload's default VALUE, not
+#: the absence of a choice.
+#:
+#: The caps are the other case and must keep their current treatment: a payload
+#: with no ``max_distance`` did not cap at some default distance, it did not cap
+#: at all, so null is the honest material and the docstring of
+#: :func:`frame_digest` says why. But a payload with no ``restrict_gt_to_predicted``
+#: ran with it true, and scored exactly what a payload passing ``true``
+#: explicitly scored. Encoding that as null would split one frame in two over
+#: how the request happened to be spelled, which is the mirror image of the
+#: defect this field list exists to close.
+_PAYLOAD_DEFAULTS: dict[str, Any] = {
+    "restrict_gt_to_predicted": True,
+    "th_step": 0.01,
+}
+
+#: Fields read out of JSONB as text that name a number.
+#:
+#: ``j.payload ->> 'th_step'`` is text, so ``0.01`` and ``0.010`` arrive as two
+#: strings and would seal as two frames although cafaeval swept one grid. These
+#: are canonicalised through ``float`` before they reach the digest. The caps
+#: are here for the same reason; they were always read as text and the hazard
+#: predates this change.
+_NUMERIC_FRAME_FIELDS: frozenset[str] = frozenset({"max_terms", "max_distance", "th_step"})
+
+#: Fields naming a truth value that arrives from JSONB as text.
+_BOOLEAN_FRAME_FIELDS: frozenset[str] = frozenset({"restrict_gt_to_predicted"})
 
 #: Rows and the provenance each one can reach. ``information_accretion_set_id``
 #: lives only in the producing job's payload: no column records it, which is why
@@ -79,6 +139,9 @@ _ROWS = text("""
            j.payload ->> 'information_accretion_set_id'   AS information_accretion_set_id,
            j.payload ->> 'max_terms'                      AS max_terms,
            j.payload ->> 'max_distance'                   AS max_distance,
+           j.payload ->> 'restrict_gt_to_predicted'       AS restrict_gt_to_predicted,
+           j.payload ->> 'th_step'                        AS th_step,
+           j.payload ->> 'toi_file'                       AS toi_file,
            (j.id IS NOT NULL)                             AS has_job
     FROM evaluation_result r
     LEFT JOIN evaluation_set es ON es.id = r.evaluation_set_id
@@ -118,14 +181,57 @@ _RECORD_FRAME = text("""
 """)
 
 
+def _frame_value(field: str, raw: Any) -> Any:
+    """One field's material: resolved to its default, then canonicalised.
+
+    Two spellings of one run must not seal as two frames. A payload omitting
+    ``th_step`` swept the same grid as one passing ``0.01``, and ``0.01`` read
+    out of JSONB as text is the same grid as ``0.010``. Both collapse here, so
+    the digest is a function of what cafaeval did rather than of how the
+    request was written.
+
+    A field in neither map keeps its raw value, which is how the caps stay
+    null when absent: see :data:`_PAYLOAD_DEFAULTS` for why they must.
+    """
+    if raw is None and field in _PAYLOAD_DEFAULTS:
+        raw = _PAYLOAD_DEFAULTS[field]
+    if raw is None:
+        return None
+    if field in _BOOLEAN_FRAME_FIELDS:
+        return raw if isinstance(raw, bool) else str(raw).strip().lower() == "true"
+    if field in _NUMERIC_FRAME_FIELDS:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            # Unparseable is not the default and not absent. Keeping the raw
+            # string seals it apart from every well-formed value rather than
+            # quietly joining one of their frames.
+            return str(raw)
+    return raw
+
+
+def frame_material(row: dict[str, Any]) -> dict[str, Any]:
+    """The frame's fields, resolved and canonicalised: what the digest is of.
+
+    Exists so the material stored beside the digest is the same material the
+    digest was taken over. Recording the raw row instead would put a frame in
+    ``evaluation_frame`` whose fields do not hash to the key they are filed
+    under, and the address and its contents disagreeing is the defect storing
+    the contents was meant to fix.
+    """
+    return {field: _frame_value(field, row.get(field)) for field in _FRAME_FIELDS}
+
+
 def frame_digest(row: dict[str, Any]) -> str | None:
     """The seal for one row, or nothing when its frame cannot be recovered.
 
     Content addressed, so the same frame always yields the same seal and two
     results can be compared by string equality without anyone having to know
-    which fields the frame is made of. Absent optional values are encoded as
-    null rather than skipped, so a run that omitted a cap and a run that set it
-    to the same value the default happens to take do not collide.
+    which fields the frame is made of. A cap absent from the payload is encoded
+    as null rather than skipped, so a run that omitted it and a run that set it
+    to the same value the default happens to take do not collide. Fields whose
+    absence means a default VALUE are resolved to it first; :func:`_frame_value`
+    draws that line and :data:`_PAYLOAD_DEFAULTS` says which side each is on.
 
     Returns nothing when a field that changes the meaning of the number is
     missing. The evaluation set and the accretion set are both required for
@@ -134,8 +240,7 @@ def frame_digest(row: dict[str, Any]) -> str | None:
     """
     if not row.get("evaluation_set_id") or not row.get("information_accretion_set_id"):
         return None
-    material = {field: row.get(field) for field in _FRAME_FIELDS}
-    canonical = json.dumps(material, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(frame_material(row), sort_keys=True, separators=(",", ":"))
     return "f-" + hashlib.sha256(canonical.encode()).hexdigest()[:_DIGEST_WIDTH]
 
 
@@ -201,7 +306,7 @@ def _walk(session: Session, rows: list[dict[str, Any]], p: Any) -> _Tally:
                 _RECORD_FRAME,
                 {
                     "digest": digest,
-                    "material": json.dumps({f: row.get(f) for f in _FRAME_FIELDS}, sort_keys=True),
+                    "material": json.dumps(frame_material(row), sort_keys=True),
                     "fields": json.dumps(list(_FRAME_FIELDS)),
                     "provenance": json.dumps(capture_provenance()),
                 },
