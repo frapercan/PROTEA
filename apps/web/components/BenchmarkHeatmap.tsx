@@ -53,11 +53,6 @@ const ASPECT_LABELS: Record<string, string> = {
   CCO: "Cellular Component",
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  NK: "No Knowledge",
-  LK: "Limited Knowledge",
-  PK: "Partial Knowledge",
-};
 
 /** Pick the best primary-metric row per embedding inside a single cell. The
  *  matrix endpoint already dedupes per (eid, esid, st, k, cat, asp) — collapse

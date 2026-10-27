@@ -220,11 +220,10 @@ export const NINE_CELL: Record<Knowledge, Record<Aspect, GridCell>> = {
 export const KNOWLEDGE_ROWS: Knowledge[] = ["NK", "LK", "PK"];
 export const ASPECT_COLS: Aspect[] = ["MF", "BP", "CC"];
 
-export const KNOWLEDGE_LABEL: Record<Knowledge, string> = {
-  NK: "No knowledge",
-  LK: "Limited knowledge",
-  PK: "Prior knowledge",
-};
+// Re-exported from the single definition. This file used to say "Prior
+// knowledge" for PK, which named a different thing from the "Partial
+// Knowledge" three other surfaces showed.
+export { KNOWLEDGE_LABEL } from "@/lib/knowledgeRegimes";
 export const ASPECT_LABEL: Record<Aspect, string> = {
   MF: "Molecular function",
   BP: "Biological process",

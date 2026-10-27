@@ -5,6 +5,7 @@ import { getShowcase, type PerTaskAggregate, type ShowcaseData } from "@/lib/api
 import { Tooltip } from "@/components/Tooltip";
 import { ShareBestLinkButton } from "./ShareBestLinkButton";
 import { stageBadgeClass, stageLabelKey } from "@/lib/stageBadge";
+import { KNOWLEDGE_DEFINITION } from "@/lib/knowledgeRegimes";
 
 /**
  * Async server component that hydrates the homepage best-result
@@ -48,11 +49,10 @@ const ASPECT_TOOLTIPS: Record<string, string> = {
 // the NK / LK / PK acronyms in the spotlight subtitle are self-
 // explaining (P1.9). Source of truth lives on the benchmark page; copy
 // is kept short here.
-const CATEGORY_TOOLTIPS: Record<string, string> = {
-  NK: "No Knowledge: the test protein has no experimental GO annotations of any aspect at the train cutoff. Strictest CAFA split.",
-  LK: "Limited Knowledge: the protein is annotated in other aspects but not the one under evaluation.",
-  PK: "Partial Knowledge: the protein is already annotated for the same aspect, so scoring only counts newly added terms.",
-};
+// The definitions come from lib/knowledgeRegimes, which is the single
+// one. This block used to name the benchmark page as the source of
+// truth, and that page only ever held labels, never definitions.
+const CATEGORY_TOOLTIPS: Record<string, string> = KNOWLEDGE_DEFINITION;
 
 // Definition of the IA-weighted headline metric. f_micro_w is the
 // information-accretion-weighted micro-averaged F: the LAFA / CAFA headline
