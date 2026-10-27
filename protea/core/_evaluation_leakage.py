@@ -39,7 +39,18 @@ from protea.infrastructure.orm.models.embedding.prediction_set import Prediction
 
 #: Backends produced only by fitting against annotations. Anything else is a
 #: pretrained backbone used as it ships, which has no cut to declare.
-FITTED_BACKENDS: frozenset[str] = frozenset({"residue-sparse", "learned-code"})
+#:
+#: ``ingested-method`` joins them for the same reason and not by analogy. The
+#: rows under it are written by ``ingest_method_predictions``, which exists
+#: only for a method whose score the platform did not compute: a model fitted
+#: elsewhere, against some release of our annotations. Leaving it out would
+#: have made the rule of the research screens -- a method appears only on
+#: windows whose t0 is at or after its cut -- unenforceable for exactly the
+#: arms it was written for, because an ingested set reaches its cut the same
+#: way a learned code does, through ``trained_on_annotation_set_id``.
+FITTED_BACKENDS: frozenset[str] = frozenset(
+    {"residue-sparse", "learned-code", "ingested-method"}
+)
 
 
 def _release(session: Session, annotation_set_id: uuid.UUID | None) -> int | None:

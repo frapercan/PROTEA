@@ -17,29 +17,19 @@ from __future__ import annotations
 
 from typing import Any
 
-#: Every ``model_backend`` a config may carry.
-#:
-#: The five language-model backends and ``auto``, plus the two an encoder
-#: operation writes. Those last two were missing for months while two merged
-#: operations wrote them on every run, which is the failure mode this set has
-#: by construction: nothing derives it, so it holds the values somebody
-#: remembered rather than the values the code produces. ``tests/
-#: test_backend_registry.py`` closes that by reading the operations.
-#:
-#: The two encoder tags are not interchangeable and the pairing is the point:
-#:
-#:   residue-sparse   select-then-pool, written by encode_residue_sparse
-#:   learned-code     pool-then-select, written by apply_learned_encoder
-#:
-#: Each operation accepts only its own order and refuses the other by name, so
-#: the tag is a fact about how a code was computed rather than a label anyone
-#: chose. That is what lets a reader tell an ablation control from a serving
-#: candidate by filtering instead of by reading prose.
-VALID_BACKENDS: frozenset[str] = frozenset(
-    {"esm", "esm3c", "t5", "ankh", "protst", "auto", "residue-sparse", "learned-code"}
+# The three closed vocabularies live beside the columns they constrain and
+# are imported rather than restated. There used to be two copies, this one
+# and the model's, and they had already drifted by two entries: the tags an
+# encoder operation writes were missing here for months while two merged
+# operations wrote them on every run. ``tests/test_backend_registry.py``
+# closes the general case by reading the operations themselves.
+from protea.core._evaluation_leakage import FITTED_BACKENDS
+from protea.infrastructure.orm.models.embedding.embedding_config import (
+    VALID_BACKENDS,
+    VALID_KINDS,
+    VALID_LAYER_AGG,
+    VALID_POOLING,
 )
-VALID_LAYER_AGG: frozenset[str] = frozenset({"mean", "last", "concat"})
-VALID_POOLING: frozenset[str] = frozenset({"mean", "max", "cls", "mean_max"})
 
 
 def _validate_model_fields(body: dict[str, Any], errors: list[str]) -> None:
@@ -123,6 +113,63 @@ def _validate_description(body: dict[str, Any], errors: list[str]) -> None:
     description = body.get("description", None)
     if description is not None and not isinstance(description, str):
         errors.append("description must be a string or null")
+    display_name = body.get("display_name", None)
+    if display_name is not None and not isinstance(display_name, str):
+        errors.append("display_name must be a string or null")
+    family = body.get("family", None)
+    if family is not None and not isinstance(family, str):
+        errors.append("family must be a string or null")
+
+
+def _validate_provenance(body: dict[str, Any], errors: list[str]) -> None:
+    """The fields that say what this configuration descends from and saw.
+
+    THE CUT IS WHY THIS EXISTS. ``trained_on_annotation_set_id`` is the only
+    place a fitted encoding records which annotation release it saw, and
+    ``protea.core._evaluation_leakage`` reads it to decide whether the
+    encoding may be scored on a frame at all. The canonicaliser used to drop
+    it, along with ``kind``, ``family`` and the parent config, so every
+    configuration created over HTTP arrived claiming to be a pretrained
+    backbone with nothing to declare. For a backend that is only ever
+    produced by fitting, that is not a missing field: it is a row that
+    ``check_training_cut`` will refuse later with "is fitted but declares no
+    training release", after someone has spent a run on it.
+
+    So the cut is required exactly when the backend says the artifact was
+    fitted, and refused at creation rather than at scoring time.
+    """
+    kind = body.get("kind", "pretrained")
+    if kind not in VALID_KINDS:
+        errors.append(f"kind must be one of {sorted(VALID_KINDS)}")
+    cut = body.get("trained_on_annotation_set_id")
+    parent = body.get("derived_from_embedding_config_id")
+    for name, value in (("trained_on_annotation_set_id", cut), ("derived_from_embedding_config_id", parent)):
+        if value is not None and not _is_uuid(value):
+            errors.append(f"{name} must be a uuid or null")
+    fitted = body.get("model_backend") in FITTED_BACKENDS or kind == "learned"
+    if fitted and cut is None:
+        errors.append(
+            "trained_on_annotation_set_id is required for a fitted encoding "
+            f"(backend in {sorted(FITTED_BACKENDS)} or kind 'learned'): the "
+            "leakage guard refuses to score one that declares no training "
+            "release, so a row without it could never be used"
+        )
+    if not fitted and cut is not None:
+        errors.append(
+            "trained_on_annotation_set_id is for an encoding that was FITTED. A "
+            "pretrained backbone saw none of our annotations and declaring a "
+            "cut for it would be false"
+        )
+
+
+def _is_uuid(value: Any) -> bool:
+    import uuid as _uuid
+
+    try:
+        _uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
 
 
 def _canonicalise_config(body: dict[str, Any]) -> dict[str, Any]:
@@ -146,6 +193,11 @@ def _canonicalise_config(body: dict[str, Any]) -> dict[str, Any]:
         "chunk_size": body.get("chunk_size", 512),
         "chunk_overlap": body.get("chunk_overlap", 0),
         "description": body.get("description", None),
+        "display_name": body.get("display_name", None),
+        "family": body.get("family", None),
+        "kind": body.get("kind", "pretrained"),
+        "derived_from_embedding_config_id": body.get("derived_from_embedding_config_id"),
+        "trained_on_annotation_set_id": body.get("trained_on_annotation_set_id"),
     }
 
 
@@ -169,6 +221,7 @@ def validate_embedding_config_body(body: dict[str, Any]) -> dict[str, Any]:
     _validate_chunking_sizes(body, errors)
     _validate_embedding_scale(body, errors)
     _validate_description(body, errors)
+    _validate_provenance(body, errors)
 
     if errors:
         raise InvalidEmbeddingConfigError(errors)

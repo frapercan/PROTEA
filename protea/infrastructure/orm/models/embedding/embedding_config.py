@@ -22,9 +22,50 @@ from sqlalchemy.orm import Mapped, mapped_column
 from protea.core.embedding_identity import derive_embedding_config_id
 from protea.infrastructure.orm.base import Base
 
-_VALID_LAYER_AGG = {"mean", "last", "concat"}
-_VALID_POOLING = {"mean", "max", "cls", "mean_max"}
-_VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "protst", "auto"}
+#: The closed vocabularies of this table's three recipe columns, here because
+#: this is where the columns are. There were two copies: these, which nothing
+#: read, and the ones the HTTP validator enforces, which by then were two
+#: entries ahead (``residue-sparse`` and ``learned-code``). A dead second list
+#: that disagrees with the live one is how the next entry lands in only one of
+#: them, so the validator now imports these.
+#:
+#: ``model_backend`` is NOT only an architecture. Four of its values name the
+#: PRODUCER of a representation rather than a model family, and that is what
+#: makes the tag usable as evidence elsewhere: ``residue-sparse`` is written
+#: only by ``encode_residue_sparse``, ``learned-code`` only by
+#: ``apply_learned_encoder``, and ``ingested-method`` only by
+#: ``ingest_method_predictions``, whose rows carry a score the platform did
+#: not compute. ``protea.core._evaluation_leakage`` reads exactly that: a
+#: backend in its ``FITTED_BACKENDS`` was produced by fitting against
+#: annotations and therefore has a cut to declare.
+#: The backend tag ``ingest_method_predictions`` requires of the config a
+#: method's prediction set points at. Named rather than spelled twice: the
+#: operation refuses any other tag, which is what makes the tag evidence
+#: about how the rows were produced instead of a label.
+INGESTED_METHOD_BACKEND = "ingested-method"
+
+VALID_LAYER_AGG: frozenset[str] = frozenset({"mean", "last", "concat", "none"})
+VALID_POOLING: frozenset[str] = frozenset({"mean", "max", "cls", "mean_max", "reader"})
+VALID_BACKENDS: frozenset[str] = frozenset(
+    {
+        # pretrained backbones, used as they ship
+        "esm",
+        "esm3c",
+        "t5",
+        "ankh",
+        "protst",
+        "auto",
+        # producers: what computed the representation, not what it descends from
+        "residue-sparse",
+        "learned-code",
+        INGESTED_METHOD_BACKEND,
+    }
+)
+
+#: ``kind``: the coarse split ``family`` used to carry as a second, unmarked
+#: meaning. ``learned`` is anything fitted against our annotations, which is
+#: the half that owes a training cut.
+VALID_KINDS: frozenset[str] = frozenset({"pretrained", "learned"})
 
 
 class EmbeddingConfig(Base):

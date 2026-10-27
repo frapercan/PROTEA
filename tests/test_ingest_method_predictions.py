@@ -28,6 +28,9 @@ from protea.core.operations.ingest_method_predictions import (
     _read_rows,
     scan,
 )
+from protea.infrastructure.orm.models.embedding.embedding_config import (
+    INGESTED_METHOD_BACKEND,
+)
 
 #: aspect letters as go_term stores them, verified on the live pivot:
 #: P 30,464 / F 12,397 / C 4,467 under releases/2022-07-01.
@@ -66,10 +69,16 @@ def _payload(path: Path, **over: Any) -> IngestMethodPredictionsPayload:
 
 
 class _Row:
-    """Stands in for any ORM row the operation only resolves and reads an id from."""
+    """Stands in for the three rows the set points at.
 
-    def __init__(self) -> None:
+    ``model_backend`` is only read off the config, and the operation refuses
+    any tag but ``ingested-method``: that refusal is what lets the leakage
+    guard treat the tag as evidence that the arm was fitted elsewhere.
+    """
+
+    def __init__(self, backend: str = INGESTED_METHOD_BACKEND) -> None:
         self.id = uuid.uuid4()
+        self.model_backend = backend
 
 
 class _Result:
@@ -86,14 +95,19 @@ class _Result:
 class _Session:
     """Answers the term query and the three lookups, and records every write."""
 
-    def __init__(self, terms: dict[str, tuple[int, str]] | None = None) -> None:
+    def __init__(
+        self,
+        terms: dict[str, tuple[int, str]] | None = None,
+        backend: str = INGESTED_METHOD_BACKEND,
+    ) -> None:
         self._terms = TERMS if terms is None else terms
+        self._backend = backend
         self.added: list[Any] = []
         self.inserted: list[int] = []
         self.flushes = 0
 
     def get(self, _model: type, _ident: uuid.UUID) -> _Row:
-        return _Row()
+        return _Row(self._backend)
 
     def execute(self, statement: Any) -> _Result:
         # The term map comes back as (go_id, id, aspect); an INSERT comes back
@@ -260,6 +274,28 @@ class TestTheGatesFireBeforeAnythingIsWritten:
             session, _payload(path, predictions_sha256=digest).model_dump(), emit=_emit
         )
         assert result.result["sha256"] == digest
+
+
+class TestTheConfigHasToBeTheRightKind:
+    def test_a_foreign_backend_is_refused(self, tmp_path: Path) -> None:
+        # Not a formality. _evaluation_leakage reads this tag as evidence that
+        # the rows came from a model fitted elsewhere, and therefore demands a
+        # training cut; if any config could be named here that evidence would
+        # be a convention rather than a fact about how the rows were made.
+        session = _Session(backend="ankh")
+        op = IngestMethodPredictionsOperation()
+        with pytest.raises(ValueError, match="ingested-method"):
+            op.execute(session, _payload(_write(tmp_path, GOOD)).model_dump(), emit=_emit)
+        assert session.added == []
+
+    def test_the_tag_the_operation_demands_is_a_fitted_backend(self) -> None:
+        # The two halves have to agree: the operation refuses anything but
+        # this tag, and the guard only asks for a cut from tags it considers
+        # fitted. If they drifted, an ingested arm would be scorable with no
+        # cut declared at all.
+        from protea.core._evaluation_leakage import FITTED_BACKENDS
+
+        assert INGESTED_METHOD_BACKEND in FITTED_BACKENDS
 
 
 class TestWhatItReportsWhenItWorks:
