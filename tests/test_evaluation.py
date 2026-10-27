@@ -13,6 +13,7 @@ from protea.core.evaluation import (
     _load_experimental_annotations_by_ns,
     _load_go_maps,
     compute_evaluation_data,
+    ReconciledWindow,
     compute_evaluation_data_reconciled,
 )
 
@@ -665,14 +666,15 @@ class TestComputeEvaluationDataReconciled:
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
                 side_effect=[
-                    {"P1": {"F": {"GO:0001"}}},
-                    {"P1": {"F": {"GO:0001"}}},
+                    ({"P1": {"F": {"GO:0001"}}}, None),
+                    ({"P1": {"F": {"GO:0001"}}}, None),
                 ],
             ),
             patch("protea.core.evaluation._reconcile_not_side", return_value={}),
         ):
             result = compute_evaluation_data_reconciled(
-                MagicMock(), old_id, new_id, old_snap, new_snap, pivot
+                MagicMock(),
+                ReconciledWindow(old_id, new_id, old_snap, new_snap, pivot),
             )
         assert result.delta_proteins == 0
 
@@ -686,12 +688,13 @@ class TestComputeEvaluationDataReconciled:
             patch("protea.core.evaluation._load_children_by_go_id", return_value={}),
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
-                side_effect=[{}, {"P1": {"F": {"GO:0001"}}}],
+                side_effect=[({}, None), ({"P1": {"F": {"GO:0001"}}}, None)],
             ),
             patch("protea.core.evaluation._reconcile_not_side", return_value={}),
         ):
             result = compute_evaluation_data_reconciled(
-                MagicMock(), old_id, new_id, old_snap, new_snap, pivot
+                MagicMock(),
+                ReconciledWindow(old_id, new_id, old_snap, new_snap, pivot),
             )
         assert result.nk == {"P1": {"GO:0001"}}
         assert result.lk == {}
@@ -709,8 +712,8 @@ class TestComputeEvaluationDataReconciled:
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
                 side_effect=[
-                    {"P1": {"F": {"GO:0001", "GO:0002"}}},
-                    {"P1": {"F": {"GO:0001", "GO:0002", "GO:0003"}}},
+                    ({"P1": {"F": {"GO:0001", "GO:0002"}}}, None),
+                    ({"P1": {"F": {"GO:0001", "GO:0002", "GO:0003"}}}, None),
                 ],
             ),
             patch(
@@ -719,7 +722,8 @@ class TestComputeEvaluationDataReconciled:
             ),
         ):
             result = compute_evaluation_data_reconciled(
-                MagicMock(), old_id, new_id, old_snap, new_snap, pivot
+                MagicMock(),
+                ReconciledWindow(old_id, new_id, old_snap, new_snap, pivot),
             )
         # After applying the merged negatives, P1 old = {GO:0001}, new = {GO:0001, GO:0003}
         # → PK with delta GO:0003
@@ -737,14 +741,15 @@ class TestComputeEvaluationDataReconciled:
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
                 side_effect=[
-                    {"P1": {"F": {"GO:0001"}}},
-                    {"P1": {"F": {"GO:0001"}, "P": {"GO:0002"}}},
+                    ({"P1": {"F": {"GO:0001"}}}, None),
+                    ({"P1": {"F": {"GO:0001"}, "P": {"GO:0002"}}}, None),
                 ],
             ),
             patch("protea.core.evaluation._reconcile_not_side", return_value={}),
         ):
             result = compute_evaluation_data_reconciled(
-                MagicMock(), old_id, new_id, old_snap, new_snap, pivot
+                MagicMock(),
+                ReconciledWindow(old_id, new_id, old_snap, new_snap, pivot),
             )
         assert result.lk == {"P1": {"GO:0002"}}
         assert result.nk == {}
