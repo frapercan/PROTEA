@@ -43,7 +43,64 @@ export const LIVE_ANNOTATION_AVAILABLE = false;
  *
  * Flip it with the same evidence as the other one: rows, not job status.
  */
-export const DATA_SURFACES_HAVE_DATA = false;
+/**
+ * Which result surfaces have rows, measured per route instead of all at once.
+ *
+ * ``DATA_SURFACES_HAVE_DATA`` was one boolean over eleven routes, and it was
+ * right when it was written: on 2026-10-07 every one of them was empty. It is
+ * wrong now, and the cost is not symmetric -- a single flag hides the six
+ * surfaces that hold the campaign's work in order to protect a visitor from
+ * the three that are still empty.
+ *
+ * MEASURED on the server's own database, 2026-10-27:
+ *
+ * | route                             | rows |
+ * | --------------------------------- | ---- |
+ * | /instrument/embeddings            | 8 configs, 684.048 vectors |
+ * | /instrument/functional-annotation | 1.084.104 predictions, 6 sets |
+ * | /instrument/annotations           | 75 annotation sets, 66 snapshots |
+ * | /instrument/query-sets            | 5.810 entries |
+ * | /instrument/evaluation            | 125 evaluation sets |
+ * | /feature-registry                 | 78 features, schema 1.7.0 |
+ * | /instrument/graph                 | GET /v1/graph answers with 10 nodes |
+ * | /instrument/benchmark             | 125 sets but **3** results |
+ * | /instrument/datasets              | 0 |
+ * | /instrument/reranker              | 0 reranker models |
+ * | /instrument/scoring               | 0 (/v1/scoring/rerankers is empty) |
+ *
+ * ``benchmark`` stays hidden deliberately: three results is a table with one
+ * row of nine cells, which is the blank-table-with-admin-buttons the original
+ * audit objected to. It comes back with the arms, not with this edit.
+ *
+ * Update an entry the way the old flag asked: by counting ROWS, not by reading
+ * a green job. And update the table above in the same commit, because an entry
+ * whose evidence is not written down is a guess that looks like a measurement.
+ */
+export const SURFACE_HAS_ROWS: Record<string, boolean> = {
+  "/instrument/embeddings": true,
+  "/instrument/functional-annotation": true,
+  "/instrument/annotations": true,
+  "/instrument/query-sets": true,
+  "/instrument/evaluation": true,
+  "/feature-registry": true,
+  "/instrument/graph": true,
+  "/instrument/benchmark": false,
+  "/instrument/datasets": false,
+  "/instrument/reranker": false,
+  "/instrument/scoring": false,
+};
+
+/**
+ * Whether this route may appear in navigation.
+ *
+ * A route not in the table is not gated at all, so adding a surface does not
+ * silently hide it: the failure direction is "visible and empty", which an
+ * operator notices, rather than "invisible and live", which took three weeks
+ * to notice last time.
+ */
+export function surfaceHasRows(href: string): boolean {
+  return SURFACE_HAS_ROWS[href] ?? true;
+}
 
 /**
  * The ingest that is running instead, as a dated snapshot.
