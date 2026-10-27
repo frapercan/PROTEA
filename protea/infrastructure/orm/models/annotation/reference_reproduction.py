@@ -81,5 +81,5 @@ class ReferenceReproduction(Base):
         UUID(as_uuid=True), ForeignKey("job.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
