@@ -25,13 +25,17 @@ def _parquet(rows: list[dict]) -> bytes:
     return buf.getvalue()
 
 
+#: What ``stratify_evaluation`` writes. The metric columns are neutral and
+#: ``variant`` says which weighting they hold: the old names ended in ``_w``
+#: whatever had been pooled, and every evaluation stored on this deployment ran
+#: without an information-accretion table, so its sums are unweighted.
 _CELLS = [
     {"category": "NK", "aspect": "F", "homology": "<=30",
-     "n_proteins": 271, "precision_w": 0.2, "recall_w": 0.3,
-     "f_micro_w": 0.2461, "reportable": True},
+     "n_proteins": 271, "variant": "unweighted", "precision": 0.2, "recall": 0.3,
+     "f_micro": 0.2461, "reportable": True},
     {"category": "NK", "aspect": "F", "homology": ">90",
-     "n_proteins": 4, "precision_w": 0.4, "recall_w": 0.5,
-     "f_micro_w": 0.4039, "reportable": False},
+     "n_proteins": 4, "variant": "unweighted", "precision": 0.4, "recall": 0.5,
+     "f_micro": 0.4039, "reportable": False},
 ]
 
 
