@@ -67,6 +67,60 @@ TRUTH_PROFILES: tuple[str, ...] = ("as_closed", "projected")
 #: were alive in 2022 and are obsolete in 2025.
 GAIN_RULES: tuple[str, ...] = ("pivot_terms", "live_in_both_ends")
 
+#: Which NOT annotations may take truth away, by the name a payload asks for
+#: it with.
+#:
+#: ``any`` is what the platform has always done: ``_load_not_raw_go_ids``
+#: reads every NOT row whatever its evidence code, so a ``NOT|IBA`` removes
+#: the term and its descendants from a truth whose positives are experimental
+#: only. It stays the default, so no stored window moves.
+#:
+#: ``experimental`` restricts the negation to the thirteen experimental
+#: codes, which is what the lab's frame does and what Francisco declared for
+#: the long validation window on 2026-10-27: a truth built from experiment
+#: should be denied by experiment, and an inferred NOT stays available as an
+#: INPUT to the methods instead of removing ground truth.
+#:
+#: Measured on 211 -> 227 with everything else held fixed -- same remap, same
+#: projection, same two graphs -- the two rules are:
+#:
+#: ===================  =======  ==============  =====
+#: counter              ``any``  experimental    lab
+#: ===================  =======  ==============  =====
+#: delta_proteins        40.534          40.531  40.531
+#: lk_proteins            4.669           4.667   4.667
+#: projected_entries      2.619           2.610   2.610
+#: projected_pairs        3.830           3.821   3.821
+#: projected_proteins     2.237           2.228   2.228
+#: ===================  =======  ==============  =====
+#:
+#: NK and PK do not move. Three proteins and nine projected entries is the
+#: whole of it, and it is the difference between reproducing the lab's truth
+#: exactly and missing it by three.
+#:
+#: The lab's own choice here was inherited rather than taken -- their store
+#: was built from experimental exports and the other codes were never loaded
+#: -- which is why this is a declared field and not a constant.
+NOT_CODE_RULES: tuple[str, ...] = ("any", "experimental")
+
+
+def refuse_unknown_rules(window: ReconciledWindow) -> None:
+    """Refuse a window that names a rule this module does not define.
+
+    Here rather than at the builder because the vocabularies are here: a
+    fourth rule added to one of these tuples and not to the refusal would be
+    accepted as a spelling of its default, which is how a field meant to
+    separate two truths ends up merging them.
+    """
+    for name, rules in (
+        ("truth_profile", TRUTH_PROFILES),
+        ("toi_rule", GAIN_RULES),
+        ("not_codes", NOT_CODE_RULES),
+    ):
+        value = getattr(window, name)
+        if value not in rules:
+            raise ValueError(f"unknown {name} {value!r}; expected one of {rules}")
+
 class ReconciledWindow(NamedTuple):
     """The five ids a reconciled delta is built from, plus how to build it.
 
@@ -86,6 +140,8 @@ class ReconciledWindow(NamedTuple):
     pivot_snapshot_id: uuid.UUID
     truth_profile: str = TRUTH_PROFILES[0]
     toi_rule: str = GAIN_RULES[0]
+    not_codes: str = NOT_CODE_RULES[0]
+
 
 def _window_end_snapshots(session: Session, window: ReconciledWindow) -> tuple[uuid.UUID, uuid.UUID]:
     """The ontology each end's corpus was loaded under.

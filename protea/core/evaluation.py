@@ -38,7 +38,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -69,12 +69,14 @@ from protea.core._truth_projection import (
 from protea.core._truth_remap import Applied, apply_remap
 from protea.core._truth_rules import (
     GAIN_RULES,
+    NOT_CODE_RULES,
     TRUTH_PROFILES,
     ProjectionRequest,
     ReconciledWindow,
     _keep_within_toi,
     _projection_request,
     _terms_of_interest,
+    refuse_unknown_rules,
 )
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
 
@@ -415,17 +417,35 @@ def _load_experimental_raw_go_ids(
     return dict(out)
 
 
-def _load_not_raw_go_ids(session: Session, annotation_set_id: uuid.UUID) -> dict[str, set[str]]:
-    """Return ``{protein: {native_go_id}}`` for NOT-qualified rows."""
+def _load_not_raw_go_ids(
+    session: Session, annotation_set_id: uuid.UUID, experimental_only: bool = False
+) -> dict[str, set[str]]:
+    """Return ``{protein: {native_go_id}}`` for NOT-qualified rows.
+
+    ``experimental_only`` restricts the negation to the thirteen experimental
+    codes. It is False by default, which is what this function has always
+    done: every NOT row whatever its evidence, so a ``NOT|IBA`` takes a term
+    away from a truth whose positives are experimental only. On the 211 -> 227
+    window 9.262 of the 17.178 NOT rows across the two ends carry
+    non-experimental evidence, and they move three proteins of the delta and
+    nine projected entries. Which answer is right is a frame decision and
+    lives on the window, not here; see ``_truth_rules.NOT_CODE_RULES`` for
+    the measured table.
+    """
+    evidence = "AND pga.evidence_code = ANY(:exp_codes)" if experimental_only else ""
+    params: dict[str, Any] = {"set_id": annotation_set_id}
+    if experimental_only:
+        params["exp_codes"] = _EXP_CODES
     rows = session.execute(
-        text("""
+        text(f"""
         SELECT DISTINCT pga.protein_accession, gt.go_id
         FROM protein_go_annotation pga
         JOIN go_term gt ON gt.id = pga.go_term_id
         WHERE pga.annotation_set_id = :set_id
           AND pga.qualifier LIKE '%NOT%'
+          {evidence}
     """),
-        {"set_id": annotation_set_id},
+        params,
     ).fetchall()
     out: dict[str, set[str]] = defaultdict(set)
     for prot, go_id in rows:
@@ -500,13 +520,25 @@ def _reconcile_experimental_side(
     return out, (projection, remapped)
 
 
+class _Side(NamedTuple):
+    """One end of the window: its corpus and the graph that closes it.
+
+    The two travel together through both reconcile steps, and bundling them
+    is what leaves room for the window's rules without passing seven
+    arguments.
+    """
+
+    annotation_set_id: uuid.UUID
+    native_snapshot_id: uuid.UUID
+
+
 def _reconcile_not_side(
     session: Session,
-    annotation_set_id: uuid.UUID,
-    native_snapshot_id: uuid.UUID,
+    side: _Side,
     pivot_go_ids: set[str],
     pivot_children: dict[str, set[str]],
     project: ProjectionRequest | None = None,
+    experimental_only: bool = False,
 ) -> tuple[dict[str, set[str]], Applied | None]:
     """Reconcile NOT-qualified terms to pivot via True Path Rule contrapositive.
 
@@ -518,8 +550,8 @@ def _reconcile_not_side(
     This preserves PROTEA's NOT propagation semantics — democafa just drops
     NOT rows — while still producing a pivot-consistent exclusion set.
     """
-    native_children = _load_children_by_go_id(session, native_snapshot_id)
-    raw = _load_not_raw_go_ids(session, annotation_set_id)
+    native_children = _load_children_by_go_id(session, side.native_snapshot_id)
+    raw = _load_not_raw_go_ids(session, side.annotation_set_id, experimental_only)
     # The same remapping as the experimental side, and NEVER a projection: a
     # NOT denies the term and everything under it, so climbing to an ancestor
     # would assert the protein lacks something it may well have. No ``spare``
@@ -582,12 +614,13 @@ def _union_of_negatives(
     """
     merged: dict[str, set[str]] = defaultdict(set)
     reports: list[Applied | None] = []
-    for side, native in (
-        (window.old_annotation_set_id, window.old_native_snapshot_id),
-        (window.new_annotation_set_id, window.new_native_snapshot_id),
+    experimental_only = window.not_codes == "experimental"
+    for side in (
+        _Side(window.old_annotation_set_id, window.old_native_snapshot_id),
+        _Side(window.new_annotation_set_id, window.new_native_snapshot_id),
     ):
         negatives, applied = _reconcile_not_side(
-            session, side, native, pivot_go_ids, pivot_children, project
+            session, side, pivot_go_ids, pivot_children, project, experimental_only
         )
         reports.append(applied)
         for protein, terms in negatives.items():
@@ -707,15 +740,7 @@ def compute_evaluation_data_reconciled(
     both annotation sets is applied to both sides, matching same-snapshot
     behaviour.
     """
-    if window.truth_profile not in TRUTH_PROFILES:
-        raise ValueError(
-            f"unknown truth_profile {window.truth_profile!r}; expected one of "
-            f"{TRUTH_PROFILES}"
-        )
-    if window.toi_rule not in GAIN_RULES:
-        raise ValueError(
-            f"unknown toi_rule {window.toi_rule!r}; expected one of {GAIN_RULES}"
-        )
+    refuse_unknown_rules(window)
     pivot_go_ids, pivot_aspect = _load_pivot_term_universe(session, window.pivot_snapshot_id)
     pivot_children = _load_children_by_go_id(session, window.pivot_snapshot_id)
 
@@ -761,6 +786,7 @@ __all__ = [
     "EvaluationData",
     "compute_evaluation_data",
     "GAIN_RULES",
+    "NOT_CODE_RULES",
     "ReconciledWindow",
     "TRUTH_PROFILES",
     "compute_evaluation_data_reconciled",
