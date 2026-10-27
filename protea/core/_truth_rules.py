@@ -103,6 +103,24 @@ GAIN_RULES: tuple[str, ...] = ("pivot_terms", "live_in_both_ends")
 #: -- which is why this is a declared field and not a constant.
 NOT_CODE_RULES: tuple[str, ...] = ("any", "experimental")
 
+
+def refuse_unknown_rules(window: ReconciledWindow) -> None:
+    """Refuse a window that names a rule this module does not define.
+
+    Here rather than at the builder because the vocabularies are here: a
+    fourth rule added to one of these tuples and not to the refusal would be
+    accepted as a spelling of its default, which is how a field meant to
+    separate two truths ends up merging them.
+    """
+    for name, rules in (
+        ("truth_profile", TRUTH_PROFILES),
+        ("toi_rule", GAIN_RULES),
+        ("not_codes", NOT_CODE_RULES),
+    ):
+        value = getattr(window, name)
+        if value not in rules:
+            raise ValueError(f"unknown {name} {value!r}; expected one of {rules}")
+
 class ReconciledWindow(NamedTuple):
     """The five ids a reconciled delta is built from, plus how to build it.
 

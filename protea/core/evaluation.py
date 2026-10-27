@@ -76,6 +76,7 @@ from protea.core._truth_rules import (
     _keep_within_toi,
     _projection_request,
     _terms_of_interest,
+    refuse_unknown_rules,
 )
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
 
@@ -739,19 +740,7 @@ def compute_evaluation_data_reconciled(
     both annotation sets is applied to both sides, matching same-snapshot
     behaviour.
     """
-    if window.truth_profile not in TRUTH_PROFILES:
-        raise ValueError(
-            f"unknown truth_profile {window.truth_profile!r}; expected one of "
-            f"{TRUTH_PROFILES}"
-        )
-    if window.toi_rule not in GAIN_RULES:
-        raise ValueError(
-            f"unknown toi_rule {window.toi_rule!r}; expected one of {GAIN_RULES}"
-        )
-    if window.not_codes not in NOT_CODE_RULES:
-        raise ValueError(
-            f"unknown not_codes {window.not_codes!r}; expected one of {NOT_CODE_RULES}"
-        )
+    refuse_unknown_rules(window)
     pivot_go_ids, pivot_aspect = _load_pivot_term_universe(session, window.pivot_snapshot_id)
     pivot_children = _load_children_by_go_id(session, window.pivot_snapshot_id)
 
