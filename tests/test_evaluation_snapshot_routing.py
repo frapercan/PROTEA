@@ -84,18 +84,19 @@ def test_the_natives_come_from_the_sets_and_not_from_the_caller() -> None:
     # The caller's snapshot is the pivot. It is not evidence about where the
     # annotation sets live, and believing it was is the whole defect.
     _, reconciled = _run(SNAP_A, SNAP_B, SNAP_B)
-    # (session, old_set_id, new_set_id, old_native, new_native, pivot)
-    args = reconciled.call_args.args
-    assert args[3] == SNAP_A, "old native must come from the old set"
-    assert args[4] == SNAP_B, "new native must come from the new set"
-    assert args[5] == SNAP_B, "the caller's snapshot is the pivot"
+    # (session, ReconciledWindow): the five ids travel as one object now, so
+    # the assertion reads them by name instead of by position.
+    window = reconciled.call_args.args[1]
+    assert window.old_native_snapshot_id == SNAP_A, "old native must come from the old set"
+    assert window.new_native_snapshot_id == SNAP_B, "new native must come from the new set"
+    assert window.pivot_snapshot_id == SNAP_B, "the caller's snapshot is the pivot"
 
 
 def test_a_pivot_that_is_neither_native_still_reconciles() -> None:
     third = uuid.uuid4()
     direct, reconciled = _run(SNAP_A, SNAP_B, third)
     reconciled.assert_called_once()
-    assert reconciled.call_args.args[5] == third
+    assert reconciled.call_args.args[1].pivot_snapshot_id == third
     direct.assert_not_called()
 
 
