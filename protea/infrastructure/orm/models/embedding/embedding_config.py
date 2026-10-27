@@ -13,11 +13,13 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    event,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from protea.core.embedding_identity import derive_embedding_config_id
 from protea.infrastructure.orm.base import Base
 
 _VALID_LAYER_AGG = {"mean", "last", "concat"}
@@ -103,13 +105,31 @@ class EmbeddingConfig(Base):
     embedding_scale: Mapped[float] = mapped_column(
         Float, nullable=False, default=1.0, server_default="1.0"
     )
-    max_length: Mapped[int] = mapped_column(Integer, nullable=False, default=1022)
+    #: Residues the model sees. NULL means full length: no truncation was
+    #: applied. A sentinel integer would make the recipe a function of the
+    #: corpus, and max_length is an identity field.
+    max_length: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1022)
     use_chunking: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=512)
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    #: The lineage a model descends from: ``ankh``, ``esm2``, ``esmc``,
+    #: ``prot_t5``, ``prostt5``, ``protst``, ``rung2``. One statement only —
+    #: it used to hold architectures for the learned configs too, which made
+    #: grouping by it mix lineages with architectures.
     family: Mapped[str | None] = mapped_column(String, nullable=True)
+    #: ``pretrained`` or ``learned``. The coarse split that ``family`` was
+    #: carrying as a second, unmarked meaning.
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="pretrained")
+    #: For a learned encoding, the config whose vectors it was built on top of.
+    #: NULL for a pretrained one — a sentinel would make "no parent" and
+    #: "parent unknown" the same answer.
+    derived_from_embedding_config_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("embedding_config.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     param_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     #: The annotation release this encoding was FITTED against, for
     #: encodings that were fitted at all.
@@ -142,3 +162,25 @@ class EmbeddingConfig(Base):
             f"| pool={self.pooling} | norm_res={self.normalize_residues} "
             f"| norm={self.normalize} | chunking={self.use_chunking})>"
         )
+
+
+@event.listens_for(EmbeddingConfig, "before_insert")
+def _derive_id_from_recipe(_mapper, _connection, target: EmbeddingConfig) -> None:
+    """Give every new config the id its own recipe derives.
+
+    ``embedding_identity`` was written so there would be "one derivation with
+    callers, rather than one derivation per place that remembers to do it". It
+    ended up with none: four call sites construct an ``EmbeddingConfig`` and all
+    four took the column's ``uuid.uuid4`` default, which is how five of thirteen
+    configs came to hold ids no second machine could reproduce.
+
+    A listener rather than four calls, because the four were the problem. The id
+    is what lets two machines build the same recipe and land on the same row
+    without talking to each other, and that property cannot depend on each new
+    call site remembering it exists.
+
+    An explicitly supplied id is honoured, so a migration or a repair script can
+    still place a row deliberately.
+    """
+    if target.id is None:
+        target.id = derive_embedding_config_id(target)

@@ -340,3 +340,25 @@ class TestReportableStrataNamesWhatItWithholds:
     def test_a_floor_below_one_is_refused(self) -> None:
         with pytest.raises(ValueError, match="at least 1"):
             reportable_strata({}, min_population=0)
+
+
+def test_the_docstring_counts_the_axes_it_names() -> None:
+    """The unit every result is reported for must not miscount itself.
+
+    It read "six axes" while the tuple carried seven fields and ``__str__``
+    printed all seven. A number in prose cannot be checked, so it drifted; this
+    reads the number out of the sentence and compares it with the tuple, which
+    makes the next drift a failing test instead of a sentence nobody re-reads.
+    """
+    import re
+
+    from protea.core.strata import Stratum
+
+    words = {"six": 6, "seven": 7, "eight": 8}
+    doc = Stratum.__doc__ or ""
+    match = re.search(r"\b(six|seven|eight)\b\s+axes", doc)
+    assert match, f"the Stratum docstring no longer states how many axes it has: {doc[:80]!r}"
+    assert words[match.group(1)] == len(Stratum._fields), (
+        f"the docstring says {match.group(1)} axes and the tuple has "
+        f"{len(Stratum._fields)}: {list(Stratum._fields)}"
+    )

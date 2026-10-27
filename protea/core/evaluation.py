@@ -45,6 +45,8 @@ from typing import NamedTuple
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core._binding_rule import PROTEIN_BINDING, drop_binding_only_mfo
+
 # Re-exported so callers keep importing these from here. The routing branch
 # lives in its own module to keep this file inside the section 3 file-LOC
 # budget and to give the defect it closes room to be explained.
@@ -511,6 +513,22 @@ def _load_not_raw_go_ids(session: Session, annotation_set_id: uuid.UUID) -> dict
     return dict(out)
 
 
+def _drop_binding_only(
+    session: Session, snapshot_id: uuid.UUID, raw: dict[str, set[str]]
+) -> int:
+    """Apply the protein-binding rule to one side's DIRECT annotations.
+
+    The binding subtree is resolved per snapshot rather than hardcoded, because
+    it is not a constant: 920 terms under the snapshot behind GOA 220, and the
+    ontology prunes and grows across the series this campaign spans.
+    """
+    binding = _bfs_closure(
+        {PROTEIN_BINDING}, _load_children_by_go_id(session, snapshot_id)
+    )
+    _, aspect_by_go_id = _load_pivot_term_universe(session, snapshot_id)
+    return drop_binding_only_mfo(raw, binding, aspect_by_go_id)
+
+
 def _reconcile_experimental_side(
     session: Session,
     annotation_set_id: uuid.UUID,
@@ -527,6 +545,7 @@ def _reconcile_experimental_side(
     """
     native_parents = _load_parents_by_go_id(session, native_snapshot_id)
     raw = _load_experimental_raw_go_ids(session, annotation_set_id)
+    _drop_binding_only(session, native_snapshot_id, raw)
 
     out: dict[str, dict[str, set[str]]] = {}
     for protein, go_ids in raw.items():

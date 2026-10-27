@@ -21,7 +21,13 @@ import random
 
 import networkx as nx
 
-from protea.core.ia import information_accretion, term_ia
+from protea.core.ia import (
+    ia_over_components,
+    information_accretion,
+    strongly_connected_components,
+    term_ia,
+    term_ia_against,
+)
 
 
 def _lafa_reference_ia(
@@ -155,3 +161,117 @@ def test_information_accretion_propagation_is_monotone():
     annotations = [(f"p{rng.randint(0, 20)}", rng.choice(terms)) for _ in range(200)]
     ia = information_accretion(terms, parents, annotations)
     assert all(v >= 0.0 for v in ia.values())
+
+
+# ---------------------------------------------------------------------------
+# Cycles. GO is meant to be acyclic and release 221 is not.
+# ---------------------------------------------------------------------------
+
+
+def _triangles() -> dict[str, set[str]]:
+    """The shape of release 221, reduced: two triangles under one external root.
+
+    Mirrors the measured graph of ``releases/2024-06-10``, where
+    ``{GO:0045257, GO:0045273, GO:0045281}`` and
+    ``{GO:0045258, GO:0045274, GO:0045282}`` each close through a mix of
+    ``is_a`` and ``part_of``, and the second sits below the first.
+    """
+    return {
+        "A": {"C"},
+        "B": {"A"},
+        "C": {"A", "B", "X"},
+        "D": {"E"},
+        "E": {"F"},
+        "F": {"D", "A"},
+        "X": set(),
+    }
+
+
+def test_an_acyclic_graph_has_no_components():
+    terms, parents = _random_dag(60, seed=3)
+    assert strongly_connected_components(parents) == []
+
+
+def test_it_finds_both_triangles_and_nothing_else():
+    comps = strongly_connected_components(_triangles())
+    assert sorted(sorted(c) for c in comps) == [["A", "B", "C"], ["D", "E", "F"]]
+
+
+def test_a_two_cycle_is_a_component():
+    assert [sorted(c) for c in strongly_connected_components({"A": {"B"}, "B": {"A"}})] == [
+        ["A", "B"]
+    ]
+
+
+def test_on_an_acyclic_graph_it_is_exactly_term_ia():
+    """The property that keeps 60 of the 61 snapshots unchanged.
+
+    Not "within a tolerance": the same float, because the acyclic path calls
+    ``term_ia`` and nothing else.
+    """
+    for seed in range(6):
+        terms, parents = _random_dag(60, seed)
+        rng = random.Random(500 + seed)
+        prop: dict[str, set[str]] = {}
+        for t in terms:
+            prop[t] = {f"p{j}" for j in range(rng.randint(0, 12))}
+        antes = {t: term_ia(t, parents.get(t), prop) for t in terms}
+        ahora = ia_over_components(terms, parents, prop)
+        assert ahora == antes
+
+
+def test_a_cycle_member_is_no_longer_exactly_zero():
+    """The regression. Every member used to be 0.0, so f_micro_w could not see them."""
+    parents = _triangles()
+    # Reachability propagation gives every member of a component the same set.
+    prop = {
+        "A": {"p1", "p2"}, "B": {"p1", "p2"}, "C": {"p1", "p2"},
+        "D": {"p1"}, "E": {"p1"}, "F": {"p1"},
+        "X": {"p1", "p2", "p3", "p4"},
+    }
+    viejo = {t: term_ia(t, parents.get(t), prop) for t in ("A", "B", "C")}
+    assert set(viejo.values()) == {0.0}, "the defect this fixes"
+
+    nuevo = ia_over_components(list(parents), parents, prop)
+    assert nuevo["A"] > 0.0
+    assert nuevo["A"] == nuevo["B"] == nuevo["C"]
+
+
+def test_the_members_sum_to_the_whole_components_information():
+    """Equal division is chosen because f_micro_w SUMS over the terms a protein has.
+
+    A protein carrying any member of a cycle carries all of them, so the members
+    must add up to the component's own information content, measured against the
+    parents OUTSIDE it.
+    """
+    parents = _triangles()
+    prop = {
+        "A": {"p1", "p2"}, "B": {"p1", "p2"}, "C": {"p1", "p2"},
+        "D": {"p1"}, "E": {"p1"}, "F": {"p1"},
+        "X": {"p1", "p2", "p3", "p4"},
+    }
+    ia = ia_over_components(list(parents), parents, prop)
+    entero = term_ia_against(prop["A"], {"X"}, prop)
+    assert abs((ia["A"] + ia["B"] + ia["C"]) - entero) < 1e-12
+
+
+def test_a_component_is_measured_against_its_external_parents_only():
+    """Its own members are not parents of the concept; only what is outside is."""
+    parents = _triangles()
+    prop = {
+        "A": {"p1", "p2"}, "B": {"p1", "p2"}, "C": {"p1", "p2"},
+        "D": {"p1"}, "E": {"p1"}, "F": {"p1"},
+        "X": {"p1", "p2", "p3", "p4"},
+    }
+    ia = ia_over_components(list(parents), parents, prop)
+    # D/E/F hang off A, which carries {p1,p2}: 1+1 over 2+1.
+    entero = term_ia_against(prop["D"], {"A"}, prop)
+    assert abs((ia["D"] + ia["E"] + ia["F"]) - entero) < 1e-12
+
+
+def test_terms_outside_a_cycle_are_untouched_when_one_exists():
+    parents = _triangles()
+    prop = {t: {"p1"} for t in parents}
+    prop["X"] = {"p1", "p2"}
+    ia = ia_over_components(list(parents), parents, prop)
+    assert ia["X"] == term_ia("X", parents.get("X"), prop)

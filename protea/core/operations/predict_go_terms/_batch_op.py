@@ -428,8 +428,9 @@ class PredictGOTermsBatchOperation(
         self,
         session: Session,
         ctx: _UnifiedPredictContext,
+        sequence_keys: dict[str, str] | None = None,
     ) -> tuple[dict[str, list[dict[str, Any]]], set[str]]:
-        return _unified.unified_load_annotations(self, session, ctx)
+        return _unified.unified_load_annotations(self, session, ctx, sequence_keys)
 
     def _unified_load_pair_inputs(
         self,

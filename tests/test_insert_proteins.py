@@ -6,6 +6,7 @@ Integration test uses a real Postgres via --with-postgres.
 
 from __future__ import annotations
 
+import gzip
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -54,6 +55,16 @@ def _make_mock_response(fasta_text: str, link_header: str = "") -> MagicMock:
     resp.status_code = 200
     resp.content = fasta_text.encode("utf-8")
     resp.headers = {"link": link_header}
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+def _make_gz_response(fasta_text: str) -> MagicMock:
+    """A release file as served: gzipped bytes, no Link header."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.content = gzip.compress(fasta_text.encode("utf-8"))
+    resp.headers = {}
     resp.raise_for_status = MagicMock()
     return resp
 
@@ -148,106 +159,185 @@ class TestInsertProteinsPayload:
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — _store_records
+# Unit tests — the release-file source path
 # ---------------------------------------------------------------------------
 
+_CANONICAL_URL = "https://ftp.uniprot.org/x/uniprot_sprot.fasta.gz"
+_VARSPLIC_URL = "https://ftp.uniprot.org/x/uniprot_sprot_varsplic.fasta.gz"
 
-class TestStoreRecords:
+FASTA_ISOFORM = (
+    ">sp|P12345-2|TEST_HUMAN Isoform 2 OS=Homo sapiens OX=9606 GN=TEST PE=1 SV=2\n"
+    "MKTAYIAKQRQ\n"
+)
+
+
+class TestReleaseFastaPayload:
+    def test_defaults_to_no_release_files(self):
+        p = InsertProteinsPayload(search_criteria="reviewed:true")
+        assert p.release_fasta_urls == []
+
+    def test_accepts_the_json_list_a_real_job_arrives_as(self):
+        # POST /v1/jobs carries JSON, so the field arrives as a list.
+        # ProteaPayload is strict=True on purpose and will not coerce a
+        # list into a tuple, which is how this was caught.
+        p = InsertProteinsPayload.model_validate(
+            {
+                "search_criteria": "reviewed:true",
+                "release_fasta_urls": [_CANONICAL_URL, _VARSPLIC_URL],
+            }
+        )
+        assert p.release_fasta_urls == [_CANONICAL_URL, _VARSPLIC_URL]
+
+    def test_survives_a_json_round_trip(self):
+        import json
+
+        p = InsertProteinsPayload.model_validate(
+            json.loads(
+                json.dumps(
+                    {
+                        "search_criteria": "reviewed:true",
+                        "release_fasta_urls": [_CANONICAL_URL],
+                    }
+                )
+            )
+        )
+        assert p.release_fasta_urls == [_CANONICAL_URL]
+
+    def test_rejects_a_non_http_url(self):
+        # A local path would read whatever is on the worker's disk, which
+        # no declaration can pin.
+        with pytest.raises(Exception):
+            InsertProteinsPayload(
+                search_criteria="reviewed:true",
+                release_fasta_urls=["/var/tmp/uniprot_sprot.fasta.gz"],
+            )
+
+    def test_still_requires_search_criteria(self):
+        # It is what the files are asserted to be equivalent to, so the
+        # declaration stays readable without opening the URLs.
+        with pytest.raises(Exception):
+            InsertProteinsPayload(release_fasta_urls=[_CANONICAL_URL])
+
+
+class TestExecuteFromReleaseFiles:
     def setup_method(self):
         self.op = InsertProteinsOperation()
 
-    def test_empty_records_returns_zeros(self):
-        """Line 300: empty records early return."""
+    def test_reads_the_release_files_instead_of_querying(self):
         session = _make_mock_session()
-        result = self.op._store_records(session, [], _noop_emit)
-        assert result == (0, 0, 0, 0)
-        session.query.assert_not_called()
+        emit = _capturing_emit()
+        bodies = {
+            _CANONICAL_URL: _make_gz_response(FASTA_TWO),
+            _VARSPLIC_URL: _make_gz_response(FASTA_ISOFORM),
+        }
+        with patch.object(
+            self.op._uniprot_plugin._client.session,
+            "get",
+            side_effect=lambda url, **_kw: bodies[url],
+        ) as mock_get:
+            result = self.op.execute(
+                session,
+                {
+                    "search_criteria": "reviewed:true",
+                    "release_fasta_urls": [_CANONICAL_URL, _VARSPLIC_URL],
+                },
+                emit=emit,
+            )
+        # Exactly the two files, and no search URL: dispatching on the
+        # URL means this fails if the operation paginated instead.
+        assert [c.args[0] for c in mock_get.call_args_list] == [
+            _CANONICAL_URL,
+            _VARSPLIC_URL,
+        ]
+        assert result.result["retrieved_records"] == 3
+        assert result.result["isoform_records"] == 1
+        assert result.result["source"] == "release_files"
 
-    def test_updates_existing_protein(self):
-        """Lines 350-394: existing protein gets conservative updates."""
-        record = _make_record()
-        seq_hash = record.sequence_hash
+    def test_cursor_path_is_still_the_default(self):
+        session = _make_mock_session()
+        emit = _capturing_emit()
+        with patch.object(
+            self.op._uniprot_plugin._client.session,
+            "get",
+            return_value=_make_mock_response(FASTA_ONE),
+        ) as mock_get:
+            result = self.op.execute(
+                session,
+                {"search_criteria": "organism_id:9606", "compressed": False},
+                emit=emit,
+            )
+        assert result.result["source"] == "cursor_pagination"
+        assert "format=fasta" in mock_get.call_args_list[0].args[0]
 
-        # Existing protein with missing fields (triggers updates)
-        existing_prot = MagicMock()
-        existing_prot.accession = "P12345"
-        existing_prot.sequence_id = None  # will be updated
-        existing_prot.entry_name = None  # will be updated
-        existing_prot.canonical_accession = "OLD_ACC"  # will be updated
-        existing_prot.is_canonical = False  # will be updated
-        existing_prot.isoform_index = 2  # will be updated
-        existing_prot.reviewed = None  # will be updated
-        existing_prot.taxonomy_id = None  # will be updated
-        existing_prot.organism = None  # will be updated
-        existing_prot.gene_name = None  # will be updated
-        existing_prot.length = None  # will be updated
+    def test_start_event_records_which_files_were_read(self):
+        # The job's own log has to name the bytes, or a corpus cannot be
+        # traced back to them.
+        session = _make_mock_session()
+        emit = _capturing_emit()
+        with patch.object(
+            self.op._uniprot_plugin._client.session,
+            "get",
+            return_value=_make_gz_response(FASTA_ONE),
+        ):
+            self.op.execute(
+                session,
+                {
+                    "search_criteria": "reviewed:true",
+                    "release_fasta_urls": [_CANONICAL_URL],
+                },
+                emit=emit,
+            )
+        (start,) = [c for c in emit.calls if c["event"] == "insert_proteins.start"]
+        assert start["fields"]["source"] == "release_files"
+        assert start["fields"]["release_fasta_urls"] == [_CANONICAL_URL]
+        md5s = [
+            c["fields"]["md5"]
+            for c in emit.calls
+            if c["event"] == "source.uniprot_release_fasta.file_done"
+        ]
+        assert len(md5s) == 1 and len(md5s[0]) == 32
 
-        session = MagicMock(spec=Session)
+    def test_isoforms_group_under_their_canonical_accession(self):
+        # The varsplic file carries only isoforms; they must still land
+        # grouped, which is what the aspect queries read.
+        session = _make_mock_session()
+        emit = _noop_emit
+        bodies = {
+            _CANONICAL_URL: _make_gz_response(FASTA_ONE),
+            _VARSPLIC_URL: _make_gz_response(FASTA_ISOFORM),
+        }
+        added = []
+        session.add_all.side_effect = lambda rows: added.extend(rows)
+        with patch.object(
+            self.op._uniprot_plugin._client.session,
+            "get",
+            side_effect=lambda url, **_kw: bodies[url],
+        ):
+            self.op.execute(
+                session,
+                {
+                    "search_criteria": "reviewed:true",
+                    "release_fasta_urls": [_CANONICAL_URL, _VARSPLIC_URL],
+                },
+                emit=emit,
+            )
+        proteins = {p.accession: p for p in added if hasattr(p, "accession")}
+        assert proteins["P12345"].canonical_accession == "P12345"
+        assert proteins["P12345"].is_canonical is True
+        assert proteins["P12345-2"].canonical_accession == "P12345"
+        assert proteins["P12345-2"].is_canonical is False
+        assert proteins["P12345-2"].isoform_index == 2
 
-        # _load_existing_sequences returns the hash → id map
-        seq_query = MagicMock()
-        seq_query.filter.return_value.all.return_value = [(seq_hash, 42)]
-
-        # _load_existing_proteins returns the existing protein
-        prot_query = MagicMock()
-        prot_query.filter.return_value.all.return_value = [existing_prot]
-
-        call_idx = {"n": 0}
-
-        def query_side_effect(*args):
-            call_idx["n"] += 1
-            if call_idx["n"] == 1:
-                return seq_query
-            return prot_query
-
-        session.query.side_effect = query_side_effect
-
-        ins_p, upd_p, ins_s, re_s = self.op._store_records(session, [record], _noop_emit)
-
-        assert ins_p == 0
-        assert upd_p == 1  # existing protein was updated
-        assert re_s == 1  # sequence was reused from DB
-        assert ins_s == 0
-        # Verify fields were updated
-        assert existing_prot.sequence_id == 42
-        assert existing_prot.entry_name == "TEST_HUMAN"
-        assert existing_prot.canonical_accession == "P12345"
-        assert existing_prot.is_canonical is True
-        assert existing_prot.isoform_index is None
-        assert existing_prot.reviewed is True
-
-    def test_inserts_new_sequence_when_missing(self):
-        """Lines 318-334: new sequence inserted when hash not in DB."""
-        record = _make_record()
-
-        session = MagicMock(spec=Session)
-
-        # No existing sequences
-        seq_query = MagicMock()
-        seq_query.filter.return_value.all.return_value = []
-
-        # No existing proteins
-        prot_query = MagicMock()
-        prot_query.filter.return_value.all.return_value = []
-
-        call_idx = {"n": 0}
-
-        def query_side_effect(*args):
-            call_idx["n"] += 1
-            if call_idx["n"] == 1:
-                return seq_query
-            return prot_query
-
-        session.query.side_effect = query_side_effect
-
-        ins_p, upd_p, ins_s, re_s = self.op._store_records(session, [record], _noop_emit)
-
-        assert ins_p == 1
-        assert upd_p == 0
-        assert ins_s == 1
-        assert re_s == 0
-        # add_all called twice: once for sequences, once for proteins
-        assert session.add_all.call_count == 2
+    def test_summary_says_release_files_were_used(self):
+        summary = self.op.summarize_payload(
+            {
+                "search_criteria": "reviewed:true",
+                "release_fasta_urls": [_CANONICAL_URL, _VARSPLIC_URL],
+            }
+        )
+        assert "release files=2" in summary
+        summary_live = self.op.summarize_payload({"search_criteria": "reviewed:true"})
+        assert "release files" not in summary_live
 
 
 # ---------------------------------------------------------------------------

@@ -53,8 +53,21 @@ jobs:
       - name: Run unit tests with coverage
         run: poetry run pytest --cov=protea --cov-report=xml --cov-fail-under=65 -q
 
+      # v4 apunta a Node 20, que GitHub deprecio y ya fuerza a Node 24. Bajo
+      # Node 24 su cliente TLS se rompe antes de llegar a honrar su propio
+      # `fail_ci_if_error: false`, asi que un fallo de la subida tumba el job
+      # entero -- lo contrario de lo que este workflow declara. Visto el
+      # 2026-10-05 en cuatro corridas de dos ramas distintas:
+      #
+      #   Required test coverage of 65% reached. Total coverage: 87,82%
+      #   Error: write EPROTO ...ssl3_read_bytes:...handshake failure
+      #
+      # Los tests PASAN en las cuatro. Y la puerta de cobertura no depende de
+      # esto: la impone pytest con --cov-fail-under=65 en el paso anterior, asi
+      # que la subida es solo para el panel externo y este cambio no relaja
+      # ninguna comprobacion.
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: coverage.xml
           fail_ci_if_error: false

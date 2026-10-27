@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { createApiKey, type ApiKeyRole, type CreateApiKeyResponse } from "@/lib/api";
+import { createApiKey, type ApiKeyRole, type CreateApiKeyResponse, errorText } from "@/lib/api";
 import { HelpDot } from "@/components/Tooltip";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
@@ -87,7 +87,7 @@ export function NewApiKeyDialog({ open, onClose, onMinted }: Props) {
       setMinted(res);
       onMinted?.({ id: res.id, name: res.name, role: (res.role ?? role) as ApiKeyRole });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : errorText(err);
       setError(msg);
     } finally {
       setLoading(false);

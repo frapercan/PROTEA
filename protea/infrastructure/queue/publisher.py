@@ -126,6 +126,27 @@ def publish_job(amqp_url: str, queue_name: str, job_id: UUID) -> None:
     _publish(amqp_url, queue_name, json.dumps({"job_id": str(job_id)}).encode("utf-8"))
 
 
+def pending_message_count(amqp_url: str, queue_name: str) -> int | None:
+    """How many messages the broker is holding for ``queue_name``.
+
+    Returns ``None`` when the broker could not be asked, which is a different
+    fact from zero and must not be read as one: zero means nothing is waiting,
+    ``None`` means nobody knows. The caller decides, and the only safe decision
+    on ``None`` is to do nothing.
+
+    Declared ``passive`` so this never creates a queue and never has to agree
+    with the arguments the real declaration uses.
+    """
+    try:
+        connection = _get_connection(amqp_url)
+        channel = connection.channel()
+        res = channel.queue_declare(queue=queue_name, durable=True, passive=True)
+        return int(res.method.message_count)
+    except Exception:
+        _close_cached_connection()
+        return None
+
+
 def safe_republish_job(amqp_url: str, queue_name: str, job_id: UUID) -> None:
     """Re-publish a re-queued job; logs but does NOT raise on failure.
 

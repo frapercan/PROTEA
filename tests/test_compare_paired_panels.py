@@ -69,13 +69,25 @@ class _StubResult:
 
 
 class _StubSession:
-    """The two ``evaluation_result`` rows the provenance gate reads, and nothing else."""
+    """The rows the two provenance gates read: two results and their prediction sets.
 
-    def __init__(self, rows: dict[str, dict[str, Any]]) -> None:
+    Keyed by the bind parameter each gate uses, because they read different
+    tables. ``id`` is the evaluation result the frame gate wants; ``psid`` is the
+    prediction set the method seal wants. A stub that answered both from one
+    dictionary would let a gate read the wrong table and still pass.
+    """
+
+    def __init__(
+        self, rows: dict[str, dict[str, Any]], psets: dict[str, dict[str, Any]] | None = None
+    ) -> None:
         self._rows = rows
+        self._psets = psets or {}
 
     def execute(self, statement: Any, params: dict[str, Any] | None = None) -> _StubResult:
-        return _StubResult(self._rows.get((params or {}).get("id", "")))
+        bound = params or {}
+        if "psid" in bound:
+            return _StubResult(self._psets.get(bound["psid"]))
+        return _StubResult(self._rows.get(bound.get("id", "")))
 
 
 def _row(result_id: str, **overrides: Any) -> dict[str, Any]:
@@ -87,6 +99,10 @@ def _row(result_id: str, **overrides: Any) -> dict[str, Any]:
         "reranker_model_id": None,
         "frame": "lafa",
         "temporal_window": "220->230",
+        # The seal, which is what the gate reads. ``frame`` and
+        # ``temporal_window`` stay in the row because they are still reported;
+        # they are no longer what decides comparability.
+        "frame_digest": "f-0000000000000000000000",
         "leakage_role": "test",
         "results": {},
     }
@@ -94,12 +110,61 @@ def _row(result_id: str, **overrides: Any) -> dict[str, Any]:
     return row
 
 
+#: One prediction set, deliberately not a row of defaults.
+#:
+#: Every field carries a value a careless seal could not have guessed: the
+#: booleans are not both False, the depth is not zero, the feature list is not
+#: empty and the donor policy is not the permissive one. Two sides built from
+#: this template are identical in method, which is what most of this file wants,
+#: but a comparison that only ever saw blank rows would pass a seal that read
+#: the wrong keys entirely -- and this project has shipped a uniform fixture
+#: past a real defect twice.
+def _pset(pset_id: str, **overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": pset_id,
+        "embedding_config_id": "emb-9",
+        "annotation_set_id": "bank-220",
+        "ontology_snapshot_id": "onto-2026-05",
+        "query_set_id": "queries-select",
+        "limit_per_entry": 200,
+        "distance_threshold": 0.35,
+        "created_at": "2026-08-01T00:00:00Z",
+        "meta": {
+            "job_id": f"job-{pset_id}",
+            "batch_size": 1024,
+            "code_revision": "8699bfd7eec382aadd03f471b127f8be6f71cffd",
+            "dependency_revisions": {"protea-method": "a120f613"},
+            "search_backend": "numpy",
+            "metric": "cosine",
+            "donor_policy": {"reviewed_only": True, "evidence_codes": ["EXP", "IDA"]},
+            "exclude_self_neighbour": True,
+            "aspect_separated_knn": True,
+            "expand_votes_to_ancestors": False,
+            "features": ["compute_alignments"],
+        },
+    }
+    meta = overrides.pop("meta", None)
+    row.update(overrides)
+    if meta:
+        row["meta"] = {**row["meta"], **meta}
+    return row
+
+
 def _session(**overrides: Any) -> _StubSession:
+    rows = {
+        _A_ID: _row(_A_ID, **overrides.get("a", {})),
+        _B_ID: _row(_B_ID, **overrides.get("b", {})),
+    }
     return _StubSession(
+        rows,
         {
-            _A_ID: _row(_A_ID, **overrides.get("a", {})),
-            _B_ID: _row(_B_ID, **overrides.get("b", {})),
-        }
+            rows[_A_ID]["prediction_set_id"]: _pset(
+                rows[_A_ID]["prediction_set_id"], **overrides.get("a_pset", {})
+            ),
+            rows[_B_ID]["prediction_set_id"]: _pset(
+                rows[_B_ID]["prediction_set_id"], **overrides.get("b_pset", {})
+            ),
+        },
     )
 
 
@@ -1239,7 +1304,7 @@ class TestPopulationAndProvenance:
         """
         self._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
         self._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
-        blank = {"frame": None, "temporal_window": None, "leakage_role": None}
+        blank = {"frame": None, "frame_digest": None, "leakage_role": None}
         session = _session(a=blank, b=blank)
         with pytest.raises(PanelComparabilityError, match="do not both declare"):
             _run(tmp_path, session=session)
@@ -1248,7 +1313,7 @@ class TestPopulationAndProvenance:
         """The flag waives a DISAGREEMENT between two declarations, not a silence."""
         self._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
         self._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
-        blank = {"frame": None, "temporal_window": None, "leakage_role": None}
+        blank = {"frame": None, "frame_digest": None, "leakage_role": None}
         with pytest.raises(PanelComparabilityError, match="not waivable"):
             _run(tmp_path, session=_session(a=blank, b=blank), allow_frame_mismatch=True)
 
@@ -2010,3 +2075,354 @@ class TestTheAdvertisedInvariants:
             )
         with pytest.raises(ThresholdGridUnavailableError, match="nothing was compared"):
             _run(tmp_path, panels=["NK:MFO", "LK:MFO"])
+
+
+class TestRestrictingThePanelToOneStratum:
+    """A delta over a stratum, and the refusals that keep it from being read as more.
+
+    The campaign's decisions are declared with this bootstrap, and until now it
+    had nine panels keyed on category and aspect and no way to ask a question
+    inside them. That mattered: the descriptive view over length bands changed
+    which substrate won in almost every aspect, with margins between 0.0001 and
+    0.0172 -- every one of them under the 0.02 the campaign declares as its
+    effect of interest, and several under the error of the pooling that produced
+    them. An ordering that moves by less than the noise of the estimator that
+    produced it is not a finding, and only a resampled interval can say so.
+    """
+
+    @staticmethod
+    def _arrays(accs: tuple[str, ...], scale: float = 1.0) -> boot.PanelArrays:
+        n = len(accs)
+        tp = np.tile(np.linspace(0.9, 0.1, 5), (n, 1)) * scale
+        pred = np.tile(np.linspace(1.0, 0.2, 5), (n, 1))
+        gt = np.full(n, 2.0)
+        return boot.PanelArrays(accs, tp, pred, gt)
+
+    def test_restrict_keeps_only_the_named_accessions_in_order(self) -> None:
+        from protea.core.operations._paired_panels_panel import restrict
+
+        arrays = self._arrays(("P0", "P1", "P2", "P3"))
+        out = restrict(arrays, frozenset({"P3", "P1"}))
+        assert out.accessions == ("P1", "P3")
+        assert out.n == 2
+        # The rows must travel with their accession, not merely be the right count.
+        np.testing.assert_allclose(out.tp[0], arrays.tp[1])
+        np.testing.assert_allclose(out.tp[1], arrays.tp[3])
+
+    def test_restricting_to_nothing_leaves_an_empty_panel_not_a_wrong_one(self) -> None:
+        from protea.core.operations._paired_panels_panel import restrict
+
+        out = restrict(self._arrays(("P0", "P1")), frozenset({"NOT_HERE"}))
+        assert out.n == 0
+
+    @pytest.mark.parametrize(
+        ("restriction", "expected"),
+        [
+            (None, "NK:MFO"),
+            ({"length": "512-1024"}, "NK:MFO@length=512-1024"),
+            ({"homology": "<=30"}, "NK:MFO@homology=<=30"),
+        ],
+    )
+    def test_the_reported_key_carries_the_restriction(self, restriction, expected) -> None:
+        """A restricted delta filed under the unrestricted name is a number that
+        cannot be told apart from the one it is not."""
+        from protea.core.operations.compare_paired_panels import stratum_label
+
+        assert stratum_label("NK:MFO", restriction) == expected
+
+    def test_the_key_does_not_depend_on_mapping_order(self) -> None:
+        """Two dicts with the same content must not file one stratum twice."""
+        from protea.core.operations.compare_paired_panels import stratum_label
+
+        one = stratum_label("PK:BPO", {"length": "<=512", "homology": "30-50"})
+        other = stratum_label("PK:BPO", {"homology": "30-50", "length": "<=512"})
+        assert one == other
+
+    @pytest.mark.parametrize(
+        ("bad", "says"),
+        [
+            ({"longitud": "<=512"}, "unknown stratum axes"),
+            ({"length": "0-100"}, "is not one of"),
+            ({}, "omit restrict_to_stratum"),
+        ],
+    )
+    def test_an_unreadable_restriction_is_refused(self, bad, says) -> None:
+        """Can refuse. An unknown AXIS would restrict nothing and report the whole
+        panel under a stratum's name; an unknown BAND would restrict to the empty
+        set and report a refusal that reads like a sparse stratum, not a typo."""
+        with pytest.raises(ValidationError, match=says):
+            ComparePairedPanelsPayload.model_validate(
+                {
+                    "evaluation_result_id": "a",
+                    "baseline_evaluation_result_id": "b",
+                    "restrict_to_stratum": bad,
+                }
+            )
+
+    def test_a_readable_restriction_is_accepted_on_every_axis(self) -> None:
+        """Can act, once per axis: a refusal test alone would pass against a
+        validator that refused everything."""
+        from protea.core.strata import Stratum
+
+        for axis, band in (
+            ("length", "<=512"),
+            ("homology", "<=30"),
+            ("donor_evidence", "exp"),
+            ("category", "NK"),
+        ):
+            p = ComparePairedPanelsPayload.model_validate(
+                {
+                    "evaluation_result_id": "a",
+                    "baseline_evaluation_result_id": "b",
+                    "restrict_to_stratum": {axis: band},
+                }
+            )
+            assert p.restrict_to_stratum == {axis: band}
+            assert axis in Stratum._fields
+
+    def test_omitting_the_restriction_is_the_whole_panel(self) -> None:
+        """Every result published before this field existed was unrestricted, so
+        the default has to keep meaning that."""
+        p = ComparePairedPanelsPayload.model_validate(
+            {"evaluation_result_id": "a", "baseline_evaluation_result_id": "b"}
+        )
+        assert p.restrict_to_stratum is None
+
+
+class TestTheRestrictionReachesTheArrays:
+    """The seam between "a restriction was asked for" and "the arrays were narrowed".
+
+    Written because it was missing. The first version of these tests exercised
+    ``restrict`` and ``stratum_label`` directly and both passed, but wiring the
+    narrowing out of ``_raw_pair`` altogether broke NO test: the pieces were
+    covered and the join between them was not. A restriction that never reaches
+    the arrays produces a whole-panel delta reported under a stratum's name,
+    which is the one outcome the whole feature exists to prevent.
+    """
+
+    @staticmethod
+    def _side(accs: tuple[str, ...], present: bool = True):
+        from protea.core.operations import _paired_panels_bootstrap as boot
+
+        n = len(accs)
+        arrays = boot.PanelArrays(
+            accs,
+            np.tile(np.linspace(0.9, 0.1, 5), (n, 1)),
+            np.tile(np.linspace(1.0, 0.2, 5), (n, 1)),
+            np.full(n, 2.0),
+        )
+
+        class _Grid:
+            panels = {"molecular_function": arrays} if present else {}
+
+        class _Side:
+            grids = {"NK": _Grid()}
+
+            def panel(self, setting, namespace):
+                grid = self.grids.get(setting)
+                return None if grid is None else grid.panels.get(namespace)
+
+        return _Side()
+
+    def test_without_a_restriction_both_arms_keep_every_protein(self):
+        from protea.core.operations._paired_panels_panel import _raw_pair
+
+        sides = (self._side(("P0", "P1", "P2")), self._side(("P0", "P1", "P2")))
+        a, b, whole = _raw_pair(sides, "NK:MFO", None)
+        assert a.accessions == b.accessions == ("P0", "P1", "P2")
+        # No restriction, so there is no separate whole panel to carry.
+        assert whole is None
+
+    def test_a_restriction_narrows_both_arms_to_the_stratum(self):
+        """Can act, and through the seam rather than beside it."""
+        from protea.core.operations._paired_panels_panel import _raw_pair
+        from protea.core.operations._paired_panels_stratum import Restriction
+
+        sides = (self._side(("P0", "P1", "P2")), self._side(("P0", "P1", "P2")))
+        narrow = Restriction(frozenset({"P1"}), "NK:MFO@length=<=512")
+        a, b, whole = _raw_pair(sides, "NK:MFO", narrow)
+        assert a.accessions == b.accessions == ("P1",)
+        # The whole panel travels back for the parity control, which cannot be
+        # read off a stratum: see TestParityIsCheckedOnTheWholePanel.
+        assert whole is not None
+        assert whole[0].accessions == ("P0", "P1", "P2")
+
+    def test_a_stratum_no_protein_falls_in_is_named_as_such(self):
+        """Distinct from an absent artefact: one is a population that does not
+        exist, the other a run that did not happen, and they call for different
+        actions."""
+        from protea.core.operations._paired_panels_panel import _raw_pair
+        from protea.core.operations._paired_panels_stratum import Restriction
+
+        sides = (self._side(("P0",)), self._side(("P0",)))
+        out = _raw_pair(sides, "NK:MFO", Restriction(frozenset({"NOBODY"}), "x"))
+        assert out == "stratum_empty_for_panel"
+
+    def test_an_absent_artefact_keeps_its_own_name(self):
+        from protea.core.operations._paired_panels_panel import _raw_pair
+
+        sides = (self._side(("P0",), present=False), self._side(("P0",)))
+        assert _raw_pair(sides, "NK:MFO", None) == "artefact_absent_for_panel"
+
+
+class TestTheGateReadsTheSealNotTheLabel:
+    """Which column decides comparability, and why the other one cannot.
+
+    ``frame`` and ``temporal_window`` are strings a harness writes.
+    ``frame_digest`` is computed from what a frame is made of: the evaluation
+    set, the pivot snapshot, the accretion set, the window and the two
+    evaluation caps. Only the second can say two results were measured against
+    the same thing.
+
+    Both failure modes below were live on this campaign at once. Four distinct
+    digests shared two labels, so rows in different frames compared anyway; and
+    110 of 153 evaluations carried a digest and no label, so every substrate and
+    depth comparison was refused while the three labelled arms went through.
+    Which axes could be declared with this bootstrap was decided by that, and
+    nobody chose it.
+    """
+
+    @staticmethod
+    def _write(tmp_path: Path, side: str, accs: list[str], tp: list[float]) -> None:
+        write_grid_parquet(
+            tmp_path / side / "NK" / "per_protein_grid.parquet",
+            [
+                {"accession": a, "namespace": MFO, "tp": tp, "pred": [8.0, 2.0], "n_gt": 10.0}
+                for a in accs
+            ],
+            th_step=TH_STEP,
+            setting="NK",
+        )
+
+    def test_one_label_over_two_frames_is_refused(self, tmp_path: Path) -> None:
+        """The mode that PASSED what is not comparable.
+
+        Both rows say ``internal`` / ``SELECT_220_227`` and were measured under
+        different accretion sets. Reading the label, the gate agrees they share
+        a frame. They do not, and the same reranker reads 0.3433 under one and
+        0.117 under another.
+        """
+        self._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
+        self._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
+        session = _session(
+            a={"frame": "internal", "temporal_window": "SELECT_220_227",
+               "frame_digest": "f-aaaaaaaaaaaaaaaaaaaaaa"},
+            b={"frame": "internal", "temporal_window": "SELECT_220_227",
+               "frame_digest": "f-bbbbbbbbbbbbbbbbbbbbbb"},
+        )
+        with pytest.raises(PanelComparabilityError, match="frame_digest"):
+            _run(tmp_path, session=session)
+
+    def test_two_labels_over_one_frame_are_compared(self, tmp_path: Path) -> None:
+        """The mode that REFUSED what is comparable, and the larger loss.
+
+        One row carries a harness label and no digest was ever written on the
+        other; both were produced under the same material frame. The digest says
+        so. Refusing here is what kept axes A and B out of this statistic.
+        """
+        self._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
+        self._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
+        session = _session(
+            a={"frame": "internal", "temporal_window": "SELECT_220_227",
+               "frame_digest": "f-cccccccccccccccccccccc"},
+            b={"frame": None, "temporal_window": None,
+               "frame_digest": "f-cccccccccccccccccccccc"},
+        )
+        result = _run(tmp_path, session=session)
+        assert result["panels"]["NK:MFO"]["delta"] is not None
+        assert result["frame_mismatch"] == []
+
+    def test_a_missing_seal_is_still_refused(self, tmp_path: Path) -> None:
+        """Presence before equality. Two rows with no digest are not two rows in
+        the same frame, however identical their labels look."""
+        self._write(tmp_path, "a", ["P1", "P2", "P3"], [4.0, 1.0])
+        self._write(tmp_path, "b", ["P1", "P2", "P3"], [3.0, 1.0])
+        same = {"frame": "internal", "temporal_window": "SELECT_220_227", "frame_digest": None}
+        session = _session(a=dict(same), b=dict(same))
+        with pytest.raises(PanelComparabilityError, match="do not both declare"):
+            _run(tmp_path, session=session)
+
+
+class TestParityIsCheckedOnTheWholePanel:
+    """The stored cell is a whole-population number, so a stratum cannot be
+    compared against it.
+
+    Found on real data within minutes of the first band-restricted run: the
+    parity control recomposed the ``<=512`` stratum to 0.052507 and refused it
+    against the 0.0433 the evaluation result stores for the whole panel. The
+    guard was right and the feature was wrong. The control asks whether an
+    artefact recomposes to the number published from it -- a property of the
+    artefact, not of the population a later caller chose to look at.
+    """
+
+    @staticmethod
+    def _meta():
+        from protea.core.operations._paired_panels_artifact import GridMeta
+
+        return GridMeta(
+            setting="NK",
+            tau_grid=np.array([0.5, 0.9]),
+            th_step=0.4,
+            variants=("weighted",),
+            values={},
+        )
+
+    @staticmethod
+    def _arrays(accs: tuple[str, ...], tp: float) -> Any:
+        """A panel whose first two proteins score far above the rest.
+
+        Heterogeneous on purpose. Written with one tp for every protein, any
+        subset recomposes to the same value as the whole and the test passes
+        against the bug it exists to catch -- which is what the first version of
+        it did.
+        """
+        n = len(accs)
+        tps = np.full((n, 2), 0.5)
+        tps[:2] = tp
+        return boot.PanelArrays(
+            accs,
+            tps,
+            np.full((n, 2), 8.0),
+            np.full(n, 10.0),
+        )
+
+    @staticmethod
+    def _keep(arrays, accs: frozenset):
+        from protea.core.operations._paired_panels_panel import restrict
+
+        return restrict(arrays, accs)
+
+    def test_a_stratum_is_not_measured_against_the_whole_panels_cell(self) -> None:
+        """Can act: the restricted arm reports the stratum, and parity passes
+        because it was read off the whole panel."""
+        from protea.core.operations._paired_panels_panel import arm_block
+
+        whole = self._arrays(tuple(f"P{i}" for i in range(10)), 4.0)
+        stratum = self._keep(whole, frozenset({"P0", "P1"}))
+        stored = float(boot.select_operating_point(boot.panel_curve(whole)).value)
+        op, block = arm_block(stratum, stratum, self._meta(), stored, None, parity_from=whole)
+        assert block["stored_metric"] == pytest.approx(stored)
+        assert block["estimator_parity_checked"] is True
+
+    def test_reading_parity_off_the_stratum_refuses(self) -> None:
+        """Can refuse, and this is the bug: pass the stratum as its own parity
+        source and the control fires exactly as it did on the campaign."""
+        from protea.core.operations._paired_panels_panel import arm_block
+
+        whole = self._arrays(tuple(f"P{i}" for i in range(10)), 4.0)
+        thin = self._keep(whole, frozenset({"P0"}))
+        thin = boot.PanelArrays(thin.accessions, thin.tp * 0.2, thin.pred, thin.n_gt)
+        stored = float(boot.select_operating_point(boot.panel_curve(whole)).value)
+        with pytest.raises(PanelComparabilityError, match="do not describe the same run"):
+            arm_block(thin, thin, self._meta(), stored, None)
+
+    def test_without_a_restriction_the_arm_is_its_own_parity_source(self) -> None:
+        """The unrestricted path must not change: passing None has to keep
+        reading the arm's own arrays, or this fix would retire the guard on
+        every comparison that never asked for a stratum."""
+        from protea.core.operations._paired_panels_panel import arm_block
+
+        whole = self._arrays(tuple(f"P{i}" for i in range(10)), 4.0)
+        stored = float(boot.select_operating_point(boot.panel_curve(whole)).value)
+        op, block = arm_block(whole, whole, self._meta(), stored, None)
+        assert block["estimator_parity_checked"] is True

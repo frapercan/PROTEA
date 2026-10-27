@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount, formatDateTime } from "@/lib/format";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
@@ -15,8 +17,7 @@ import {
   listQuerySets,
   getProteinStats,
   EmbeddingConfig,
-  QuerySet,
-} from "@/lib/api";
+  QuerySet, errorText } from "@/lib/api";
 
 type ModelPreset = {
   value: string;
@@ -55,7 +56,7 @@ type Tab = "configs" | "compute";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "medium" });
+  return formatDateTime(iso);
 }
 
 function shortId(id: string) {
@@ -170,7 +171,7 @@ const tToast = useTranslations("toasts");
       setCfgDescription("");
       toast(tToast("embeddingConfigCreated"), "success");
     } catch (err: any) {
-      setCfgError(String(err));
+      setCfgError(errorText(err));
     } finally {
       setCfgSubmitting(false);
     }
@@ -180,7 +181,7 @@ const tToast = useTranslations("toasts");
     const cfg = configs.find((c) => c.id === id);
     const count = cfg?.embedding_count ?? 0;
     const msg = count > 0
-      ? t("configsTab.deleteConfirm", { count: count.toLocaleString() })
+      ? t("configsTab.deleteConfirm", { count: formatCount(count) })
       : t("configsTab.deleteConfirmNoEmbeddings");
     if (!confirm(msg)) return;
     try {
@@ -188,8 +189,8 @@ const tToast = useTranslations("toasts");
       setConfigs((prev) => prev.filter((c) => c.id !== id));
       toast(tToast("configDeleted"), "info");
     } catch (err: any) {
-      setError(String(err));
-      toast(String(err), "error");
+      setError(errorText(err));
+      toast(errorText(err), "error");
     }
   }
 
@@ -219,8 +220,8 @@ const tToast = useTranslations("toasts");
       setCmpResult(result);
       toast(tToast("computeJobQueued"), "success");
     } catch (err: any) {
-      setCmpError(String(err));
-      toast(String(err), "error");
+      setCmpError(errorText(err));
+      toast(errorText(err), "error");
     } finally {
       setCmpSubmitting(false);
     }

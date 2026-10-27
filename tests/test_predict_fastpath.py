@@ -14,7 +14,7 @@ Pins three behaviours introduced by the F-PRED-FASTPATH slice:
    used, and invokes ``search_knn`` exactly once per aspect in both cases.
 
 4. ``OperationTuning`` exposes the two new knobs with correct defaults:
-   ``ref_cache_freshness_seconds`` (300) and ``aspect_knn_workers`` (3).
+   ``ref_cache_freshness_seconds`` and ``aspect_knn_workers`` (3).
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ from protea.core.disk_cache import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect module-level cache dir to a temp directory."""
@@ -55,6 +56,7 @@ def _sample_pool(n: int = 4, dim: int = 8) -> tuple[list[str], np.ndarray]:
 # ---------------------------------------------------------------------------
 # 1. _is_cache_fresh
 # ---------------------------------------------------------------------------
+
 
 class TestIsCacheFresh:
     def test_returns_false_when_files_absent(self, cache_dir: Path) -> None:
@@ -90,6 +92,7 @@ class TestIsCacheFresh:
 # ---------------------------------------------------------------------------
 # 2. _load_reference_pool_cached — COUNT skip on fresh cache
 # ---------------------------------------------------------------------------
+
 
 class TestLoadReferencePoolCachedFreshnessSkip:
     def test_skip_count_when_fresh(self, cache_dir: Path) -> None:
@@ -196,9 +199,7 @@ _needs_full_stack = pytest.mark.skipif(
 class TestAspectKnnPreSearchParallel:
     """Verify parallel KNN produces identical results to serial KNN."""
 
-    def _make_ref_data(
-        self, n_refs: int = 10, dim: int = 8
-    ) -> dict[str, dict[str, Any]]:
+    def _make_ref_data(self, n_refs: int = 10, dim: int = 8) -> dict[str, dict[str, Any]]:
         """Minimal ref_data_by_aspect for the pre-search."""
         from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 
@@ -218,6 +219,7 @@ class TestAspectKnnPreSearchParallel:
     def _make_payload(self) -> Any:
         """Minimal PredictGOTermsBatchPayload-like namespace."""
         from types import SimpleNamespace
+
         return SimpleNamespace(
             limit_per_entry=3,
             distance_threshold=None,
@@ -246,7 +248,9 @@ class TestAspectKnnPreSearchParallel:
         get_tuning.cache_clear()
         monkeypatch.setattr(
             "protea.core.operations.predict_go_terms._aspect_helpers.get_tuning",
-            lambda: type("T", (), {"operation": type("O", (), {"aspect_knn_workers": n_workers})()})(),
+            lambda: type(
+                "T", (), {"operation": type("O", (), {"aspect_knn_workers": n_workers})()}
+            )(),
             raising=False,
         )
 
@@ -275,13 +279,26 @@ class TestAspectKnnPreSearchParallel:
 # 4. OperationTuning defaults
 # ---------------------------------------------------------------------------
 
+
 @_needs_full_stack
 class TestOperationTuningDefaults:
-    def test_ref_cache_freshness_seconds_default(self) -> None:
+    def test_ref_cache_freshness_outlives_what_it_caches(self) -> None:
+        """The cache exists to skip a COUNT(*) that takes 338 s on corpus 220.
+
+        Its default was 300 s: SHORTER than the operation it avoids, so it
+        expired before the work it cached had finished and never once hit.
+        Every batch of every job re-ran the count, twelve grid jobs meant 216
+        of them, and consumers blocked inside until the broker dropped them.
+
+        Pinned as an inequality rather than a number because the number is not
+        the point: whatever the default becomes, it has to outlast the thing it
+        is caching, with room for a corpus that grows.
+        """
         from protea.config.tuning import OperationTuning
 
         t = OperationTuning()
-        assert t.ref_cache_freshness_seconds == 300
+        slowest_count_seconds = 338
+        assert t.ref_cache_freshness_seconds > slowest_count_seconds * 10
 
     def test_aspect_knn_workers_default(self) -> None:
         from protea.config.tuning import OperationTuning

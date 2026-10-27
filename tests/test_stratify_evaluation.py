@@ -12,6 +12,7 @@ import uuid
 import pandas as pd
 import pytest
 
+from protea.core.operations._run_cafa_strata import project
 from protea.core.operations.stratify_evaluation import (
     _ASPECT_FOR_NAMESPACE,
     StratifyEvaluationOperation,
@@ -19,9 +20,20 @@ from protea.core.operations.stratify_evaluation import (
     _category_for,
     _strata_for_rows,
 )
-from protea.core.strata import Aspect, Category, Neighbourhood
+from protea.core.strata import (
+    NEIGHBOURHOOD_AXES,
+    SEQUENCE_AXES,
+    Aspect,
+    Category,
+    Neighbourhood,
+    Stratum,
+    length_band_for,
+)
 
 _NB = Neighbourhood(best_identity=45.0, donor_is_experimental=True, taxonomic_relation="close")
+
+#: What the operation crosses by default, donor axis included.
+_ALL_AXES = ["category", "aspect", "length", "homology"]
 
 
 def _row(acc: str, ns: str, tp: float = 1.0, pred: float = 2.0, n_gt: float = 2.0) -> dict:
@@ -64,6 +76,7 @@ class TestPlacingRows:
             category=Category.NO_KNOWLEDGE,
             lengths={"Q1": 300},
             neighbourhoods={"Q1": _NB},
+            axes=_ALL_AXES,
         )
         assert placed[0].aspect is Aspect.MOLECULAR_FUNCTION
         assert placed[0].category is Category.NO_KNOWLEDGE
@@ -80,11 +93,74 @@ class TestPlacingRows:
         self, lengths: dict, neighbourhoods: dict, namespace: str
     ) -> None:
         """Skipped, never defaulted: every default here would move a number by
-        an amount nobody chose."""
+        an amount nobody chose.
+
+        Every case here crosses a donor axis, which is what makes the missing
+        neighbourhood disqualifying. :class:`TestAxesDecideWhatAPlacementNeeds`
+        covers the run that asks for no donor axis and must not skip it.
+        """
         assert _strata_for_rows(
             [_row("Q1", namespace)],
             category=Category.NO_KNOWLEDGE, lengths=lengths, neighbourhoods=neighbourhoods,
+            axes=_ALL_AXES,
         ) == {}
+
+
+class TestAxesDecideWhatAPlacementNeeds:
+    """A donor neighbourhood is a cost, so only a run that reads one should pay it.
+
+    Placing a query used to require an aligned donor whatever was being
+    crossed. Category, aspect and length are three facts about the query's own
+    sequence and need no alignment, so that requirement discarded most of the
+    campaign from tables that never asked about homology, and reported the
+    surviving minority as though it were the population.
+    """
+
+    def test_the_sequence_axes_place_a_query_with_no_donor_at_all(self) -> None:
+        """Can act: the whole point of the change."""
+        placed = _strata_for_rows(
+            [_row("Q1", "molecular_function")],
+            category=Category.NO_KNOWLEDGE,
+            lengths={"Q1": 300},
+            neighbourhoods={},
+            axes=["category", "aspect", "length"],
+        )
+        assert list(placed) == [0]
+        assert placed[0].length is length_band_for(300)
+
+    @pytest.mark.parametrize("axis", sorted(NEIGHBOURHOOD_AXES))
+    def test_any_donor_axis_still_refuses_a_query_with_no_donor(self, axis: str) -> None:
+        """Can refuse, once per donor axis: a table that reports homology,
+        donor evidence, taxonomy or propagation for a query whose donors were
+        never aligned is reporting an empty neighbourhood as a measurement."""
+        assert _strata_for_rows(
+            [_row("Q1", "molecular_function")],
+            category=Category.NO_KNOWLEDGE,
+            lengths={"Q1": 300},
+            neighbourhoods={},
+            axes=["length", axis],
+        ) == {}
+
+    def test_dropping_the_donor_does_not_move_the_length_band(self) -> None:
+        """The placement path is shared, so this pins that taking it without a
+        neighbourhood answers the sequence axes identically. If it did not, the
+        change would have bought coverage by moving numbers."""
+        args = dict(category=Category.NO_KNOWLEDGE, lengths={"Q1": 300},
+                    axes=["category", "aspect", "length"])
+        with_donor = _strata_for_rows([_row("Q1", "molecular_function")],
+                                      neighbourhoods={"Q1": _NB}, **args)
+        without = _strata_for_rows([_row("Q1", "molecular_function")],
+                                   neighbourhoods={}, **args)
+        assert project(with_donor[0], args["axes"]) == project(without[0], args["axes"])
+
+
+class TestTheSplitIsCheckedAgainstTheStratum:
+    def test_every_stratum_field_is_on_exactly_one_side(self) -> None:
+        """A seventh axis added to Stratum without deciding which side it falls
+        on would silently join the sequence axes and be reported for queries
+        that cannot support it. This makes that a failing test instead."""
+        assert NEIGHBOURHOOD_AXES | SEQUENCE_AXES == set(Stratum._fields)
+        assert not (NEIGHBOURHOOD_AXES & SEQUENCE_AXES)
 
 
 class _FakeResult:

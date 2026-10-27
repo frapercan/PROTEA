@@ -204,13 +204,23 @@ class TestLocalArtefacts:
     def test_thesis_pdf_url_reflects_filesystem(
         self, client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from protea.api._thesis_pdf import thesis_pdf_path
+
         pdf = tmp_path / "thesis.pdf"
         # Serve-mount: the PDF is resolved from PROTEA_THESIS_PDF_PATH at
         # request time (no baked file, no rebuild).
         monkeypatch.setenv("PROTEA_THESIS_PDF_PATH", str(pdf))
 
-        body = client.get("/stack").json()
-        assert body["thesis_pdf_url"] is None
+        # The absent case has to be asked of the resolver with a root it
+        # controls. Pointing the env var at a missing file does NOT mean
+        # "no PDF": by contract the resolver then falls through to
+        # <root>/static/thesis.pdf and the legacy public/ path. This test
+        # used to assert None through the endpoint and passed only
+        # because nobody had ever built the thesis; placing a real
+        # static/thesis.pdf on 2026-10-07 exposed it.
+        monkeypatch.delenv("PROTEA_THESIS_PDF_PATH", raising=False)
+        assert thesis_pdf_path(project_root=tmp_path) is None
+        monkeypatch.setenv("PROTEA_THESIS_PDF_PATH", str(pdf))
 
         pdf.write_bytes(b"%PDF-1.7 fake")
         body = client.get("/stack").json()

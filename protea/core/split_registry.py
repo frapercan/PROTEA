@@ -48,6 +48,8 @@ __all__ = [
     "Release",
     "ReleaseWindow",
     "Split",
+    "HoldoutTouchedError",
+    "HOLDOUT_WAIVER",
     "SplitLeakError",
     "SplitName",
     "SplitUndecidedError",
@@ -57,12 +59,14 @@ __all__ = [
     "adjustment_candidates",
     "menu_is_sufficient",
     "assert_may_inform",
+    "assert_window_may_inform",
     "consecutive_windows",
     "exclusion_basis",
     "ground_truth_requires_history",
     "release",
     "releases_before",
     "resolve_split",
+    "window_reads_past_the_mark",
     "windows_for",
 ]
 
@@ -115,6 +119,13 @@ class Release:
 RELEASES: tuple[Release, ...] = tuple(
     sorted(
         (
+            # v220 is the campaign's selection lower endpoint and the only
+            # annotation set a donor may come from without reading the future.
+            # It was absent from this table while the tune window was 226->227,
+            # which is why ``release("v220")`` raised and the campaign's own
+            # window could not be named here. Published date read from
+            # ``annotation_set.source_published_at``, not inferred.
+            Release(date(2024, 4, 16), "v220"),
             Release(date(2025, 5, 3), "v226"),
             Release(date(2025, 9, 4), "v227"),
             Release(date(2025, 11, 10), "v228"),
@@ -267,6 +278,18 @@ _SPLITS: dict[SplitName, Split] = {
             {"model_fitting", "hyperparameters", "thresholds", "design", "champion_choice"}
         ),
         balanced=True,
+        # SUPERSEDED BY THE AUTHOR 2026-09-14: the adjustment window is
+        # 220 -> 227. The 2026-07-27 decision below stands as history and its
+        # reasoning is still the reasoning; what changed is the fact it rested
+        # on. GOA 226 is not loaded, while 220 -> 227 carries the 315 results,
+        # both scoring-side evaluation sets and every frame seal the campaign
+        # has produced, so 226 -> 227 named a window with no data behind it.
+        # The caution that follows still applies and is why the menu matters:
+        # 220 -> 227 spans seven releases, so it is a wider and less
+        # representative window than an adjacent pair, and a decision selected
+        # on it should be checked against an earlier window once the recency
+        # ladder is ingested.
+        #
         # DECIDED BY THE AUTHOR 2026-07-27, in E2E-CANONICAL-RUN.md section 3:
         # "TUNE window: 226 -> 227. Every parameter, threshold and design
         # decision is selected here. Nothing after 227 informs a choice."
@@ -284,7 +307,7 @@ _SPLITS: dict[SplitName, Split] = {
         # holds on an earlier window is better evidence than one selected on a
         # single contraction, and the menu says which earlier windows the
         # release table can currently offer. Today it offers none.
-        windows=(ReleaseWindow("v226", "v227"),),
+        windows=(ReleaseWindow("v220", "v227"),),
     ),
     SplitName.VALIDATION: Split(
         name=SplitName.VALIDATION,
@@ -362,14 +385,14 @@ def adjustment_candidates() -> tuple[ReleaseWindow, ...]:
     window starting at the mark does not. This used to cut off one window
     earlier, which excluded the tune window from its own menu.
 
-    The menu now holds exactly **one** window, 226->227, which is the tune
-    window itself, so it offers no second window to check a decision against.
-    That is the finding rather than a defect here: the release table begins at
-    v226, so **there is nothing earlier in it to widen the tune set with**, and
-    a decision selected on 226->227 cannot currently be shown to hold anywhere
-    else. Since 226->227 is itself one of the two roughly thirty percent
-    contractions, that is a real exposure and not a formality. Releases
-    preceding v226 have to be ingested to close it.
+    The menu holds **two** windows since v220 entered the table on 2026-09-14,
+    220->226 and 226->227, and neither is the adjustment window itself, which is
+    now 220->227. The exposure the previous note described is narrowed but not
+    closed: 226->227 is still one of the two roughly thirty percent corpus
+    contractions, and 220->226 **cannot be scored at all today because GOA 226
+    is not ingested**. So the menu names two windows and the store can serve
+    neither as a check. Ingesting the releases between v160 and v220 is what
+    closes it, and that is the recency ladder.
     :func:`menu_is_sufficient` is the check to gate on rather than this
     docstring.
     """
@@ -392,9 +415,17 @@ def menu_is_sufficient() -> bool:
     tuned on an anomalous release transition, and nothing in the table can
     currently show whether it survives a normal one.
 
-    This does not block the campaign, which the author fixed on 226->227
-    knowingly. It records what that fixing costs, so the cost is visible rather
-    than discovered later.
+    This does not block the campaign. It records what the choice of window
+    costs, so the cost is visible rather than discovered later. Nothing calls
+    it: it is a reading, not a gate.
+
+    **It answers about the release TABLE and not about the store.** Since v220
+    entered the table on 2026-09-14 the menu holds two windows and this returns
+    True, but one of the two is 220->226 and **GOA 226 is not ingested**, so the
+    second window cannot be scored today. A caller that reads True as "a
+    decision can be checked against a second window" is reading more than this
+    function knows. Closing that gap means checking ingestion, which this module
+    deliberately cannot see, and it is the reason the recency ladder exists.
     """
     return len(adjustment_candidates()) >= 2
 
@@ -414,6 +445,82 @@ def assert_may_inform(name: str | SplitName, decision: str) -> None:
             f"it may inform: {permitted}. It is scored by {split.scored_by} and "
             f"is reported, never optimised against."
         )
+
+
+class HoldoutTouchedError(SplitLeakError):
+    """A window was built or scored that reads past the board's mark.
+
+    A subclass of :class:`SplitLeakError` because it is the same failure caught
+    earlier: something that may not inform a decision is about to. It has its
+    own type so a caller can let the general leak error escape while catching
+    this one to report a waiver, and so a reader of a traceback learns which
+    half of the temporal design was breached without opening this module.
+    """
+
+
+def window_reads_past_the_mark(end_published: date) -> bool:
+    """Whether a window ending on this date reads past the board's mark.
+
+    The comparison is on DATES and not on release identifiers, deliberately.
+    Membership in :data:`_VALIDATION_WINDOWS` is the wrong test and it is wrong
+    in the direction that matters: those windows are consecutive pairs, so
+    227->230 spans three of them and belongs to none, and a membership check
+    would wave through the exact window the holdout exists to protect. It is
+    also the wrong test for the corpora this platform actually holds, since
+    GOA 220 is not in the release table at all and a window starting there
+    cannot be resolved by identifier.
+
+    A date can always be resolved -- every annotation set records when its
+    corpus was published -- and the rule the author stated is about time:
+    nothing after the mark informs a choice.
+    """
+    return end_published > release(BOARD_MARK).published
+
+
+#: What a caller must say, verbatim, to score the holdout. It is long and it
+#: names its own consequence on purpose: a flag that can be set by reflex is a
+#: flag that gets set by reflex, and this one may be used once.
+HOLDOUT_WAIVER = "this is the single declared pass on the holdout"
+
+
+def assert_window_may_inform(
+    end_published: date, *, waiver: str | None = None, context: str = ""
+) -> None:
+    """Raise unless this window may inform a decision, or the waiver is claimed.
+
+    Called by the operations that BUILD an evaluation window and that SCORE
+    against one, because a rule enforced only in a document is a rule that
+    depends on everybody having read the document. This one had not been
+    enforced anywhere: :func:`assert_may_inform` existed, said the right thing,
+    and had no call sites in the whole tree.
+
+    That absence has a receipt. On 2026-08-27 the campaign's stored results
+    were deleted, and the reason recorded with the deletion was that 594 of
+    1,296 results had been evaluated on 220->230 -- the UNION of the
+    experimental window and the competitive one. Depth, preset and
+    representation had all been chosen on a window that contained the holdout,
+    and no preservation could undo it. Nothing in the platform had objected,
+    because nothing in the platform was asking.
+
+    The waiver exists because the holdout is meant to be scored, once, at the
+    end. It must be claimed in the caller's own words rather than inferred from
+    a boolean, and it is recorded on the row it produces so the single pass is
+    visible afterwards rather than reconstructed.
+    """
+    if not window_reads_past_the_mark(end_published):
+        return
+    if waiver == HOLDOUT_WAIVER:
+        return
+    where = f"{context}: " if context else ""
+    raise HoldoutTouchedError(
+        f"{where}this window ends {end_published.isoformat()}, after the board's mark "
+        f"{BOARD_MARK} was published {release(BOARD_MARK).published.isoformat()}, so it "
+        f"reads the holdout. The validation split is scored by the board and informs "
+        f"nothing; every parameter, threshold and design decision is selected strictly "
+        f"earlier. If this IS the single declared pass on the holdout, say so by passing "
+        f"the waiver verbatim: {HOLDOUT_WAIVER!r}. It is deliberately a sentence and not "
+        f"a flag, because it may be used once and should not be settable by reflex."
+    )
 
 
 def ground_truth_requires_history() -> bool:

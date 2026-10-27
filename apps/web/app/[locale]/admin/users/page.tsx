@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDateTime } from "@/lib/format";
+
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -12,7 +14,6 @@ import {
   type AdminUserRow,
   type UserRole,
 } from "@/lib/authApi";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useHasRole, useRole } from "@/lib/useRole";
 
 /**
@@ -44,7 +45,7 @@ type Tab = "all" | "pending" | "active" | "deactivated";
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    return formatDateTime(iso);
   } catch {
     return iso;
   }
@@ -186,7 +187,6 @@ export default function AdminUsersPage() {
   if (!hydrated) {
     return (
       <>
-        <Breadcrumbs />
         <div className="mx-auto max-w-5xl px-4 sm:px-6 py-6 space-y-3">
           <div className="h-7 w-48 animate-pulse rounded bg-stone-200" />
           <div className="h-4 w-72 animate-pulse rounded bg-stone-100" />
@@ -202,7 +202,6 @@ export default function AdminUsersPage() {
 
   return (
     <>
-      <Breadcrumbs />
       <div className="mx-auto max-w-6xl px-4 sm:px-6 py-6 space-y-6">
         <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>
@@ -513,7 +512,6 @@ function BackendMissingPanel() {
 function ForbiddenPanel({ locale, role }: { locale: string; role: UserRole }) {
   return (
     <>
-      <Breadcrumbs />
       <div className="mx-auto max-w-xl px-4 sm:px-6 py-12">
         <div
           role="alert"

@@ -48,6 +48,9 @@ from protea_contracts import (
 from pydantic import BaseModel, ValidationError
 
 from protea.core.operation_catalog import build_operation_registry
+from protea.core.operations.analyze_annotation_evolution import (
+    AnalyzeAnnotationEvolutionPayload,
+)
 from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderPayload
 from protea.core.operations.archive_ontology_snapshot import (
     ArchiveOntologySnapshotPayload,
@@ -95,6 +98,7 @@ from protea.core.operations.export_minijobs.export_coordinator import (
 from protea.core.operations.export_research_dataset import (
     ExportResearchDatasetPayload,
 )
+from protea.core.operations.extract_goa_universe import ExtractGoaUniversePayload
 from protea.core.operations.fetch_uniprot_metadata import (
     FetchUniProtMetadataPayload,
 )
@@ -114,6 +118,9 @@ from protea.core.operations.load_ontology_snapshot import (
 from protea.core.operations.load_quickgo_annotations import (
     LoadQuickGOAnnotationsPayload,
 )
+from protea.core.operations.load_swissprot_release import (
+    LoadSwissProtReleasePayload,
+)
 from protea.core.operations.measure_embedding_magnitude import (
     MeasureEmbeddingMagnitudePayload,
 )
@@ -122,6 +129,9 @@ from protea.core.operations.predict_go_terms_from_interpro import (
 )
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesPayload,
+)
+from protea.core.operations.resolve_protein_sequences import (
+    ResolveProteinSequencesPayload,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.core.operations.run_interproscan_batch import (
@@ -209,12 +219,12 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         {"embedding_config_id": "cfg", "per_band": 0},
         ("per_band",),
     ),
-    # missing-required: embedding_config_id
+    # missing-required: embedding_config_ids
     (
         "compute_embeddings",
         ComputeEmbeddingsPayload,
         {"accessions": ["P12345"]},
-        ("embedding_config_id",),
+        ("embedding_config_ids",),
     ),
     # wrong-type: sequence_ids must be list[int], not list[str]
     (
@@ -227,12 +237,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         },
         ("sequence_ids", 0),
     ),
-    # missing-required: sequences
+    # missing-required: sequences (in the legacy one-config shape, which folds
+    # into a single group and must still report the field it is missing)
     (
         "store_embeddings",
         StoreEmbeddingsPayload,
         {"parent_job_id": "job", "embedding_config_id": "cfg"},
-        ("sequences",),
+        ("groups", 0, "sequences"),
     ),
     # missing-required: output_name (one of many required fields)
     (
@@ -290,6 +301,20 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         LoadOntologySnapshotPayload,
         {"force_relationships": True},
         ("obo_url",),
+    ),
+    # A window's Swiss-Prot membership is named by the UniProt release it comes
+    # from, and "latest" names a moving target: the whole point of the table is
+    # that a release is a fixed set of accessions. A release string that is not
+    # <YYYY>_<NN> is refused before anything is downloaded.
+    (
+        "load_swissprot_release",
+        LoadSwissProtReleasePayload,
+        {
+            "release": "latest",
+            "published_at": "2025-06-18",
+            "expected_sha256": "0" * 64,
+        },
+        ("release",),
     ),
     # missing-required: source_version
     (
@@ -435,6 +460,44 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ApplyLearnedEncoderPayload,
         {"encoder_artifact_path": "/tmp/enc.pt"},
         ("source_embedding_config_id",),
+    ),
+    # bad-type: source tiene que ser una cadena no vacia. Un source vacio
+    # seleccionaria cero releases y la operacion se negaria mas tarde con un
+    # mensaje sobre "al menos dos releases", que nombra el sintoma y no la
+    # causa.
+    (
+        "analyze_annotation_evolution",
+        AnalyzeAnnotationEvolutionPayload,
+        {"source": "   "},
+        ("source",),
+    ),
+    # blank-url: a whitespace gaf_url would reach the GOA plugin, which would
+    # build a request against nothing and fail with an HTTP error naming an empty
+    # host -- a symptom three layers from the cause. The universe pass is the
+    # first thing a release runs, so a bad url here must be refused at the door.
+    (
+        "extract_goa_universe",
+        ExtractGoaUniversePayload,
+        {"gaf_url": "   ", "release": 156},
+        ("gaf_url",),
+    ),
+    # missing-release: the release number is written onto every row the pass
+    # inserts, as ``protein.first_admitted_release``. Defaulting it would put a
+    # wrong number in the corpus, which is worse than refusing the job.
+    (
+        "extract_goa_universe",
+        ExtractGoaUniversePayload,
+        {"gaf_url": "http://x/goa_uniprot_all.gaf.156.gz"},
+        ("release",),
+    ),
+    # zero-cap: ``max_accessions`` exists for a smoke run before the real one. A
+    # zero would be a pass that resolves nothing and reports success, which reads
+    # exactly like a universe that was already complete.
+    (
+        "resolve_protein_sequences",
+        ResolveProteinSequencesPayload,
+        {"max_accessions": 0},
+        ("max_accessions",),
     ),
     # bad-vocabulary: evidence_regime must name a known regime. Falling back to
     # a default here would silently widen the IA corpus (ADR-D46).

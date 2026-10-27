@@ -70,6 +70,10 @@ class ExportResearchDatasetPayload(ProteaPayload, frozen=True):
     search_backend: str = "faiss"
     compute_alignments: bool = False
     compute_taxonomy: bool = False
+    #: See TrainRerankerAutoPayload.compute_anc2vec. Exposed here so a ladder
+    #: export can say it is not asking for those two families, rather than
+    #: discovering at phase five that it cannot have them.
+    compute_anc2vec: bool = False
     expand_votes_to_ancestors: bool = False
     use_embedding_pca: bool = False
 
@@ -349,6 +353,7 @@ class ExportResearchDatasetOperation:
             "search_backend": p.search_backend,
             "compute_alignments": p.compute_alignments,
             "compute_taxonomy": p.compute_taxonomy,
+            "compute_anc2vec": p.compute_anc2vec,
             "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
             "use_embedding_pca": p.use_embedding_pca,
             "compute_self_prior": p.compute_self_prior,

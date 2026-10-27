@@ -19,12 +19,14 @@ held earlier.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import TextClause, text
 from sqlalchemy.orm import Session
 
 from protea.api.routers._arm_identity import with_arm_identity
+from protea.infrastructure.orm.models.experiment_run import ExperimentRunStatus
 
 _Q_EVALUATION_SETS = text(
     """
@@ -328,6 +330,27 @@ _Q_DONOR_COLUMN = text(
     """
 )
 
+#: Every feature selection that ever reached a consumer, named by the schema
+#: digest the booster was fitted against. It is the only place in this schema
+#: where a selection of features is named at all: a candidate carries the
+#: families its run computed, but a family is not a selection, and choosing
+#: among them is a decision only a model can make. ``schema_sha_v2`` is the
+#: canonical digest and ``feature_schema_sha`` the one rows written before it
+#: carry, so the coalesce is a fallback to the older column and not a guess.
+#:
+#: Rows with neither are dropped rather than counted as one nameless selection.
+#: A consumer that does not record what it consumed has not instantiated a level
+#: of that node, it has left one UNRECOVERABLE, and reading the model count as a
+#: level count would publish selections nobody can name and a contrast between
+#: them that never happened.
+_Q_FEATURE_SELECTIONS = text(
+    """
+    SELECT DISTINCT COALESCE(rm.schema_sha_v2, rm.feature_schema_sha) AS schema_sha
+    FROM reranker_model rm
+    WHERE COALESCE(rm.schema_sha_v2, rm.feature_schema_sha) IS NOT NULL
+    """
+)
+
 _Q_ARTIFACTS = text(
     """
     SELECT (SELECT count(*) FROM reranker_model)      AS reranker_model,
@@ -338,18 +361,99 @@ _Q_ARTIFACTS = text(
     """
 )
 
+
+class UnclassifiedRunStatus(ValueError):
+    """A lifecycle state that the floor policy neither honours nor withdraws.
+
+    Raised while this module is built, before any floor can be read, because the
+    alternative is silence: an unclassified state would decide whether a
+    declaration governs a published word by whichever way the sets below happen
+    to be written, and both ways are wrong for the same reason.
+    """
+
+
+#: Which states of an ``experiment_run`` leave a floor it declared STANDING, and
+#: which withdraw it. Written as two sets rather than as one ``<> 'abandoned'``
+#: test so a state added to the lifecycle cannot fall into either half by
+#: default: the guard below refuses to build the read at all until somebody says
+#: which it is.
+#:
+#: ``planned`` stands. A floor is a declaration, not a result, and the floors of
+#: this campaign are declared before their comparison is dispatched, so a
+#: predicate that demanded a finished run would stop the next declared floor
+#: from governing anything at all. ``running`` and ``done`` stand for the same
+#: reason: the declaration is still owned. ``abandoned`` is the withdrawal
+#: itself, and it is the only one of the four that a run uses to take its own
+#: plan back.
+_FLOOR_STANDS_IN: frozenset[str] = frozenset({"planned", "running", "done"})
+_FLOOR_WITHDRAWN_IN: frozenset[str] = frozenset({"abandoned"})
+
+
+def standing_floor_statuses(lifecycle: Iterable[str]) -> tuple[str, ...]:
+    """The states a declared floor still governs from, sorted.
+
+    Takes the lifecycle from ``ExperimentRunStatus`` rather than from a list
+    repeated here, and refuses in both directions of drift: a state that enum
+    holds and nobody classified, and a state this module honours that the enum
+    does not hold, which would otherwise put a literal in the SQL below that
+    Postgres rejects halfway through serving a request.
+
+    What it compares against is the ORM enum, not the ``experiment_run_status``
+    type in the database. Those two have drifted before -- the ``values_callable``
+    hint on the column exists because SQLAlchemy was persisting member NAMES
+    against a type holding lowercase labels -- and this guard cannot see that
+    happen, because it runs while the module is built and a round trip to the
+    server is not available to it. ``tests/test_experiment_run_enum_pg.py`` is
+    what pins the enum to the column; this pins the policy to the enum.
+    """
+    states = {str(s) for s in lifecycle}
+    unclassified = states - _FLOOR_STANDS_IN - _FLOOR_WITHDRAWN_IN
+    unknown = (_FLOOR_STANDS_IN | _FLOOR_WITHDRAWN_IN) - states
+    if unclassified or unknown:
+        drift: list[str] = []
+        if unclassified:
+            drift.append(f"{sorted(unclassified)} is a state nothing here classifies")
+        if unknown:
+            drift.append(f"{sorted(unknown)} is classified here and the column cannot hold it")
+        raise UnclassifiedRunStatus(
+            "the floor policy and experiment_run.status disagree about the run lifecycle: "
+            + "; ".join(drift)
+            + ". A floor is read off a run's config, so a state nobody classified either "
+            "lets a withdrawn declaration govern a published word or silently stops a "
+            "live one from governing."
+        )
+    return tuple(sorted(states & _FLOOR_STANDS_IN))
+
+
+#: The standing states as SQL literals. Interpolated and not bound because
+#: ``read_record`` runs everything in ``QUERIES`` without arguments; the values
+#: are this codebase's own enum members, checked by the guard above, and never
+#: anything a request can reach.
+_STANDING_FLOOR_STATUSES = ", ".join(
+    f"'{state}'" for state in standing_floor_statuses(ExperimentRunStatus)
+)
+
 #: The only place in this schema where a comparison can name its floor. An
 #: experiment run already carries a declared intent, so a floor rides on its
 #: config rather than on a column invented for the purpose. A run declares one
 #: with ``config`` holding ``graph_node`` (the node key the comparison is about)
 #: and ``floor`` (the level it is measured against).
+#:
+#: A declaration can also be TAKEN BACK, and the state predicate is what reads
+#: the retraction. Without it this query selected the two keys off any run in any
+#: state, and the one row in the store that carries both is
+#: ``campana-limpia-eje-A-sustrato-220-227``: status ``abandoned``, findings
+#: saying it was never dispatched and that its floor stops being a starting
+#: point. The retraction was in the database and nothing read it, so a run that
+#: had withdrawn its own floor still handed that floor to the substrate node.
 _Q_FLOORS = text(
-    """
+    f"""
     SELECT er.config ->> 'graph_node' AS node,
            er.config ->> 'floor'      AS floor,
            er.name                    AS name
     FROM experiment_run er
     WHERE er.config ? 'graph_node' AND er.config ? 'floor'
+      AND er.status IN ({_STANDING_FLOOR_STATUSES})
     """
 )
 
@@ -395,6 +499,7 @@ QUERIES: dict[str, TextClause] = {
     "candidates": _Q_CANDIDATES,
     "donor_column": _Q_DONOR_COLUMN,
     "artifacts": _Q_ARTIFACTS,
+    "feature_selections": _Q_FEATURE_SELECTIONS,
     "floors": _Q_FLOORS,
 }
 

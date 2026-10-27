@@ -74,9 +74,11 @@ class TestOnMessage:
         self.channel.basic_ack.assert_called_once_with(delivery_tag=42)
         self.channel.basic_nack.assert_not_called()
 
-    def test_worker_failure_acks_before_execution(self):
-        # QueueConsumer ACKs before execution to avoid RabbitMQ consumer_timeout
-        # on long-running jobs. Failed jobs are recorded in the DB; no nack is sent.
+    def test_worker_failure_still_acks(self):
+        # A failed job is recorded in the DB and the delivery is acked, not
+        # nacked: re-running it would not help and the queue must not fill
+        # with poison. The ack happens AFTER execution since 2026-10-08;
+        # test_the_ack_waits_for_the_job pins the ordering.
         consumer = _consumer(_make_worker(raises=RuntimeError("boom")), requeue_on_failure=False)
 
         consumer._on_message(self.channel, _make_method(7), self.properties, _encode(uuid4()))
@@ -84,13 +86,51 @@ class TestOnMessage:
         self.channel.basic_ack.assert_called_once_with(delivery_tag=7)
         self.channel.basic_nack.assert_not_called()
 
-    def test_worker_failure_acks_before_execution_regardless_of_requeue_flag(self):
+    def test_worker_failure_still_acks_regardless_of_requeue_flag(self):
         consumer = _consumer(_make_worker(raises=RuntimeError("boom")), requeue_on_failure=True)
 
         consumer._on_message(self.channel, _make_method(3), self.properties, _encode(uuid4()))
 
         self.channel.basic_ack.assert_called_once_with(delivery_tag=3)
         self.channel.basic_nack.assert_not_called()
+
+    def test_the_ack_waits_for_the_job(self):
+        """The ack must come AFTER handle_job, and nothing asserted that.
+
+        Until 2026-10-08 the delivery was acked before the worker started, to
+        dodge RabbitMQ's consumer_timeout. That freed the prefetch window
+        while the worker was busy, so the broker handed it the next message
+        and the message sat there for the length of an hour-long job; a
+        second node on the same queue got nothing. Every assertion in this
+        file checked the ack's ARGUMENTS and its call COUNT, both of which
+        the move left untouched, so the whole suite passed either way. This
+        is the test that can tell.
+        """
+        order: list[str] = []
+        worker = _make_worker()
+        worker.handle_job.side_effect = lambda *_a, **_k: order.append("job")
+        self.channel.basic_ack.side_effect = lambda *_a, **_k: order.append("ack")
+        consumer = _consumer(worker)
+
+        consumer._on_message(self.channel, _make_method(11), self.properties, _encode(uuid4()))
+
+        assert order == ["job", "ack"]
+
+    def test_a_failing_job_is_still_acked_last(self):
+        order: list[str] = []
+        worker = _make_worker(raises=RuntimeError("boom"))
+
+        def _boom(*_a, **_k):
+            order.append("job")
+            raise RuntimeError("boom")
+
+        worker.handle_job.side_effect = _boom
+        self.channel.basic_ack.side_effect = lambda *_a, **_k: order.append("ack")
+        consumer = _consumer(worker)
+
+        consumer._on_message(self.channel, _make_method(12), self.properties, _encode(uuid4()))
+
+        assert order == ["job", "ack"]
 
     def test_invalid_json_body_nacks_without_requeue(self):
         consumer = _consumer()
@@ -755,12 +795,22 @@ class TestOperationConsumerEmit:
         assert len(sessions) >= 2
         # Across all sessions, the JobEvent add for ``child.failed`` must
         # have happened exactly once and have been committed.
-        adds_with_commit = [s for s in sessions if s.add.called and s.commit.called]
-        assert len(adds_with_commit) == 1, (
-            f"expected exactly one session with .add()+.commit() (the "
-            f"child.failed event session), got {len(adds_with_commit)}"
+        #
+        # Asserted on the EVENT and not on a count of sessions: the consumer
+        # also stamps one ``child.provenance.libraries`` event per job, so a
+        # count of committing sessions stopped meaning "the failure was written
+        # once" the moment a second event existed. What this test is about is
+        # named in its own comment; the count was only ever a proxy for it.
+        failed = [
+            (session, call.args[0])
+            for session in sessions
+            if session.commit.called
+            for call in session.add.call_args_list
+            if getattr(call.args[0], "event", None) == "child.failed"
+        ]
+        assert len(failed) == 1, (
+            f"expected exactly one committed child.failed event, got {len(failed)}"
         )
-        adds_with_commit[0].add.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1054,14 +1104,19 @@ class TestOperationConsumerOnMessage:
         consumer._on_message(channel, method, MagicMock(), self._body(job_id=parent_id))
 
         # Identify the error-event session by the JobEvent it adds.
-        # The failure path may open additional sessions (e.g. the
-        # F-OPS-COORD-FAIL-PROPAGATE aggregate-failure probe), so we
-        # locate the writer rather than indexing by position.
-        err_sessions = [s for s in sessions if s.add.called]
-        assert len(err_sessions) == 1
-        err_session = err_sessions[0]
-        err_session.add.assert_called_once()
-        added_event = err_session.add.call_args[0][0]
+        # The path opens additional sessions that also write -- the
+        # F-OPS-COORD-FAIL-PROPAGATE aggregate-failure probe, and the
+        # per-job child.provenance.libraries stamp -- so locate the writer by
+        # the event it wrote, which is what the comment always claimed and what
+        # `len(...) == 1` only approximated while there was one writer.
+        added = [
+            call.args[0]
+            for session in sessions
+            for call in session.add.call_args_list
+            if getattr(call.args[0], "event", None) == "child.failed"
+        ]
+        assert len(added) == 1, f"expected one child.failed event, got {len(added)}"
+        added_event = added[0]
         assert added_event.job_id == parent_id
         assert added_event.event == "child.failed"
         assert added_event.level == "error"
@@ -1101,14 +1156,18 @@ class TestOperationConsumerOnMessage:
         def make_session():
             s = MagicMock()
             sessions_created.append(s)
-            # Sessions opened along the failure path:
-            #   [1] cancellation check (no add)
-            #   [2] execution (no add; raises)
-            #   [3] error-event session (calls .add(JobEvent) + .commit)
-            #   [4] F-OPS-COORD-FAIL-PROPAGATE aggregate-failure probe
-            # Trigger commit failure on the error-event session.
-            if len(sessions_created) == 3:
-                s.commit.side_effect = RuntimeError("DB gone")
+
+            def arm_commit_failure(obj, *args, **kwargs):
+                # The error-event session is the one that writes child.failed.
+                # Located by WHAT IT WRITES rather than by the order it was
+                # opened, because that order already moved once: the consumer
+                # now stamps child.provenance.libraries before executing, which
+                # shifted every ordinal after it. An index into the open
+                # sequence encodes an assumption the consumer never promised.
+                if getattr(obj, "event", None) == "child.failed":
+                    s.commit.side_effect = RuntimeError("DB gone")
+
+            s.add.side_effect = arm_commit_failure
             return s
 
         from protea.infrastructure.queue.consumer import OperationConsumer
@@ -1130,8 +1189,19 @@ class TestOperationConsumerOnMessage:
 
         consumer._on_message(channel, method, MagicMock(), self._body(job_id=parent_id))
 
-        # Error event session should have rollback called
-        err_session = sessions_created[2]
+        # Error event session should have rollback called. Located the same way
+        # the commit failure was armed -- by the event it wrote -- so the two
+        # halves of this test cannot drift apart when the session order moves.
+        err_sessions = [
+            session
+            for session in sessions_created
+            for call in session.add.call_args_list
+            if getattr(call.args[0], "event", None) == "child.failed"
+        ]
+        assert len(err_sessions) == 1, (
+            f"expected one session writing child.failed, got {len(err_sessions)}"
+        )
+        err_session = err_sessions[0]
         err_session.rollback.assert_called_once()
         err_session.close.assert_called_once()
 
@@ -1157,7 +1227,7 @@ class TestQueueConsumerRetryLater:
 
         consumer._on_message(channel, method, props, _encode(job_id))
 
-        # Should ack before execution
+        # Acked, once, after the job.
         channel.basic_ack.assert_called_once_with(delivery_tag=99)
         # Should sleep on the connection
         channel.connection.sleep.assert_called_once_with(30)
@@ -1269,7 +1339,7 @@ class TestQueueConsumerCancellationNack:
 
         consumer._on_message(channel, method, MagicMock(), _encode(uuid4()))
 
-        # Pre-ack pattern preserved; handle_job still called.
+        # Acked once, and handle_job still called.
         channel.basic_ack.assert_called_once_with(delivery_tag=125)
         worker.handle_job.assert_called_once()
         session.close.assert_called_once()

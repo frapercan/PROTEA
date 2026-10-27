@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount, formatDateTime } from "@/lib/format";
+
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { bulkCancelJobs, listJobs, Job } from "@/lib/api";
@@ -15,7 +17,7 @@ const CANCELLABLE_STATUSES = new Set(["queued", "running"]);
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "medium" });
+  return formatDateTime(iso);
 }
 
 function InlineProgress({
@@ -46,7 +48,7 @@ function InlineProgress({
         <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
           <div className="h-1.5 w-8 rounded-full bg-blue-400 animate-pulse" />
         </div>
-        <span className="text-xs text-slate-600">{(current ?? 0).toLocaleString()}</span>
+        <span className="text-xs text-slate-600">{formatCount((current ?? 0))}</span>
       </div>
     );
   }

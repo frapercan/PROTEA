@@ -1,5 +1,9 @@
 "use client";
 
+import { formatCount, formatDateTime } from "@/lib/format";
+
+import { OperatorOnlyNotice, useMayLaunchJobs } from "@/components/OperatorOnly";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
@@ -9,8 +13,7 @@ import {
   deleteAnnotationSet,
   createJob,
   AnnotationSet,
-  OntologySnapshot,
-} from "@/lib/api";
+  OntologySnapshot, errorText } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useLocale, useTranslations } from "next-intl";
@@ -22,7 +25,7 @@ const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "medium" });
+  return formatDateTime(iso);
 }
 
 function shortId(id: string) {
@@ -31,6 +34,7 @@ function shortId(id: string) {
 
 export default function AnnotationsPage() {
   const t = useTranslations("annotations");
+  const mayLaunch = useMayLaunchJobs();
   const tToast = useTranslations("toasts");
   const locale = useLocale();
   const toast = useToast();
@@ -56,7 +60,7 @@ export default function AnnotationsPage() {
       setIaEditId(null);
       toast(tToast("iaUrlSaved"), "success");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     } finally {
       setIaSaving(false);
     }
@@ -116,15 +120,15 @@ export default function AnnotationsPage() {
     const s = sets.find((a) => a.id === id);
     const count = s?.annotation_count ?? 0;
     const msg = count > 0
-      ? t("setsTab.deleteConfirm", { count: count.toLocaleString() })
+      ? t("setsTab.deleteConfirm", { count: formatCount(count) })
       : t("setsTab.deleteConfirmNoAnnotations");
     if (!confirm(msg)) return;
     try {
       const r = await deleteAnnotationSet(id);
       setSets((prev) => prev.filter((a) => a.id !== id));
-      toast(tToast("annotationsDeleted", { count: r.annotations_deleted.toLocaleString() }), "info");
+      toast(tToast("annotationsDeleted", { count: formatCount(r.annotations_deleted) }), "info");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     }
   }
 
@@ -141,7 +145,7 @@ export default function AnnotationsPage() {
       setSnapResult(res);
       toast(tToast("jobQueued"), "success");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     } finally {
       setSnapSubmitting(false);
     }
@@ -164,7 +168,7 @@ export default function AnnotationsPage() {
       setGoaResult(res);
       toast(tToast("jobQueued"), "success");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     } finally {
       setGoaSubmitting(false);
     }
@@ -183,7 +187,7 @@ export default function AnnotationsPage() {
       setQgoResult(res);
       toast(tToast("jobQueued"), "success");
     } catch (err: any) {
-      toast(String(err), "error");
+      toast(errorText(err), "error");
     } finally {
       setQgoSubmitting(false);
     }
@@ -252,7 +256,7 @@ export default function AnnotationsPage() {
                     {t("setsTab.delete")}
                   </button>
                 </div>
-                <p className="text-[13px] text-slate-500">{a.source_version ?? "—"} · {(a.annotation_count ?? 0).toLocaleString()} annotations</p>
+                <p className="text-[13px] text-slate-500">{a.source_version ?? "—"} · {formatCount((a.annotation_count ?? 0))} annotations</p>
                 <div className="mt-1 flex flex-wrap gap-1">
                   {a.meta && Object.entries(a.meta).map(([k, v]) => (
                     <span key={k} className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] text-slate-600">
@@ -287,7 +291,7 @@ export default function AnnotationsPage() {
                 <div className="font-mono text-xs text-slate-600" title={a.id}>{shortId(a.id)}</div>
                 <div className="font-medium text-slate-800">{a.source.toUpperCase()}</div>
                 <div className="text-[13px] text-slate-500">{a.source_version ?? "—"}</div>
-                <div className="text-slate-700">{(a.annotation_count ?? 0).toLocaleString()}</div>
+                <div className="text-slate-700">{formatCount((a.annotation_count ?? 0))}</div>
                 <div className="flex flex-wrap gap-1">
                   {a.meta && Object.entries(a.meta).map(([k, v]) => (
                     <span key={k} className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] text-slate-600">
@@ -341,7 +345,7 @@ export default function AnnotationsPage() {
               <div key={s.id} className="rounded-lg border bg-white p-4 shadow-sm space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-slate-800">{s.obo_version}</span>
-                  <span className="text-xs text-slate-600">{(s.go_term_count ?? 0).toLocaleString()} terms</span>
+                  <span className="text-xs text-slate-600">{formatCount((s.go_term_count ?? 0))} terms</span>
                 </div>
                 <div className="min-w-0">
                   {iaEditId === s.id ? (
@@ -401,7 +405,7 @@ export default function AnnotationsPage() {
               <div key={s.id} className="grid grid-cols-[80px_160px_100px_minmax(160px,1fr)_160px] min-w-[700px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center">
                 <div className="font-mono text-xs text-slate-600" title={s.id}>{shortId(s.id)}</div>
                 <div className="font-medium text-slate-800">{s.obo_version}</div>
-                <div className="text-slate-700">{(s.go_term_count ?? 0).toLocaleString()}</div>
+                <div className="text-slate-700">{formatCount((s.go_term_count ?? 0))}</div>
                 <div className="min-w-0">
                   {iaEditId === s.id ? (
                     <div className="flex items-center gap-1">
@@ -478,8 +482,9 @@ export default function AnnotationsPage() {
                   </Link>
                 </div>
               )}
-              <div className="flex justify-end">
-                <button type="submit" disabled={snapSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
+              <div className="flex items-center justify-between gap-4">
+                {mayLaunch ? <span /> : <OperatorOnlyNotice />}
+                <button type="submit" disabled={snapSubmitting || !mayLaunch} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
                   {snapSubmitting ? t("loadSnapshotTab.launching") : t("loadSnapshotTab.launchJob")}
                 </button>
               </div>
@@ -537,8 +542,9 @@ export default function AnnotationsPage() {
                   </Link>
                 </div>
               )}
-              <div className="flex justify-end">
-                <button type="submit" disabled={goaSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
+              <div className="flex items-center justify-between gap-4">
+                {mayLaunch ? <span /> : <OperatorOnlyNotice />}
+                <button type="submit" disabled={goaSubmitting || !mayLaunch} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
                   {goaSubmitting ? t("loadGoaTab.launching") : t("loadGoaTab.launchJob")}
                 </button>
               </div>
@@ -585,8 +591,9 @@ export default function AnnotationsPage() {
                   </Link>
                 </div>
               )}
-              <div className="flex justify-end">
-                <button type="submit" disabled={qgoSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
+              <div className="flex items-center justify-between gap-4">
+                {mayLaunch ? <span /> : <OperatorOnlyNotice />}
+                <button type="submit" disabled={qgoSubmitting || !mayLaunch} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
                   {qgoSubmitting ? t("loadQuickgoTab.launching") : t("loadQuickgoTab.launchJob")}
                 </button>
               </div>

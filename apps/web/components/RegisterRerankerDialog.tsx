@@ -7,8 +7,7 @@ import {
   listDatasets,
   type Dataset,
   type RerankerImportByReferenceBody,
-  type RerankerImportResponse,
-} from "@/lib/api";
+  type RerankerImportResponse, errorText } from "@/lib/api";
 
 /**
  * Register a booster that is already in the artifact store via
@@ -76,7 +75,7 @@ export function RegisterRerankerDialog({ open, onClose, onRegistered }: Props) {
     try {
       run = JSON.parse(runJsonText) as Record<string, unknown>;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : errorText(err);
       setError(t("errors.runJsonInvalid", { message: msg }));
       return;
     }
@@ -99,7 +98,7 @@ export function RegisterRerankerDialog({ open, onClose, onRegistered }: Props) {
       onRegistered?.(res);
       onClose();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : errorText(err);
       setError(msg);
     } finally {
       setSubmitting(false);

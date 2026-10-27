@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount, formatDate } from "@/lib/format";
+
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -46,7 +48,7 @@ function predLabel(p: PredictionSet) {
   if (p.embedding_config_name) parts.push(p.embedding_config_name);
   if (p.annotation_set_label) parts.push(p.annotation_set_label);
   parts.push(`k=${p.limit_per_entry}`);
-  if (p.prediction_count != null) parts.push(`${p.prediction_count.toLocaleString()} preds`);
+  if (p.prediction_count != null) parts.push(`${formatCount(p.prediction_count)} preds`);
   return `${parts.join(" · ")} (${shortId(p.id)}…)`;
 }
 
@@ -455,7 +457,7 @@ function RerankerCard({
             )}
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-600">{new Date(model.created_at).toLocaleDateString()}</span>
+            <span className="text-xs text-slate-600">{formatDate(model.created_at)}</span>
             <span className="text-slate-300 text-xs">{expanded ? "▲" : "▼"}</span>
           </div>
         </div>
@@ -497,8 +499,8 @@ function RerankerCard({
               <MetricsBadge label="F1" value={m.val_f1} />
             </div>
             <div className="flex flex-wrap gap-4 mt-2 text-[13px] text-slate-500">
-              {m.train_samples != null && <span>Train samples: {m.train_samples.toLocaleString()}</span>}
-              {m.val_samples != null && <span>Val samples: {m.val_samples.toLocaleString()}</span>}
+              {m.train_samples != null && <span>Train samples: {formatCount(m.train_samples)}</span>}
+              {m.val_samples != null && <span>Val samples: {formatCount(m.val_samples)}</span>}
               {m.positive_rate_train != null && (
                 <span>Train positive rate: {(m.positive_rate_train * 100).toFixed(2)}%</span>
               )}

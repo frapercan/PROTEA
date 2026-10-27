@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached, invalidate
+from protea.api.cache import cached, refresh
 from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -24,6 +24,41 @@ PROTEIN_STATS_TTL_SECONDS = 300.0
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
+
+
+def _count_proteins_with_go(session: Session) -> int:
+    """How many proteins carry at least one GO annotation.
+
+    NO ES UN count(distinct) SOBRE LAS ANOTACIONES. Esa era la forma anterior,
+    sin filtro, asi que recorria la tabla entera para deduplicar: con el corpus
+    GOA cargado son 379 millones de filas y 617 segundos medidos en
+    pg_stat_activity. El endpoint cachea 300 s
+    (``PROTEIN_STATS_TTL_SECONDS``), de modo que la consulta tardaba MAS que su
+    propia cache y la base se quedaba recalculandola de forma permanente: cada
+    vez que terminaba, el resultado ya estaba caducado.
+
+    El semijoin pregunta lo mismo al reves, recorriendo las 617.103 proteinas
+    con una sonda al indice ``ix_protein_go_annotation_protein_accession`` por
+    cada una, y parando en la primera coincidencia. Medido sobre este mismo
+    corpus: 21,9 s frente a 617, el mismo resultado (560.359 proteinas), y por
+    debajo del TTL -- que es lo que hace que la cache sirva para algo.
+
+    Los dos cuentan lo mismo, y no por casualidad: la clave ajena
+    ``protein_go_annotation_protein_accession_fkey`` garantiza que toda
+    anotacion apunta a una proteina existente, asi que no hay accessions en la
+    tabla de anotaciones que falten en ``protein``. Sin esa clave los dos
+    numeros podrian diferir y el cambio no seria equivalente.
+    """
+    return (
+        session.query(func.count(Protein.accession))
+        .filter(
+            session.query(ProteinGOAnnotation.protein_accession)
+            .filter(ProteinGOAnnotation.protein_accession == Protein.accession)
+            .exists()
+        )
+        .scalar()
+        or 0
+    )
 
 
 def _compute_protein_stats(
@@ -65,9 +100,7 @@ def _compute_protein_stats(
             .scalar()
             or 0
         )
-        with_go = (
-            session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar() or 0
-        )
+        with_go = _count_proteins_with_go(session)
         return {
             "total": total,
             "canonical": canonical,
@@ -106,10 +139,12 @@ def get_protein_stats(
 
 def prewarm_protein_stats(factory: sessionmaker[Session]) -> dict[str, Any]:
     """Recompute and store ``proteins:stats``; used by the app startup hook
-    and the background refresh loop. Always bypasses the existing entry so
-    the cache is refilled with fresh counts before the old TTL expires."""
-    invalidate(PROTEIN_STATS_CACHE_KEY)
-    return cached(
+    and the background refresh loop. Always recomputes, so the cache is
+    refilled with fresh counts before the old TTL expires.
+
+    Through :func:`refresh`, so the previous value stays servable for the
+    whole recompute instead of the key being empty while it runs."""
+    return refresh(
         PROTEIN_STATS_CACHE_KEY,
         PROTEIN_STATS_TTL_SECONDS,
         lambda: _compute_protein_stats(factory),

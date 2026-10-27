@@ -1620,8 +1620,15 @@ class TestExecuteHappyPath:
         assert emit_events.count("run_cafa_evaluation.setting_done") == 3
 
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
-    def test_cafa_eval_failure_catches_exception(self, mock_compute):
-        """When cafa_eval raises for one setting, it should log warning and continue."""
+    def test_cafa_eval_failure_fails_the_job(self, mock_compute):
+        """When cafa_eval raises, every setting is tried and then the job fails.
+
+        This test used to assert the opposite -- three empty cells and a
+        successful job -- which is the behaviour that let a real breakage sit
+        unnoticed: `signal only works in main thread of the main interpreter`
+        failed all three settings and the job still reported success with an
+        EvaluationResult of three empty cells.
+        """
         mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
 
         session = MagicMock()
@@ -1639,24 +1646,27 @@ class TestExecuteHappyPath:
         query.order_by.return_value = query
         query.yield_per.return_value = []
 
-        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
-            with patch(
+        from protea.core.operations._run_cafa_eval_driver import SettingEvaluationError
+
+        with (
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
+            patch(
                 "cafaeval.evaluation.cafa_eval",
                 side_effect=RuntimeError("cafa_eval exploded"),
-            ):
-                result = self.op.execute(
-                    session,
-                    {"evaluation_set_id": EVAL_SET_ID, "prediction_set_id": PRED_SET_ID},
-                    emit=self.emit,
-                )
+            ),
+            pytest.raises(SettingEvaluationError) as exc,
+        ):
+            self.op.execute(
+                session,
+                {"evaluation_set_id": EVAL_SET_ID, "prediction_set_id": PRED_SET_ID},
+                emit=self.emit,
+            )
 
-        # All three settings should be empty dicts (all failed)
-        results = result.result["results"]
-        assert results["NK"] == {}
-        assert results["LK"] == {}
-        assert results["PK"] == {}
+        # All three are named, so the audit says whether it is systemic.
+        for setting in ("NK", "LK", "PK"):
+            assert setting in str(exc.value)
 
-        # Emit should have 3 setting_failed events
+        # And all three were tried before it raised, not just the first.
         emit_events = [c[0][0] for c in self.emit.call_args_list]
         assert emit_events.count("run_cafa_evaluation.setting_failed") == 3
 
@@ -2153,3 +2163,296 @@ class TestCafaevalInvocationLafaParity:
 
         assert captured["th_step"] == 0.001
         assert captured["max_terms"] == 500
+
+
+# ---------------------------------------------------------------------------
+# Running cafaeval off the main thread, and refusing an empty result
+# ---------------------------------------------------------------------------
+
+
+class TestCafaevalOffTheMainThread:
+    """``_job_pump`` runs every operation in a per-job thread.
+
+    ``signal.signal`` is refused anywhere but the main thread, so the call
+    that existed to make cafaeval safe was the one thing that made it
+    impossible from a worker. The tests above only ever exercised it from the
+    main thread, which is why they passed while every real run failed.
+    """
+
+    @staticmethod
+    def _ctx():
+        """Same context the parity tests build, so only the thread differs."""
+        return TestCafaevalInvocationLafaParity()._make_ctx()
+
+    def _invoke_in_a_thread(self, cafa_eval):
+        """Call the driver from a non-main thread, re-raising what it raised."""
+        import threading
+
+        from protea.core.operations import _run_cafa_eval_driver as driver
+
+        box: dict[str, Any] = {}
+
+        def run():
+            try:
+                with patch.dict(
+                    "sys.modules",
+                    {"cafaeval.evaluation": MagicMock(cafa_eval=cafa_eval)},
+                ):
+                    box["out"] = driver._invoke_cafaeval_signal_safe(
+                        ctx=self._ctx(),
+                        pred_dir="/tmp/preds",
+                        gt_file="/tmp/nk.tsv",
+                        known_file=None,
+                    )
+            except BaseException as exc:  # noqa: BLE001 - re-raised below
+                box["exc"] = exc
+
+        t = threading.Thread(target=run, name="job-test")
+        t.start()
+        t.join(timeout=30)
+        assert not t.is_alive(), "the driver call hung off the main thread"
+        if "exc" in box:
+            raise box["exc"]
+        return box["out"]
+
+    def test_the_driver_runs_off_the_main_thread(self):
+        """The regression: this raised ValueError from signal.signal before."""
+        called: dict[str, Any] = {}
+
+        def fake_cafa_eval(*args, **kwargs):
+            called["yes"] = True
+            return ("df", "dfs_best")
+
+        df, dfs_best, sink = self._invoke_in_a_thread(fake_cafa_eval)
+
+        assert called.get("yes") is True
+        assert (df, dfs_best) == ("df", "dfs_best")
+        assert sink is not None
+
+    def test_it_does_not_touch_signal_handlers_off_the_main_thread(self):
+        """Not merely tolerated: the call is skipped, so it cannot raise."""
+        import signal as signal_module
+
+        with patch.object(signal_module, "signal", side_effect=AssertionError) as spy:
+            self._invoke_in_a_thread(lambda *a, **k: ("df", "dfs_best"))
+
+        assert spy.call_count == 0
+
+    def test_it_still_resets_the_handlers_on_the_main_thread(self):
+        """A direct in-process call can reach the dense kernel, so keep it."""
+        import signal as signal_module
+
+        from protea.core.operations import _run_cafa_eval_driver as driver
+
+        with (
+            patch.object(signal_module, "signal", return_value=None) as spy,
+            patch.dict(
+                "sys.modules",
+                {"cafaeval.evaluation": MagicMock(cafa_eval=lambda *a, **k: ("df", "b"))},
+            ),
+        ):
+            driver._invoke_cafaeval_signal_safe(
+                ctx=self._ctx(), pred_dir="/tmp/p", gt_file="/tmp/nk.tsv", known_file=None
+            )
+
+        # Two to SIG_DFL on the way in, two restores on the way out.
+        assert spy.call_count == 4
+        assert {c.args[0] for c in spy.call_args_list} == {
+            signal_module.SIGTERM,
+            signal_module.SIGINT,
+        }
+
+    def test_the_sink_is_always_passed_which_forces_the_sparse_kernel(self):
+        """Why skipping the reset is safe: no sink, no sparse-only, no pool.
+
+        cafaeval refuses ``per_protein_sink`` on its dense fork-pool path, so
+        as long as this caller always passes one there is no pool to protect
+        from an unexited SIGTERM handler.
+        """
+        captured: dict[str, Any] = {}
+
+        def fake_cafa_eval(*args, **kwargs):
+            captured.update(kwargs)
+            return ("df", "dfs_best")
+
+        self._invoke_in_a_thread(fake_cafa_eval)
+
+        assert captured["per_protein_sink"] is not None
+        assert captured["n_cpu"] == 1
+
+
+class TestAnEmptySettingFailsTheJob:
+    """A result whose cells are empty is not a result.
+
+    The driver used to record a failed setting as a warning and contribute
+    ``{}``, so a run where all three failed still reported success and
+    persisted an EvaluationResult of three empty cells -- indistinguishable
+    from a configuration that genuinely scored nothing.
+    """
+
+    def _evaluate(self, per_setting):
+        """Drive the loop with ``_run_cafaeval_for_setting`` stubbed per setting."""
+        from protea.core.operations import _run_cafa_eval_driver as driver
+
+        events: list[str] = []
+
+        def emit(code, message=None, data=None, level="info"):
+            events.append(code)
+
+        ctx = MagicMock()
+        with (
+            patch.object(driver, "_resolve_setting_pred_dir", return_value="/tmp/preds"),
+            patch.object(
+                driver,
+                "_run_cafaeval_for_setting",
+                side_effect=lambda **kw: per_setting[kw["setting"]],
+            ),
+        ):
+            out = driver.evaluate_all_settings(MagicMock(), ctx=ctx, emit=emit)
+        return out, events
+
+    def test_all_three_failing_raises_and_names_all_three(self):
+        from protea.core.operations._run_cafa_eval_driver import SettingEvaluationError
+
+        with pytest.raises(SettingEvaluationError) as exc:
+            self._evaluate({"NK": {}, "LK": {}, "PK": {}})
+
+        for setting in ("NK", "LK", "PK"):
+            assert setting in str(exc.value)
+
+    def test_one_failing_raises_and_names_only_that_one(self):
+        from protea.core.operations._run_cafa_eval_driver import SettingEvaluationError
+
+        with pytest.raises(SettingEvaluationError) as exc:
+            self._evaluate({"NK": {"bpo": {}}, "LK": {}, "PK": {"cco": {}}})
+
+        assert "LK" in str(exc.value)
+        assert "NK" not in str(exc.value)
+        assert "PK" not in str(exc.value)
+
+    def test_all_three_run_before_it_raises(self):
+        """The audit trail must name every failure, not only the first."""
+        from protea.core.operations._run_cafa_eval_driver import SettingEvaluationError
+
+        calls: list[str] = []
+
+        from protea.core.operations import _run_cafa_eval_driver as driver
+
+        def record(**kw):
+            calls.append(kw["setting"])
+            return {}
+
+        with (
+            patch.object(driver, "_resolve_setting_pred_dir", return_value="/tmp/preds"),
+            patch.object(driver, "_run_cafaeval_for_setting", side_effect=record),
+            pytest.raises(SettingEvaluationError),
+        ):
+            driver.evaluate_all_settings(MagicMock(), ctx=MagicMock(), emit=lambda *a, **k: None)
+
+        assert calls == ["NK", "LK", "PK"]
+
+    def test_metrics_in_every_cell_return_normally(self):
+        out, _ = self._evaluate(
+            {"NK": {"bpo": {"f": 1}}, "LK": {"mfo": {"f": 2}}, "PK": {"cco": {"f": 3}}}
+        )
+
+        assert set(out) == {"NK", "LK", "PK"}
+        assert out["NK"] == {"bpo": {"f": 1}}
+
+
+# ---------------------------------------------------------------------------
+# A cyclic snapshot cannot be scored, and should say so by name
+# ---------------------------------------------------------------------------
+
+
+class TestACyclicSnapshotIsRefusedByName:
+    """cafaeval dies on a cycle with a message that names nothing.
+
+    ``Graph.top_sort`` is Kahn's algorithm and raises
+    ``Exception("The sparse matrix doesn't represent an acyclic graph")`` from
+    inside ``Graph.__init__``, so the run dies while PARSING the obo. Verified
+    against the real file: ``obo_parser`` on ``releases/2024-06-10`` raises
+    exactly that, and the snapshot of release 221 closes two triangles.
+
+    This does not make a cyclic snapshot scoreable. It makes the refusal
+    legible, and moves it before a 31 MB download and a ground-truth write.
+    """
+
+    @staticmethod
+    def _session(parent_rows):
+        session = MagicMock()
+        session.execute.return_value = parent_rows
+        return session
+
+    @staticmethod
+    def _snapshot():
+        return SimpleNamespace(id=uuid.uuid4(), obo_version="releases/2024-06-10")
+
+    def test_an_acyclic_snapshot_passes_silently(self) -> None:
+        from protea.core.operations.run_cafa_evaluation import _refuse_a_cyclic_snapshot
+
+        emitted: list[str] = []
+        _refuse_a_cyclic_snapshot(
+            self._session([("GO:2", "GO:1"), ("GO:3", "GO:2")]),
+            self._snapshot(),
+            lambda code, *a, **k: emitted.append(code),
+        )
+        assert emitted == []
+
+    def test_a_cycle_raises_naming_the_snapshot_and_the_terms(self) -> None:
+        from protea.core.operations.run_cafa_evaluation import _refuse_a_cyclic_snapshot
+
+        snap = self._snapshot()
+        with pytest.raises(ValueError) as exc:
+            _refuse_a_cyclic_snapshot(
+                self._session([("GO:1", "GO:2"), ("GO:2", "GO:3"), ("GO:3", "GO:1")]),
+                snap,
+                lambda *a, **k: None,
+            )
+        mensaje = str(exc.value)
+        assert str(snap.id) in mensaje
+        assert "releases/2024-06-10" in mensaje
+        for t in ("GO:1", "GO:2", "GO:3"):
+            assert t in mensaje
+
+    def test_it_says_the_ia_of_the_same_snapshot_can_still_be_computed(self) -> None:
+        """So nobody concludes the snapshot is unusable for everything."""
+        from protea.core.operations.run_cafa_evaluation import _refuse_a_cyclic_snapshot
+
+        with pytest.raises(ValueError, match="compute_information_accretion"):
+            _refuse_a_cyclic_snapshot(
+                self._session([("GO:1", "GO:2"), ("GO:2", "GO:1")]),
+                self._snapshot(),
+                lambda *a, **k: None,
+            )
+
+    def test_it_emits_an_error_event_with_the_terms(self) -> None:
+        from protea.core.operations.run_cafa_evaluation import _refuse_a_cyclic_snapshot
+
+        eventos: list[tuple] = []
+
+        def emit(code, message=None, data=None, level="info"):
+            eventos.append((code, data, level))
+
+        with pytest.raises(ValueError):
+            _refuse_a_cyclic_snapshot(
+                self._session([("GO:1", "GO:2"), ("GO:2", "GO:1")]),
+                self._snapshot(),
+                emit,
+            )
+        assert len(eventos) == 1
+        code, data, level = eventos[0]
+        assert code == "run_cafa_evaluation.cyclic_snapshot"
+        assert level == "error"
+        assert data["components"] == 1
+        assert data["terms"] == ["GO:1", "GO:2"]
+
+    def test_the_staging_step_calls_it_before_touching_the_obo(self) -> None:
+        """The wiring: refusing after the download would still be a 31 MB wait."""
+        import inspect
+
+        from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
+
+        src = inspect.getsource(RunCafaEvaluationOperation._stage_evaluator_inputs)
+        assert "_refuse_a_cyclic_snapshot(" in src
+        assert src.index("_refuse_a_cyclic_snapshot(") < src.index("resolve_obo(")

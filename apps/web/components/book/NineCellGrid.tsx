@@ -21,12 +21,29 @@ import {
 export function NineCellGrid({
   frameCaption,
   italicLine,
+  carriedLabel,
+  frontierLabel,
+  explainer,
+  scrollHint,
 }: {
   frameCaption: string;
   italicLine: string;
+  /** "carried" and "frontier" are verdicts a reader has to be able to
+   *  read, so they are translated like any other label rather than left
+   *  in English on four of the five locales. */
+  carriedLabel: string;
+  frontierLabel: string;
+  explainer: string;
+  scrollHint: string;
 }) {
   return (
     <figure className="m-0">
+      {/* The table is wider than a phone and always has been: at 390px the
+          CC column sits off-screen at x=475, and overflow-x-auto scrolls
+          but gives no sign that there is anything to scroll to. An
+          external audit on 2026-10-07 read it as a two-column board.
+          The hint is shown only where the overflow actually happens. */}
+      <p className="mb-2 text-[11px] text-[var(--subtle)] sm:hidden">{scrollHint}</p>
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-right font-mono tabular-nums">
           <caption className="sr-only">{frameCaption}</caption>
@@ -74,7 +91,7 @@ export function NineCellGrid({
                       */}
                       {cell.won ? (
                         <span className="text-[1.6rem] leading-none text-[var(--foreground)]">
-                          {cell.value === null ? "carried" : cell.value.toFixed(3)}
+                          {cell.value === null ? carriedLabel : cell.value.toFixed(3)}
                         </span>
                       ) : (
                         <span className="inline-flex items-baseline gap-1 text-[var(--danger)]">
@@ -82,7 +99,7 @@ export function NineCellGrid({
                             [
                           </span>
                           <span className="text-[1.6rem] leading-none">
-                            {cell.value === null ? "frontier" : cell.value.toFixed(3)}
+                            {cell.value === null ? frontierLabel : cell.value.toFixed(3)}
                           </span>
                           <span aria-hidden className="text-lg opacity-60">
                             ]
@@ -110,10 +127,7 @@ export function NineCellGrid({
           anything live.
         */}
         <p className="max-w-2xl text-[11px] leading-relaxed text-[var(--subtle)]">
-          Positions are from the sealed board, which is an external evaluation
-          of a submitted container and does not move. The figures behind them
-          are withdrawn while the campaign recomputes, so each cell names which
-          side of the frontier it is on and not by how much.
+          {explainer}
           {/*
             This caption used to carry a second sentence naming the campaign's
             own window and pointing at the grid that was filling it in. Both

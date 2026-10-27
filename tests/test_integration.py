@@ -474,9 +474,26 @@ def test_load_goa_annotations_roundtrip(db):
         ),
     ]
 
-    # Step 4: Load annotations
+    # Step 4: Load annotations.
+    #
+    # A real GAF declares the GO build it was generated against in a
+    # ``!go-version`` header, and ``execute`` refuses a snapshot newer than
+    # that before touching the DB. The fixture serves the header the same way
+    # it serves the records, so this exercises the accepting path: the
+    # snapshot below is releases/2024-01-17, at or before the declared build.
     goa_op = LoadGOAAnnotationsOperation()
-    with patch.object(goa_op, "_stream_gaf", return_value=iter(gaf_records)):
+    gaf_header = (
+        "!gaf-version: 2.2\n"
+        "!go-version: http://purl.obolibrary.org/obo/go/releases/2024-03-28/"
+        "extensions/go-plus.owl\n"
+    )
+    with (
+        patch.object(goa_op, "_stream_gaf", return_value=iter(gaf_records)),
+        patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value=gaf_header,
+        ),
+    ):
         with Session(db, future=True) as session:
             result = goa_op.execute(
                 session,

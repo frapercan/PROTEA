@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { type FormEvent, useId, useState } from "react";
 import { AuthError, login } from "@/lib/authApi";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 /**
  * FARM-AUTH.10 — email + password sign-in form.
@@ -72,7 +71,6 @@ export default function LoginPage() {
 
   return (
     <>
-      <Breadcrumbs />
       <div className="mx-auto max-w-md px-4 sm:px-6 py-8">
         <header className="text-center">
           <h1 className="text-2xl font-bold tracking-tight text-stone-950">{t("title")}</h1>

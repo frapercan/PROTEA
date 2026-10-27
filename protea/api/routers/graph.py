@@ -14,13 +14,16 @@ it is the same flow configured differently. A NODE is one decision over a field,
 or over a group of fields that cannot be decided apart. The nodes are, in
 pipeline order: frame, substrate, bank, retriever, generator, scoring, features,
 re-ranking, combination, routing. The EDGE into a node says how firmly that
-decision is held and takes one of five values:
+decision is held and takes one of seven values:
 
 ``measured``
     a declared comparison separated against its floor.
+``indistinguishable``
+    a declared comparison was read with the power to resolve the difference this
+    project acts on, and its levels came back inside each other's noise. A null
+    that was measured, which is a finding and not the absence of one.
 ``chosen``
-    the comparison ran with power and did not separate; a level was selected and
-    recorded.
+    a level was selected and recorded and nothing was established about it.
 ``inherited``
     nobody ever decided. The value is the one it has always been.
 ``unpowered``
@@ -28,6 +31,36 @@ decision is held and takes one of five values:
     the comparison, before any metric is read.
 ``blocked``
     a level cannot be produced at all, because its artifact has no producer.
+    Rows would end it.
+``inexpressible``
+    the record's SHAPE cannot hold the artifact, so nothing the record comes to
+    hold moves the node: a migration has to move first. Apart from ``blocked``
+    because the two send a reader to different work, and because four nodes
+    printed the first while meaning the second -- their edges were built from a
+    literal zero, so they published one word beside live counts that could never
+    change it. Both are listed under ``blocked``: a node the record cannot
+    express still has a precondition, and it is the one a reader most needs,
+    because it is a migration and not a run.
+
+WHY THE SIXTH WORD EXISTS. ``compare_paired_panels`` reads every panel into
+one of six buckets and keeps them six because they are six facts, two of which
+are different nulls: one had the power to resolve the declared effect and found
+nothing, the other had no declared effect to look for. The scale had five words,
+so both arrived as ``chosen``, and a reader could not tell a measured null from a
+question nobody asked -- 23 of the first against 2,299 of the second, over the
+whole-panel readings in ``job_event``. The correspondence is now a table,
+``STRENGTH_OF_READING`` in ``_graph_edges``, with exactly one strength per
+reading, so a seventh bucket in the instrument is a refusal at import instead of
+a word published as ``chosen``.
+
+``chosen`` is still a sink, and deliberately so. Four different situations arrive
+at that one word: a single level the frame's own definition fixed, a powered
+contrast with no floor declared for it, a declared floor that REFUSED to be
+compared, and one no panel could answer. What separates them is WHY nothing was
+established, which is the node's reason to give rather than the scale's, so every
+node also publishes ``floor``, ``separated`` and ``floor_refusal``. A refusal is
+caught rather than allowed to escape, so this page keeps serving, and its text is
+published because a caught refusal nobody sees is a silent None.
 
 A PANEL is one of nine regions, a knowledge category (NK, LK, PK) crossed with
 an aspect (BPO, MFO, CCO). Panels are never pooled and never summed: the
@@ -42,9 +75,11 @@ knowable before reading a single metric. Two or more scored levels reach
 ``measured`` only when a floor is declared for the comparison and some level
 clears it on every panel that carries both. No table in this schema has a column
 for a floor, so the one place a floor can be declared is an ``experiment_run``
-whose ``config`` names ``graph_node`` and ``floor``. Until such a row exists no
-node here can be a measurement, and that is the honest report rather than a
-defect in the endpoint.
+whose ``config`` names ``graph_node`` and ``floor`` AND whose ``status`` still
+stands behind it: a run that went ``abandoned`` withdrew its own plan, and its
+floor is read no further (see ``_graph_reads.standing_floor_statuses``). Until
+such a row exists no node here can be a measurement, and that is the honest
+report rather than a defect in the endpoint.
 
 WHERE THE PANEL POPULATIONS COME FROM. Not from the ground-truth parquet, which
 this endpoint never opens, and not from ``evaluation_set.stats``, which counts
@@ -68,11 +103,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory, get_settings
-from protea.api.routers._graph_edges import BLOCKED, Built
+from protea.api.routers._graph_edges import BLOCK_WORDS, Built
 from protea.api.routers._graph_nodes import (
     _bank_node,
     _combination_node,
@@ -85,6 +120,7 @@ from protea.api.routers._graph_nodes import (
     _scoring_node,
     _substrate_node,
     _window_span,
+    declared_floors,
 )
 from protea.api.routers._graph_panels import (
     build_panels,
@@ -101,8 +137,9 @@ from protea.infrastructure.storage.factory import (
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 
-# The edge vocabulary, closed at five. Spelled once so a typo in a builder is an
-# import-time NameError rather than a word nobody downstream recognises.
+# The edge vocabulary lives in _graph_edges, closed against the panel tally's own
+# words. Spelled once so a typo in a builder is an import-time NameError rather
+# than a word nobody downstream recognises.
 
 # ── The frame ─────────────────────────────────────────────────────────────────
 
@@ -237,7 +274,7 @@ def build_graph(
     carries. The two say the same thing because they are built from one source.
     """
     head = record["evaluation_sets"][0] if record["evaluation_sets"] else None
-    floors = {f["node"]: f["floor"] for f in record["floors"] if f["node"] and f["floor"]}
+    floors = declared_floors(record["floors"], record["panels"], units)
     # EVERY builder gets the floors. Until 2026-09-02 this list handed the dict
     # to _scoring_node alone, so nine of the ten nodes could not see a declared
     # floor and `strength_of` returned CHOSEN for them whatever was declared.
@@ -280,13 +317,72 @@ def build_graph(
                 "precondition": precondition,
             }
             for node, what, precondition in built
-            if node["strength"] == BLOCKED
+            if node["strength"] in BLOCK_WORDS
         ],
     }
 
 
-@router.get("")
+def _promote_head(
+    record: dict[str, list[dict[str, Any]]], evaluation_set_id: str | None
+) -> None:
+    """Move the requested evaluation set to the front of the record, in place.
+
+    The graph reads its window from ``record["evaluation_sets"][0]`` in four
+    places, and the query returns every set ordered by ``created_at DESC``. So
+    without this the surface shows whichever window was built LAST and offers
+    no way to ask for another -- which was fine with one window and is not with
+    three: the campaign has a long validation (211 to 227), a single-pass test
+    (227 to 230) and LAFA's external window, and a reader following the
+    argument has to be able to point the page at the one being discussed.
+
+    Reordering rather than filtering, because the other rows are not noise: the
+    ``declared`` block counts the published results and the sets it did not
+    choose still belong to the record.
+
+    :raises HTTPException: 404 on an id that is not in the record. Falling back
+        to the newest window would answer a question about one window with the
+        numbers of another, and nothing in the response would say so.
+    """
+    if evaluation_set_id is None:
+        return
+    sets = record["evaluation_sets"]
+    wanted = str(evaluation_set_id)
+    for i, row in enumerate(sets):
+        if str(row.get("id")) == wanted:
+            if i:
+                sets.insert(0, sets.pop(i))
+            return
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            f"evaluation set {wanted} is not in the experiment record. "
+            "Omit the parameter to read the most recently built window."
+        ),
+    )
+
+
+@router.get(
+    "",
+    responses={
+        404: {
+            "description": (
+                "The requested evaluation set is not in the experiment record. "
+                "Declared because the alternative -- answering with another "
+                "window's numbers -- is the failure this parameter exists to "
+                "prevent."
+            )
+        }
+    },
+)
 def get_graph(
+    evaluation_set_id: str | None = Query(
+        None,
+        description=(
+            "Which window to read. Defaults to the most recently built one, "
+            "which is the historical behaviour; 404 on an unknown id rather "
+            "than falling back to another window."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
@@ -298,6 +394,12 @@ def get_graph(
     """
     with factory() as session:
         record = read_record(session)
+        # BEFORE read_pivot_aspects, and the order is load-bearing: that read
+        # takes the pivot snapshot from evaluation_sets[0] and the aspect of a
+        # term decides which of the nine panels it lands in. Promoting after it
+        # would label the chosen window's panels with another window's pivot,
+        # and the response would say nothing about it.
+        _promote_head(record, evaluation_set_id)
         aspect_of_term = read_pivot_aspects(session, record)
     units = _counted_units(record, aspect_of_term, settings)
     return build_graph(record, units)

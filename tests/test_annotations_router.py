@@ -5,6 +5,7 @@ Database and queue are fully mocked -- no real infrastructure required.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -17,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 from protea.api.cache import invalidate as _cache_invalidate
 from protea.api.routers.annotations import router
+from protea.api.routers.annotations._common import _blocks, stream_groundtruth
 
 
 @pytest.fixture(autouse=True)
@@ -813,6 +815,65 @@ class TestDownloadKnownTerms:
 
 
 # ---------------------------------------------------------------------------
+# Chunking of the GT/known-terms TSV responses
+# ---------------------------------------------------------------------------
+
+
+class TestGroundTruthChunking:
+    """The GT routes must not emit one HTTP chunk per row.
+
+    ``known-terms.tsv`` reaches millions of rows -- 5.206.444 on evaluation
+    set ``c35ee267`` -- and one ASGI message per row is what stopped it ever
+    finishing. With blocks the full 95 MB serves in 11,2 s.
+    """
+
+    @staticmethod
+    def _rows(n):
+        return [f"P{i:05d}\tGO:{i:07d}\n" for i in range(n)]
+
+    @pytest.mark.parametrize("size", [1, 7, 64, 4096, 1 << 20])
+    def test_blocks_concatenate_back_to_the_input(self, size):
+        rows = self._rows(500)
+        assert "".join(_blocks(rows, size)) == "".join(rows)
+
+    def test_blocks_of_an_empty_input_yield_nothing(self):
+        assert list(_blocks([])) == []
+
+    def test_a_row_longer_than_the_block_is_never_split(self):
+        row = "P1\t" + "GO:0000001," * 5_000 + "\n"
+        assert list(_blocks([row], 64)) == [row]
+
+    def test_the_chunk_count_follows_bytes_and_not_rows(self):
+        rows = self._rows(20_000)
+        size = 64 * 1024
+        chunks = list(_blocks(rows, size))
+        assert len(chunks) <= sum(len(r) for r in rows) // size + 1
+        assert len(chunks) * 100 < len(rows)
+
+    def test_the_response_hands_the_socket_blocks(self):
+        """The wiring, not just the helper: a revert to ``iter(lines)`` fails here."""
+        rows = self._rows(20_000)
+        with (
+            patch("protea.api.routers.annotations._common.session_scope") as scope,
+            patch(
+                "protea.api.routers.annotations._common.iter_groundtruth_tsv",
+                return_value=rows,
+            ),
+        ):
+            scope.return_value.__enter__.return_value = MagicMock()
+            resp = stream_groundtruth(MagicMock(), uuid4(), "known", "known-terms.tsv")
+
+        # Starlette adapts the sync generator into an async one, so drain it
+        # the way the server would.
+        async def drain():
+            return [c async for c in resp.body_iterator]
+
+        chunks = asyncio.run(drain())
+        assert "".join(chunks) == "".join(rows)
+        assert len(chunks) * 100 < len(rows)
+
+
+# ---------------------------------------------------------------------------
 # GET /annotations/evaluation-sets/{eval_id}/delta-proteins.fasta (lines 615-672)
 # ---------------------------------------------------------------------------
 
@@ -1356,3 +1417,149 @@ class TestGetGoSubgraph:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["nodes"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Information Accretion
+# ---------------------------------------------------------------------------
+
+
+class _IaSet:
+    """A stand-in for the ORM row, carrying only what the service reads."""
+
+    def __init__(self, *, sha="abc", uri="s3://protea/ia/x/IA.tsv"):
+        from uuid import uuid4 as _u
+
+        self.id = _u()
+        self.ontology_snapshot_id = _u()
+        self.annotation_set_id = _u()
+        self.evidence_regime = "experimental"
+        self.content_sha256 = sha
+        self.artifact_uri = uri
+        self.term_count = 39906
+        self.nonzero_count = 39840
+        self.ia_max = 14.59
+        self.ia_mean = 5.2
+        self.created_at = None
+
+
+class TestTheIaDownloadVerifiesWhatItHandsOut:
+    """``_evaluation_artifacts`` refuses to SCORE against drifted bytes.
+
+    A download that skipped the same check would hand out the one copy nobody
+    validated, and the caller would have no way to tell: an IA table looks
+    exactly as plausible whether or not it is the one the row describes.
+    """
+
+    def test_matching_bytes_are_served(self):
+        import hashlib
+
+        from protea.services.annotations_service import fetch_information_accretion_tsv
+
+        data = b"GO:0000001\t0.0\n"
+        ia = _IaSet(sha=hashlib.sha256(data).hexdigest())
+        session, store = MagicMock(), MagicMock()
+        session.get.side_effect = [ia, MagicMock(source_published_at=None)]
+        store.get.return_value = data
+        assert fetch_information_accretion_tsv(session, ia.id, store=store) == data
+
+    def test_drifted_bytes_are_refused_and_name_both_hashes(self):
+        from protea.services.annotations_service import (
+            AnnotationsServiceError,
+            fetch_information_accretion_tsv,
+        )
+
+        ia = _IaSet(sha="0" * 64)
+        session, store = MagicMock(), MagicMock()
+        session.get.side_effect = [ia, MagicMock(source_published_at=None)]
+        store.get.return_value = b"otra cosa"
+        with pytest.raises(AnnotationsServiceError) as e:
+            fetch_information_accretion_tsv(session, ia.id, store=store)
+        assert "0" * 64 in str(e.value), "a mismatch has to name what was expected"
+        assert "drifted" in str(e.value)
+
+    def test_a_set_that_does_not_resolve_is_a_404_at_the_boundary(self):
+        from protea.services.annotations_service import (
+            EntityNotFoundError,
+            fetch_information_accretion_tsv,
+        )
+
+        session = MagicMock()
+        session.get.return_value = None
+        with pytest.raises(EntityNotFoundError):
+            fetch_information_accretion_tsv(session, uuid4(), store=MagicMock())
+
+
+class TestTheIaRoutesDoNotHandOutTheHoldout:
+    """Same reasoning as the public stats page that was serving release 235.
+
+    An IA table is a fact about its release, so handing one out past the mark
+    hands out the holdout. The waiver that lets a window read past it is a
+    deliberate act recorded in one place, not something a download performs.
+    """
+
+    def test_a_set_past_the_mark_is_refused(self):
+        from datetime import timedelta
+
+        from protea.core.split_registry import BOARD_MARK, release
+        from protea.services.annotations_service import (
+            HoldoutArtifactError,
+            fetch_information_accretion_tsv,
+        )
+
+        despues = release(BOARD_MARK).published + timedelta(days=1)
+        ia = _IaSet()
+        session = MagicMock()
+        session.get.side_effect = [ia, MagicMock(source_published_at=despues)]
+        with pytest.raises(HoldoutArtifactError) as e:
+            fetch_information_accretion_tsv(session, ia.id, store=MagicMock())
+        assert BOARD_MARK in str(e.value), "the refusal says which mark it is enforcing"
+
+    def test_a_set_exactly_at_the_mark_is_served(self):
+        """The mark is the last release that informs, not the first that does not."""
+        import hashlib
+
+        from protea.core.split_registry import BOARD_MARK, release
+        from protea.services.annotations_service import fetch_information_accretion_tsv
+
+        data = b"GO:0000001\t0.0\n"
+        ia = _IaSet(sha=hashlib.sha256(data).hexdigest())
+        session, store = MagicMock(), MagicMock()
+        session.get.side_effect = [
+            ia,
+            MagicMock(source_published_at=release(BOARD_MARK).published),
+        ]
+        store.get.return_value = data
+        assert fetch_information_accretion_tsv(session, ia.id, store=store) == data
+
+    def test_the_waiver_path_exists_and_is_explicit(self):
+        """Not a back door: a caller that already holds the waiver can pass it.
+
+        The point is that it cannot happen by accident, not that it cannot
+        happen. ``include_past_mark`` defaults to False and no route sets it.
+        """
+        import inspect
+
+        from protea.api.routers.annotations import evaluation_sets as mod
+        from protea.services.annotations_service import fetch_information_accretion_tsv
+
+        firma = inspect.signature(fetch_information_accretion_tsv)
+        assert firma.parameters["include_past_mark"].default is False
+        assert "include_past_mark" not in inspect.getsource(mod.download_information_accretion_tsv)
+
+    def test_the_listing_hides_them_too(self):
+        """A listing that named them would leak which releases exist past the mark."""
+        import inspect
+
+        from protea.services.annotations_service import (
+            list_information_accretion_sets_data,
+        )
+
+        src = inspect.getsource(list_information_accretion_sets_data)
+        assert "include_past_mark" in src and "source_published_at" in src
+        assert (
+            inspect.signature(list_information_accretion_sets_data)
+            .parameters["include_past_mark"]
+            .default
+            is False
+        )

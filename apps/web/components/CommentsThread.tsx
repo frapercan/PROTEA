@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDateTime } from "@/lib/format";
+
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { createJobComment, listJobComments, type JobComment } from "@/lib/api";
@@ -51,7 +53,7 @@ function persistAuthor(author: string) {
 
 function formatStamp(iso: string): string {
   try {
-    return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    return formatDateTime(iso);
   } catch {
     return iso;
   }

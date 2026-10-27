@@ -17,6 +17,7 @@
 
 "use client";
 
+import { formatCount } from "@/lib/format";
 import {
   ASPECT_NAME,
   ASPECT_ORDER,
@@ -96,7 +97,7 @@ function Profile({ cells }: { cells: StratumCell[] }) {
                   fill={LINE_COLOUR[a]}
                 >
                   <title>
-                    {`${ASPECT_NAME[a]} / ${p.band}: ${p.value.toFixed(4)} over ${p.n.toLocaleString()} proteins`}
+                    {`${ASPECT_NAME[a]} / ${p.band}: ${p.value.toFixed(4)} over ${formatCount(p.n)} proteins`}
                   </title>
                 </circle>
               );
@@ -210,7 +211,7 @@ function AspectGrid({
                       title={
                         thin
                           ? `withheld: ${cell.n_proteins} proteins, below the population floor`
-                          : `${cell.f_micro_w.toFixed(4)} over ${cell.n_proteins.toLocaleString()} proteins`
+                          : `${cell.f_micro_w.toFixed(4)} over ${formatCount(cell.n_proteins)} proteins`
                       }
                     >
                       <span
@@ -221,7 +222,7 @@ function AspectGrid({
                       <span
                         className={`text-[9px] tabular-nums ${thin ? "text-slate-400" : "opacity-80"}`}
                       >
-                        n={cell.n_proteins.toLocaleString()}
+                        n={formatCount(cell.n_proteins)}
                       </span>
                     </div>
                   </td>

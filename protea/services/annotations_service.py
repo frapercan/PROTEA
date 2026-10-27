@@ -14,17 +14,23 @@ responses:
 
 from __future__ import annotations
 
+import hashlib
 import uuid
+from datetime import date
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import Date, cast, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from protea.core.evaluation import load_evaluation_data_for_set
+from protea.core.split_registry import BOARD_MARK, release
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
+from protea.infrastructure.orm.models.annotation.information_accretion_set import (
+    InformationAccretionSet,
+)
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 
@@ -205,7 +211,8 @@ def delete_annotation_set_data(
 ) -> dict[str, Any]:
     """Delete an annotation set and all its annotations.
 
-    Returns the deletion summary dict.
+    Returns the deletion summary dict, which carries ``source`` so the router
+    can invalidate the per-source list cache without a second query.
 
     Raises:
 
@@ -221,6 +228,9 @@ def delete_annotation_set_data(
         .filter(ProteinGOAnnotation.annotation_set_id == set_id)
         .scalar()
     )
+    # Read before the delete: the router needs it to invalidate the per-source
+    # list cache, and after the flush the instance is gone.
+    source = a.source
     try:
         session.delete(a)
         session.flush()
@@ -229,7 +239,11 @@ def delete_annotation_set_data(
             "This annotation set is referenced by one or more prediction "
             "sets. Delete those first."
         ) from exc
-    return {"deleted": str(set_id), "annotations_deleted": annotation_count or 0}
+    return {
+        "deleted": str(set_id),
+        "source": source,
+        "annotations_deleted": annotation_count or 0,
+    }
 
 
 def iter_groundtruth_tsv(
@@ -241,10 +255,16 @@ def iter_groundtruth_tsv(
 
     ``category`` is ``"nk"``, ``"lk"``, ``"pk"`` or ``"known"``.
     Each row is ``"<protein>\\t<go_id>\\n"``; sorted by protein then GO id
-    so the output is deterministic. The caller wraps the list in a
-    ``StreamingResponse`` (the materialised list is small enough, a
-    few thousand rows for typical CAFA splits, to fit in memory and
-    keeps the streaming generator simple).
+    so the output is deterministic.
+
+    The list is materialised because the data it comes from already is:
+    :func:`load_evaluation_data_for_set` reads the whole persisted parquet
+    into memory, so streaming the rows out one at a time would not lower
+    the high-water mark. It is NOT small, though -- ``"known"`` on
+    evaluation set ``c35ee267`` is 5.206.444 rows, 95 MB, against 12.355
+    for ``"nk"`` on the same set -- so the caller must batch it into blocks
+    instead of handing this straight to a ``StreamingResponse``; see
+    :func:`protea.api.routers.annotations._common.stream_groundtruth`.
 
     Raises :class:`EntityNotFoundError` when the EvaluationSet does
     not resolve.
@@ -318,3 +338,122 @@ __all__ = [
     "set_snapshot_ia_url",
     "snapshot_to_dict",
 ]
+
+
+# ── Information Accretion sets ───────────────────────────────────────────────
+
+
+class HoldoutArtifactError(AnnotationsServiceError):
+    """The artefact asked for belongs to a release past the board's mark.
+
+    Raised instead of served, and raised for the SAME reason the page that
+    published release 235 was a problem: these routes answer to whoever holds a
+    key, and an IA table is as much a fact about its release as the ground truth
+    is. The waiver that lets a window read past the mark is a deliberate act
+    recorded in one place; it is not a thing a download should perform silently.
+    """
+
+    def __init__(self, ia_set_id: uuid.UUID, published: date) -> None:
+        super().__init__(
+            f"InformationAccretionSet {ia_set_id} was computed on a release "
+            f"published {published}, past the board's mark {BOARD_MARK} "
+            f"({release(BOARD_MARK).published}); serving it here would hand out "
+            "the holdout without the waiver that reading past the mark requires"
+        )
+
+
+def _ia_set_to_dict(s: InformationAccretionSet, source_version: str | None) -> dict[str, Any]:
+    """One row as the API reports it.
+
+    ``content_sha256`` is included on purpose: it is what a caller checks the
+    bytes against after downloading, so listing it is what makes the download
+    verifiable from the other side rather than only from ours.
+    """
+    return {
+        "id": str(s.id),
+        "ontology_snapshot_id": str(s.ontology_snapshot_id),
+        "annotation_set_id": str(s.annotation_set_id),
+        "source_version": source_version,
+        "evidence_regime": s.evidence_regime,
+        "content_sha256": s.content_sha256,
+        "term_count": s.term_count,
+        "nonzero_count": s.nonzero_count,
+        "ia_max": s.ia_max,
+        "ia_mean": s.ia_mean,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
+
+
+def list_information_accretion_sets_data(
+    session: Session,
+    *,
+    ontology_snapshot_id: uuid.UUID | None = None,
+    source_version: str | None = None,
+    include_past_mark: bool = False,
+) -> list[dict[str, Any]]:
+    """List the IA tables, newest first, optionally narrowed.
+
+    The two filters exist so a caller can find the IA OF A CUT without walking
+    the whole list: a rolling frame asks for "the IA of r" once per cut, and
+    making that a scan would make the obvious use the expensive one.
+
+    ``include_past_mark`` defaults to False, so a plain listing never names a
+    table computed on a release past the board's mark. Set it only where the
+    waiver already applies.
+    """
+    q = (
+        session.query(InformationAccretionSet, AnnotationSet.source_version)
+        .join(AnnotationSet, AnnotationSet.id == InformationAccretionSet.annotation_set_id)
+    )
+    if ontology_snapshot_id is not None:
+        q = q.filter(InformationAccretionSet.ontology_snapshot_id == ontology_snapshot_id)
+    if source_version is not None:
+        q = q.filter(AnnotationSet.source_version == source_version)
+    if not include_past_mark:
+        limite = release(BOARD_MARK).published
+        q = q.filter(
+            or_(
+                AnnotationSet.source_published_at.is_(None),
+                cast(AnnotationSet.source_published_at, Date) <= limite,
+            )
+        )
+    rows = q.order_by(InformationAccretionSet.created_at.desc()).all()
+    return [_ia_set_to_dict(s, ver) for s, ver in rows]
+
+
+def fetch_information_accretion_tsv(
+    session: Session,
+    ia_set_id: uuid.UUID,
+    *,
+    store: Any,
+    include_past_mark: bool = False,
+) -> bytes:
+    """The IA table's bytes, verified against the hash the row records.
+
+    The verification is not ceremony. ``_evaluation_artifacts`` already refuses
+    to score against an artefact whose bytes have drifted from
+    ``content_sha256``; a download that skipped the same check would hand out
+    the one copy nobody validated, and the caller would have no way to tell.
+
+    Raises :class:`EntityNotFoundError` when the set does not resolve, and
+    :class:`HoldoutArtifactError` when it belongs past the mark.
+    """
+    s = session.get(InformationAccretionSet, ia_set_id)
+    if s is None:
+        raise EntityNotFoundError("InformationAccretionSet", ia_set_id)
+    a = session.get(AnnotationSet, s.annotation_set_id)
+    publicada = getattr(a, "source_published_at", None)
+    if not include_past_mark and publicada is not None:
+        dia = publicada.date() if hasattr(publicada, "date") else publicada
+        if dia > release(BOARD_MARK).published:
+            raise HoldoutArtifactError(ia_set_id, dia)
+    key = s.artifact_uri.split("/", 3)[-1] if "://" in s.artifact_uri else s.artifact_uri
+    data = store.get(key)
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != s.content_sha256:
+        raise AnnotationsServiceError(
+            f"InformationAccretionSet {ia_set_id} content hash mismatch: row "
+            f"records {s.content_sha256}, stored bytes hash to {digest}; the "
+            "stored artifact has drifted and is not served"
+        )
+    return data

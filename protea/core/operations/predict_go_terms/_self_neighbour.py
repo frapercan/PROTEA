@@ -17,50 +17,28 @@ predicted almost nothing.
 WHY IT ASKS FOR ONE MORE. Filtering after the search would silently turn a
 requested depth of ten into nine for every protein present in its own donor
 corpus, and into ten for every protein absent from it, so the same payload would
-mean two different depths depending on the corpus. Asking for k+1 and dropping
-the self hit keeps ``limit_per_entry`` meaning the number of real donors.
+mean two different depths depending on the corpus. Asking for more than k and
+dropping the self hit keeps ``limit_per_entry`` meaning the number of real
+donors.
+
+WHY THIS MODULE NO LONGER IMPLEMENTS IT. The first version dropped by
+ACCESSION and asked for exactly k+1. The method downstream drops by SEQUENCE
+and asks for k plus a margin measured from the bank, so a query with twins in
+the pool loses more entries than the pre-search anticipated and the method
+reaches past what it was handed. That was fixed in ``protea_method`` and
+migrated into the aspect path alone; the naive pair stayed here, callable,
+unmarked, under a header saying both paths need it. On 2026-09-07 every
+``exclude_self_neighbour`` arm of axis C died on
+``SequenceIdentityMissingError`` against a bank where nothing was unmappable,
+because the unified path was still the one that had not migrated.
+
+So this module now hands out the sequence-aware pair and implements nothing.
+The header above is true again: both paths take their margin and their drop
+from the same two functions.
 """
 
 from __future__ import annotations
 
-__all__ = ["search_k_for", "without_self"]
+from protea_method._self_by_sequence import extra_neighbours_for, without_own_sequence
 
-
-def search_k_for(k: int, exclude_self: bool) -> int:
-    """How many neighbours to ask the index for, to end up with ``k`` real ones."""
-    return k + 1 if exclude_self else k
-
-
-def without_self(
-    neighbours: list[list[tuple[str, float]]],
-    query_accessions: list[str],
-    k: int,
-    exclude_self: bool,
-) -> list[list[tuple[str, float]]]:
-    """Drop each query's own accession from its neighbour list, then trim to ``k``.
-
-    ``neighbours`` is one list of ``(accession, distance)`` per query, in the
-    same order as ``query_accessions``; that ordering is the contract
-    ``search_knn`` already keeps with every caller here.
-
-    Trimming happens after the drop, never before, so a query that did not
-    retrieve itself keeps ``k`` neighbours rather than being punished with k-1
-    for the extra slot the search asked for on its behalf.
-
-    A mismatch in length is not silently tolerated. It would mean the neighbour
-    lists and the accessions had drifted out of order, and dropping "self" by
-    position would then remove a real donor from the wrong protein, which is a
-    corrupted candidate set that still looks well formed.
-    """
-    if not exclude_self:
-        return neighbours
-    if len(neighbours) != len(query_accessions):
-        raise ValueError(
-            f"{len(neighbours)} neighbour lists against {len(query_accessions)} "
-            "query accessions; the two are positionally paired and dropping the "
-            "self hit by position would remove a real donor from another protein"
-        )
-    return [
-        [pair for pair in top if pair[0] != acc][:k]
-        for top, acc in zip(neighbours, query_accessions, strict=True)
-    ]
+__all__ = ["extra_neighbours_for", "without_own_sequence"]

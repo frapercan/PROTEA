@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDateTime } from "@/lib/format";
+
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
@@ -12,7 +14,6 @@ import {
   type CreateExperimentRunPayload,
   type UpdateExperimentRunPayload,
 } from "@/lib/api";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
 import { useFocusTrap } from "@/lib/useFocusTrap";
@@ -52,7 +53,7 @@ const STATUS_STYLES: Record<ExperimentRunStatus, { chip: string; dot: string }> 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    return formatDateTime(iso);
   } catch {
     return iso;
   }
@@ -169,7 +170,6 @@ export default function ExperimentRunsPage() {
 
   return (
     <>
-      <Breadcrumbs />
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.contracts.operation import OperationResult, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.provenance import stamp_library_provenance
 from protea.core.retry import RetryPolicy, is_retryable, with_retry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
@@ -52,6 +53,40 @@ def _renew_lease_sql(session: Session, job_id: UUID, lease_seconds: int) -> None
         )
         .values(leased_until=utcnow() + timedelta(seconds=lease_seconds))
     )
+
+
+def _discard_failed_work(session: Session, job_id: UUID) -> None:
+    """Roll back before anyone tries to record what went wrong.
+
+    An exception raised during ``flush`` leaves SQLAlchemy refusing every
+    further statement on that session until it is rolled back. Both failure
+    handlers start by TOUCHING the session -- ``_on_operation_failure`` calls
+    ``_rebind_job``, which queries, and ``_on_retry_later`` counts prior retry
+    events -- so on a poisoned session they raise ``PendingRollbackError``
+    before they can write anything.
+
+    The damage is not the second exception, it is that the second exception
+    REPLACES the first. The job row never gets the real ``error_code`` or
+    ``error_message``, and what surfaces is "This Session's transaction has
+    been rolled back due to a previous exception during flush", which names
+    the machinery instead of the cause. It happened to the 214->215 evaluation
+    of the GOA campaign on 2026-09-22: the job failed with that message and
+    whatever actually broke was never recorded.
+
+    The retryable branch already rolled back here and the other two paths did
+    not, which is the asymmetry this removes. Rolling back unconditionally is
+    safe: the operation has failed, so its uncommitted work must go, and work
+    it committed earlier -- a GOA load commits per page -- is already durable
+    and untouched by this.
+    """
+    try:
+        session.rollback()
+    except Exception as exc:  # the session is unusable; say so and carry on
+        logger.warning(
+            "Rollback before recording failure did not succeed. job_id=%s error=%s",
+            job_id,
+            exc,
+        )
 
 
 class BaseWorker:
@@ -216,22 +251,19 @@ class BaseWorker:
 
             op = self._registry.get(job.operation)
             emit = make_safe_emit(self._build_emit(job_id))
+            stamp_library_provenance(emit)
             enhanced_payload = {**job.payload, "_job_id": str(job.id)}
 
             try:
                 result: OperationResult = op.execute(session, enhanced_payload, emit=emit)
                 self._on_operation_success(session, job, job_id, result)
             except RetryLaterError as e:
+                _discard_failed_work(session, job_id)
                 self._on_retry_later(session, job, job_id, e)
                 raise
             except Exception as e:
+                _discard_failed_work(session, job_id)
                 if is_retryable(e):
-                    # Let with_retry handle this; rollback so the next
-                    # attempt sees a clean session state.
-                    try:
-                        session.rollback()
-                    except Exception:
-                        pass
                     raise
                 self._on_operation_failure(session, job, job_id, e)
                 raise

@@ -13,6 +13,7 @@
 // smoke can land later as F6.5b-2 if we want contract-drift coverage.
 
 import { test, expect } from "./fixtures/mock-api";
+import { LIVE_ANNOTATION_AVAILABLE } from "../../lib/campaign";
 
 const FASTA_SAMPLE = `>sp|TEST1|HELLO
 MKTIIALSYIFCLVFA
@@ -93,6 +94,17 @@ function jobLifecycle(id: string, flipAtCall = 2) {
 }
 
 test.describe("annotate flow", () => {
+  // The four flows below drive the live form. While the annotation corpus
+  // is being rebuilt the form does not render: it shows the paused panel
+  // instead, because submitting would surface the API's own 409 body
+  // ("No annotation sets available. Load GO annotations first.") to the
+  // visitor. Skipped from the same constant the component reads, so the
+  // change that brings the predictor back brings these back with it.
+  test.skip(
+    !LIVE_ANNOTATION_AVAILABLE,
+    "predictor paused while the annotation corpus is rebuilt; see lib/campaign.ts",
+  );
+
   test("submit button is disabled when the FASTA textarea is empty", async ({
     page,
     mockApi,
@@ -183,5 +195,27 @@ test.describe("annotate flow", () => {
       timeout: 10_000,
     });
     await expect(page.getByRole("button", { name: /^Annotate$/ })).toBeEnabled();
+  });
+});
+
+test.describe("annotate, predictor paused", () => {
+  test.skip(
+    LIVE_ANNOTATION_AVAILABLE,
+    "this is the paused surface; the live flows above cover the other state",
+  );
+
+  test("says why it is closed and offers somewhere real to go", async ({ page }) => {
+    await page.goto("/en/annotate");
+    await expect(page.getByText(/predictor is paused/i)).toBeVisible();
+    // The operator-facing 409 body must not reach the reader.
+    await expect(page.getByText(/Load GO annotations first/i)).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /Explore the API/i })).toBeVisible();
+    // The sequence box STAYS, disabled. This assertion said toHaveCount(0)
+    // until CI caught it: it was written while the paused state replaced
+    // the form, and when the form came back the unit test was updated and
+    // this one was not. Showing the tool disabled is the contract.
+    const box = page.getByRole("textbox");
+    await expect(box).toHaveCount(1);
+    await expect(box).toBeDisabled();
   });
 });

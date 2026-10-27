@@ -24,6 +24,10 @@ from .experiment_run import ExperimentRun, ExperimentRunStatus  # noqa: F401
 from .job import Job, JobEvent  # noqa: F401
 from .protein.protein import Protein  # noqa: F401
 from .protein.protein_metadata import ProteinUniProtMetadata  # noqa: F401
+from .protein.swissprot_release import (  # noqa: F401
+    SwissProtMembership,
+    SwissProtRelease,
+)
 from .query.query_set import QuerySet, QuerySetEntry  # noqa: F401
 from .sequence.sequence import Sequence  # noqa: F401
 from .support_entry import SupportEntry  # noqa: F401

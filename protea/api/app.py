@@ -444,12 +444,16 @@ def _build_lifespan(factory):  # noqa: ANN001 - sessionmaker factory, mocked in 
             asyncio.create_task(_refresh_loop(label, fn, ttl), name=f"{label}-refresh")
             for label, fn, ttl in targets
         ]
-        # Let the event loop dispatch the just-created tasks before we
-        # hand control to the application. Three event-loop ticks is enough
-        # for to_thread to flip into its executor; in tests where the
-        # prewarm fn is a MagicMock, the mock is invoked synchronously
-        # so the assert_called_once_with assertion holds. In production
-        # this is a sub-millisecond yield with no startup-latency cost.
+        # Let the event loop dispatch the just-created tasks before we hand
+        # control to the application: a sub-millisecond yield so the prewarms are
+        # already on their way when the first request arrives, with no
+        # startup-latency cost.
+        #
+        # It used to say three ticks were "enough for to_thread to flip into its
+        # executor, so the assert_called_once_with assertion holds". That made a
+        # test's correctness depend on thread scheduling, and it failed in CI on
+        # the LAST target of the list after passing twice locally. The test now
+        # waits for the fact instead, and nothing here owes anything to it.
         for _tick in range(3):
             await asyncio.sleep(0)
         try:

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { AuthError, me, type UserMe } from "@/lib/authApi";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 /**
  * FARM-AUTH.10 — current-user profile page.
@@ -85,7 +84,6 @@ export default function ProfilePage() {
   if (state.kind === "loading") {
     return (
       <>
-        <Breadcrumbs />
         <div className="mx-auto max-w-3xl px-4 sm:px-6 py-8 space-y-4">
           <div className="h-8 w-48 animate-pulse rounded bg-stone-200" />
           <div className="h-32 animate-pulse rounded-xl bg-stone-100" />
@@ -97,7 +95,6 @@ export default function ProfilePage() {
   if (state.kind === "anonymous") {
     return (
       <>
-        <Breadcrumbs />
         <div className="mx-auto max-w-md px-4 sm:px-6 py-12">
           <div className="rounded-xl border border-stone-200 bg-white p-6 text-center shadow-sm">
             <h1 className="text-lg font-semibold text-stone-950">{t("anonymousTitle")}</h1>
@@ -125,7 +122,6 @@ export default function ProfilePage() {
   if (state.kind === "error") {
     return (
       <>
-        <Breadcrumbs />
         <div className="mx-auto max-w-2xl px-4 sm:px-6 py-12">
           <div
             role="alert"
@@ -158,7 +154,6 @@ export default function ProfilePage() {
 
   return (
     <>
-      <Breadcrumbs />
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-8 space-y-8">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>

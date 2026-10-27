@@ -16,6 +16,33 @@
       "threshold": 500
     },
     {
+      "key": "class::protea/infrastructure/queue/consumer.py::OperationConsumer",
+      "kind": "class",
+      "path": "protea/infrastructure/queue/consumer.py",
+      "name": "OperationConsumer",
+      "line": 326,
+      "metric": 510,
+      "threshold": 500
+    },
+    {
+      "key": "class::protea/workers/base_worker.py::BaseWorker",
+      "kind": "class",
+      "path": "protea/workers/base_worker.py",
+      "name": "BaseWorker",
+      "line": 58,
+      "metric": 501,
+      "threshold": 500
+    },
+    {
+      "key": "file::protea/infrastructure/queue/consumer.py::",
+      "kind": "file",
+      "path": "protea/infrastructure/queue/consumer.py",
+      "name": "",
+      "line": 0,
+      "metric": 835,
+      "threshold": 800
+    },
+    {
       "key": "method::protea/api/routers/benchmark.py::_aggregate_benchmark_matrix",
       "kind": "method",
       "path": "protea/api/routers/benchmark.py",
@@ -29,7 +56,7 @@
       "kind": "method",
       "path": "protea/api/routers/stratum_proteins.py",
       "name": "_join",
-      "line": 189,
+      "line": 188,
       "metric": 72,
       "threshold": 60
     },
@@ -38,7 +65,7 @@
       "kind": "method",
       "path": "protea/api/routers/stratum_proteins.py",
       "name": "stratum_proteins",
-      "line": 324,
+      "line": 323,
       "metric": 134,
       "threshold": 60
     },
@@ -65,7 +92,7 @@
       "kind": "params",
       "path": "protea/api/routers/stratum_proteins.py",
       "name": "stratum_proteins",
-      "line": 324,
+      "line": 323,
       "metric": 7,
       "threshold": 6
     },

@@ -83,8 +83,10 @@ def _validate_chunking_sizes(body: dict[str, Any], errors: list[str]) -> None:
     chunker makes forward progress on every step.
     """
     max_length = body.get("max_length", 1022)
-    if not isinstance(max_length, int) or max_length <= 0:
-        errors.append("max_length must be a positive integer")
+    # None is the full-length configuration: no truncation applied. It is a
+    # value, not a missing field, so it must pass where 0 and negatives do not.
+    if max_length is not None and (not isinstance(max_length, int) or max_length <= 0):
+        errors.append("max_length must be a positive integer, or null for full length")
 
     chunk_size = body.get("chunk_size", 512)
     if not isinstance(chunk_size, int) or chunk_size <= 0:

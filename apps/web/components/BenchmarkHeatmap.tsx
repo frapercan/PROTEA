@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import { useMemo } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -51,11 +53,6 @@ const ASPECT_LABELS: Record<string, string> = {
   CCO: "Cellular Component",
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  NK: "No Knowledge",
-  LK: "Limited Knowledge",
-  PK: "Partial Knowledge",
-};
 
 /** Pick the best primary-metric row per embedding inside a single cell. The
  *  matrix endpoint already dedupes per (eid, esid, st, k, cat, asp) — collapse
@@ -152,7 +149,7 @@ function HeatmapCell({
                       // vanished would leave a table that looks complete.
                       <span
                         aria-label={`scored on ${pop.count} proteins, against a median of ${pop.median} in this cell`}
-                        title={`Scored on ${pop.count!.toLocaleString()} proteins against a median of ${pop.median!.toLocaleString()} here. Not comparable to the rows beside it on face value.`}
+                        title={`Scored on ${formatCount(pop.count!)} proteins against a median of ${formatCount(pop.median!)} here. Not comparable to the rows beside it on face value.`}
                         className="text-[10px] leading-none text-amber-600"
                       >
                         ⚠

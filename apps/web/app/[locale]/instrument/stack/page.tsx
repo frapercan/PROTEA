@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDateTime } from "@/lib/format";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
@@ -173,7 +175,7 @@ export default function StackPage() {
             <h2 className="text-lg font-semibold text-slate-900">{t("pullsHeading")}</h2>
             {pullsFetchedAt && (
               <p className="mt-1 text-xs text-slate-500">
-                {t("fetchedAt", { time: new Date(pullsFetchedAt * 1000).toLocaleString() })}
+                {t("fetchedAt", { time: formatDateTime(pullsFetchedAt * 1000) })}
               </p>
             )}
           </div>

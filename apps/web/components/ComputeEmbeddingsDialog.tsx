@@ -7,8 +7,7 @@ import {
   listEmbeddingConfigs,
   listQuerySets,
   type EmbeddingConfig,
-  type QuerySet,
-} from "@/lib/api";
+  type QuerySet, errorText } from "@/lib/api";
 
 /**
  * Quick-action dialog that dispatches a ``compute_embeddings`` job onto
@@ -100,7 +99,7 @@ export function ComputeEmbeddingsDialog({
       onLaunched?.(result);
       onClose();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : errorText(err);
       setError(msg);
     } finally {
       setSubmitting(false);

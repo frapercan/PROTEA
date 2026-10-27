@@ -10,8 +10,7 @@ import {
   type CreateDatasetPayload,
   type EmbeddingConfig,
   type ImportDatasetByReferencePayload,
-  type OntologySnapshot,
-} from "@/lib/api";
+  type OntologySnapshot, errorText } from "@/lib/api";
 import { HelpDot } from "@/components/Tooltip";
 
 /**
@@ -197,7 +196,7 @@ export function NewDatasetDialog({ open, onClose, onCreated, onImported }: Props
       onCreated?.(res.job_id, outputName.trim());
       onClose();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : errorText(err);
       setError(msg);
     } finally {
       setLoading(false);
@@ -267,7 +266,7 @@ export function NewDatasetDialog({ open, onClose, onCreated, onImported }: Props
       onImported?.(res.id, res.name);
       onClose();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : errorText(err);
       setError(msg);
     } finally {
       setLoading(false);

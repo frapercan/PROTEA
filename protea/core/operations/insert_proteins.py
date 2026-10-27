@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
-from collections.abc import Sequence as Seq
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -11,9 +10,8 @@ from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
-from protea.core.utils import chunks, contract_payload
-from protea.infrastructure.orm.models.protein.protein import Protein
-from protea.infrastructure.orm.models.sequence.sequence import Sequence as SequenceModel
+from protea.core.operations._protein_store import StoreCounts, store_records
+from protea.core.utils import contract_payload
 
 PositiveInt = Annotated[int, Field(gt=0)]
 NonNegativeFloat = Annotated[float, Field(ge=0.0)]
@@ -31,9 +29,26 @@ class _InsertTotals:
     sequences_inserted: int = 0
     sequences_reused: int = 0
 
+    def absorb(self, c: StoreCounts) -> None:
+        """Fold one :func:`store_records` call into the run totals."""
+        self.proteins_inserted += c.proteins_inserted
+        self.proteins_updated += c.proteins_updated
+        self.sequences_inserted += c.sequences_inserted
+        self.sequences_reused += c.sequences_reused
+
 
 class InsertProteinsPayload(ProteaPayload, frozen=True):
+    #: The UniProt query to fetch. When ``release_fasta_urls`` is set it
+    #: is not used to fetch anything, but it is still required and still
+    #: recorded: it states which query the named files are being
+    #: asserted to be equivalent to, so the declaration is readable
+    #: without opening the URLs.
     search_criteria: str
+    #: Gzipped FASTA files from a UniProt release directory to read
+    #: instead of walking the search endpoint by cursor. Empty means
+    #: paginate. See :meth:`InsertProteinsOperation._stream_fasta` for
+    #: when each path is the right one.
+    release_fasta_urls: list[str] = []
     page_size: PositiveInt = 500
     total_limit: PositiveInt | None = None
     timeout_seconds: PositiveInt = 60
@@ -52,20 +67,34 @@ class InsertProteinsPayload(ProteaPayload, frozen=True):
             raise ValueError("must be a non-empty string")
         return v.strip()
 
+    @field_validator("release_fasta_urls", mode="after")
+    @classmethod
+    def must_be_http_urls(cls, v: list[str]) -> list[str]:
+        for url in v:
+            if not url.startswith(("http://", "https://")):
+                raise ValueError(f"not an http(s) URL: {url!r}")
+        return v
+
 
 class InsertProteinsOperation(Operation):
     """Fetches protein sequences from UniProt (FASTA) and upserts them into the DB.
 
-    Uses cursor-based pagination, exponential backoff with jitter, and MD5-based
-    sequence deduplication. Many proteins can share one Sequence row.
-    Isoforms (``<canonical>-<n>``) are stored as separate Protein rows grouped
-    by ``canonical_accession``.
+    Reads either a release directory's gzipped flat files or the search
+    endpoint by cursor, depending on the payload; :meth:`_stream_fasta`
+    documents which to use. Both paths share exponential backoff with
+    jitter and MD5-based sequence deduplication. Many proteins can share
+    one Sequence row. Isoforms (``<canonical>-<n>``) are stored as
+    separate Protein rows grouped by ``canonical_accession``.
+
+    The whole run is one transaction: nothing is visible until it
+    commits, and a failure leaves no partial universe.
     """
 
     name = "insert_proteins"
     description = (
-        "Fetch protein sequences from UniProt (FASTA, cursor-paginated) and upsert "
-        "Protein + Sequence rows; isoforms are stored grouped by canonical accession."
+        "Fetch protein sequences from UniProt (FASTA, from release files or "
+        "cursor-paginated) and upsert Protein + Sequence rows; isoforms are "
+        "stored grouped by canonical accession."
     )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
@@ -79,6 +108,11 @@ class InsertProteinsOperation(Operation):
             bits.append(f"query={short}")
         if limit:
             bits.append(f"limit={limit}")
+        # Without this the summary reads as a live query on a run that
+        # never issued one.
+        urls = (payload or {}).get("release_fasta_urls") or ()
+        if urls:
+            bits.append(f"release files={len(urls)}")
         return " · ".join(bits)
 
     def __init__(self) -> None:
@@ -94,12 +128,8 @@ class InsertProteinsOperation(Operation):
     ) -> OperationResult:
         p = InsertProteinsPayload.model_validate(contract_payload(payload))
         t0 = time.perf_counter()
-        emit(
-            "insert_proteins.start",
-            None,
-            {"search_criteria": p.search_criteria, "page_size": p.page_size},
-            "info",
-        )
+        source = "release_files" if p.release_fasta_urls else "cursor_pagination"
+        self._emit_start(p, source, emit)
 
         totals = _InsertTotals()
         buffer: list[UniProtProteinRecord] = []
@@ -122,14 +152,11 @@ class InsertProteinsOperation(Operation):
 
         if buffer:
             totals.pages += 1
-            ins_p, upd_p, ins_s, re_s = self._store_records(session, buffer, emit)
-            totals.proteins_inserted += ins_p
-            totals.proteins_updated += upd_p
-            totals.sequences_inserted += ins_s
-            totals.sequences_reused += re_s
+            totals.absorb(store_records(session, buffer, emit))
 
         http_req, http_ret = self._uniprot_plugin.http_counters
         result_dict = {
+            "source": source,
             "pages": totals.pages,
             "retrieved_records": totals.retrieved,
             "isoform_records": totals.isoforms,
@@ -144,6 +171,21 @@ class InsertProteinsOperation(Operation):
         emit("insert_proteins.done", None, result_dict, "info")
         return OperationResult(result=result_dict)
 
+    @staticmethod
+    def _emit_start(p: InsertProteinsPayload, source: str, emit: EmitFn) -> None:
+        """Record which source path the run took, and over which files."""
+        emit(
+            "insert_proteins.start",
+            None,
+            {
+                "search_criteria": p.search_criteria,
+                "page_size": p.page_size,
+                "source": source,
+                "release_fasta_urls": list(p.release_fasta_urls),
+            },
+            "info",
+        )
+
     def _flush_page(
         self,
         session: Session,
@@ -154,11 +196,7 @@ class InsertProteinsOperation(Operation):
     ) -> None:
         """Persist one page worth of buffered records + emit progress."""
         totals.pages += 1
-        ins_p, upd_p, ins_s, re_s = self._store_records(session, buffer, emit)
-        totals.proteins_inserted += ins_p
-        totals.proteins_updated += upd_p
-        totals.sequences_inserted += ins_s
-        totals.sequences_reused += re_s
+        totals.absorb(store_records(session, buffer, emit))
         http_req, http_ret = self._uniprot_plugin.http_counters
         fields: dict[str, Any] = {
             "page": totals.pages,
@@ -180,10 +218,37 @@ class InsertProteinsOperation(Operation):
     ) -> Iterator[UniProtProteinRecord]:
         """Delegate to the protea-sources UniProtSource plugin.
 
-        Plugin owns HTTP retries, cursor pagination, gzip decoding,
-        and FASTA parsing. The operation owns batching, dedup, and
-        bulk insert. See ``f2a6_real_migration_design.md``.
+        Plugin owns HTTP retries, pagination or release-file reading,
+        gzip decoding, and FASTA parsing. The operation owns batching,
+        dedup, and bulk insert. See ``f2a6_real_migration_design.md``.
+
+        Two source paths, chosen by whether the payload names release
+        files:
+
+        * **Release files** (``release_fasta_urls`` set). Reads the
+          gzipped flat files of a UniProt release directory. For a
+          whole-database criterion such as ``reviewed:true`` this is the
+          only practical path: UniProt rate-limits cursor pagination
+          progressively, so throughput decays over a long walk and the
+          wall-clock time of a full fetch is not bounded by the result
+          size. Those files are the same query materialised, they are
+          served at full bandwidth, and because a release directory is
+          immutable they also pin the bytes. Pass the canonical file and
+          its ``_varsplic`` companion, in that order, so isoforms arrive
+          after the canonical entries they belong to. ``include_isoforms``
+          has no effect here -- which files are read decides that.
+        * **Cursor pagination** (the default). Right for a narrow
+          criterion, where the result set is small enough that the walk
+          finishes before throttling matters, and where no published
+          file corresponds to the query.
+
+        Prefer a versioned release path over ``current_release``, which
+        moves: the job's event log records each file's md5, but only a
+        pinned URL makes the fetch repeatable.
         """
+        if p.release_fasta_urls:
+            yield from self._stream_release_fasta(p, emit)
+            return
         yield from self._uniprot_plugin.stream_fasta(
             UniProtFastaStreamPayload(
                 search_criteria=p.search_criteria,
@@ -200,168 +265,27 @@ class InsertProteinsOperation(Operation):
             emit=emit,
         )
 
-    # ---- DB storage ----
-    def _store_records(
-        self, session: Session, records: list[UniProtProteinRecord], emit: EmitFn
-    ) -> tuple[int, int, int, int]:
-        if not records:
-            return 0, 0, 0, 0
-        existing_seq_ids, sequences_inserted, sequences_reused = self._dedup_and_persist_sequences(
-            session, records, emit
-        )
-        accessions = [r.accession for r in records]
-        existing_prot = self._load_existing_proteins(session, accessions)
-        proteins_inserted, proteins_updated = self._upsert_proteins(
-            session, records, existing_prot, existing_seq_ids, emit
-        )
-        return proteins_inserted, proteins_updated, sequences_inserted, sequences_reused
+    def _stream_release_fasta(
+        self, p: InsertProteinsPayload, emit: EmitFn
+    ) -> Iterator[UniProtProteinRecord]:
+        """Read the release files named by the payload.
 
-    def _dedup_and_persist_sequences(
-        self,
-        session: Session,
-        records: list[UniProtProteinRecord],
-        emit: EmitFn,
-    ) -> tuple[dict[str, int], int, int]:
-        """Deduplicate by ``sequence_hash``, return ``(seq_id_by_hash, inserted, reused)``.
-
-        Updates ``seq_id_by_hash`` in place with new IDs for hashes that
-        had to be inserted, so the caller can resolve every record's
-        ``sequence_id`` in a single dict lookup.
+        The transport payload carries only the retry/timeout knobs; the
+        plugin ignores its query fields on this path.
         """
-        hash_to_seq: dict[str, str] = {}
-        for r in records:
-            if r.sequence_hash not in hash_to_seq:
-                hash_to_seq[r.sequence_hash] = r.sequence
-
-        unique_hashes = list(hash_to_seq.keys())
-        emit("db.lookup_sequences_start", None, {"count": len(unique_hashes)}, "info")
-        existing_seq_ids = self._load_existing_sequences(session, unique_hashes)
-        sequences_reused = len(existing_seq_ids)
-        emit("db.lookup_sequences_done", None, {"existing": sequences_reused}, "info")
-
-        missing_hashes = [h for h in unique_hashes if h not in existing_seq_ids]
-        sequences_inserted = 0
-        if missing_hashes:
-            emit("db.insert_sequences_start", None, {"rows": len(missing_hashes)}, "info")
-            new_sequences = [
-                SequenceModel(sequence=hash_to_seq[h], sequence_hash=h) for h in missing_hashes
-            ]
-            session.add_all(new_sequences)
-            session.flush()
-            for s in new_sequences:
-                existing_seq_ids[s.sequence_hash] = s.id
-            sequences_inserted = len(new_sequences)
-            emit("db.insert_sequences_done", None, {"rows": sequences_inserted}, "info")
-
-        return existing_seq_ids, sequences_inserted, sequences_reused
-
-    def _upsert_proteins(
-        self,
-        session: Session,
-        records: list[UniProtProteinRecord],
-        existing_prot: dict[str, Protein],
-        existing_seq_ids: dict[str, int],
-        emit: EmitFn,
-    ) -> tuple[int, int]:
-        """Insert new ``Protein`` rows + conservatively patch existing ones.
-
-        Returns ``(proteins_inserted, proteins_updated)``. Existing rows are
-        only touched via ``_apply_protein_updates``, which fills nulls /
-        flips canonicality / refreshes isoform index without clobbering
-        non-empty curator-supplied fields.
-        """
-        proteins_inserted = 0
-        proteins_updated = 0
-        to_add: list[Protein] = []
-        for r in records:
-            seq_id = existing_seq_ids[r.sequence_hash]
-            if r.accession in existing_prot:
-                if self._apply_protein_updates(existing_prot[r.accession], r, seq_id):
-                    proteins_updated += 1
-            else:
-                to_add.append(self._build_new_protein(r, seq_id))
-                proteins_inserted += 1
-        if to_add:
-            emit("db.insert_proteins_start", None, {"rows": len(to_add)}, "info")
-            session.add_all(to_add)
-            session.flush()
-            emit("db.insert_proteins_done", None, {"rows": len(to_add)}, "info")
-        return proteins_inserted, proteins_updated
-
-    @staticmethod
-    def _apply_protein_updates(
-        p: Protein, r: UniProtProteinRecord, seq_id: int | None
-    ) -> bool:
-        """Patch ``p`` with non-clobbering updates from ``r``; return ``True`` if anything changed."""
-        changed = False
-        if getattr(p, "sequence_id", None) is None and seq_id is not None:
-            p.sequence_id = seq_id
-            changed = True
-        if getattr(p, "entry_name", None) in (None, "") and r.entry_name:
-            p.entry_name = r.entry_name
-            changed = True
-        if getattr(p, "canonical_accession", None) != r.canonical_accession:
-            p.canonical_accession = r.canonical_accession
-            changed = True
-        if getattr(p, "is_canonical", None) != r.is_canonical:
-            p.is_canonical = r.is_canonical
-            changed = True
-        if getattr(p, "isoform_index", None) != r.isoform_index:
-            p.isoform_index = r.isoform_index
-            changed = True
-        if getattr(p, "reviewed", None) is None:
-            p.reviewed = r.reviewed
-            changed = True
-        if getattr(p, "taxonomy_id", None) in (None, "") and r.taxonomy_id:
-            p.taxonomy_id = r.taxonomy_id
-            changed = True
-        if getattr(p, "organism", None) in (None, "") and r.organism:
-            p.organism = r.organism
-            changed = True
-        if getattr(p, "gene_name", None) in (None, "") and r.gene_name:
-            p.gene_name = r.gene_name
-            changed = True
-        if getattr(p, "length", None) is None:
-            p.length = r.length
-            changed = True
-        return changed
-
-    @staticmethod
-    def _build_new_protein(r: UniProtProteinRecord, seq_id: int | None) -> Protein:
-        return Protein(
-            accession=r.accession,
-            canonical_accession=r.canonical_accession,
-            is_canonical=r.is_canonical,
-            isoform_index=r.isoform_index,
-            reviewed=r.reviewed,
-            entry_name=r.entry_name,
-            organism=r.organism,
-            taxonomy_id=r.taxonomy_id,
-            gene_name=r.gene_name,
-            length=r.length,
-            sequence_id=seq_id,
+        yield from self._uniprot_plugin.stream_release_fasta(
+            p.release_fasta_urls,
+            payload=UniProtFastaStreamPayload(
+                search_criteria=p.search_criteria,
+                page_size=p.page_size,
+                timeout_seconds=p.timeout_seconds,
+                include_isoforms=p.include_isoforms,
+                compressed=p.compressed,
+                max_retries=p.max_retries,
+                backoff_base_seconds=p.backoff_base_seconds,
+                backoff_max_seconds=p.backoff_max_seconds,
+                jitter_seconds=p.jitter_seconds,
+                user_agent=p.user_agent,
+            ),
+            emit=emit,
         )
-
-    def _load_existing_sequences(
-        self, session: Session, hashes: Seq[str], chunk_size: int = 5000
-    ) -> dict[str, int]:
-        existing: dict[str, int] = {}
-        for chunk in chunks(hashes, chunk_size):
-            rows = (
-                session.query(SequenceModel.sequence_hash, SequenceModel.id)
-                .filter(SequenceModel.sequence_hash.in_(chunk))
-                .all()
-            )
-            for h, sid in rows:
-                existing[h] = sid
-        return existing
-
-    def _load_existing_proteins(
-        self, session: Session, accessions: Seq[str], chunk_size: int = 5000
-    ) -> dict[str, Protein]:
-        existing: dict[str, Protein] = {}
-        for chunk in chunks(accessions, chunk_size):
-            rows = session.query(Protein).filter(Protein.accession.in_(chunk)).all()
-            for p in rows:
-                existing[p.accession] = p
-        return existing

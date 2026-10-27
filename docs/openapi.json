@@ -3580,6 +3580,129 @@
         ]
       }
     },
+    "/v1/annotations/information-accretion-sets": {
+      "get": {
+        "description": "The IA tables on record, newest first.\n\nThe two filters are what makes \"the IA of cut r\" a lookup instead of a scan,\nwhich matters because a rolling frame asks that question once per cut.\n\nTables computed on a release past the board's mark are NOT listed. They are\nnot hidden to be tidy: these routes answer to whoever holds a key, and an IA\ntable is as much a fact about its release as the ground truth is.",
+        "operationId": "list_information_accretion_sets_v1_annotations_information_accretion_sets_get",
+        "parameters": [
+          {
+            "description": "Only tables computed on this ontology snapshot.",
+            "in": "query",
+            "name": "ontology_snapshot_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tables computed on this ontology snapshot.",
+              "title": "Ontology Snapshot Id"
+            }
+          },
+          {
+            "description": "Only tables whose corpus is this release, e.g. `220`.",
+            "in": "query",
+            "name": "source_version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tables whose corpus is this release, e.g. `220`.",
+              "title": "Source Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Information Accretion Sets V1 Annotations Information Accretion Sets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Information Accretion tables",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/information-accretion-sets/{ia_set_id}/ia.tsv": {
+      "get": {
+        "description": "The IA table's bytes, checked against the hash its row records.\n\nThe check is the same one ``_evaluation_artifacts`` makes before scoring\nagainst a table: a download that skipped it would hand out the single copy\nnobody validated, and the caller could not tell. A drifted artefact answers\n409 rather than a file.",
+        "operationId": "download_information_accretion_tsv_v1_annotations_information_accretion_sets__ia_set_id__ia_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ia_set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ia Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download an Information Accretion table",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
     "/v1/annotations/sets": {
       "get": {
         "description": "List annotation sets with their annotation counts, newest first.\n\nCached 5 minutes: GROUP BY over protein_go_annotation (80M rows) takes\n6+ seconds. Per-source views are cached independently. Serves the\nlast-known payload on producer failure so a transient DB blip does\nnot surface as a 500.",
@@ -7075,6 +7198,26 @@
       "get": {
         "description": "The experiment graph as the record currently supports it.\n\nReads and returns. The session is opened directly rather than through\n``session_scope``, which commits on exit; there is nothing to commit and a\nreporting surface should not hold a transaction open that could.",
         "operationId": "get_graph_v1_graph_get",
+        "parameters": [
+          {
+            "description": "Which window to read. Defaults to the most recently built one, which is the historical behaviour; 404 on an unknown id rather than falling back to another window.",
+            "in": "query",
+            "name": "evaluation_set_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which window to read. Defaults to the most recently built one, which is the historical behaviour; 404 on an unknown id rather than falling back to another window.",
+              "title": "Evaluation Set Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7087,6 +7230,31 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "The requested evaluation set is not in the experiment record. Declared because the alternative -- answering with another window's numbers -- is the failure this parameter exists to prevent."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Graph",
@@ -10884,46 +11052,8 @@
         ]
       },
       "post": {
-        "description": "Submit a thumbs-up with an optional comment.",
+        "description": "Submit a thumbs-up with an optional comment.\n\nOpen to anonymous callers under the IP-hash daily quota, mirroring\n``/annotate``. It used to require ``ROLE_VIEWER``, which made the\nendpoint unusable for the only people it exists for: ``GET /support``\nis public and the button sits on a public page, so every visitor who\npressed it got 401 \"Missing API key or bearer token\". Measured\n2026-10-07 against the live API.\n\nThe quota is the control that replaces the role here. A thumbs-up is\nnot a privileged write: it creates one row with an optional comment\nalready capped by :meth:`SupportCreate.comment_within_limit`, and\nnothing reads it back as instruction.",
         "operationId": "post_support_v1_support_post",
-        "parameters": [
-          {
-            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
-              "title": "Authorization"
-            }
-          },
-          {
-            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
-            "in": "header",
-            "name": "X-Api-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
-              "title": "X-Api-Key"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {

@@ -357,6 +357,160 @@ Execution flow
    9. emit("load_ontology_snapshot.done", ...)
    10. return OperationResult(result={snapshot_id, term_count, rel_count})
 
+extract_goa_universe
+--------------------
+
+**Operation name:** ``extract_goa_universe``; queue: ``protea.jobs``
+
+| **How to invoke this:** see *Build the protein universe from a GOA release* in :doc:`/appendix/howto_guides`.
+| **Tables touched:** ``Protein`` (insert only, accession and canonicality; see *Proteins and sequences* in :doc:`/architecture/data_model`).
+| **Decision record:** :doc:`ADR-D49 </adr/D49-corpus-is-four-tiers-of-the-gaf-series>`.
+
+Scans one GOA GAF and makes every accession it admits exist in ``protein`` as an
+**accession-only row**: accession, ``canonical_accession``, ``is_canonical``,
+``isoform_index`` and ``first_admitted_release``, with no sequence and no
+UniProt metadata. It runs BEFORE ``load_goa_annotations`` for the same release
+and on the same cached file, because
+``protein_go_annotation.protein_accession`` is a foreign key and the loader can
+only skip what is not there.
+
+It opens no connection but the one that fetches the GAF. Sequences, audit dates
+and merged accessions are ``resolve_protein_sequences``' job, once, after the
+series. That makes a release pass a pure function of a cached file, and
+therefore safe to re-run.
+
+Admission is four tiers, declared in the payload rather than hardcoded, and the
+evidence sets with the measurement behind each inclusion live in
+``protea/core/operations/_universe_sources.py``. ``NOT``-qualified rows admit:
+a ``NOT`` is curated knowledge and the evaluation propagates it.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 18 57
+
+   * - Field
+     - Default
+     - Description
+   * - ``gaf_url``
+     - *(required)*
+     - HTTP(S) URL to the GAF file (plain or ``.gz``), or a local cache server.
+   * - ``release``
+     - *(required)*
+     - GOA release number, written onto every inserted row as
+       ``protein.first_admitted_release``. Required rather than parsed out of
+       the URL, because a number read from a filename is a guess and this one
+       goes into the corpus.
+   * - ``admit``
+     - ``["truth", "curated_inference", "swissprot_of_release"]``
+     - Which tiers admit a protein. An unknown tier name raises; an empty list
+       raises. See ADR-D49 for what each tier is and what it measured.
+   * - ``timeout_seconds``
+     - ``120``
+     - HTTP stream timeout for the GAF fetch.
+   * - ``dry_run``
+     - ``false``
+     - Scan and report without writing a row.
+
+Execution flow
+~~~~~~~~~~~~~~
+
+.. code-block:: text
+
+   1. validate payload; resolve the evidence codes the requested tiers admit
+   2. stream the GAF with a RAW-COLUMN predicate (0,24% of lines survive it,
+      so building a record first would cost 11,5 min a release instead of 4,4):
+      a. admit if the evidence code is in the tiers' code set
+      b. else reject and COUNT if the code is unknown to the ECO mapping
+      c. else admit if tier swissprot_of_release and the GAF's entry name
+         says the entry is reviewed at this release
+      d. reject rows whose DB Object Type is not a protein, counted apart
+   3. gate the surviving accessions through the UniProtKB accession grammar
+   4. query protein for which of them are already there
+   5. Core-INSERT the absent ones, accession only, committing per chunk
+   6. UPDATE first_admitted_release where it IS NULL or greater (a minimum,
+      so an out-of-order run still leaves the true earliest release)
+   7. emit("extract_goa_universe.done", ...)
+   8. return OperationResult(result={admissible_accessions, missing,
+      proteins_inserted, first_release_written, malformed_accessions,
+      rows_not_a_protein, filas_por_nivel, codigos_desconocidos, ...})
+
+resolve_protein_sequences
+-------------------------
+
+**Operation name:** ``resolve_protein_sequences``; queue: ``protea.jobs``
+
+| **How to invoke this:** see *Give the universe its sequences* in :doc:`/appendix/howto_guides`.
+| **Tables touched:** ``Protein`` (update, plus insert for merge aliases), ``Sequence`` (insert, deduplicated by MD5).
+| **Decision record:** :doc:`ADR-D49 </adr/D49-corpus-is-four-tiers-of-the-gaf-series>`.
+
+Fetches from UniProt everything the GAF cannot say. Runs ONCE, after the last
+``extract_goa_universe`` pass of the series, over the union of the releases:
+annotations are historical and must be loaded release by release, a sequence is
+a property of the protein and only today's UniProt has it.
+
+Its population is a QUERY, not a payload field: every ``protein`` row with no
+``sequence_id``, read from the table at the moment the job runs. Three internal
+passes with three different predicates:
+
+#. **Sequences.** ``/uniprotkb/accessions`` in batches of a thousand, TSV,
+   asking for the sequence and the three audit dates in one request. An
+   accession UniProt no longer serves is simply absent from the answer.
+#. **Merged accessions.** The batch endpoint matches PRIMARY accessions only, so
+   a merged accession looks deleted. The search endpoint resolves it, and both
+   rows are stored sharing one ``sequence_id``. Embeddings are keyed on
+   ``Sequence``, so a merge costs no extra vector and no extra KNN neighbour.
+   A *demerged* accession points at several entries and is recorded with its
+   destinations rather than resolved, because choosing one is a curatorial
+   decision.
+#. **Audit dates.** Predicate ``date_created IS NULL``, which is a different and
+   much larger population: every protein ``insert_proteins`` loaded has a
+   sequence and no dates.
+
+Transport (retries, backoff, ``Retry-After``) belongs to the
+``protea_sources`` UniProt plugin. This operation imports no HTTP library, which
+``tests/test_resolve_protein_sequences.py`` pins by reading the module's AST.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 18 57
+
+   * - Field
+     - Default
+     - Description
+   * - ``timeout_seconds``
+     - ``120``
+     - Per-request timeout. The other transport knobs (six retries, backoff from
+       2s capped at 60s, half a second of jitter) are measured facts about
+       UniProt's rate limiting and are not payload fields.
+   * - ``max_accessions``
+     - ``null``
+     - Stop after this many candidates, for a smoke run. Reported back as
+       ``limit`` so a capped run cannot be read as a complete one.
+   * - ``dry_run``
+     - ``false``
+     - Count the candidates and write nothing.
+
+Artifacts
+~~~~~~~~~
+
+Published under ``protein_resolution/<job_id>/`` in the ``ArtifactStore``:
+
+- ``fusiones.tsv``: the GAF accession and the primary it merged into. Without
+  it a protein that changed accession mid-series looks like one disappearance
+  and one appearance.
+- ``sin_resolver.txt``: the accessions UniProt no longer serves, by name. This
+  used to be a count, and a count cannot be audited.
+- ``demerges.tsv``: a split accession and every entry it points at.
+
+Annotations of a protein whose sequence never arrives are KEPT: the protein took
+part in the deltas. Queries that need a chain filter on ``sequence_id IS NOT NULL``.
+
 load_goa_annotations
 ---------------------
 

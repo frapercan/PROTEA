@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount, formatDateTime } from "@/lib/format";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
@@ -19,14 +21,13 @@ import {
   PredictionSet,
   AnnotationSet,
   OntologySnapshot,
-  QuerySet,
-} from "@/lib/api";
+  QuerySet, errorText } from "@/lib/api";
 
 type Tab = "predict" | "results";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "medium" });
+  return formatDateTime(iso);
 }
 
 function shortId(id: string) {
@@ -261,7 +262,7 @@ export default function FunctionalAnnotationPage() {
       setPredResult(result);
       toast(t("predictTab.launchAnnotationJob"), "success");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : errorText(err);
       setPredError(msg);
       toast(msg, "error");
     } finally {
@@ -273,15 +274,15 @@ export default function FunctionalAnnotationPage() {
     const ps = predictionSets.find((p) => p.id === id);
     const count = ps?.prediction_count ?? 0;
     const msg = count > 0
-      ? t("resultsTab.deleteConfirm", { count: count.toLocaleString() })
+      ? t("resultsTab.deleteConfirm", { count: formatCount(count) })
       : t("resultsTab.deleteConfirmNoAssignments");
     if (!confirm(msg)) return;
     try {
       const r = await deletePredictionSet(id);
       setPredictionSets((prev) => prev.filter((p) => p.id !== id));
-      toast(tToast("predictionsDeleted", { count: r.predictions_deleted.toLocaleString() }), "info");
+      toast(tToast("predictionsDeleted", { count: formatCount(r.predictions_deleted) }), "info");
     } catch (err) {
-      toast(err instanceof Error ? err.message : String(err), "error");
+      toast(err instanceof Error ? err.message : errorText(err), "error");
     }
   }
 
@@ -298,7 +299,7 @@ export default function FunctionalAnnotationPage() {
   const configValue = selectedConfig
     ? `${selectedConfig.description || selectedConfig.model_name}${
         selectedConfig.embedding_count != null
-          ? ` (${selectedConfig.embedding_count.toLocaleString()} ${t("onboarding.steps.embeddings.unit")})`
+          ? ` (${formatCount(selectedConfig.embedding_count)} ${t("onboarding.steps.embeddings.unit")})`
           : ""
       }`
     : null;
@@ -310,13 +311,13 @@ export default function FunctionalAnnotationPage() {
           : ""
       }${
         selectedAnnotationSet.annotation_count != null
-          ? ` (${selectedAnnotationSet.annotation_count.toLocaleString()} ${t("onboarding.steps.annotationSet.unit")})`
+          ? ` (${formatCount(selectedAnnotationSet.annotation_count)} ${t("onboarding.steps.annotationSet.unit")})`
           : ""
       }`
     : null;
 
   const queryValue = selectedQuerySet
-    ? `${selectedQuerySet.name} (${selectedQuerySet.entry_count.toLocaleString()} ${t("onboarding.steps.querySet.unit")})`
+    ? `${selectedQuerySet.name} (${formatCount(selectedQuerySet.entry_count)} ${t("onboarding.steps.querySet.unit")})`
     : querySets.length > 0
       ? t("onboarding.steps.querySet.allSequences")
       : null;

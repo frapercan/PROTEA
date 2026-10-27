@@ -5,8 +5,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 
+from protea.api.auth.anon_quota import require_anon_quota
 from protea.api.deps import get_session_factory
-from protea.api.roles import ROLE_VIEWER, require_role
 from protea.config.tuning import get_tuning
 from protea.infrastructure.orm.models.support_entry import SupportEntry
 from protea.infrastructure.session import session_scope
@@ -82,12 +82,25 @@ def get_support(
         }
 
 
-@router.post("", status_code=201, dependencies=[Depends(require_role(ROLE_VIEWER))])
+@router.post("", status_code=201, dependencies=[Depends(require_anon_quota)])
 def post_support(
     body: SupportCreate,
     factory=Depends(get_session_factory),
 ) -> dict[str, Any]:
-    """Submit a thumbs-up with an optional comment."""
+    """Submit a thumbs-up with an optional comment.
+
+    Open to anonymous callers under the IP-hash daily quota, mirroring
+    ``/annotate``. It used to require ``ROLE_VIEWER``, which made the
+    endpoint unusable for the only people it exists for: ``GET /support``
+    is public and the button sits on a public page, so every visitor who
+    pressed it got 401 "Missing API key or bearer token". Measured
+    2026-10-07 against the live API.
+
+    The quota is the control that replaces the role here. A thumbs-up is
+    not a privileged write: it creates one row with an optional comment
+    already capped by :meth:`SupportCreate.comment_within_limit`, and
+    nothing reads it back as instruction.
+    """
     comment = body.comment.strip() if body.comment else None
     if comment == "":
         comment = None

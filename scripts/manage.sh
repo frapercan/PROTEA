@@ -141,7 +141,7 @@ cmd_start() {
     printf "\n${BOLD}[3] API${RESET}\n"
     cd "$ROOT"
     _start_bg api poetry run uvicorn protea.api.app:create_app \
-        --factory --host 0.0.0.0 --port 8000 --root-path /api-proxy
+        --factory --host 127.0.0.1 --port 8000 --root-path /api-proxy
     api_ready=0
     for _ in $(seq 1 120); do
         if curl -sf http://localhost:8000/jobs > /dev/null 2>&1; then api_ready=1; break; fi
@@ -468,7 +468,7 @@ _restart_api() {
     kill -9 "$(pgrep -f 'uvicorn protea.api' 2>/dev/null)" 2>/dev/null || true
     cd "$ROOT"
     _start_bg api poetry run uvicorn protea.api.app:create_app \
-        --factory --host 0.0.0.0 --port 8000 --root-path /api-proxy
+        --factory --host 127.0.0.1 --port 8000 --root-path /api-proxy
 }
 
 # Restart any tracked worker whose process is dead, replaying its recorded

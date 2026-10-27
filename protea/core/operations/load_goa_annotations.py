@@ -2,17 +2,33 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
 from typing import Annotated, Any, NamedTuple
 
 from protea_contracts import GoaAnnotationRecord, GoaStreamPayload
 from pydantic import Field, field_validator
-from sqlalchemy import distinct, select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.utils import contract_payload
+from protea.core.contracts.operation import (
+    EmitFn,
+    OperationResult,
+    ProteaPayload,
+    RetryLaterError,
+)
+from protea.core.operations._gaf_header import (
+    HeaderUnreadableError,
+    assert_not_newer_than_declared,
+    declared_release,
+    fetch_header,
+)
+from protea.core.operations._goa_load_report import (
+    _GoaPageTotals,
+    _Rejections,
+    load_report,
+)
+from protea.core.operations._goa_pages import stream_into_pages
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -23,25 +39,154 @@ from protea.infrastructure.orm.models.protein.protein import Protein
 
 _AUTO_EVAL_QUEUE = "protea.jobs"
 
+
+def _append_attempt(annotation_set: AnnotationSet, job_id: uuid.UUID | None) -> None:
+    """Record ``job_id`` as the latest attempt to write into ``annotation_set``.
+
+    The chain lives in ``meta`` rather than in a column because a resumable
+    load has no single owning job; see :meth:`LoadGOAAnnotationsOperation.
+    _create_annotation_set` for why ``job_id`` keeps naming only the opener.
+
+    Two details this has to get right. A ``RetryLaterError`` re-runs the SAME
+    job, so the id it carries is often the one already at the end of the chain
+    and appending it again would inflate the attempt count without a second
+    attempt having happened; consecutive duplicates are dropped. And ``meta`` is
+    a plain JSONB dict, which SQLAlchemy does not track in place, so the list is
+    rebuilt and the attribute reassigned or the append never reaches the row.
+
+THE GATE AND THE FOREIGN KEY HAVE TO NAME THE SAME COLUMN. ``_load_accessions``
+builds the set that ``_store_buffer`` uses to decide which GAF rows may be stored.
+The constraint that actually governs storage is
+``protein_go_annotation.protein_accession`` referencing ``protein.accession``. Until
+2026-10-05 the gate was built from ``canonical_accession`` instead, and the two
+coincide only on canonical rows -- so every row whose ``accession`` differs from its
+``canonical_accession`` was refused by the gate although the foreign key would have
+accepted it:
+
+* **isoforms** (``P12345-2``, canonical ``P12345``): the isoform exists in
+  ``protein`` but is never anyone's ``canonical_accession``, so its annotations were
+  dropped. Not collapsed onto the canonical -- dropped.
+* **merge aliases** (``P30456``, canonical ``P04439``): resolving secondary
+  accessions in ``ensure_goa_universe`` exists so that a 2016 GAF naming ``P30456``
+  loads. It did not. PROTEA#980 inserted those rows and this gate refused them, so
+  the ~1,403 annotations per release that work was measured to rescue were still
+  being skipped.
+
+Nothing announced it. The rows land in ``skipped``, which also counts GAF
+accessions genuinely outside the corpus, so the total looked ordinary.
+"""
+    if job_id is None:
+        return
+    meta = dict(annotation_set.meta or {})
+    chain = list(meta.get("job_ids") or [])
+    if chain and chain[-1] == str(job_id):
+        return
+    chain.append(str(job_id))
+    meta["job_ids"] = chain
+    annotation_set.meta = meta
+
+
+def _existing_annotation_set(
+    session: Session, source_version: str, snapshot_id: uuid.UUID
+) -> AnnotationSet | None:
+    """The set a previous attempt at this same load already opened, if any.
+
+    Until 2026-09-22 the load always inserted a new row, so every
+    re-attempt of a partial load created another AnnotationSet for the same
+    release: GOA 184 ended with FOUR, holding 36.076 annotations between
+    them and none of them complete.
+
+    That is not only waste. ``_select_prior_annotation_set`` picks the
+    previous corpus by source_version, so with four candidates for one
+    release the choice stops being defined -- and an ambiguous
+    ``.one_or_none()`` on exactly this shape is how the LB.1 incident of
+    2026-05-12 read from outside.
+
+    The identity is (source, source_version, ontology_snapshot_id). The
+    snapshot belongs in it: loading one release against a DIFFERENT
+    ontology is a different corpus and must stay a different set.
+
+    Reusing it is what makes the operation resumable rather than merely
+    restartable. ``uq_pga_set_protein_term_evidence`` includes
+    annotation_set_id, so writing into the SAME set lets
+    ``on_conflict_do_nothing`` skip what a previous attempt already wrote;
+    a new one re-inserts everything and orphans the old rows under an id
+    nobody will select.
+
+    NOT ENFORCED IN THE SCHEMA, deliberately and for now. A unique
+    constraint on those three columns is the stronger fix and belongs in a
+    migration, but it cannot be applied while GOA 184 still holds its four
+    rows, so the cleanup has to land first. Without it this is racy in
+    principle; in practice protea.jobs runs one consumer at prefetch 1.
+    """
+    return session.scalars(
+        select(AnnotationSet)
+        .where(
+            AnnotationSet.source == "goa",
+            AnnotationSet.source_version == source_version,
+            AnnotationSet.ontology_snapshot_id == snapshot_id,
+        )
+        .order_by(AnnotationSet.created_at)
+    ).first()
+
 PositiveInt = Annotated[int, Field(gt=0)]
+
+
+#: Los ``index_elements`` de ``uq_pga_annotation_identity``, que es un indice
+#: unico sobre ``coalesce(col, '')`` y no una ``UniqueConstraint``.
+#:
+#: En Postgres ``NULL`` nunca entra en conflicto con ``NULL``, y el qualifier esta
+#: vacio en el 99,5% de las filas fiables de GOA 156. Una restriccion que
+#: incluyera ``qualifier`` dejaria de deduplicar justo ahi, y cada reintento de
+#: una carga interrumpida duplicaria el corpus en silencio -- comprobado contra
+#: Postgres. Sobre ``coalesce`` si deduplica, asi que la resumibilidad de la que
+#: depende esta operacion se conserva junto con la polaridad.
+#:
+#: HAY DOS CAPAS DE DEDUPLICADO Y TIENEN QUE DECIR LO MISMO. Esta, y el
+#: ``dedup_key`` de ``_store_buffer``, que filtra dentro del buffer antes de que
+#: la base opine. Si solo se ensancha una, la otra sigue colapsando y el cambio
+#: parece hecho sin estarlo -- la salida seguiria siendo correcta, solo
+#: incompleta, asi que nada mas lo notaria. ``None`` y ``""`` tienen que ser la
+#: misma cosa en las dos, porque en el indice lo son.
+#: ``tests/test_annotation_identity.py`` fija que coincidan, y una mutacion que
+#: quite un campo de cualquiera de las dos lo tumba.
+def _identity_key(
+    annotation_set_id: uuid.UUID, accession: str, go_term_id: int, rec: GoaAnnotationRecord
+) -> tuple[Any, ...]:
+    """La identidad de una anotacion, en la capa del buffer.
+
+    Es la segunda mitad de ``_IDENTITY_ELEMENTS``: los mismos seis campos con
+    ``None`` normalizado a ``""``, porque el indice los compara con ``coalesce``.
+    Existe como funcion para que las dos capas puedan apuntar a un solo sitio.
+    """
+    return (
+        annotation_set_id,
+        accession,
+        go_term_id,
+        rec.evidence_code or "",
+        rec.qualifier or "",
+        rec.db_reference or "",
+    )
+
+
+_IDENTITY_ELEMENTS = (
+    text("annotation_set_id"),
+    text("protein_accession"),
+    text("go_term_id"),
+    text("coalesce(evidence_code, '')"),
+    text("coalesce(qualifier, '')"),
+    text("coalesce(db_reference, '')"),
+)
 
 
 class _GoaStoreCtx(NamedTuple):
     """Immutable per-stream context handed to ``_store_buffer`` / ``_flush_page``."""
 
     annotation_set_id: uuid.UUID
-    canonical_accessions: set[str]
+    admissible_accessions: set[str]
     go_term_map: dict[str, int]
 
 
-@dataclass
-class _GoaPageTotals:
-    """Mutable accumulator for the GAF page loop."""
-
-    pages: int = 0
-    lines: int = 0
-    inserted: int = 0
-    skipped: int = 0
 
 
 class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
@@ -52,6 +197,7 @@ class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
     timeout_seconds: PositiveInt = 300
     commit_every_page: bool = True
     total_limit: PositiveInt | None = None
+    allow_unverified_ontology: bool = False
 
     @field_validator("ontology_snapshot_id", "gaf_url", "source_version", mode="before")
     @classmethod
@@ -125,28 +271,28 @@ class LoadGOAAnnotationsOperation:
             "info",
         )
 
-        canonical_accessions = self._load_accessions(session, emit)
-        if not canonical_accessions:
+        ontology_check = self._check_declared_ontology(p, snapshot, emit)
+
+        admissible_accessions = self._load_accessions(session, emit)
+        if not admissible_accessions:
             emit("load_goa_annotations.no_proteins", None, {}, "warning")
             return OperationResult(result={"annotations_inserted": 0})
 
         go_term_map = self._load_go_term_map(session, snapshot_id, emit)
-        annotation_set = self._create_annotation_set(session, p, snapshot_id, emit)
+        annotation_set = self._create_annotation_set(session, p, snapshot_id, payload, emit)
         store_ctx = _GoaStoreCtx(
             annotation_set_id=annotation_set.id,
-            canonical_accessions=canonical_accessions,
+            admissible_accessions=admissible_accessions,
             go_term_map=go_term_map,
         )
         totals = self._stream_and_store(session, p, store_ctx, emit)
 
-        result: dict[str, Any] = {
-            "annotation_set_id": str(annotation_set.id),
-            "pages": totals.pages,
-            "total_lines_read": totals.lines,
-            "annotations_inserted": totals.inserted,
-            "annotations_skipped": totals.skipped,
-            "elapsed_seconds": time.perf_counter() - t0,
-        }
+        result = load_report(
+            annotation_set_id=annotation_set.id,
+            totals=totals,
+            ontology_check=ontology_check,
+            elapsed=time.perf_counter() - t0,
+        )
 
         # Auto-trigger an atomic generate_evaluation_set against the latest
         # prior goa AnnotationSet (numeric source_version sort).  Cascade
@@ -161,25 +307,100 @@ class LoadGOAAnnotationsOperation:
         emit("load_goa_annotations.done", None, result, "info")
         return OperationResult(result=result, publish_after_commit=publish_after_commit)
 
+    def _check_declared_ontology(
+        self,
+        p: LoadGOAAnnotationsPayload,
+        snapshot: OntologySnapshot,
+        emit: EmitFn,
+    ) -> dict[str, str | None]:
+        """Refuse a snapshot newer than the GO build the GAF declares.
+
+        Runs before any row is read or written, so a mismatch costs a few
+        kilobytes rather than a full stream. See ``_gaf_header`` for the rule.
+        """
+        # A transport failure is not a statement about the file. Until
+        # 2026-09-22 both arrived here as an empty header and twenty releases
+        # failed permanently with a message saying they declared no ontology,
+        # when the archive had simply refused twenty ranged requests in two
+        # minutes. RetryLaterError puts it back on the queue, which is what a
+        # transient refusal deserves; a file that genuinely declares nothing
+        # still reaches the refusal below.
+        try:
+            header = fetch_header(p.gaf_url, p.timeout_seconds)
+        except HeaderUnreadableError as exc:
+            raise RetryLaterError(str(exc)) from exc
+        declared = declared_release(header)
+        checked = assert_not_newer_than_declared(
+            gaf_url=p.gaf_url,
+            obo_version=snapshot.obo_version,
+            declared=declared,
+            allow_unverified=p.allow_unverified_ontology,
+        )
+        emit(
+            "load_goa_annotations.ontology_checked",
+            None,
+            {**checked, "verified": declared is not None},
+            "info" if declared is not None else "warning",
+        )
+        return checked
+
     def _create_annotation_set(
         self,
         session: Session,
         p: LoadGOAAnnotationsPayload,
         snapshot_id: uuid.UUID,
+        payload: dict[str, Any],
         emit: EmitFn,
     ) -> AnnotationSet:
+        """Return the set this load writes into, reusing one an earlier attempt left.
+
+        A retry must not fork the corpus. See :meth:`_existing_annotation_set`
+        for why the lookup exists and what its key is.
+
+        WHO THE ``job_id`` NAMES. The job that OPENED the set, and only that
+        one. Every other operation that persists a row stamps ``job_id`` at
+        creation and is done, because none of them resumes; this one does. Once
+        the lookup above reuses a set, ``on_conflict_do_nothing`` means the rows
+        under a single id can have been written across several attempts, so no
+        single column can name the load that produced them. Reading the STATUS
+        of ``job_id`` as the status of the set is therefore wrong: the opener is
+        routinely the attempt that failed, and a later one finished the work.
+
+        ``meta["job_ids"]`` carries the whole chain, in attempt order, opener
+        first. That is the field to read to ask which jobs wrote here; the last
+        entry is the one that got to the end. Keeping ``job_id`` pointing at the
+        opener keeps the column meaning the same thing it means everywhere else
+        in the schema, instead of a fourth variant nobody can compare against.
+        """
+        job_id = job_id_from_payload(payload)
+        existing = _existing_annotation_set(session, p.source_version, snapshot_id)
+        if existing is not None:
+            _append_attempt(existing, job_id)
+            emit(
+                "load_goa_annotations.annotation_set_reused",
+                None,
+                {
+                    "annotation_set_id": str(existing.id),
+                    "source_version": p.source_version,
+                    "opened_by_job_id": str(existing.job_id) if existing.job_id else None,
+                    "attempts": len((existing.meta or {}).get("job_ids") or []),
+                },
+                "info",
+            )
+            return existing
         annotation_set = AnnotationSet(
             source="goa",
             source_version=p.source_version,
             ontology_snapshot_id=snapshot_id,
-            meta={"gaf_url": p.gaf_url},
+            job_id=job_id,
+            meta={"gaf_url": p.gaf_url, "job_ids": [str(job_id)] if job_id else []},
         )
         session.add(annotation_set)
         session.flush()
         emit(
             "load_goa_annotations.annotation_set_created",
             None,
-            {"annotation_set_id": str(annotation_set.id)},
+            {"annotation_set_id": str(annotation_set.id), "job_id": str(job_id) if job_id else None},
             "info",
         )
         return annotation_set
@@ -190,31 +411,16 @@ class LoadGOAAnnotationsOperation:
         p: LoadGOAAnnotationsPayload,
         store_ctx: _GoaStoreCtx,
         emit: EmitFn,
+        *,
+        prefilter: bool = True,
     ) -> _GoaPageTotals:
         """Stream GAF records, page-flush via ``_flush_page``, return totals.
 
-        Honours ``p.total_limit`` (early break) and ``p.commit_every_page``.
+        Honours ``p.total_limit`` (early break) and ``p.commit_every_page``. The
+        page loop and the accession prefilter live in ``_goa_pages``;
+        ``prefilter=False`` runs the loop without the prefilter.
         """
-        totals = _GoaPageTotals()
-        buffer: list[GoaAnnotationRecord] = []
-        for record in self._stream_gaf(p, emit):
-            totals.lines += 1
-            if p.total_limit is not None and totals.inserted >= p.total_limit:
-                emit(
-                    "load_goa_annotations.limit_reached",
-                    None,
-                    {"total_limit": p.total_limit},
-                    "warning",
-                )
-                break
-            buffer.append(record)
-            if len(buffer) >= p.page_size:
-                self._flush_page(session, buffer, store_ctx, totals, emit)
-                if p.commit_every_page:
-                    session.commit()
-        if buffer:
-            self._flush_page(session, buffer, store_ctx, totals, emit=None)
-        return totals
+        return stream_into_pages(self, session, p, store_ctx, emit, prefilter=prefilter)
 
     def _flush_page(
         self,
@@ -229,16 +435,16 @@ class LoadGOAAnnotationsOperation:
         Final flush after the loop passes ``emit=None`` to skip the per-page
         progress event; in-loop flushes pass the real emit.
         """
-        inserted, skipped = self._store_buffer(
+        inserted, rejected = self._store_buffer(
             session,
             buffer,
             store_ctx.annotation_set_id,
-            store_ctx.canonical_accessions,
+            store_ctx.admissible_accessions,
             store_ctx.go_term_map,
         )
         totals.pages += 1
         totals.inserted += inserted
-        totals.skipped += skipped
+        totals.absorb(rejected)
         buffer.clear()
         if emit is not None:
             emit(
@@ -249,6 +455,9 @@ class LoadGOAAnnotationsOperation:
                     "total_lines": totals.lines,
                     "total_inserted": totals.inserted,
                     "total_skipped": totals.skipped,
+                    # The one bucket worth watching page by page: the only one
+                    # that means a row of OUR corpus was dropped.
+                    "total_go_term_unknown": totals.go_term_unknown,
                 },
                 "info",
             )
@@ -378,12 +587,17 @@ class LoadGOAAnnotationsOperation:
         return child.id
 
     def _load_accessions(self, session: Session, emit: EmitFn) -> set[str]:
+        """Which GAF accessions this load may store, read from ``protein.accession``.
+
+        See THE GATE AND THE FOREIGN KEY in the module docstring for why the column
+        matters.
+        """
         emit("load_goa_annotations.load_accessions_start", None, {}, "info")
-        accessions = set(session.scalars(select(distinct(Protein.canonical_accession))))
+        accessions = set(session.scalars(select(Protein.accession)))
         emit(
             "load_goa_annotations.load_accessions_done",
             None,
-            {"canonical_accessions": len(accessions)},
+            {"accessions": len(accessions)},
             "info",
         )
         return accessions
@@ -402,20 +616,25 @@ class LoadGOAAnnotationsOperation:
         return mapping
 
     def _stream_gaf(
-        self, p: LoadGOAAnnotationsPayload, emit: EmitFn
+        self,
+        p: LoadGOAAnnotationsPayload,
+        emit: EmitFn,
+        accept: Callable[[list[str]], bool] | None = None,
     ) -> Iterator[GoaAnnotationRecord]:
         """Delegate to the protea-sources GoaSource plugin.
 
         The plugin owns HTTP, gzip decoding, and GAF line parsing; the
         operation owns DB filtering, GO term resolution, dedup, and
         bulk insert. See ``f2a6_real_migration_design.md`` (D-MIGR-01,
-        D-MIGR-02, D-MIGR-06).
+        D-MIGR-02, D-MIGR-06). ``accept`` goes to the plugin unchanged: no
+        record is built for a line it rejects (``_goa_pages``).
         """
         from protea_sources.goa import plugin as goa_plugin
 
         yield from goa_plugin.stream(
             GoaStreamPayload(gaf_url=p.gaf_url, timeout_seconds=p.timeout_seconds),
             emit=emit,
+            accept=accept,
         )
 
     def _store_buffer(
@@ -425,27 +644,29 @@ class LoadGOAAnnotationsOperation:
         annotation_set_id: uuid.UUID,
         valid_accessions: set[str],
         go_term_map: dict[str, int],
-    ) -> tuple[int, int]:
+    ) -> tuple[int, _Rejections]:
         to_add: list[dict] = []
-        skipped = 0
+        rejected = _Rejections()
         seen: set[tuple] = set()
 
         for rec in records:
             accession = rec.accession.strip()
             if not accession or accession not in valid_accessions:
-                skipped += 1
+                rejected.not_in_universe += 1
                 continue
 
             go_id = rec.go_id.strip()
             go_term_id = go_term_map.get(go_id)
             if go_term_id is None:
-                skipped += 1
+                # OURS, and dropped. See _Rejections for why this is apart.
+                rejected.go_term_unknown += 1
+                rejected.lost_go_ids[go_id] += 1
                 continue
 
             evidence_code = rec.evidence_code
-            dedup_key = (annotation_set_id, accession, go_term_id, evidence_code)
+            dedup_key = _identity_key(annotation_set_id, accession, go_term_id, rec)
             if dedup_key in seen:
-                skipped += 1
+                rejected.duplicate_in_batch += 1
                 continue
             seen.add(dedup_key)
 
@@ -470,7 +691,7 @@ class LoadGOAAnnotationsOperation:
             for i in range(0, len(to_add), chunk_size):
                 chunk = to_add[i : i + chunk_size]
                 stmt = pg_insert(ProteinGOAnnotation.__table__).values(chunk)
-                stmt = stmt.on_conflict_do_nothing(constraint="uq_pga_set_protein_term_evidence")
+                stmt = stmt.on_conflict_do_nothing(index_elements=_IDENTITY_ELEMENTS)
                 session.execute(stmt)
 
-        return len(to_add), skipped
+        return len(to_add), rejected

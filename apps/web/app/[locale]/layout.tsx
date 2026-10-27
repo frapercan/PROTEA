@@ -122,11 +122,29 @@ export async function generateMetadata(
       description: SITE_DESCRIPTION,
       locale: ogLocale,
       alternateLocale: Object.values(OG_LOCALE_MAP).filter((l) => l !== ogLocale),
+      // A STATIC file, absolute, declared rather than derived.
+      //
+      // Without this Next derives the image from the dynamic
+      // app/[locale]/opengraph-image.tsx route, and `trailingSlash: true`
+      // (next.config.ts:55) makes that URL answer 308 before it answers
+      // 200. Preview crawlers do not reliably follow a redirect on the
+      // image, which is why LinkedIn could not render a card for this
+      // site on 2026-10-07. A plain file also stops the image being
+      // rendered again on every request.
+      images: [
+        {
+          url: `${SITE_URL}/og/protea-1200x630.png`,
+          width: 1200,
+          height: 630,
+          alt: SITE_TITLE,
+        },
+      ],
     },
     twitter: {
       card: "summary_large_image",
       title: SITE_TITLE,
       description: SITE_DESCRIPTION,
+      images: [`${SITE_URL}/og/protea-1200x630.png`],
     },
     icons: {
       icon: "/favicon.ico",

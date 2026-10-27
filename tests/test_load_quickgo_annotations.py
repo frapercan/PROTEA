@@ -758,3 +758,39 @@ class TestExecute:
 
     def test_operation_name(self) -> None:
         assert LoadQuickGOAnnotationsOperation().name == "load_quickgo_annotations"
+
+
+class TestTheSetNamesTheJobThatOpenedIt:
+    """The quickgo half of the same provenance gap.
+
+    On 2026-09-23 every annotation_set row in the database held
+    ``job_id = NULL`` -- 54 of 54 -- while every evaluation_set row held one.
+    Both loaders had the same omission. This one is the simple case: it does
+    not resume into an existing set, so the job that opened it is also the
+    only job that wrote under its id.
+    """
+
+    @staticmethod
+    def _create(raw_payload):
+        from protea.core.operations.load_quickgo_annotations import (
+            LoadQuickGOAnnotationsOperation,
+        )
+
+        parsed = MagicMock(source_version="2026-09", quickgo_base_url="https://example.test")
+        return LoadQuickGOAnnotationsOperation()._create_annotation_set(
+            MagicMock(), parsed, uuid.uuid4(), raw_payload, lambda *a, **k: None
+        )
+
+    def test_the_job_from_the_payload_is_stamped(self):
+        job_id = uuid.uuid4()
+
+        got = self._create({"_job_id": str(job_id)})
+
+        assert got.job_id == job_id
+        assert got.meta["job_ids"] == [str(job_id)]
+
+    def test_a_dispatch_with_no_job_leaves_it_null(self):
+        got = self._create({})
+
+        assert got.job_id is None
+        assert got.meta["job_ids"] == []

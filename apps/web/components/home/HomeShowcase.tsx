@@ -1,9 +1,11 @@
+import { formatCount } from "@/lib/format";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { getShowcase, type PerTaskAggregate, type ShowcaseData } from "@/lib/api";
 import { Tooltip } from "@/components/Tooltip";
 import { ShareBestLinkButton } from "./ShareBestLinkButton";
 import { stageBadgeClass, stageLabelKey } from "@/lib/stageBadge";
+import { KNOWLEDGE_DEFINITION } from "@/lib/knowledgeRegimes";
 
 /**
  * Async server component that hydrates the homepage best-result
@@ -47,11 +49,10 @@ const ASPECT_TOOLTIPS: Record<string, string> = {
 // the NK / LK / PK acronyms in the spotlight subtitle are self-
 // explaining (P1.9). Source of truth lives on the benchmark page; copy
 // is kept short here.
-const CATEGORY_TOOLTIPS: Record<string, string> = {
-  NK: "No Knowledge: the test protein has no experimental GO annotations of any aspect at the train cutoff. Strictest CAFA split.",
-  LK: "Limited Knowledge: the protein is annotated in other aspects but not the one under evaluation.",
-  PK: "Partial Knowledge: the protein is already annotated for the same aspect, so scoring only counts newly added terms.",
-};
+// The definitions come from lib/knowledgeRegimes, which is the single
+// one. This block used to name the benchmark page as the source of
+// truth, and that page only ever held labels, never definitions.
+const CATEGORY_TOOLTIPS: Record<string, string> = KNOWLEDGE_DEFINITION;
 
 // Definition of the IA-weighted headline metric. f_micro_w is the
 // information-accretion-weighted micro-averaged F: the LAFA / CAFA headline
@@ -438,7 +439,7 @@ export async function HomeShowcase() {
                       {t(STAGE_I18N[stage.name] as never)}
                     </span>
                     <span className="text-[11px] text-slate-600 tabular-nums mt-0.5 font-medium">
-                      {stage.count.toLocaleString()}
+                      {formatCount(stage.count)}
                     </span>
                     <span className="text-[10px] text-slate-500 leading-snug mt-1.5 line-clamp-2">
                       {t(STAGE_DESC_I18N[stage.name] as never)}
@@ -485,7 +486,7 @@ export async function HomeShowcase() {
                 />
                 <div className="relative">
                   <div className="text-3xl sm:text-4xl font-bold text-slate-900 tabular-nums tracking-tight">
-                    {count.toLocaleString()}
+                    {formatCount(count)}
                   </div>
                   <div className="text-xs uppercase tracking-[0.14em] text-slate-500 mt-2 font-semibold">
                     {t(key as never)}

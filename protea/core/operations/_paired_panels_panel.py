@@ -42,6 +42,7 @@ from protea.core.operations._paired_panels_artifact import (
     require_variant,
     resolve_setting_file,
 )
+from protea.core.operations._paired_panels_stratum import Restriction
 from protea.core.operations._run_cafa_helpers import eval_artifact_key
 
 # The exact-path control. ``_micro`` is the function behind every published
@@ -347,6 +348,16 @@ def estimator_parity(curve_own: np.ndarray, stored: float | None) -> bool | None
 
     ``None`` when the result row carries no cell for this panel, which is a
     third state and not a pass: nothing was checked.
+
+    ALWAYS OVER THE WHOLE PANEL, never over a stratum. The stored cell was
+    published over the whole population, so recomposing a restricted population
+    and comparing it against that cell asks whether a part equals the whole, and
+    every restricted comparison would refuse -- which is what happened the first
+    time a length band was asked for on real data: 0.052507 recomposed against
+    0.0433 stored. The control asks whether an artefact recomposes to the number
+    published from it. That is a property of the artefact, not of the population
+    a later caller chose to look at, so the caller passes the unrestricted arrays
+    here while every reported number follows the restriction.
     """
     if stored is None:
         return None
@@ -368,6 +379,7 @@ def arm_block(
     meta: GridMeta,
     stored: float | None,
     tau_index: int | None,
+    parity_from: boot.PanelArrays | None = None,
 ) -> tuple[boot.OperatingPoint, dict[str, Any]]:
     """One arm's numbers, on the paired population and on its own.
 
@@ -380,6 +392,9 @@ def arm_block(
     ``tau_index`` is the caller's operating point and governs every number
     reported here. It does not govern :func:`estimator_parity`, which explains
     there why it cannot.
+
+    ``parity_from`` is the arm's whole panel under a restriction, and ``None``
+    without one; :func:`estimator_parity` says why it cannot be the stratum.
     """
     curve_shared = boot.panel_curve(shared)
     curve_own = boot.panel_curve(own)
@@ -387,7 +402,8 @@ def arm_block(
     op_own = boot.operating_point(curve_own, tau_index)
     exact_path_control(shared, op_shared)
     exact_path_control(own, op_own)
-    parity = estimator_parity(curve_own, stored)
+    curve_parity = curve_own if parity_from is None else boot.panel_curve(parity_from)
+    parity = estimator_parity(curve_parity, stored)
     scored = int(np.count_nonzero(shared.pred[:, op_shared.tau_index] > 0.0))
     scored_own = int(np.count_nonzero(own.pred[:, op_own.tau_index] > 0.0))
     return op_shared, {
@@ -576,7 +592,14 @@ def _arms(
     sides: tuple[Side, Side], key: str, aligned: tuple[boot.PanelArrays, boot.PanelArrays],
     raw: tuple[boot.PanelArrays, boot.PanelArrays],
     tau_index: int | None,
+    whole: tuple[boot.PanelArrays, boot.PanelArrays] | None = None,
 ) -> tuple[tuple[boot.OperatingPoint, boot.OperatingPoint], dict[str, Any], dict[str, Any]]:
+    """Both arms' blocks. ``whole`` is the unrestricted pair, when there is one.
+
+    It exists only for the parity control, which asks whether an artefact
+    recomposes to the cell published from it. Every other number here follows
+    the restriction.
+    """
     setting, aspect = key.split(":")
     op_a, block_a = arm_block(
         aligned[0],
@@ -584,6 +607,7 @@ def _arms(
         sides[0].grids[setting].meta,
         sides[0].stored_metric(setting, aspect),
         tau_index,
+        None if whole is None else whole[0],
     )
     op_b, block_b = arm_block(
         aligned[1],
@@ -591,8 +615,79 @@ def _arms(
         sides[1].grids[setting].meta,
         sides[1].stored_metric(setting, aspect),
         tau_index,
+        None if whole is None else whole[1],
     )
     return (op_a, op_b), block_a, block_b
+
+
+def restrict(arrays: boot.PanelArrays, keep: frozenset[str]) -> boot.PanelArrays:
+    """The panel narrowed to the accessions in ``keep``, order preserved.
+
+    Applied BEFORE the population statistics rather than after, so that the
+    Jaccard overlap, ``n_paired`` and every refusal downstream all describe the
+    restricted population. Restricting afterwards would report a stratum's
+    delta beside the whole panel's population counts, and the two would be read
+    as one fact.
+    """
+    order = np.array(
+        [i for i, acc in enumerate(arrays.accessions) if acc in keep], dtype=np.int64
+    )
+    return arrays.take(order)
+
+
+def _raw_pair(
+    sides: tuple[Side, Side],
+    key: str,
+    narrow: Restriction | None,
+) -> tuple[boot.PanelArrays, boot.PanelArrays, tuple[boot.PanelArrays, boot.PanelArrays] | None] | str:
+    """Both arms' arrays, narrowed if asked, the whole pair beside them, or WHY there are none.
+
+    The unrestricted pair travels back because the parity control needs it: the
+    stored cell was published over the whole population, so a stratum recomposed
+    and compared against it asks whether a part equals the whole.
+
+    The two ways of having nothing are returned as different strings rather than
+    as one empty result. An artefact that was never written and a stratum that
+    holds no protein both leave zero rows to resample, but the first is a run
+    that did not happen and the second is a population that does not exist, and
+    the actions they call for are not the same.
+    """
+    setting, aspect = key.split(":")
+    namespace = CAFA_TO_NAMESPACE[aspect]
+    raw_a, raw_b = sides[0].panel(setting, namespace), sides[1].panel(setting, namespace)
+    if raw_a is None or raw_b is None:
+        return "artefact_absent_for_panel"
+    if narrow is None:
+        return raw_a, raw_b, None
+    kept_a, kept_b = restrict(raw_a, narrow.keep), restrict(raw_b, narrow.keep)
+    if not (kept_a.n and kept_b.n):
+        return "stratum_empty_for_panel"
+    return kept_a, kept_b, (raw_a, raw_b)
+
+
+def _below_floor(
+    stats: dict[str, Any],
+    block_a: dict[str, Any],
+    block_b: dict[str, Any],
+    delta: float,
+    arm_silent: str | None,
+) -> dict[str, Any]:
+    """Computed, and unresolvable -- which is not the same fact as never read.
+
+    A panel with fewer than two paired proteins has a delta and cannot have an
+    interval. The verdict says "not resolved" and the tally counts it among the
+    panels that could not answer, rather than among the panels that were not
+    asked; folding the two together would let a missing artefact hide inside a
+    thin stratum.
+    """
+    return {
+        **empty_panel(stats, "population_below_bootstrap_floor", "unresolvable"),
+        "verdict": "not_resolved",
+        "a": block_a,
+        "b": block_b,
+        "delta": delta,
+        "arm_silent": arm_silent,
+    }
 
 
 def panel_result(
@@ -601,14 +696,19 @@ def panel_result(
     cfg: PanelConfig,
     index: int,
     rule: tuple[str, float],
+    narrow: Restriction | None = None,
 ) -> dict[str, Any]:
-    """One panel's whole answer, including the answers that are refusals to answer."""
-    setting, aspect = key.split(":")
-    namespace = CAFA_TO_NAMESPACE[aspect]
-    raw_a, raw_b = sides[0].panel(setting, namespace), sides[1].panel(setting, namespace)
-    if raw_a is None or raw_b is None:
-        return empty_panel({"panel": key, **absent_stats(rule)}, "artefact_absent_for_panel", "empty")
-    stats = {"panel": key, **population_stats(raw_a, raw_b, rule[0])}
+    """One panel's whole answer, including the answers that are refusals to answer.
+
+    ``narrow`` restricts the paired population to one stratum and carries the
+    name that restriction is reported under. ``None`` is the whole panel.
+    """
+    reported = narrow.label if narrow else key
+    raw = _raw_pair(sides, key, narrow)
+    if isinstance(raw, str):
+        return empty_panel({"panel": reported, **absent_stats(rule)}, raw, "empty")
+    raw_a, raw_b, whole = raw
+    stats = {"panel": reported, **population_stats(raw_a, raw_b, rule[0])}
     refusal = population_refusal(raw_a, raw_b, stats, rule[0], rule[1])
     if refusal is not None:
         return refused_panel(stats, *refusal)
@@ -616,28 +716,16 @@ def panel_result(
     # Assert the population, never infer it from a count reported elsewhere.
     if not (a.n == b.n == stats["n_paired"]):
         raise PanelComparabilityError(
-            f"panel {key}: declared {stats['n_paired']} paired proteins but the arrays hold "
+            f"panel {reported}: declared {stats['n_paired']} paired proteins but the arrays hold "
             f"{a.n} and {b.n}; the number and the population it is over have come apart"
         )
-    assert_same_ground_truth(a, b, key)
-    ops, block_a, block_b = _arms(sides, key, (a, b), (raw_a, raw_b), cfg.tau_index)
+    assert_same_ground_truth(a, b, reported)
+    ops, block_a, block_b = _arms(sides, key, (a, b), (raw_a, raw_b), cfg.tau_index, whole)
     delta = float(ops[0].value - ops[1].value)
     silent = [n for n, blk in (("A", block_a), ("B", block_b)) if blk["silent"]]
     arm_silent = silent[0] if len(silent) == 1 else None
     if a.n < 2:
-        # Computed, and unresolvable. Not the same fact as an artefact that was
-        # never read, so the verdict says "not resolved" and the tally counts it
-        # among the panels that could not answer rather than among the panels
-        # that were not asked.
-        floor = empty_panel(stats, "population_below_bootstrap_floor", "unresolvable")
-        return {
-            **floor,
-            "verdict": "not_resolved",
-            "a": block_a,
-            "b": block_b,
-            "delta": delta,
-            "arm_silent": arm_silent,
-        }
+        return _below_floor(stats, block_a, block_b, delta, arm_silent)
     panel: dict[str, Any] = {
         **stats,
         "a": block_a,

@@ -15,6 +15,7 @@ from protea.core.contracts.operation import OperationResult
 from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsOperation,
     LoadGOAAnnotationsPayload,
+    _Rejections,
 )
 
 _noop_emit = lambda *_: None  # noqa: E731
@@ -170,7 +171,7 @@ class TestStoreBuffer:
         op = self._op()
         session = MagicMock()
         records = [self._make_record(accession="UNKNOWN")]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -178,13 +179,15 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 0
-        assert skipped == 1
+        assert rejected.total == 1
+        assert rejected.not_in_universe == 1, "un accession ajeno NO es perdida nuestra"
+        assert rejected.go_term_unknown == 0
 
     def test_skips_empty_accession(self) -> None:
         op = self._op()
         session = MagicMock()
         records = [self._make_record(accession="  ")]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -192,13 +195,14 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 0
-        assert skipped == 1
+        assert rejected.total == 1
+        assert rejected.not_in_universe == 1
 
     def test_skips_unknown_go_term(self) -> None:
         op = self._op()
         session = MagicMock()
         records = [self._make_record(go_id="GO:9999999")]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -206,7 +210,13 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 0
-        assert skipped == 1
+        # EL CUBO QUE IMPORTA: la proteina es nuestra y la fila se cae. Es la
+        # unica de las tres razones que significa perdida del superset, y antes
+        # iba sumada con las ~270M filas de "esta proteina no es nuestra".
+        assert rejected.go_term_unknown == 1
+        assert rejected.not_in_universe == 0
+        # Y el id perdido queda NOMBRADO, no solo contado, hasta el tope.
+        assert rejected.lost_go_ids == {"GO:9999999": 1}
 
     def test_inserts_valid_records(self) -> None:
         op = self._op()
@@ -215,7 +225,7 @@ class TestStoreBuffer:
             self._make_record(accession="P12345", go_id="GO:0003824"),
             self._make_record(accession="Q67890", go_id="GO:0008150", evidence="IEA"),
         ]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -223,7 +233,7 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1, "GO:0008150": 2},
         )
         assert inserted == 2
-        assert skipped == 0
+        assert rejected.total == 0
         session.execute.assert_called()
 
     def test_deduplicates_within_buffer(self) -> None:
@@ -231,7 +241,7 @@ class TestStoreBuffer:
         session = MagicMock()
         rec = self._make_record()
         records = [rec.model_copy(), rec.model_copy(), rec.model_copy()]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -239,7 +249,9 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 1
-        assert skipped == 2
+        assert rejected.total == 2
+        assert rejected.duplicate_in_batch == 2, "un repetido dentro del lote es inocuo"
+        assert rejected.go_term_unknown == 0
 
     def test_different_evidence_codes_not_deduplicated(self) -> None:
         op = self._op()
@@ -248,7 +260,7 @@ class TestStoreBuffer:
             self._make_record(evidence="IDA"),
             self._make_record(evidence="IEA"),
         ]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -256,7 +268,7 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 2
-        assert skipped == 0
+        assert rejected.total == 0
 
     def test_mixed_valid_and_invalid(self) -> None:
         op = self._op()
@@ -267,7 +279,7 @@ class TestStoreBuffer:
             self._make_record(accession="Q67890", go_id="GO:0008150"),
             self._make_record(go_id="GO:INVALID"),
         ]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -275,12 +287,12 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1, "GO:0008150": 2},
         )
         assert inserted == 2
-        assert skipped == 2
+        assert rejected.total == 2
 
     def test_empty_buffer(self) -> None:
         op = self._op()
         session = MagicMock()
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             [],
             uuid.UUID(_SNAPSHOT_ID),
@@ -288,7 +300,7 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 0
-        assert skipped == 0
+        assert rejected.total == 0
         session.execute.assert_not_called()
 
     def test_empty_evidence_treated_as_none_for_dedup(self) -> None:
@@ -299,7 +311,7 @@ class TestStoreBuffer:
             self._make_record(evidence=""),
             self._make_record(evidence=""),
         ]
-        inserted, skipped = op._store_buffer(
+        inserted, rejected = op._store_buffer(
             session,
             records,
             uuid.UUID(_SNAPSHOT_ID),
@@ -307,7 +319,7 @@ class TestStoreBuffer:
             go_term_map={"GO:0003824": 1},
         )
         assert inserted == 1
-        assert skipped == 1
+        assert rejected.total == 1
 
 
 # ---------------------------------------------------------------------------
@@ -333,9 +345,7 @@ class TestStreamGaf:
         mock_resp.raw = raw
         mock_resp.raise_for_status = MagicMock()
 
-        with patch(
-            "protea_sources.goa.requests.get", return_value=mock_resp
-        ):
+        with patch("protea_sources.goa.requests.get", return_value=mock_resp):
             return list(self.op._stream_gaf(payload, emit))
 
     def test_parses_valid_gaf_line(self):
@@ -411,9 +421,7 @@ class TestStreamGaf:
         mock_resp.raw = raw
         mock_resp.raise_for_status = MagicMock()
 
-        with patch(
-            "protea_sources.goa.requests.get", return_value=mock_resp
-        ):
+        with patch("protea_sources.goa.requests.get", return_value=mock_resp):
             records = list(self.op._stream_gaf(payload, emit))
         assert len(records) == 1
 
@@ -463,7 +471,11 @@ class TestLoadAccessions:
         self.op._load_accessions(session, emit)
         done = [e for e in events if e["event"] == "load_goa_annotations.load_accessions_done"]
         assert len(done) == 1
-        assert done[0]["fields"]["canonical_accessions"] == 3
+        # Named ``accessions``, not ``canonical_accessions``: the gate reads
+        # ``protein.accession``, which is the column the foreign key names. The old
+        # field name was part of what made the mismatch read as intentional.
+        assert done[0]["fields"]["accessions"] == 3
+        assert "canonical_accessions" not in done[0]["fields"]
 
 
 # ---------------------------------------------------------------------------
@@ -520,10 +532,29 @@ class TestExecute:
         self.op = LoadGOAAnnotationsOperation()
         self.snapshot_id = uuid.uuid4()
 
+    @pytest.fixture(autouse=True)
+    def _offline_ontology_check(self):
+        """``execute`` reads the GAF's ``!go-version`` before touching the DB.
+
+        These tests are offline, so serve a header declaring a build later
+        than the snapshot they bind to; the guard itself is pinned in
+        ``test_gaf_header_guard.py``.
+        """
+        with patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value=(
+                "!gaf-version: 2.2\n"
+                "!go-version: http://purl.obolibrary.org/obo/go/releases/"
+                "2030-01-01/extensions/go-plus.owl\n"
+            ),
+        ):
+            yield
+
     def _make_session(self, accessions, go_terms):
         session = MagicMock()
-        # session.get(OntologySnapshot, id) returns a truthy mock
-        session.get.return_value = MagicMock()
+        # session.get(OntologySnapshot, id) returns a truthy mock carrying the
+        # release the ontology guard compares against.
+        session.get.return_value = MagicMock(obo_version="releases/2024-03-28")
         # _load_accessions uses session.scalars
         session.scalars.return_value = iter(accessions)
         # _load_go_term_map uses session.query
@@ -572,27 +603,31 @@ class TestExecute:
         real_go = dict(go_terms)
 
         def fake_store_buffer(_session, records, _ann_set_id, _valid, _go_map):
+            # Mirrors the real method's THREE rejection buckets, not a single
+            # count: a double that collapsed them would let the production code
+            # stop distinguishing them without any test noticing.
             inserted = 0
-            skipped = 0
+            rejected = _Rejections()
             seen = set()
             for rec in records:
                 acc = rec.accession.strip()
                 if not acc or acc not in real_valid:
-                    skipped += 1
+                    rejected.not_in_universe += 1
                     continue
                 go_id = rec.go_id.strip()
                 go_term_id = real_go.get(go_id)
                 if go_term_id is None:
-                    skipped += 1
+                    rejected.go_term_unknown += 1
+                    rejected.lost_go_ids[go_id] += 1
                     continue
                 ev = rec.evidence_code
                 key = (_ann_set_id, acc, go_term_id, ev)
                 if key in seen:
-                    skipped += 1
+                    rejected.duplicate_in_batch += 1
                     continue
                 seen.add(key)
                 inserted += 1
-            return inserted, skipped
+            return inserted, rejected
 
         if store_buffer_side_effect is not None:
             fake_store_buffer = store_buffer_side_effect
@@ -605,6 +640,15 @@ class TestExecute:
             patch(
                 "protea.core.operations.load_goa_annotations.AnnotationSet",
                 return_value=ann_set_mock,
+            ),
+            # These tests exercise the CREATE path, so they assume no earlier
+            # attempt left a set behind. That assumption was implicit while the
+            # load always created one; since it now reuses, it has to be said.
+            # Stubbing the lookup also keeps `select(AnnotationSet)` away from
+            # the MagicMock the line above puts in its place.
+            patch(
+                "protea.core.operations.load_goa_annotations._existing_annotation_set",
+                return_value=None,
             ),
             patch.object(
                 self.op,
@@ -862,6 +906,106 @@ class TestExecute:
 # ---------------------------------------------------------------------------
 
 
+class TestExecuteRefusesAMismatchedOntology:
+    """The guard must fire before any row is read, written, or downloaded.
+
+    GOA 220 was loaded against an ontology eleven months after the build its
+    own header declares. Nothing rejected it, and the mislabel only surfaced
+    months later when prediction refused to run.
+    """
+
+    def _session(self, obo_version):
+        session = MagicMock()
+        session.get.return_value = MagicMock(obo_version=obo_version)
+        return session
+
+    def _payload(self, **extra):
+        return {
+            "ontology_snapshot_id": str(uuid.uuid4()),
+            "gaf_url": "https://example.invalid/goa_uniprot_all.gaf.220.gz",
+            "source_version": "220",
+            **extra,
+        }
+
+    _HEADER_220 = (
+        "!gaf-version: 2.2\n"
+        "!go-version: http://purl.obolibrary.org/obo/go/releases/2024-04-13/"
+        "extensions/go-plus.owl\n"
+    )
+
+    def test_refuses_a_snapshot_later_than_the_declared_build(self):
+        session = self._session("releases/2025-03-16")
+        with patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value=self._HEADER_220,
+        ):
+            with pytest.raises(ValueError, match="which is later"):
+                LoadGOAAnnotationsOperation().execute(session, self._payload(), emit=_noop_emit)
+
+    def test_nothing_is_created_when_it_refuses(self):
+        """No AnnotationSet, no accession scan, no stream: it fails first."""
+        session = self._session("releases/2025-03-16")
+        op = LoadGOAAnnotationsOperation()
+        with (
+            patch(
+                "protea.core.operations.load_goa_annotations.fetch_header",
+                return_value=self._HEADER_220,
+            ),
+            patch.object(op, "_stream_gaf") as stream,
+        ):
+            with pytest.raises(ValueError):
+                op.execute(session, self._payload(), emit=_noop_emit)
+        session.add.assert_not_called()
+        session.scalars.assert_not_called()
+        stream.assert_not_called()
+
+    def test_accepts_the_era_correct_snapshot(self):
+        """``releases/2024-03-28`` is what GAF 220 should have been bound to."""
+        session = self._session("releases/2024-03-28")
+        op = LoadGOAAnnotationsOperation()
+        with patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value=self._HEADER_220,
+        ):
+            checked = op._check_declared_ontology(
+                LoadGOAAnnotationsPayload.model_validate(self._payload()),
+                session.get.return_value,
+                _noop_emit,
+            )
+        assert checked == {
+            "declared": "releases/2024-04-13",
+            "bound": "releases/2024-03-28",
+        }
+
+    def test_an_unreadable_header_refuses_unless_the_skip_is_declared(self):
+        session = self._session("releases/2024-03-28")
+        op = LoadGOAAnnotationsOperation()
+        with patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value="",
+        ):
+            with pytest.raises(ValueError, match="allow_unverified_ontology"):
+                op.execute(session, self._payload(), emit=_noop_emit)
+
+            payload = LoadGOAAnnotationsPayload.model_validate(
+                self._payload(allow_unverified_ontology=True)
+            )
+            checked = op._check_declared_ontology(payload, session.get.return_value, _noop_emit)
+        assert checked["declared"] is None
+
+    def test_the_check_is_recorded_in_the_emitted_event(self):
+        session = self._session("releases/2025-03-16")
+        emit, events = _make_emit()
+        with patch(
+            "protea.core.operations.load_goa_annotations.fetch_header",
+            return_value=self._HEADER_220,
+        ):
+            with pytest.raises(ValueError):
+                LoadGOAAnnotationsOperation().execute(session, self._payload(), emit=emit)
+        started = [e for e in events if e["event"] == "load_goa_annotations.start"]
+        assert len(started) == 1, "the refusal happens after start, before work"
+
+
 class TestMaybeEnqueueAtomicEval:
     """Covers the automatic generate_evaluation_set enqueue triggered by a
     successful load_goa_annotations run.
@@ -959,9 +1103,7 @@ class TestMaybeEnqueueAtomicEval:
         assert result == child_id
         # Two add() calls: the Job and its job.created JobEvent.
         assert session.add.call_count == 2
-        enqueued = [
-            e for e in events if e["event"] == "load_goa_annotations.auto_eval_enqueued"
-        ]
+        enqueued = [e for e in events if e["event"] == "load_goa_annotations.auto_eval_enqueued"]
         assert len(enqueued) == 1
         assert enqueued[0]["fields"]["child_job_id"] == str(child_id)
         assert enqueued[0]["fields"]["old_source_version"] == "215"
@@ -999,3 +1141,203 @@ class TestMaybeEnqueueAtomicEval:
 class TestOperationName:
     def test_name(self):
         assert LoadGOAAnnotationsOperation.name == "load_goa_annotations"
+
+
+class TestARetryDoesNotForkTheCorpus:
+    """A second attempt at the same load writes into the set the first opened.
+
+    WHY THIS TEST EXISTS. The load always inserted a new AnnotationSet, so
+    every re-attempt of a partial load created another one for the same
+    release. GOA 184 ended with FOUR, holding 36,076 annotations between them
+    and none of them complete. The retries were correct -- the stale-job reaper
+    re-enqueued a job whose lease had expired, which is what it is for -- and
+    the operation turned each correct retry into another fork of the corpus.
+
+    It is not only waste. ``_select_prior_annotation_set`` picks the previous
+    corpus by source_version, so with four candidates for one release the
+    choice stops being defined, and an ambiguous ``.one_or_none()`` on exactly
+    this shape is how the LB.1 incident of 2026-05-12 read from outside.
+
+    Reuse is also what makes the load resumable rather than merely restartable:
+    ``uq_pga_set_protein_term_evidence`` includes annotation_set_id, so the same
+    set lets ``on_conflict_do_nothing`` skip what the first attempt wrote.
+    """
+
+    def test_an_existing_set_for_the_same_release_and_snapshot_is_reused(self):
+        from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
+
+        existing = MagicMock(id=uuid.uuid4(), job_id=uuid.uuid4(), meta={})
+        snapshot_id = uuid.uuid4()
+        payload = MagicMock(source_version="184", gaf_url="https://example.test/gaf.gz")
+        session, emitted = MagicMock(), []
+
+        with patch(
+            "protea.core.operations.load_goa_annotations._existing_annotation_set",
+            return_value=existing,
+        ):
+            got = LoadGOAAnnotationsOperation()._create_annotation_set(
+                session, payload, snapshot_id, {}, lambda *a, **k: emitted.append(a[0])
+            )
+
+        assert got is existing, "a retry forked the corpus instead of resuming it"
+        session.add.assert_not_called()
+        assert "load_goa_annotations.annotation_set_reused" in emitted
+
+    def test_the_snapshot_is_part_of_the_identity(self):
+        """Same release against a DIFFERENT ontology is a different corpus.
+
+        Reuse keyed on source_version alone would silently merge two corpora
+        that were resolved under different graphs, which is the defect this
+        project already paid for once with GOA 220.
+        """
+        from protea.core.operations import load_goa_annotations as mod
+
+        session = MagicMock()
+        mod._existing_annotation_set(session, "184", uuid.uuid4())
+        where = session.scalars.call_args[0][0].whereclause
+        rendered = str(where.compile(compile_kwargs={"literal_binds": True}))
+        assert "ontology_snapshot_id" in rendered, (
+            "the lookup ignores the snapshot, so one release loaded against two "
+            "ontologies would collapse into a single set"
+        )
+
+
+class TestAnAnnotationSetThatNamesNoJobIsUnattributable:
+    """Every GOA corpus in the database should say which job wrote it.
+
+    WHY THIS TEST EXISTS. On 2026-09-23 all 54 goa annotation sets held
+    ``job_id = NULL`` while all 45 evaluation sets held one, because
+    ``generate_evaluation_set`` stamps the column and this load never did. A
+    set with no job names no worker, no revision and -- since PROTEA#963 --
+    no library versions either, so nothing it contains can be attributed.
+
+    WHY A COLUMN IS NOT ENOUGH HERE. Since PROTEA#966 the load resumes into
+    the set an earlier attempt opened, and ``on_conflict_do_nothing`` means
+    the rows under one id can have been written across several jobs. So
+    ``job_id`` names the OPENER and nothing more, and the full chain lives in
+    ``meta["job_ids"]``. The distinction is the point: the opener is routinely
+    the attempt that failed, and reading its status as the set's status would
+    be a new way to be wrong about which release is complete.
+    """
+
+    @staticmethod
+    def _create(raw_payload, existing=None):
+        from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
+
+        parsed = MagicMock(source_version="184", gaf_url="https://example.test/gaf.gz")
+        session, emitted = MagicMock(), []
+        with patch(
+            "protea.core.operations.load_goa_annotations._existing_annotation_set",
+            return_value=existing,
+        ):
+            got = LoadGOAAnnotationsOperation()._create_annotation_set(
+                session,
+                parsed,
+                uuid.uuid4(),
+                raw_payload,
+                lambda *a, **k: emitted.append((a[0], a[2])),
+            )
+        return got, session, emitted
+
+    def test_a_new_set_carries_the_job_that_opened_it(self):
+        job_id = uuid.uuid4()
+
+        got, session, emitted = self._create({"_job_id": str(job_id)})
+
+        assert got.job_id == job_id, "the set does not name the job that created it"
+        assert got.meta["job_ids"] == [str(job_id)], "the opener did not open the chain"
+        created = dict(emitted)["load_goa_annotations.annotation_set_created"]
+        assert created["job_id"] == str(job_id)
+
+    def test_a_retry_is_appended_to_the_chain_and_does_not_reassign_the_column(self):
+        """The second attempt is recorded without rewriting who opened the set."""
+        opener, retry = uuid.uuid4(), uuid.uuid4()
+        existing = MagicMock(id=uuid.uuid4(), job_id=opener, meta={"job_ids": [str(opener)]})
+
+        got, _, emitted = self._create({"_job_id": str(retry)}, existing=existing)
+
+        assert got is existing
+        assert got.job_id == opener, "the retry overwrote the opener on the column"
+        assert got.meta["job_ids"] == [str(opener), str(retry)], (
+            "the retrying job is not recoverable from the set it wrote into"
+        )
+        assert dict(emitted)["load_goa_annotations.annotation_set_reused"]["attempts"] == 2
+
+    def test_the_same_job_retrying_itself_is_not_a_second_attempt(self):
+        """A RetryLaterError re-runs the SAME job, so its id is already last.
+
+        Appending it again would report attempts the load never made, which is
+        the kind of inflated count that later gets read as evidence of trouble.
+        """
+        job_id = uuid.uuid4()
+        existing = MagicMock(id=uuid.uuid4(), job_id=job_id, meta={"job_ids": [str(job_id)]})
+
+        got, _, _ = self._create({"_job_id": str(job_id)}, existing=existing)
+
+        assert got.meta["job_ids"] == [str(job_id)]
+
+    def test_a_dispatch_with_no_job_still_loads(self):
+        """A direct ``op.execute`` in a test carries no ``_job_id``.
+
+        It must leave the column NULL rather than refuse: the operation is
+        callable outside a job, and that path is how most of this file runs.
+        """
+        got, _, _ = self._create({})
+
+        assert got.job_id is None
+        assert got.meta["job_ids"] == []
+
+
+class TestTheThreeRejectionsAreCountedApart:
+    """``skipped`` conflated one expected rejection with two that are loss.
+
+    Of GOA 156's 280.9M rows some 270M belong to proteins outside this corpus, so
+    a loss of 50,000 of OUR rows inside that number is invisible. This is the same
+    defect ``malformed_skipped`` had on the extraction side (ADR-D49), on the other
+    end of the pipeline.
+    """
+
+    def test_the_sum_still_equals_the_old_single_number(self):
+        """``annotations_skipped`` stays as the total, so nothing that already
+        reads it breaks."""
+        r = _Rejections(not_in_universe=7, go_term_unknown=2, duplicate_in_batch=1)
+        assert r.total == 10
+
+    def test_the_lost_go_ids_are_named_not_only_counted(self):
+        """A number cannot be audited, a list can: the same argument as
+        ``sin_resolver.txt``. Which GO ids were dropped is what says whether the
+        ontology pairing is wrong or GOA simply moved a term."""
+        r = _Rejections()
+        r.go_term_unknown += 1
+        r.lost_go_ids["GO:0000040"] += 1
+        assert dict(r.lost_go_ids) == {"GO:0000040": 1}
+
+    def test_the_sample_of_names_is_capped_but_the_count_is_not(self):
+        """A release paired with the wrong OBO would otherwise put tens of
+        thousands of ids into one job event."""
+        from protea.core.operations._goa_load_report import (
+            _MAX_LOST_GO_IDS,
+            _GoaPageTotals,
+        )
+
+        totals = _GoaPageTotals()
+        for i in range(_MAX_LOST_GO_IDS * 3):
+            r = _Rejections()
+            r.go_term_unknown += 1
+            r.lost_go_ids[f"GO:{i:07d}"] += 1
+            totals.absorb(r)
+        assert totals.go_term_unknown == _MAX_LOST_GO_IDS * 3, "el recuento NO se acota"
+        assert len(totals.lost_go_ids) == _MAX_LOST_GO_IDS, "la muestra de nombres si"
+
+    def test_a_repeated_lost_id_keeps_accumulating_past_the_cap(self):
+        """Once an id is in the sample it keeps counting, so the most frequent
+        offender does not get frozen at one."""
+        from protea.core.operations._goa_load_report import _GoaPageTotals
+
+        totals = _GoaPageTotals()
+        for _ in range(5):
+            r = _Rejections()
+            r.go_term_unknown += 1
+            r.lost_go_ids["GO:0000040"] += 1
+            totals.absorb(r)
+        assert totals.lost_go_ids["GO:0000040"] == 5

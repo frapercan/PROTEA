@@ -11,8 +11,6 @@ import pytest
 
 from protea.core.split_registry import (
     BOARD_MARK,
-    SplitUndecidedError,
-    comparable_window,
     RELEASES,
     ExclusionBasis,
     ReleaseWindow,
@@ -23,6 +21,7 @@ from protea.core.split_registry import (
     UnknownSplitError,
     adjustment_candidates,
     assert_may_inform,
+    comparable_window,
     consecutive_windows,
     exclusion_basis,
     ground_truth_requires_history,
@@ -118,17 +117,24 @@ class TestTheValidationSplitIsNotOursToOptimise:
 
 
 class TestTheTuneWindowIsDecided:
-    """It was undecided until the author fixed it on 2026-07-27.
+    """It was undecided until the author fixed it on 2026-07-27, then moved.
 
-    E2E-CANONICAL-RUN.md section 3: "TUNE window: 226 -> 227. Every parameter,
-    threshold and design decision is selected here. Nothing after 227 informs a
-    choice." The registry refused to name it for five weeks after that, so a
-    caller asking it for the adjustment windows was told the decision had not
-    been taken when it had.
+    E2E-CANONICAL-RUN.md section 3 fixed "TUNE window: 226 -> 227" on
+    2026-07-27, and the registry refused to name it for five weeks after that.
+    The author superseded it on 2026-09-14 with 220 -> 227, on the ground that
+    GOA 226 is not ingested while 220 -> 227 carries every result and every
+    frame seal the campaign has produced. The reasoning of the first decision
+    was never wrong; the fact it rested on was.
+
+    This test is the barrier, so moving the window means editing it on purpose.
     """
 
     def test_it_names_the_window_the_author_fixed(self) -> None:
-        assert [str(w) for w in windows_for("adjustment")] == ["v226->v227"]
+        assert [str(w) for w in windows_for("adjustment")] == ["v220->v227"]
+
+    def test_the_superseded_window_is_no_longer_the_adjustment_set(self) -> None:
+        """A caller must not still be handed 226->227 after the supersession."""
+        assert "v226->v227" not in [str(w) for w in windows_for("adjustment")]
 
     def test_it_may_inform_the_decisions_it_was_fixed_for(self) -> None:
         for decision in ("hyperparameters", "thresholds", "design", "champion_choice"):
@@ -210,17 +216,34 @@ class TestTheAdjustmentSetCannotTouchTheBoardWindow:
         """One window means the tune window alone, with nothing to check it against."""
         assert not menu_is_sufficient() or len(adjustment_candidates()) >= 2
 
-    def test_the_menu_holds_the_tune_window_and_nothing_earlier(self) -> None:
-        """What the fixed frame costs, pinned so it is visible rather than found.
+    def test_the_menu_no_longer_holds_only_the_tune_window(self) -> None:
+        """What the frame costs, pinned so it is visible rather than found.
 
-        The release table begins at v226, so the only window the leak rule
-        admits is the tune window itself. A decision selected on it cannot
-        currently be shown to hold anywhere else, and the tune window is one of
-        the two roughly thirty percent contractions. Ingesting a release before
-        v226 is what changes this, and this test is what says so.
+        The table began at v226, so the only window the leak rule admitted was
+        the tune window itself. Adding v220 on 2026-09-14 widened the menu to
+        220->226 and 226->227, and neither is the adjustment window, which is
+        now 220->227. So the menu no longer coincides with the adjustment set,
+        which is what this used to assert.
+
+        The exposure is narrowed, not closed, and the next test says why: the
+        menu is a fact about the release TABLE and neither of its two windows
+        can be scored today.
         """
-        assert adjustment_candidates() == tuple(windows_for("adjustment"))
-        assert not menu_is_sufficient()
+        assert adjustment_candidates() != tuple(windows_for("adjustment"))
+        assert [str(w) for w in adjustment_candidates()] == ["v220->v226", "v226->v227"]
+        assert menu_is_sufficient()
+
+    def test_the_menu_says_nothing_about_what_is_ingested(self) -> None:
+        """The trap this function sets, written down so nobody walks into it.
+
+        ``menu_is_sufficient`` went True the moment v220 entered the table, but
+        220->226 needs GOA 226 and 226->227 needs it too, and GOA 226 is not
+        ingested. A True here means the table can EXPRESS a second window, never
+        that the store can SERVE one. This module cannot see the store on
+        purpose, so the check has to live with the caller.
+        """
+        assert menu_is_sufficient()
+        assert any("v226" in str(w) for w in adjustment_candidates())
 
 
 class TestWindowsAreOrderedPairs:

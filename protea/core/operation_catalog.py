@@ -9,6 +9,9 @@ metadata looks like.
 from __future__ import annotations
 
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.operations.analyze_annotation_evolution import (
+    AnalyzeAnnotationEvolutionOperation,
+)
 from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderOperation
 from protea.core.operations.archive_ontology_snapshot import (
     ArchiveOntologySnapshotOperation,
@@ -54,6 +57,7 @@ from protea.core.operations.export_minijobs import (
 from protea.core.operations.export_research_dataset import (
     ExportResearchDatasetOperation,
 )
+from protea.core.operations.extract_goa_universe import ExtractGoaUniverseOperation
 from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOperation
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetOperation
 from protea.core.operations.insert_proteins import InsertProteinsOperation
@@ -63,6 +67,9 @@ from protea.core.operations.load_interpro_go_mapping import (
 )
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
+from protea.core.operations.load_swissprot_release import (
+    LoadSwissProtReleaseOperation,
+)
 from protea.core.operations.measure_embedding_magnitude import (
     MeasureEmbeddingMagnitudeOperation,
 )
@@ -77,6 +84,9 @@ from protea.core.operations.predict_go_terms_from_interpro import (
 )
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesOperation,
+)
+from protea.core.operations.resolve_protein_sequences import (
+    ResolveProteinSequencesOperation,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
@@ -100,6 +110,8 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(FetchUniProtMetadataOperation())
     registry.register(LoadOntologySnapshotOperation())
     registry.register(LoadQuickGOAnnotationsOperation())
+    registry.register(ExtractGoaUniverseOperation())
+    registry.register(ResolveProteinSequencesOperation())
     registry.register(LoadGOAAnnotationsOperation())
     registry.register(LoadInterProGoMappingOperation())
     registry.register(RunInterProScanBatchOperation())
@@ -114,8 +126,10 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(PredictGOTermsBatchOperation())
     registry.register(StorePredictionsOperation())
     registry.register(PredictGOTermsFromInterProOperation())
+    registry.register(LoadSwissProtReleaseOperation())
     registry.register(RefreshGoaReleaseDatesOperation())
     registry.register(BuildGoCooccurrenceOperation())
+    registry.register(AnalyzeAnnotationEvolutionOperation())
     registry.register(ComputeInformationAccretionOperation())
     registry.register(ArchiveOntologySnapshotOperation())
     registry.register(CountBackendParametersOperation())

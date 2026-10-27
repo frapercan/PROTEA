@@ -35,9 +35,20 @@ Exits 0 if no violations are found, 1 otherwise.
 from __future__ import annotations
 
 import importlib
+import pathlib
 import re
 import sys
 from pathlib import Path
+
+# The project root FIRST on sys.path. Running this as ``python3
+# scripts/check_doc_refs.py`` puts ``scripts/`` at ``sys.path[0]``, so
+# ``import protea`` resolved to whatever copy was installed in the environment
+# rather than the tree being checked. In a git worktree that is a different tree
+# entirely, and every module added in the worktree reported as a broken
+# reference. Two ALLOWLIST entries existed only to silence that, and they are
+# removed below: the gate can check them for real now.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
 
 # ---------------------------------------------------------------------------
 # Allowlist: (role, dotted_name)
@@ -68,13 +79,8 @@ ALLOWLIST: set[tuple[str, str]] = {
     # the concrete classes (LocalFsArtifactStore, MinioArtifactStore) not the
     # base.  Suppress until DR.1 adds a proper autoclass directive.
     ("class", "protea.infrastructure.storage.ArtifactStore"),
-    # TelemetryConfig is a real, importable dataclass in
-    # protea.infrastructure.telemetry.  The false positive arises because
-    # this checker is run as `python3 scripts/check_doc_refs.py`, which
-    # prepends the scripts/ directory to sys.path[0] rather than the project
-    # root, so `importlib.import_module` cannot find the protea package.
-    # The class is valid public API used in the observability runbook.
-    ("class", "protea.infrastructure.telemetry.TelemetryConfig"),
+    # (TelemetryConfig used to sit here. Its stated reason was the sys.path bug
+    # fixed above, so it is checked for real now.)
 }
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount } from "@/lib/format";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
@@ -19,7 +21,7 @@ function StatRow({ label, value, highlight }: { label: string; value: number | n
     <div className="flex justify-between items-center py-1.5 border-b border-slate-100 last:border-0">
       <span className="text-sm text-slate-600">{label}</span>
       <span className={`text-sm font-mono font-semibold ${highlight && value ? "text-amber-600" : "text-slate-800"}`}>
-        {value === null ? "—" : value.toLocaleString()}
+        {value === null ? "—" : formatCount(value)}
       </span>
     </div>
   );
@@ -109,7 +111,7 @@ function VacuumCard({
           disabled={vacuuming || !hasOrphans}
           className="px-3 py-1.5 text-sm bg-amber-500 text-white rounded hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {vacuuming ? labelCleaning : `${labelVacuum} ${orphanValue !== null ? `(${orphanValue.toLocaleString()})` : ""}`}
+          {vacuuming ? labelCleaning : `${labelVacuum} ${orphanValue !== null ? `(${formatCount(orphanValue)})` : ""}`}
         </button>
       </div>
     </div>
@@ -170,7 +172,7 @@ export default function MaintenancePage() {
     setSeqVacuuming(true);
     try {
       const r = await runVacuumSequences();
-      toast(tToast("sequencesVacuumed", { count: r.deleted_sequences.toLocaleString() }), "success");
+      toast(tToast("sequencesVacuumed", { count: formatCount(r.deleted_sequences) }), "success");
       await loadSeqPreview();
       await loadEmbPreview(); // seq deletion cascades to embeddings
     } catch (e: any) {
@@ -184,7 +186,7 @@ export default function MaintenancePage() {
     setEmbVacuuming(true);
     try {
       const r = await runVacuumEmbeddings();
-      toast(tToast("embeddingsVacuumed", { count: r.deleted_embeddings.toLocaleString() }), "success");
+      toast(tToast("embeddingsVacuumed", { count: formatCount(r.deleted_embeddings) }), "success");
       await loadEmbPreview();
     } catch (e: any) {
       toast(e.message ?? tToast("vacuumFailed"), "error");

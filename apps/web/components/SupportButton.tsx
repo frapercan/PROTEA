@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCount, formatDate } from "@/lib/format";
+
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { baseUrl } from "@/lib/api";
@@ -18,6 +20,7 @@ export function SupportButton() {
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [failed, setFailed] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -39,17 +42,29 @@ export function SupportButton() {
 
   async function handleSubmit() {
     setSubmitting(true);
+    setFailed(false);
     try {
       const res = await fetch(`${baseUrl()}/support`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ comment: comment.trim() || null }),
       });
+      // It used to read the body and declare success whatever came back.
+      // POST /support required a role until 2026-10-07, so every
+      // anonymous visitor got 401 and was thanked for it: the panel said
+      // "submitted", the count never moved, and nothing was recorded.
+      // A button that lies about writing is worse than one that refuses.
+      if (!res.ok) {
+        setFailed(true);
+        return;
+      }
       const json = await res.json();
       setData((prev) => prev ? { ...prev, count: json.count } : { count: json.count, comments: [] });
       setSubmitted(true);
       setComment("");
       setTimeout(() => setOpen(false), 1500);
+    } catch {
+      setFailed(true);
     } finally {
       setSubmitting(false);
     }
@@ -65,7 +80,7 @@ export function SupportButton() {
           onClick={() => { setOpen((v) => !v); setSubmitted(false); }}
           aria-label={
             count !== null
-              ? `${t("support")} (${count.toLocaleString()})`
+              ? `${t("support")} (${formatCount(count)})`
               : t("support")
           }
           aria-haspopup="dialog"
@@ -79,7 +94,7 @@ export function SupportButton() {
               aria-hidden="true"
               className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] font-bold text-blue-700 tabular-nums"
             >
-              {count.toLocaleString()}
+              {formatCount(count)}
             </span>
           )}
         </button>
@@ -110,6 +125,11 @@ export function SupportButton() {
                 <p className="text-xs text-slate-600">
                   {t("publicNote")}
                 </p>
+                {failed && (
+                  <p role="alert" className="text-xs font-medium text-red-700">
+                    {t("failed")}
+                  </p>
+                )}
                 <button
                   onClick={handleSubmit}
                   disabled={submitting}
@@ -132,7 +152,7 @@ export function SupportButton() {
               </div>
               {data.comments.map((c) => (
                 <div key={c.id} className="text-xs text-slate-600 leading-relaxed">
-                  <span className="text-slate-600 mr-1">{new Date(c.created_at).toLocaleDateString()}</span>
+                  <span className="text-slate-600 mr-1">{formatDate(c.created_at)}</span>
                   {c.comment}
                 </div>
               ))}

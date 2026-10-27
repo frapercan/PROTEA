@@ -9,7 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.auth.anon_quota import require_anon_quota
-from protea.api.cache import cached, invalidate
+from protea.api.cache import cached, refresh
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
@@ -118,8 +118,7 @@ def prewarm_embedding_configs(
     hook and the background refresh loop. Always bypasses the existing
     entry so the cache is refilled with fresh counts before the old TTL
     expires."""
-    invalidate(EMBEDDING_CONFIGS_CACHE_KEY)
-    return cached(
+    return refresh(
         EMBEDDING_CONFIGS_CACHE_KEY,
         EMBEDDING_CONFIGS_TTL_SECONDS,
         lambda: _compute_embedding_configs(factory),
@@ -285,8 +284,7 @@ def prewarm_prediction_sets(
     startup hook and the background refresh loop. Always bypasses the
     existing entry so the cache is refilled with fresh data before the
     old TTL expires."""
-    invalidate(PREDICTION_SETS_CACHE_KEY)
-    return cached(
+    return refresh(
         PREDICTION_SETS_CACHE_KEY,
         PREDICTION_SETS_TTL_SECONDS,
         lambda: _compute_prediction_sets(factory),

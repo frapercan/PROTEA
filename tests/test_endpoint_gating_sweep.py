@@ -161,7 +161,6 @@ _OPERATOR_PATHS = {
 _VIEWER_PATHS = {
     "/query-sets",
     "/query-sets/{query_set_id}",
-    "/support",
 }
 
 # Paths open to anonymous callers (no auth gate, quota-only).
@@ -171,6 +170,21 @@ _ANON_OPEN_PATHS = {
     # predict_go_terms dispatch; the endpoint mirrors /annotate's anon
     # quota gate so logged-out demo visitors complete the flow.
     "/embeddings/predict",
+    # 2026-10-07: moved out of _VIEWER_PATHS deliberately, and this sweep
+    # is what forced the move to be explicit rather than accidental.
+    #
+    # POST /support is the "back the project" button, and it sat on a
+    # public page behind a viewer gate, so every anonymous visitor who
+    # pressed it got 401 "Missing API key or bearer token". Worse, the
+    # button did not check res.ok and thanked them anyway: the count never
+    # moved and nothing was recorded.
+    #
+    # Why it is safe to open. GET /support is already public, so nothing
+    # is disclosed that was not. The write creates one row with an
+    # optional comment already capped by SupportCreate.comment_within_limit,
+    # nothing reads it back as instruction, and the IP-hash daily quota is
+    # the control that replaces the role, exactly as for /annotate.
+    "/support",
 }
 
 
@@ -239,7 +253,10 @@ class TestViewerFloorRoutes:
         "method,path",
         [
             ("POST", "/query-sets"),
-            ("POST", "/support"),
+            # /support is NOT here any more: it is the public "back the
+            # project" button and is now quota-gated instead of
+            # role-gated. Its anonymous contract is asserted below, so
+            # the route did not simply stop being checked.
         ],
     )
     def test_unauthenticated_gets_401(self, monkeypatch, client, method, path):
@@ -275,6 +292,22 @@ class TestViewerFloorRoutes:
         assert resp.status_code not in (401, 403), (
             "POST /embeddings/predict: anonymous caller was blocked by auth "
             f"gate ({resp.status_code})"
+        )
+
+    def test_support_allows_anonymous(self, monkeypatch, client):
+        """POST /support is open to anonymous callers, quota-gated only.
+
+        It is the "back the project" button on a public page. Behind a
+        viewer gate it answered 401 to every visitor who pressed it, which
+        is the whole reason it was reclassified on 2026-10-07. The handler
+        may still answer 4xx for business reasons; what it must not do is
+        turn the caller away at the auth gate.
+        """
+        monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
+        monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
+        resp = client.post("/support", json={})
+        assert resp.status_code not in (401, 403), (
+            f"POST /support: anonymous caller was blocked by auth gate ({resp.status_code})"
         )
 
     @pytest.mark.parametrize(

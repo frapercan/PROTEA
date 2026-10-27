@@ -18,14 +18,20 @@ from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.infrastructure.benchmark_config import BenchmarkConfig
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
+from protea.infrastructure.settings import load_settings
+from protea.infrastructure.storage import get_artifact_store
 from protea.services.annotations_service import (
+    AnnotationsServiceError,
     EntityNotFoundError,
+    HoldoutArtifactError,
     apply_baseline_scoring_default,
     assert_evaluation_set_exists,
     delete_evaluation_set_collect_keys,
+    fetch_information_accretion_tsv,
     get_evaluation_set_data,
     iter_delta_proteins_fasta,
     list_evaluation_sets_data,
+    list_information_accretion_sets_data,
 )
 from protea.services.jobs_service import (
     InvalidJobPayloadError,
@@ -34,6 +40,9 @@ from protea.services.jobs_service import (
 )
 
 from ._common import EVALUATIONS_QUEUE, JOBS_QUEUE, stream_groundtruth
+
+#: Settings root, as the storage factory wants it.
+_ROOT = Path(__file__).resolve().parents[4]
 
 router = APIRouter()
 
@@ -243,3 +252,70 @@ def run_cafa_evaluation(
 
     publish_job(amqp_url, EVALUATIONS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
+
+
+# ── Information Accretion ────────────────────────────────────────────────────
+
+
+@router.get(
+    "/information-accretion-sets",
+    summary="List Information Accretion tables",
+)
+def list_information_accretion_sets(
+    ontology_snapshot_id: UUID | None = Query(
+        default=None, description="Only tables computed on this ontology snapshot."
+    ),
+    source_version: str | None = Query(
+        default=None, description="Only tables whose corpus is this release, e.g. `220`."
+    ),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> list[dict[str, Any]]:
+    """The IA tables on record, newest first.
+
+    The two filters are what makes "the IA of cut r" a lookup instead of a scan,
+    which matters because a rolling frame asks that question once per cut.
+
+    Tables computed on a release past the board's mark are NOT listed. They are
+    not hidden to be tidy: these routes answer to whoever holds a key, and an IA
+    table is as much a fact about its release as the ground truth is.
+    """
+    with session_scope(factory) as session:
+        return list_information_accretion_sets_data(
+            session,
+            ontology_snapshot_id=ontology_snapshot_id,
+            source_version=source_version,
+        )
+
+
+@router.get(
+    "/information-accretion-sets/{ia_set_id}/ia.tsv",
+    response_class=StreamingResponse,
+    summary="Download an Information Accretion table",
+)
+def download_information_accretion_tsv(
+    ia_set_id: UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> StreamingResponse:
+    """The IA table's bytes, checked against the hash its row records.
+
+    The check is the same one ``_evaluation_artifacts`` makes before scoring
+    against a table: a download that skipped it would hand out the single copy
+    nobody validated, and the caller could not tell. A drifted artefact answers
+    409 rather than a file.
+    """
+    try:
+        with session_scope(factory) as session:
+            data = fetch_information_accretion_tsv(
+                session, ia_set_id, store=get_artifact_store(load_settings(_ROOT))
+            )
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HoldoutArtifactError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except AnnotationsServiceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return StreamingResponse(
+        iter([data]),
+        media_type="text/tab-separated-values",
+        headers={"Content-Disposition": f'attachment; filename="IA-{ia_set_id}.tsv"'},
+    )

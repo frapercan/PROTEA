@@ -10,6 +10,7 @@
 
 "use client";
 
+import { formatCount } from "@/lib/format";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -110,7 +111,7 @@ export function StratumMembers({
           it is turns an apparent contradiction into a second fact.
         */}
         <strong className="font-semibold text-slate-700">
-          {data.band_population.toLocaleString()}
+          {formatCount(data.band_population)}
         </strong>{" "}
         proteins share this length and identity band, more than the cell
         itself because category and aspect are asserted rather than filtered.
@@ -139,7 +140,7 @@ export function StratumMembers({
                 </Link>
               </td>
               <td className="py-1 text-right tabular-nums text-slate-600">
-                {m.residues.toLocaleString()}
+                {formatCount(m.residues)}
               </td>
               <td className="py-1 text-right font-mono tabular-nums text-slate-800">
                 {m.best_identity === null

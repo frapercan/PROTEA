@@ -83,6 +83,10 @@ class TestEmbeddingsByPlm:
         # Second branch = the GROUP BY.
         group_q = MagicMock()
         group_q.join.return_value = group_q
+        # The numerator now carries the same two filters as the total, so the
+        # chain has a .filter in it. If this line is removed the test fails,
+        # which is how it pins that the restriction is still there.
+        group_q.filter.return_value = group_q
         group_q.group_by.return_value = group_q
         group_q.order_by.return_value = group_q
         group_q.all.return_value = [
@@ -125,6 +129,8 @@ class TestGoMatrix:
         q = MagicMock()
         session.query.return_value = q
         q.join.return_value = q
+        # The matrix is bounded at the board's mark, so the chain has a .filter.
+        q.filter.return_value = q
         q.group_by.return_value = q
         q.order_by.return_value = q
         q.all.return_value = [
@@ -378,3 +384,222 @@ class TestPrewarmAll:
 # Silence pyflakes unused-import warnings for symbols only referenced in
 # the body of test classes via patch() string literals.
 _ = (time,)
+
+
+class TestLaDensidadDescribeUnaReleaseYNoLaSuma:
+    """La densidad de terminos por proteina es de UN corpus, no de 71.
+
+    POR QUE ESTE TEST EXISTE. `_compute_go_density` no filtraba por
+    annotation_set, asi que agregaba las 71 releases de GOA a la vez: el
+    recuento de una proteina era la suma de sus terminos en todas las releases
+    en que aparece. Medido el 2026-10-04 con el corpus cargado, el endpoint
+    informaba 193,68 terminos de CCO por proteina cuando el valor de una
+    release es 2,27 -- factor 85 -- con un maximo de 7.228 frente a 61.
+
+    Y el dano no era solo la escala. Los percentiles mezclaban cuantos terminos
+    tiene una proteina con cuantas releases ha sobrevivido, asi que la forma de
+    la distribucion tampoco tenia lectura. El test mira el SQL porque el valor
+    no se puede comprobar sin una base cargada, y lo que hay que fijar es que
+    la consulta ACOTE y DEDUPLIQUE.
+    """
+
+    @staticmethod
+    def _sql():
+        from uuid import uuid4
+
+        from sqlalchemy.orm import Session
+
+        from protea.api.routers.proteins_stats import _terminos_por_proteina
+
+        sub = _terminos_por_proteina(Session(), uuid4())
+        return str(sub.original.compile(compile_kwargs={"literal_binds": True}))
+
+    def test_acota_a_un_annotation_set(self):
+        sql = self._sql()
+        assert "annotation_set_id" in sql, (
+            "la subconsulta no filtra por annotation_set: vuelve a sumar todas "
+            "las releases del corpus"
+        )
+
+    def test_cuenta_terminos_distintos(self):
+        sql = self._sql()
+        assert "count(DISTINCT" in sql, (
+            "el count no es DISTINCT: un par (proteina, termino) con tres "
+            "codigos de evidencia cuenta tres veces"
+        )
+
+    def test_agrupa_por_aspecto_y_proteina(self):
+        sql = self._sql().lower()
+        assert "group by" in sql and "aspect" in sql and "protein_accession" in sql
+
+
+class TestTheStatsDoNotPublishPastTheMark:
+    """These endpoints answer WITHOUT a key, so what they aggregate is public.
+
+    Measured 2026-10-11: ``/proteins/stats/go-density`` served release 235, five
+    past the board's mark and inside the prospective window, to anyone who
+    asked. Aggregates, but a window onto the holdout all the same -- and nobody
+    was watching it. The 2026-08-27 incident was the same shape: not a missing
+    rule, a rule nobody asked.
+    """
+
+    def test_the_helper_actually_restricts(self):
+        from protea.api.routers.proteins_stats import _no_pasada_la_marca
+
+        q = MagicMock()
+        _no_pasada_la_marca(q)
+        assert q.filter.called, "the helper returned the query untouched"
+
+    def test_the_newest_release_lookup_goes_through_it(self):
+        """Not a style check: this is the call that served release 235.
+
+        ``_ultimo_set_goa`` picks the highest-numbered GOA set, and the density
+        card asks it without any bound. The restriction has to be on THAT query,
+        not merely available somewhere in the module.
+        """
+        import inspect
+
+        from protea.api.routers import proteins_stats as mod
+
+        assert "_no_pasada_la_marca" in inspect.getsource(mod._ultimo_set_goa)
+
+    def test_the_limit_is_the_registry_mark_and_not_a_copy(self):
+        from protea.api.routers import proteins_stats as mod
+        from protea.core.split_registry import BOARD_MARK, release
+
+        assert mod.BOARD_MARK is BOARD_MARK
+        assert mod.release(BOARD_MARK).published == release(BOARD_MARK).published, (
+            "two ideas of where the limit is drift apart; the guard and the "
+            "public page have to read the same one"
+        )
+
+    def test_it_bounds_by_date_and_not_by_release_number(self):
+        """``split_registry`` says the identifier is opaque on purpose.
+
+        Its own words: ordering derived from the identifier would break the
+        moment the upstream naming changed, and the dates are what the temporal
+        design actually means. So parsing "v227" into 227 and comparing numbers
+        would be reading the one field the registry asks nobody to read.
+        """
+        import inspect
+
+        from protea.api.routers import proteins_stats as mod
+
+        src = inspect.getsource(mod._no_pasada_la_marca)
+        assert "source_published_at" in src
+        assert "published" in src
+        assert "source_version" not in src
+
+
+class TestExperimentalIsOneDefinition:
+    def test_the_codes_are_imported_and_not_restated(self):
+        from protea.api.routers.proteins_stats import _EXPERIMENTAL_CODES
+        from protea.core.evaluation import _EXP_CODES
+
+        assert set(_EXPERIMENTAL_CODES) == set(_EXP_CODES), (
+            "this page used to carry its own set of six, missing TAS, IC and the "
+            "five high-throughput codes, so its 'experimental' split was a "
+            "different population from the one the evaluation and the IA score"
+        )
+
+    def test_the_high_throughput_codes_are_in(self):
+        from protea.api.routers.proteins_stats import _EXPERIMENTAL_CODES
+
+        for code in ("TAS", "IC", "HTP", "HDA", "HMP", "HGI", "HEP"):
+            assert code in _EXPERIMENTAL_CODES, f"{code} was one of the seven missing"
+
+
+class TestCoverageDividesTwoCountsOfOneThing:
+    """A percentage over 100 was the symptom; two populations was the defect.
+
+    Measured while an embedding pass was running: 700.475 proteins with a
+    vector over a denominator of 576.450 canonical reviewed ones, 121,5%. The
+    first fix aligned both sides on ``is_canonical AND reviewed``, which made
+    the arithmetic honest about the wrong thing: it then reported 576.450 at
+    100,0% while 746.014 canonical proteins exist and every one of them is
+    embedded. Aligning on ``is_canonical`` alone keeps the percentage sound
+    and stops the card hiding 169.564 proteins.
+    """
+
+    @staticmethod
+    def _filtros(fuente: str) -> set[str]:
+        """The ``Protein.<col>`` each ``.filter(...)`` names, as a set."""
+        import re
+
+        return set(re.findall(r"\.filter\((Protein\.\w+)\.", fuente))
+
+    def test_both_sides_count_the_same_population(self):
+        """The invariant, stated once instead of by counting a literal twice.
+
+        The previous version asserted that a particular filter appeared twice
+        in the source, so it had to be edited whenever the population changed
+        and said nothing about the two sides agreeing. What matters is that
+        they agree.
+        """
+        import inspect
+
+        from protea.api.routers import proteins_stats as mod
+
+        src = inspect.getsource(mod._compute_embeddings_by_plm)
+        total, numerador = src.split("rows = (", 1)
+        assert self._filtros(total) == self._filtros(numerador), (
+            "numerator and denominator filter on different populations"
+        )
+
+    def test_the_population_is_the_canonical_corpus(self):
+        """Canonical, and NOT narrowed to the Swiss-Prot spine.
+
+        ``is_canonical`` because an isoform shares its parent's sequence and
+        would count as separate coverage of the same thing.
+        """
+        import inspect
+
+        from protea.api.routers import proteins_stats as mod
+
+        src = inspect.getsource(mod._compute_embeddings_by_plm)
+        total, numerador = src.split("rows = (", 1)
+        assert self._filtros(total) == {"Protein.is_canonical"}
+        assert "Protein.reviewed" not in self._filtros(numerador)
+
+
+class TestOneOrganismIsOneBar:
+    """The ranking grouped by NAME, and the two load paths disagree on names.
+
+    The Swiss-Prot path writes ``Homo sapiens`` and the TSV path
+    ``Homo sapiens (Human)``, so taxon 9606 appeared as two bars and the
+    ranking compared halves against wholes. Measured on the live corpus: 726
+    taxa carry more than one name, and every one of the top six did, so the
+    order was wrong from the top down -- 41.823 canonical proteins showed as
+    21.387 and 20.436.
+    """
+
+    @staticmethod
+    def _sql() -> str:
+        import inspect
+
+        from protea.api.routers import proteins_stats as mod
+
+        return inspect.getsource(mod._compute_taxonomy_top)
+
+    def test_it_groups_by_taxon_and_not_by_name(self):
+        src = self._sql()
+        assert ".group_by(Protein.taxonomy_id)" in src
+        assert "Protein.organism, Protein.taxonomy_id" not in src
+
+    def test_the_name_is_aggregated_so_two_spellings_cannot_split_a_taxon(self):
+        """Selecting the bare column would make the group key include it again."""
+        src = self._sql()
+        assert "func.min(Protein.organism)" in src
+
+    def test_rows_with_no_taxon_are_excluded(self):
+        """Otherwise the 28.868 deleted entries collapse into one unnamed bar.
+
+        They carry neither organism nor taxonomy_id, so the organism filter
+        already removed them; this states it of the new group key too.
+        """
+        src = self._sql()
+        assert ".filter(Protein.taxonomy_id.is_not(None))" in src
+
+    def test_isoforms_still_do_not_double_weight(self):
+        src = self._sql()
+        assert ".filter(Protein.is_canonical.is_(True))" in src

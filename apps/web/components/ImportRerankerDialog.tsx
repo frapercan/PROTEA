@@ -7,8 +7,7 @@ import {
   listDatasets,
   type Dataset,
   type RerankerImportOverrides,
-  type RerankerImportResponse,
-} from "@/lib/api";
+  type RerankerImportResponse, errorText } from "@/lib/api";
 
 /**
  * Multipart upload form for ``POST /reranker-models/import``.
@@ -99,7 +98,7 @@ export function ImportRerankerDialog({ open, onClose, onImported }: Props) {
       onImported?.(res);
       onClose();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : errorText(err);
       setError(msg);
     } finally {
       setSubmitting(false);

@@ -237,14 +237,40 @@ def test_gate_accepts_drop_rate_under_the_limit() -> None:
     _gate(raw=1000, dropped=5)  # 0.5 percent, under the 1.0 default
 
 
-def test_gate_rejects_a_cycle() -> None:
-    parents = {"A": {"B"}, "B": {"A"}}
+def test_gate_accepts_a_cycle_and_counts_it() -> None:
+    """This used to refuse, and refusing stopped being right.
+
+    Refusing was correct while every snapshot was acyclic, because a cycle
+    could then only mean a broken load. Release 221 has two real ones, so
+    refusing there withholds a number instead of protecting one. The cycle is
+    condensed and reported.
+    """
+    parents = {"A": {"B"}, "B": {"A", "X"}}
     ancestors = build_ancestors(parents)
-    with pytest.raises(InformationAccretionGateError, match="cycle"):
+    stats = _gate(
+        terms=["A", "B", "X"], parents=parents, ancestors=ancestors,
+        proteins_per_term={"A": {"p"}, "B": {"p"}, "X": {"p", "q"}},
+        ia={"A": 0.25, "B": 0.25, "X": 0.0},
+    )
+    assert stats["cycles"] == 1
+    assert stats["terms_in_cycles"] == 2
+
+
+def test_gate_rejects_a_cycle_whose_members_disagree() -> None:
+    """What IS still refused, because it means propagation did not close.
+
+    Members of a cycle are ancestors of one another, so reachability
+    propagation must give them the same protein set. If it did not, the
+    component's IA is measured through one member against the wrong
+    population, and nothing downstream would show it.
+    """
+    parents = {"A": {"B"}, "B": {"A", "X"}}
+    ancestors = build_ancestors(parents)
+    with pytest.raises(InformationAccretionGateError, match="do not share a protein set"):
         _gate(
-            terms=["A", "B"], parents=parents, ancestors=ancestors,
-            proteins_per_term={"A": {"p"}, "B": {"p"}},
-            ia={"A": 0.0, "B": 0.0},
+            terms=["A", "B", "X"], parents=parents, ancestors=ancestors,
+            proteins_per_term={"A": {"p", "q"}, "B": {"p"}, "X": {"p", "q"}},
+            ia={"A": 0.0, "B": 0.0, "X": 0.0},
         )
 
 
@@ -273,3 +299,66 @@ def test_gate_rejects_a_rootless_dag() -> None:
 def test_gate_rejects_an_all_zero_table() -> None:
     with pytest.raises(InformationAccretionGateError, match="uniform IC=1"):
         _gate(ia={"R": 0.0, "A": 0.0, "B": 0.0})
+
+
+class TestANotRowIsNotEvidenceFor:
+    """A row that says the protein does NOT have the term must not count as a carrier.
+
+    IA is ``-log2`` of a term's frequency, so counting a refutation as evidence
+    inflates that frequency and therefore LOWERS the weight of exactly the terms
+    somebody took the trouble to refute. The damage runs the wrong way and it is
+    silent: the table still has the right shape and the right term set.
+
+    Five other queries under ``protea/core`` spell this filter the same way
+    (`evaluation.py` twice, `build_go_cooccurrence`, `_training_dump_loaders`,
+    `analyze_annotation_evolution`). This operation was the only one without it,
+    which is what a convention carried by copying eventually costs.
+    """
+
+    @staticmethod
+    def _sql_for(evidence_codes):
+        from unittest.mock import MagicMock
+
+        from protea.core.operations.compute_information_accretion import (
+            ComputeInformationAccretionOperation,
+        )
+
+        session = MagicMock()
+        session.execute.return_value.yield_per.return_value = []
+        ComputeInformationAccretionOperation()._propagate(
+            session,
+            annotation_set_id="a-set",
+            evidence_codes=evidence_codes,
+            ancestors={},
+            emit=lambda *a, **k: None,
+        )
+        return str(session.execute.call_args[0][0])
+
+    def test_the_filter_is_there_when_no_regime_is_asked_for(self):
+        assert "not like '%NOT%'" in self._sql_for(None)
+
+    def test_the_filter_is_there_when_a_regime_is_asked_for(self):
+        """The branch that a naive fix misses.
+
+        The statement is built in two steps and the evidence clause is appended
+        only when a regime is given. A qualifier filter appended beside it would
+        apply to one branch and not the other, and the branch it would miss is
+        the one every real run takes.
+        """
+        assert "not like '%NOT%'" in self._sql_for(("EXP", "IDA"))
+
+    def test_a_null_qualifier_still_counts(self):
+        """Most rows carry no qualifier at all; excluding them would empty the corpus."""
+        sql = self._sql_for(None)
+        assert "pga.qualifier is null or" in sql
+
+    def test_it_matches_the_relation_form_and_not_a_bare_flag(self):
+        """Since GAF 2.2 -- release 202 of this series -- the column is a RELATION.
+
+        The real values are ``NOT|enables``, ``enables``, ``involved_in``. An
+        equality test against ``'NOT'`` would pass ``NOT|enables`` straight
+        through, which is every negated row from 202 onwards.
+        """
+        sql = self._sql_for(None)
+        assert "not like '%NOT%'" in sql
+        assert "!= 'NOT'" not in sql and "<> 'NOT'" not in sql

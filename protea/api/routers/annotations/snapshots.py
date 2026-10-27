@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached, invalidate
+from protea.api.cache import cached, refresh
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotPayload
@@ -66,8 +66,7 @@ def prewarm_snapshots(
 ) -> list[dict[str, Any]]:
     """Recompute and store ``annotations:snapshots``; used by the app startup
     hook and the background refresh loop."""
-    invalidate(SNAPSHOTS_CACHE_KEY)
-    return cached(
+    return refresh(
         SNAPSHOTS_CACHE_KEY,
         SNAPSHOTS_TTL_SECONDS,
         lambda: _compute_snapshots(factory),

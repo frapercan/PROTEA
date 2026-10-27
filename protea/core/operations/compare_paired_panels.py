@@ -46,6 +46,17 @@ as free when it was not. ``_paired_panels_bootstrap`` argues why both are
 correct procedures for different published quantities, the payload below argues
 why the vocabulary is closed, and the result records which one ran.
 
+**The comparison declares its axis.** Two evaluation results sit behind two
+prediction sets, and a delta between them is a delta in whatever those two
+methods differ in. ``method_axis`` names the field the comparison claims to be
+varying, and ``_paired_panels_method`` refuses unless every other field of the
+method agrees, naming the ones that do not with both their values. The empty
+default is the claim that the method was held still. This is the upstream half
+of what ``_frame_gate`` does downstream, and it is the half that was missing
+when two arms believed to differ in the donor bank alone also differed in
+ancestor expansion, aspect-separated retrieval, the code revision and the
+ontology snapshot, and nine deltas were published off them.
+
 **What it does not do.** It does not report a mean over the nine panels or an
 interval for one. The nine panels are nine populations, since an aspect scores
 only the proteins that gained in that aspect, so a mean over them is a different
@@ -69,6 +80,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
+from protea.core.method_seal import METHOD_IDENTITY_FIELDS
 from protea.core.operations._paired_panels_artifact import (
     SETTINGS,
     GridMeta,
@@ -76,6 +88,8 @@ from protea.core.operations._paired_panels_artifact import (
     ThresholdGridUnavailableError,
     assert_comparable,
 )
+from protea.core.operations._paired_panels_events import _emit_panel
+from protea.core.operations._paired_panels_method import _method_gate
 from protea.core.operations._paired_panels_panel import (
     PanelConfig,
     Side,
@@ -83,6 +97,12 @@ from protea.core.operations._paired_panels_panel import (
     panel_result,
     resolve_tau_index,
     tally,
+)
+from protea.core.operations._paired_panels_stratum import (
+    Restriction,
+    stratum_label,
+    stratum_population,
+    validate_stratum,
 )
 from protea.core.utils import contract_payload
 
@@ -100,13 +120,36 @@ ALL_PANELS: tuple[str, ...] = (
     "PK:CCO",
 )
 
+
+#: Which closed vocabulary each Stratum axis draws from. Written here rather
+#: than inferred, so a seventh axis added to Stratum fails this operation's
+#: tests instead of silently accepting any string for itself.
 #: Markers that must agree for two evaluation results to be comparable.
 #: ``prediction_set_id`` and ``scoring_config_id`` are expected to differ: that
 #: is what is being compared.
+#:
+#: THE SEAL, NOT THE LABEL. This gate used to compare ``frame`` and
+#: ``temporal_window``, which are strings a harness writes. ``frame_digest`` is
+#: computed from the material a frame is actually made of -- the evaluation set,
+#: the pivot snapshot, the accretion set, the window and the two evaluation caps
+#: -- so it is the only column that can say two results were measured against
+#: the same thing.
+#:
+#: Reading the label had both failure modes at once, and both were live on this
+#: campaign. It PASSED results that are not comparable: four distinct digests
+#: shared two labels, so two rows both stamped ``internal`` / ``SELECT_220_227``
+#: could sit in different frames and compare anyway. And it REFUSED results that
+#: are: 110 of the campaign's 153 evaluations carried a digest and no label, so
+#: every substrate and depth comparison was rejected while the three arms that
+#: happened to be labelled went through. Which axes could be declared with this
+#: bootstrap was decided by that, and nobody chose it.
+#:
+#: ``leakage_role`` stays a marker of its own because it is not part of the
+#: digest; ``evaluation_set_id`` is kept although the digest covers it, so a
+#: mismatch names the set rather than only two opaque hashes.
 _FRAME_MARKERS: tuple[str, ...] = (
     "evaluation_set_id",
-    "frame",
-    "temporal_window",
+    "frame_digest",
     "leakage_role",
 )
 
@@ -116,7 +159,7 @@ _PROVENANCE_SQL = text(
     "       prediction_set_id::text AS prediction_set_id,"
     "       scoring_config_id::text AS scoring_config_id,"
     "       reranker_model_id::text AS reranker_model_id,"
-    "       frame, temporal_window, leakage_role, results"
+    "       frame, temporal_window, frame_digest, leakage_role, results"
     "  FROM evaluation_result WHERE id = :id"
 )
 
@@ -192,7 +235,32 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
     ]
     population_rule: Literal["intersect", "require_identical"] = "intersect"
     min_jaccard: Annotated[float, Field(default=0.95, gt=0.0, le=1.0)]
+    restrict_to_stratum: Annotated[
+        dict[str, str] | None,
+        Field(
+            default=None,
+            description=(
+                "axis -> band, restricting the paired population to one stratum. "
+                "None compares the whole panel, which is what every result before "
+                "this field existed did."
+            ),
+        ),
+    ]
     allow_frame_mismatch: bool = False
+    method_axis: Annotated[
+        list[str],
+        Field(
+            default_factory=list,
+            description=(
+                "the prediction_set fields this comparison claims to be varying, e.g. "
+                "['annotation_set_id'] for a bank contrast. Everything else in the method "
+                "must agree, field by field, and a field that moved and was not named here "
+                "is a refusal that names it with both its values. The empty default is the "
+                "claim that the method is held entirely still, which is what a comparison "
+                "of two scoring configs or two rerankers over one prediction method asserts."
+            ),
+        ),
+    ]
     artifacts_root: str | None = None
     baseline_artifacts_root: str | None = None
 
@@ -224,6 +292,37 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
                 "per-panel membership tracked, which this operation does not compute."
             )
         return value
+
+    @field_validator("method_axis")
+    @classmethod
+    def _known_axis(cls, value: list[str]) -> list[str]:
+        """An axis field that is not method identity is refused here, not later.
+
+        There is no ``allow_method_mismatch`` to pair with ``allow_frame_mismatch``,
+        and that is the design. A frame mismatch is waived because the two numbers
+        were measured differently and somebody may still want to look; a method
+        mismatch has a waiver already, and it is to NAME the field, which costs one
+        list entry and makes the job row say what the comparison was of. A boolean
+        that waived the whole seal at once would put the campaign back where D2
+        found it, with a delta attributable to nothing.
+        """
+        unknown = sorted(set(value) - set(METHOD_IDENTITY_FIELDS))
+        if unknown:
+            raise ValueError(
+                f"method_axis names {unknown}, which is not method identity. The fields "
+                f"that can be an axis are {list(METHOD_IDENTITY_FIELDS)}. A misspelled "
+                "axis declares nothing and would be refused one gate later under the "
+                "wrong name."
+            )
+        repeated = sorted({key for key in value if value.count(key) > 1})
+        if repeated:
+            raise ValueError(f"method_axis lists {repeated} more than once")
+        return value
+
+    @field_validator("restrict_to_stratum")
+    @classmethod
+    def _known_stratum(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        return validate_stratum(value)
 
     @model_validator(mode="after")
     def _coherent(self) -> ComparePairedPanelsPayload:
@@ -369,153 +468,6 @@ def _system_block(side: Side) -> dict[str, Any]:
     return block
 
 
-def _emit_pairing(panel: dict[str, Any], key: str, p: ComparePairedPanelsPayload, emit: EmitFn) -> None:
-    emit(
-        "compare_paired_panels.pairing",
-        None,
-        {
-            "panel": key,
-            **{k: panel.get(k) for k in ("n_paired", "n_only_a", "n_only_b", "population_rule")},
-        },
-        "info",
-    )
-    if panel["status"] == "refused":
-        emit(
-            "compare_paired_panels.panel_refused",
-            f"{key}: {panel['message']}",
-            {"panel": key, "reason": panel["reason"], **{
-                k: panel.get(k) for k in ("n_paired", "n_only_a", "n_only_b", "jaccard")
-            }},
-            "error",
-        )
-        return
-    if panel["status"] == "empty":
-        emit(
-            "compare_paired_panels.panel_absent",
-            f"{key}: no artefact for this panel on one or both sides, so it was not "
-            "computed; it is reported as absent and never as a null",
-            {"panel": key, "reason": panel["reason"]},
-            "warning",
-        )
-        return
-    if not panel["reportable"]:
-        emit(
-            "compare_paired_panels.withheld",
-            f"{key} holds {panel['n_paired']} paired proteins, below the floor of "
-            f"{p.min_population}; computed and flagged, never dropped",
-            {"panel": key, "n_paired": panel["n_paired"], "min_population": p.min_population},
-            "warning",
-        )
-    if panel.get("arm_silent"):
-        emit(
-            "compare_paired_panels.arm_silent",
-            f"{key}: arm {panel['arm_silent']} predicts nothing on this panel and scores "
-            "zero; the difference against it is a real difference, so it is named rather "
-            "than dropped",
-            {"panel": key, "arm": panel["arm_silent"]},
-            "info",
-        )
-    if panel.get("interval_fallback_reason"):
-        emit(
-            "compare_paired_panels.interval_fallback",
-            None,
-            {"panel": key, "reason": panel["interval_fallback_reason"]},
-            "warning",
-        )
-
-
-def _emit_panel(
-    panel: dict[str, Any],
-    key: str,
-    p: ComparePairedPanelsPayload,
-    cfg: PanelConfig,
-    emit: EmitFn,
-) -> None:
-    """What the panel measured, at the level it belongs.
-
-    What a reader should CONCLUDE from it is emitted separately, because the
-    two answer different questions and are filtered at different levels: this
-    one is always info, and a verdict about power is a warning.
-
-    ``operating_point`` sits beside ``tau_a`` and ``tau_b`` because the three
-    are one fact: two taus that may differ are each an argmax, two equal ones
-    are the declared threshold. It comes off the config, the object the
-    resampler was handed, so this event reports what ran and not what was asked.
-    """
-    _emit_pairing(panel, key, p, emit)
-    reported = (
-        "delta",
-        "ci_low",
-        "ci_high",
-        "interval_method",
-        "minimum_detectable_effect",
-        "resolves",
-        "status",
-        "verdict",
-    )
-    emit(
-        "compare_paired_panels.panel",
-        None,
-        {
-            "panel": key,
-            **{k: panel.get(k) for k in reported},
-            "operating_point": cfg.operating_point,
-            "tau_a": (panel["a"] or {}).get("tau"),
-            "tau_b": (panel["b"] or {}).get("tau"),
-            "tau_a_switched_fraction": panel["diagnostics"].get("tau_a_switched_fraction"),
-        },
-        "info",
-    )
-    _emit_verdict(panel, key, emit)
-
-
-def _emit_verdict(panel: dict[str, Any], key: str, emit: EmitFn) -> None:
-    """Which of the three readings of an interval covering zero this one is.
-
-    The distinction is the operation's reason to exist. An interval covering
-    zero can mean the two systems are the same down to a size worth caring
-    about, or that the comparison could never have resolved anything, or that
-    nobody declared what size was worth caring about so the question is
-    unanswered. Those are different conclusions and only the first is evidence.
-
-    The first is info and the other two are warnings, so a reader filtering the
-    job event log on level sees the ones that need an action.
-    """
-    mde, effect = panel["minimum_detectable_effect"], panel.get("effect_of_interest")
-    if panel["status"] == "underpowered" and mde is not None:
-        emit(
-            "compare_paired_panels.underpowered",
-            f"{key} could not have resolved an effect smaller than {mde:.4f} on "
-            f"{panel['n_paired']} proteins, and the effect of interest is {effect}; the "
-            "interval covering zero here is about power, not about the two systems being "
-            "the same",
-            {
-                "panel": key,
-                "minimum_detectable_effect": mde,
-                "effect_of_interest": effect,
-                "n_paired": panel["n_paired"],
-            },
-            "warning",
-        )
-    elif panel["status"] == "null_unread" and mde is not None:
-        emit(
-            "compare_paired_panels.null_unread",
-            f"{key} covers zero and could have resolved {mde:.4f}, but no effect_of_interest "
-            "was declared, so nothing here says whether that is evidence of sameness or "
-            "evidence of nothing. Declare the smallest difference worth detecting and re-run; "
-            "this operation will not pick the campaign's standard for it",
-            {"panel": key, "minimum_detectable_effect": mde},
-            "warning",
-        )
-    elif panel["status"] == "null_with_power":
-        emit(
-            "compare_paired_panels.null_with_power",
-            f"{key} covers zero and could have resolved {mde:.4f}, which is at or below the "
-            f"declared effect of interest {effect}; this null is evidence of sameness down "
-            "to that size, and is not an unanswered question",
-            {"panel": key, "minimum_detectable_effect": mde, "effect_of_interest": effect},
-            "info",
-        )
 
 
 def _refuse_if_nothing_was_comparable(
@@ -557,8 +509,36 @@ class ComparePairedPanelsOperation(Operation):
         a = str(payload.get("evaluation_result_id", "?"))[:8]
         b = str(payload.get("baseline_evaluation_result_id", "?"))[:8]
         panels = payload.get("panels") or list(ALL_PANELS)
+        # The axis is in the one-line summary because that is the line a reader
+        # scanning a job list sees. "31dd3eb8 against 0e076cb3" says which rows
+        # were compared and not what the comparison was OF, which is the sentence
+        # the nine invalid deltas were filed under.
+        #
+        # PRESENCE FIRST, which is the rule ``_frame_gate`` applies to its
+        # markers and ``method_seal.MUST_BE_RECORDED`` to its revisions. This
+        # line is rendered over the STORED payload of every job the list holds,
+        # including every job that ran before this field existed: job 96e1942d,
+        # the one the nine invalid deltas were published from, carries no
+        # ``method_axis`` key at all. Reading that absence as the empty axis
+        # would print "one method held still" across exactly the comparison in
+        # which four method fields moved, which is this operation asserting the
+        # false claim it exists to refuse, about itself, on the surface a reader
+        # scans. An absent declaration is not a declaration that nothing varied.
+        axis = payload.get("method_axis")
+        if axis is None:
+            varying = "no method axis declared"
+        elif not isinstance(axis, list):
+            # ``POST /jobs`` stores the payload blob unvalidated and the model
+            # only sees it on dequeue, so a bare string is reachable here, and
+            # joining one renders it one character at a time as though
+            # seventeen fields had varied.
+            varying = f"method axis {axis!r} is not a list of fields"
+        elif axis:
+            varying = "varying " + ", ".join(str(field) for field in axis)
+        else:
+            varying = "one method held still"
         return (
-            f"{a} against {b} on {len(panels)} panels, "
+            f"{a} against {b}, {varying}, on {len(panels)} panels, "
             f"{payload.get('n_resamples', 2000)} resamples, seed {payload.get('seed', 0)}"
         )
 
@@ -568,6 +548,11 @@ class ComparePairedPanelsOperation(Operation):
         p = ComparePairedPanelsPayload.model_validate(contract_payload(payload))
         self._emit_start(p, emit)
         prov_a, prov_b, mismatch = _frame_gate(session, p, emit)
+        # After the frame gate and before a single byte of artefact is read.
+        # The two gates ask different questions -- were these numbers MEASURED
+        # the same way, and were they PRODUCED by methods that differ in one
+        # named way -- and the second is the one the bank comparison needed.
+        axis = _method_gate(session, p, (prov_a, prov_b), emit)
         wanted = {key.split(":")[0] for key in p.panels}
         settings = tuple(s for s in SETTINGS if s in wanted)
         with contextlib.ExitStack() as stack:
@@ -589,9 +574,20 @@ class ComparePairedPanelsOperation(Operation):
             # serve both arms. Resolved before it, a grid disagreement would
             # surface as an off-grid tau, the right refusal under a wrong name.
             cfg = self._config(sides, p)
-            panels = self._panels(sides, p, cfg, emit)
+            keep = (
+                stratum_population(
+                    session, p.restrict_to_stratum, prov_b["prediction_set_id"], emit
+                )
+                if p.restrict_to_stratum
+                else None
+            )
+            panels = self._panels(sides, p, cfg, emit, keep=keep)
             _refuse_if_nothing_was_comparable(sides, panels)
             result = self._result(sides, p, cfg, panels, mismatch, artifact_mismatch)
+            # Recorded beside the number, not only emitted. A delta whose stored
+            # result does not say which field it is a delta IN is the shape the
+            # nine invalid deltas had, and an event is not in the result.
+            result["method_axis"] = list(axis)
         emit("compare_paired_panels.verdict", None, result["verdict"], "info")
         return OperationResult(
             result=result, progress_current=len(panels), progress_total=len(p.panels)
@@ -712,13 +708,19 @@ class ComparePairedPanelsOperation(Operation):
         p: ComparePairedPanelsPayload,
         cfg: PanelConfig,
         emit: EmitFn,
+        keep: frozenset[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         rule = (p.population_rule, p.min_jaccard)
         out: dict[str, dict[str, Any]] = {}
         for key in p.panels:
-            panel = panel_result(sides, key, cfg, ALL_PANELS.index(key), rule)
-            _emit_panel(panel, key, p, cfg, emit)
-            out[key] = panel
+            # The reported name carries the restriction, so a stratum's delta
+            # and the whole panel's delta cannot be filed under one key and
+            # later read as two measurements of the same thing.
+            reported = stratum_label(key, p.restrict_to_stratum)
+            narrow = Restriction(keep, reported) if keep is not None else None
+            panel = panel_result(sides, key, cfg, ALL_PANELS.index(key), rule, narrow)
+            _emit_panel(panel, reported, p, cfg, emit)
+            out[reported] = panel
         return out
 
     @staticmethod
@@ -747,6 +749,8 @@ class ComparePairedPanelsOperation(Operation):
             "confidence": p.confidence,
             "power": p.power,
             "min_population": p.min_population,
+            "restrict_to_stratum": p.restrict_to_stratum,
+            "stratum_membership_from": "baseline" if p.restrict_to_stratum else None,
             "population_rule": p.population_rule,
             "interval_method_requested": p.interval_method,
             "effect_of_interest": p.effect_of_interest,

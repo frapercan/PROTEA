@@ -220,11 +220,10 @@ export const NINE_CELL: Record<Knowledge, Record<Aspect, GridCell>> = {
 export const KNOWLEDGE_ROWS: Knowledge[] = ["NK", "LK", "PK"];
 export const ASPECT_COLS: Aspect[] = ["MF", "BP", "CC"];
 
-export const KNOWLEDGE_LABEL: Record<Knowledge, string> = {
-  NK: "No knowledge",
-  LK: "Limited knowledge",
-  PK: "Prior knowledge",
-};
+// Re-exported from the single definition. This file used to say "Prior
+// knowledge" for PK, which named a different thing from the "Partial
+// Knowledge" three other surfaces showed.
+export { KNOWLEDGE_LABEL } from "@/lib/knowledgeRegimes";
 export const ASPECT_LABEL: Record<Aspect, string> = {
   MF: "Molecular function",
   BP: "Biological process",
@@ -293,9 +292,9 @@ export const PILLARS: Pillar[] = [
     title: "The taxonomy of evidence",
     teaser: "Orthogonal evidence classes, not one model. Sixteen of sixty-four features carry ninety-five percent of the gain.",
     claim:
-      "PROTEA does not use one model to predict function. It gathers several independent kinds of evidence and lets a final judge weigh them. One kind is a compact numerical fingerprint of the protein, learned by a protein language model (a neural network trained on millions of sequences). Another is a set of per-candidate clues the judge reads directly: how similar a match is, how common a term is, how a candidate term relates to what we already know. A third is grafted in from an outside catalogue, the InterPro2GO mapping, which links known protein domains to functions; it adds 0.0179 to the sealed score and is what tips seven of the nine cells into first place. Why so many kinds? Because none of them wins everywhere. And the judge is frugal: of the sixty-four clues it is offered, sixteen carry ninety-five percent of the weight and twenty-eight carry none at all.",
+      "PROTEA does not use one model to predict function. It gathers several independent kinds of evidence and lets a final judge weigh them. One kind is a compact numerical fingerprint of the protein, learned by a protein language model (a neural network trained on millions of sequences). Another is a set of per-candidate clues the judge reads directly: how similar a match is, how common a term is, how a candidate term relates to what we already know. A third is grafted in from an outside catalogue, the InterPro2GO mapping, which links known protein domains to functions; it added 0.0179 and tipped seven of the nine cells into first place on the board as it stood before the campaign was wiped, which this record cannot currently re-check. Why so many kinds? Because none of them wins everywhere. And the judge is frugal: of the sixty-four clues it is offered, sixteen carry ninety-five percent of the weight and twenty-eight carry none at all.",
     evidence: {
-      caption: `LightGBM gain share, sealed booster (${METRIC}, ${FRAME})`,
+      caption: "LightGBM gain share, source not in the record",
       valueHeader: "Gain share",
       rows: [
         { label: "go_term_frequency", value: "0.255", note: "base-rate prior" },
@@ -308,9 +307,22 @@ export const PILLARS: Pillar[] = [
         { label: "identity_nw", value: "0.022" },
       ],
     },
+    evidenceLabel:
+      "These eight figures claimed the sealed board as their source, and that " +
+      "claim does not hold here. Measured on this server 2026-10-27: " +
+      "reranker_model holds 0 rows, so there is no booster to read a gain share " +
+      "from; the cited gain_report.json is absent from the whole filesystem and " +
+      "not only from storage/; and evaluation_frame holds 0 rows with no result " +
+      "carrying a frame or a frame_digest, so nothing is sealed. The numbers are " +
+      "kept rather than deleted because they may well be a real pre-wipe " +
+      "measurement and the ordering they assert is this chapter's point; what is " +
+      "withdrawn is the attribution. Chapters two and three already withdrew " +
+      "their values, and chapter four labels its own as lab evaluations off the " +
+      "board: this is the standard they set and this row did not meet.",
     receipt: {
       artifact: "storage/feature_necessity/gain_report.json",
       script: "storage/feature_necessity/measure_gain.py",
+      pending: true,
     },
     operation: {
       kind: "script",
@@ -348,6 +360,7 @@ export const PILLARS: Pillar[] = [
     receiptSecondary: {
       artifact: "storage/layer_ablation/crown_result.json",
       script: "storage/layer_ablation/WRITEUP.md",
+      pending: true,
     },
     operation: {
       kind: "job",
@@ -420,10 +433,12 @@ export const PILLARS: Pillar[] = [
     receipt: {
       artifact: "storage/regen_headline/BP_WALL_CHARACTERIZATION.md",
       script: "storage/cooc_experiment/oracle_ceiling.py",
+      pending: true,
     },
     receiptSecondary: {
       artifact: "storage/cooc_experiment/isolate_percell_split.json",
       script: "storage/cooc_experiment/decompose_order_vs_count.py",
+      pending: true,
     },
     operation: {
       kind: "script",

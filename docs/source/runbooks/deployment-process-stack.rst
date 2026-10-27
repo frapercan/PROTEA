@@ -510,3 +510,31 @@ See also
   implementation and CLI reference).
 - ``agent-farm/scripts/services/deploy-keeper-supervisor.sh`` (outer
   supervisor loop and trigger subsystem).
+
+The served thesis PDF
+---------------------
+
+The ``/thesis.pdf`` mount is real, and on 2026-10-07 it answered 404
+everywhere with ``"thesis PDF not available"`` while the public home page
+linked to it. The route was fine; the file had never been placed on this
+machine.
+
+:func:`protea.api._thesis_pdf.thesis_pdf_path` resolves, in order,
+``$PROTEA_THESIS_PDF_PATH``, then ``<repo>/static/thesis.pdf``, then the
+legacy ``apps/web/public/thesis.pdf``. It resolves **at request time**,
+so dropping the file in place fixes the route with no rebuild and no
+restart of the API.
+
+To produce it::
+
+    cd ~/Thesis-laptop/thesis && make all      # pdflatex, biber, makeglossaries
+    cp thesis.pdf ~/Thesis-laptop/PROTEA/static/thesis.pdf
+
+``static/`` is gitignored, so the 1.1 MB artefact stays out of the
+repository. Two things follow from that. It is a **build artefact**: when
+the thesis sources change, nothing rebuilds it, and the public site keeps
+serving the old one until someone repeats the two commands above. And a
+``git clean -xdf`` removes it, which is why the resolver offers the env
+var first: pointing ``PROTEA_THESIS_PDF_PATH`` at a path outside the
+build tree is the durable answer, and it needs an API restart to take
+effect.

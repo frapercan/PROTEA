@@ -25,11 +25,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import distinct, func
+from sqlalchemy import Date, Integer, case, cast, distinct, func, literal, or_
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached, invalidate
+from protea.api.cache import cached, refresh
 from protea.api.deps import get_session_factory
+from protea.core.evaluation import _EXP_CODES
+from protea.core.split_registry import BOARD_MARK, release
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
@@ -61,8 +63,12 @@ TTL_GO_DENSITY = 600.0
 TTL_PIPELINE = 60.0
 TTL_DATASETS = 300.0
 
-# Experimental evidence codes (CAFA-style).
-_EXPERIMENTAL_CODES = {"EXP", "IDA", "IMP", "IGI", "IEP", "IPI"}
+# Experimental evidence codes: IMPORTED, never restated. This page used to carry
+# its own set of six, missing TAS, IC and the five high-throughput codes, so the
+# "experimental" split it drew was a different population from the one the
+# evaluation and the IA score. Three parallel definitions of the same word is how
+# two numbers on the same screen stop meaning the same thing.
+_EXPERIMENTAL_CODES = frozenset(_EXP_CODES)
 
 # Histogram bin count for sequence-length panel.
 _SEQ_LEN_BINS = 50
@@ -79,15 +85,19 @@ def _compute_embeddings_by_plm(factory: sessionmaker[Session]) -> dict[str, Any]
 
     GROUPs ``sequence_embedding`` by ``embedding_config_id``, JOINs back to
     ``protein`` via ``sequence_id`` so the count reflects PROTEIN coverage
-    (sequence-dedup is folded back out). Total uses the canonical Swiss-Prot
-    population (``is_canonical=True AND reviewed=True``) so the percent
-    matches what the surrounding cards report.
+    (sequence-dedup is folded back out).
+
+    THE POPULATION IS THE CANONICAL CORPUS, not the Swiss-Prot spine. Both
+    sides carried ``reviewed=True``, making the arithmetic honest about the
+    wrong thing: 576.450 at 100,0% while 746.014 canonical proteins exist and
+    all of them are embedded. ``reviewed`` had been added to stop a measured
+    121,5%, whose cause was an unaligned numerator, so aligning both sides on
+    ``is_canonical`` alone fixes it without hiding 169.564 proteins.
     """
     with session_scope(factory) as session:
         total = (
             session.query(func.count(Protein.accession))
             .filter(Protein.is_canonical.is_(True))
-            .filter(Protein.reviewed.is_(True))
             .scalar()
             or 0
         )
@@ -102,6 +112,11 @@ def _compute_embeddings_by_plm(factory: sessionmaker[Session]) -> dict[str, Any]
             )
             .join(SequenceEmbedding, SequenceEmbedding.embedding_config_id == EmbeddingConfig.id)
             .join(Protein, Protein.sequence_id == SequenceEmbedding.sequence_id)
+            # The SAME filter as the total above. Without it the numerator counts
+            # isoforms that the denominator excludes and the percentage goes over
+            # 100: measured at 121,5%, 700.475 over 576.450, while an embedding
+            # pass was running.
+            .filter(Protein.is_canonical.is_(True))
             .group_by(
                 EmbeddingConfig.id,
                 EmbeddingConfig.model_name,
@@ -134,9 +149,13 @@ def _compute_go_matrix(factory: sessionmaker[Session]) -> dict[str, Any]:
     """Cell = COUNT(*) of (source, version, aspect, experimental?) tuples.
 
     ``experimental`` is the standard CAFA split: True when the row's
-    ``evidence_code`` is one of the 6 high-confidence codes, False otherwise.
-    Returns flat rows so the frontend can pivot on whichever axis it wants
-    (we don't presume one layout).
+    ``evidence_code`` is one of the codes the evaluation scores on, imported
+    rather than restated. Returns flat rows so the frontend can pivot on
+    whichever axis it wants (we don't presume one layout).
+
+    Bounded at the board's mark, like every other card here: the matrix used to
+    carry a column per release up to the newest one loaded, which published
+    counts for the prospective window on a page that answers without a key.
     """
     with session_scope(factory) as session:
         is_exp = func.coalesce(ProteinGOAnnotation.evidence_code, "").in_(_EXPERIMENTAL_CODES)
@@ -150,6 +169,13 @@ def _compute_go_matrix(factory: sessionmaker[Session]) -> dict[str, Any]:
             )
             .join(GOTerm, ProteinGOAnnotation.go_term_id == GOTerm.id)
             .join(AnnotationSet, ProteinGOAnnotation.annotation_set_id == AnnotationSet.id)
+            .filter(
+                or_(
+                    AnnotationSet.source_published_at.is_(None),
+                    cast(AnnotationSet.source_published_at, Date)
+                    <= release(BOARD_MARK).published,
+                )
+            )
             .group_by(
                 AnnotationSet.source,
                 AnnotationSet.source_version,
@@ -181,17 +207,32 @@ def _compute_taxonomy_top(factory: sessionmaker[Session]) -> dict[str, Any]:
     Only counts canonical rows so isoforms don't double-weight an organism.
     Returns ``taxonomy_id`` alongside the human-readable ``organism`` so the
     frontend can deep-link to a UniProt taxonomy page.
+
+    GROUPED BY TAXON, NOT BY NAME. The two load paths spell an organism
+    differently -- the Swiss-Prot path writes ``Homo sapiens`` and the TSV path
+    ``Homo sapiens (Human)`` -- so grouping by the string split one organism
+    into two bars and ranked the halves. 726 taxa carry more than one name, and
+    every one of the top six did, so the ordering was wrong from the top down:
+    taxon 9606 is 41.823 canonical proteins and showed as 21.387 and 20.436.
+
+    The taxon is the identity and the name is a label, so the label is picked
+    with ``min`` to keep it deterministic rather than whichever row the plan
+    happened to emit. Rows with no taxon are excluded for the same reason they
+    always were excluded by the ``organism`` filter: the 28.868 deleted
+    UniProtKB entries carry neither, and collapsing them into one unnamed bar
+    would invent an organism.
     """
     with session_scope(factory) as session:
         rows = (
             session.query(
-                Protein.organism,
+                func.min(Protein.organism),
                 Protein.taxonomy_id,
                 func.count(Protein.accession),
             )
             .filter(Protein.is_canonical.is_(True))
             .filter(Protein.organism.is_not(None))
-            .group_by(Protein.organism, Protein.taxonomy_id)
+            .filter(Protein.taxonomy_id.is_not(None))
+            .group_by(Protein.taxonomy_id)
             .order_by(func.count(Protein.accession).desc())
             .limit(20)
             .all()
@@ -286,6 +327,92 @@ def _histogram_bins(session: Session, pmin: int, pmax: int) -> list[dict[str, An
 # ── GO term density per protein per aspect ───────────────────────────────────
 
 
+def _no_pasada_la_marca(query):
+    """Restrict a query over ``annotation_set`` to releases at or before the mark.
+
+    WHY A PUBLIC PAGE NEEDS THIS. These endpoints answer without a key, and the
+    GO-density card picked the highest-numbered release there is: measured
+    2026-10-11 it served release 235, which is five releases past the board's
+    mark and inside the prospective window. Aggregates, yes -- and a window onto
+    the holdout all the same, open to anyone who asks and watched by nobody. The
+    2026-08-27 incident was not a missing rule either; it was a rule nobody
+    asked. A page that publishes past the mark asks nothing.
+
+    BY DATE AND NOT BY NUMBER. ``split_registry`` says the identifier is opaque
+    on purpose -- "ordering derived from the identifier would break the moment
+    the upstream naming changed, and the dates are what the temporal design
+    actually means" -- so this compares ``source_published_at`` against the
+    mark's own ``published``, read from the same registry the guard reads. One
+    idea of where the limit is, in one place.
+    """
+    limite = release(BOARD_MARK).published
+    return query.filter(
+        or_(
+            AnnotationSet.source_published_at.is_(None),
+            cast(AnnotationSet.source_published_at, Date) <= limite,
+        )
+    )
+
+
+def _ultimo_set_goa(session: Session):
+    """El annotation_set de GOA mas reciente, por numero de release.
+
+    NO por ``created_at``. La campana de 2026-09 cargo las releases
+    desordenadas -- la 184 buena entro el dia 22 y la 185 el dia 18, entre
+    otras cinco inversiones -- asi que la fecha de creacion de la fila no
+    ordena las releases. El numero si, y el cast va guardado por el regex
+    porque ``source_version`` es texto y otras fuentes no lo usan numerico.
+    """
+    orden = case(
+        (AnnotationSet.source_version.op("~")(r"^[0-9]+$"), cast(AnnotationSet.source_version, Integer)),
+        else_=literal(-1),
+    )
+    return (
+        _no_pasada_la_marca(
+            session.query(AnnotationSet).filter(AnnotationSet.source == "goa")
+        )
+        .order_by(orden.desc())
+        .first()
+    )
+
+
+def _terminos_por_proteina(session: Session, set_id):
+    """Subconsulta: terminos DISTINTOS por (aspecto, proteina) en UN set.
+
+    Las dos palabras en mayuscula son las dos correcciones.
+
+    UN SET. Antes esta consulta no filtraba por annotation_set, asi que
+    agregaba las 71 releases del corpus GOA a la vez y el recuento de una
+    proteina era la suma de sus terminos en todas las releases en que aparece.
+    El panel informaba 193,68 terminos de CCO por proteina cuando el valor de
+    una release es 2,27 -- factor 85 -- y un maximo de 7.228 frente a 61.
+    Ninguna proteina tiene 280 terminos de funcion molecular: el numero no
+    tenia lectura biologica.
+
+    Y peor que el factor: los percentiles mezclaban DOS cantidades -- cuantos
+    terminos tiene una proteina y cuantas releases ha sobrevivido -- asi que la
+    forma de la distribucion tampoco significaba nada.
+
+    DISTINTOS. El count no lo era, de modo que un par (proteina, termino) con
+    tres codigos de evidencia contaba tres veces. Eso solo ya infla un 34%
+    dentro de una sola release: 3,04 frente a 2,27 en CCO.
+
+    ``_compute_go_matrix``, en este mismo fichero, ya une AnnotationSet y
+    agrupa por source y source_version. Esto sigue ese patron.
+    """
+    return (
+        session.query(
+            GOTerm.aspect.label("aspect"),
+            ProteinGOAnnotation.protein_accession.label("acc"),
+            func.count(distinct(ProteinGOAnnotation.go_term_id)).label("n"),
+        )
+        .join(GOTerm, ProteinGOAnnotation.go_term_id == GOTerm.id)
+        .filter(ProteinGOAnnotation.annotation_set_id == set_id)
+        .group_by(GOTerm.aspect, ProteinGOAnnotation.protein_accession)
+        .subquery()
+    )
+
+
 def _compute_go_density(factory: sessionmaker[Session]) -> dict[str, Any]:
     """Per-aspect average + p50 / p90 of (#go_terms per protein).
 
@@ -295,16 +422,10 @@ def _compute_go_density(factory: sessionmaker[Session]) -> dict[str, Any]:
     """
     aspect_map = {"F": "MFO", "P": "BPO", "C": "CCO"}
     with session_scope(factory) as session:
-        sub = (
-            session.query(
-                GOTerm.aspect.label("aspect"),
-                ProteinGOAnnotation.protein_accession.label("acc"),
-                func.count(ProteinGOAnnotation.go_term_id).label("n"),
-            )
-            .join(GOTerm, ProteinGOAnnotation.go_term_id == GOTerm.id)
-            .group_by(GOTerm.aspect, ProteinGOAnnotation.protein_accession)
-            .subquery()
-        )
+        ultimo = _ultimo_set_goa(session)
+        if ultimo is None:
+            return {"items": [], "source": None, "source_version": None}
+        sub = _terminos_por_proteina(session, ultimo.id)
         rows = (
             session.query(
                 sub.c.aspect,
@@ -328,7 +449,11 @@ def _compute_go_density(factory: sessionmaker[Session]) -> dict[str, Any]:
             }
             for asp, pc, avg, p50, p90, mx in rows
         ]
-        return {"items": items}
+        return {
+            "items": items,
+            "source": ultimo.source,
+            "source_version": ultimo.source_version,
+        }
 
 
 # ── Pipeline activity ────────────────────────────────────────────────────────
@@ -444,11 +569,18 @@ def prewarm_all(factory: sessionmaker[Session]) -> None:
 
     Per-section failures are swallowed so a single slow query does not
     starve the rest of the dashboard.
+
+    Through :func:`refresh`, so the previous value stays servable for the
+    whole recompute instead of the key being empty while it runs.
+
+    That mattered most here, because this loop walks SEVEN sections and the
+    slowest of them was measured at a median of 137 s. Dropping each key
+    before producing its replacement left the dashboard without a value to
+    serve for most of every cycle, on keys that were never missing.
     """
     for key, ttl, fn in _sections():
-        invalidate(key)
         try:
-            cached(key, ttl, _make_compute(fn, factory))
+            refresh(key, ttl, _make_compute(fn, factory))
         except Exception:  # pragma: no cover - logged by caller
             pass
 

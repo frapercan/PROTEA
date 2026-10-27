@@ -422,14 +422,14 @@ class _KnnTransferRunner:
         self._parity_chunk_size = int(raw_chunk) if raw_chunk else 0
 
     def run(self) -> list[dict[str, Any]] | dict[str, Any]:
-        """Drive the full KNN-transfer-label pipeline."""
+        """Drive the pipeline. The anc2vec gate is here and not inside the
+        phases: see ``TrainRerankerAutoPayload.compute_anc2vec``."""
         self._run_knn()
         self._compute_reranker_features()
         self._compute_pair_features()
         self._compute_tax_consensus()
-        self._anc2vec.build_index()
-        self._anc2vec.compute_neighbor_centroids()
-        self._anc2vec.compute_query_centroids()
+        if getattr(self.p, "compute_anc2vec", False):
+            self._anc2vec.run_all()
         self._compute_pca_proj()
         return self._build_records()
 
