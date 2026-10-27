@@ -197,6 +197,95 @@ def _reproductions_of(
     ]
 
 
+def _one_under(
+    name: str,
+    catalogue: list[dict[str, Any]],
+    mine: list[dict[str, Any]],
+    field: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """The one row THIS window's results were read over, or why there is not one.
+
+    WHAT THIS REPLACES. Both of these were read as the first row of the
+    catalogue carrying ``in_use`` -- the oldest thing in the whole record that
+    anything had ever used, in a list ordered by creation, with nothing in the
+    expression mentioning the window. So the frame for the titular 211->227
+    window published ``delta-219-220-t0-c787b26a94ac``: a query set of 5.810
+    entries belonging to the 219->220 window, because it was the oldest in use.
+    A reader of that block concluded the headline number had been measured over
+    5.810 targets named for a different pair of releases. It had not.
+
+    NULL IS PUBLISHED WITH ITS REASON, never bare, on the same argument a
+    blocked node's ``blocked_reason`` rests on. The titular window's results
+    come from an ingested method and an ingested method carries no query set at
+    all, so "none, and here is why" is an answer. Another window's name is not
+    one, and a bare null is barely better: it cannot be told from nobody having
+    looked.
+
+    SEVERAL IS REFUSED RATHER THAN RESOLVED. Two query sets under one window
+    means the panels below were drawn from two populations, and printing one of
+    them is how a block that looks complete describes half of what it
+    summarises. Likewise a window where some results name one and others name
+    none: that is not a window with a query set.
+    """
+    if not mine:
+        return None, f"no published result sits under this window, so no {name} is in use under it"
+    named = [r.get(field) for r in mine]
+    known = {value for value in named if value}
+    if not known:
+        return None, (
+            f"none of this window's {len(mine)} results names a {name}. An ingested method "
+            "carries no query set, and the weighting of any arm is recoverable only from its "
+            "producing job's payload"
+        )
+    if len(known) > 1:
+        return None, (
+            f"this window's results were read over {len(known)} different {name}s, so the "
+            "panels below are drawn from more than one population and no single row describes "
+            "them"
+        )
+    if len(known) == 1 and None in named:
+        missing = sum(1 for value in named if not value)
+        return None, (
+            f"{missing} of this window's {len(mine)} results name no {name} and the rest name "
+            "one, so no single row describes them together"
+        )
+    wanted = known.pop()
+    row = next((r for r in catalogue if str(r["id"]) == str(wanted)), None)
+    if row is None:
+        return None, (
+            f"this window's results name {name} {wanted}, which is not in the record this page read"
+        )
+    return row, None
+
+
+def _is_declared(
+    heads: list[dict[str, Any]],
+    window: str | None,
+    pivot: dict[str, Any] | None,
+    accretion: dict[str, Any] | None,
+    query_set: dict[str, Any] | None,
+    unsealed: int,
+) -> bool:
+    """Whether the record leaves a reader nothing to guess about the frame.
+
+    Not "a frame exists". Every one of these has to resolve: exactly one
+    evaluation set, so there is a single window under measurement; both ends
+    resolving to a release; a pivot, an accretion table and a query set; and no
+    published result left unsealed. So the block can be fully populated and
+    still report false.
+
+    IT GOT STRICTER WITH ``_one_under`` AND THAT IS THE POINT. The last two
+    arguments used to be the oldest in-use row in the whole record, which is
+    something almost any populated record has, so ``declared`` could be true
+    while the window's OWN query set was unrecoverable -- the exact state it
+    exists to report. Now they are null unless this window's results resolve
+    exactly one, so the flag answers the question it claims to.
+    """
+    return bool(
+        heads and len(heads) == 1 and window and pivot and accretion and query_set and unsealed == 0
+    )
+
+
 def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     """The frame every number below is read in, and whether it is declared.
 
@@ -214,8 +303,11 @@ def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     heads = record["evaluation_sets"]
     head = heads[0] if heads else None
     claims = _reproductions_of(record, head)
-    accretion = next((a for a in record["accretion"] if a["in_use"]), None)
-    query_set = next((q for q in record["query_sets"] if q["in_use"]), None)
+    mine = [r for r in record["results"] if head and r["evaluation_set_id"] == head["id"]]
+    accretion, accretion_why = _one_under(
+        "accretion table", record["accretion"], mine, "accretion_id"
+    )
+    query_set, query_set_why = _one_under("query set", record["query_sets"], mine, "query_set_id")
     results = record["results"]
     sealed = sum(1 for r in results if r["frame"])
     unsealed = len(results) - sealed
@@ -228,15 +320,7 @@ def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     span = _window_span(head) if head else None
     pivot = _pivot_of(head)
     return {
-        "declared": bool(
-            head is not None
-            and len(heads) == 1
-            and window
-            and pivot
-            and accretion
-            and query_set
-            and unsealed == 0
-        ),
+        "declared": _is_declared(heads, window, pivot, accretion, query_set, unsealed),
         "evaluation_set_id": head["id"] if head else None,
         "window": window,
         "window_span": span,
@@ -245,6 +329,11 @@ def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         "pivot_snapshot": pivot,
         "information_accretion_set": _accretion_of(accretion),
         "query_set": _query_set_of(query_set),
+        # Present only when the two above are null, for the reason a blocked
+        # node carries ``blocked_reason``: a null a reader cannot account for
+        # is indistinguishable from a null nobody looked at.
+        "information_accretion_absent": accretion_why,
+        "query_set_absent": query_set_why,
         "sealed_rows": sealed,
         "unsealed_rows": unsealed,
         # Declared says the record is unambiguous. This says it is faithful:
