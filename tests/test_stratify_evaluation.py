@@ -1,8 +1,18 @@
 """Turning a finished evaluation into cells.
 
-Reads the per-protein table `run_cafa_evaluation` writes, places each protein
-on the strata axes, and pools each cell micro. Written as a separate operation
-so it can stratify evaluations that already exist without rerunning them.
+Reads the per-protein grid `run_cafa_evaluation` writes, slices it at the
+threshold the result published, places each protein on the strata axes, and
+pools each cell micro. Written as a separate operation so it can stratify
+evaluations that already exist without rerunning them.
+
+THE FIXTURE GOES THROUGH THE PRODUCTION WRITER, which is the whole point of
+this file's shape. These tests existed and passed while the operation read a
+file nothing had written for months: they built `per_protein.parquet`
+themselves, so the fixture agreed with the consumer and both disagreed with
+the producer. A test that fabricates its own input cannot catch that, however
+many assertions it carries. So `_grid` calls `write_grid_parquet` with a
+`GridFrame.stamp`, and the filename, the footer and the column layout are the
+producer's rather than this file's.
 """
 
 from __future__ import annotations
@@ -12,9 +22,16 @@ import uuid
 import pandas as pd
 import pytest
 
-from protea.core.operations._run_cafa_strata import project
+from protea.core.operations._run_cafa_grid_artifact import (
+    GRID_FILENAME,
+    GridArtifact,
+    GridFrame,
+    write_grid_parquet,
+)
+from protea.core.operations._run_cafa_strata import VARIANT_COLUMNS, project
 from protea.core.operations.stratify_evaluation import (
     _ASPECT_FOR_NAMESPACE,
+    BEST_F_FILENAME,
     StratifyEvaluationOperation,
     StratifyEvaluationPayload,
     _category_for,
@@ -36,12 +53,67 @@ _NB = Neighbourhood(best_identity=45.0, donor_is_experimental=True, taxonomic_re
 _ALL_AXES = ["category", "aspect", "length", "homology"]
 
 
-def _row(acc: str, ns: str, tp: float = 1.0, pred: float = 2.0, n_gt: float = 2.0) -> dict:
+#: The grid this file writes: three thresholds, so the middle one is neither
+#: the first nor the last column and a slice at the wrong index shows up as a
+#: wrong number rather than as an index error.
+_TH_STEP = 0.25
+_TAUS = (0.25, 0.5, 0.75)
+_REPORTED_TAU = 0.5
+
+
+def _row(
+    acc: str,
+    ns: str,
+    tp: float = 1.0,
+    pred: float = 2.0,
+    n_gt: float = 2.0,
+    variant: str = "unweighted",
+) -> dict:
+    """One grid row: the components over the whole sweep, plus scalar n_gt.
+
+    The values at the thresholds either side of the reported one are
+    deliberately WRONG -- the ground truth is the only thing that does not
+    move with the threshold -- so a slice at the wrong column cannot produce
+    the expected cell by coincidence.
+    """
+    tp_col, pred_col, gt_col = VARIANT_COLUMNS[variant]
     return {
-        "protein_accession": acc, "namespace": ns, "tau": 0.5,
-        "tp_w": tp, "pred_w": pred, "n_gt_w": n_gt,
-        "precision_w": tp / pred, "recall_w": tp / n_gt, "f_w": 0.5,
+        "protein_accession": acc,
+        "namespace": ns,
+        tp_col: [tp + 100.0, tp, 0.0],
+        pred_col: [pred + 100.0, pred, 0.0],
+        gt_col: n_gt,
     }
+
+
+def _grid(root, rows: list[dict], *, setting: str = "NK", variant: str = "unweighted"):
+    """Write one setting through the producer, with the best-F table beside it.
+
+    `write_grid_parquet` decides the filename, the footer and the column
+    layout. `information_accretion_set_id` is the string "null" because that is
+    what the stored grids on this deployment carry: every evaluation here ran
+    without an accretion table, which is why the unweighted variant is the one
+    these tests pool.
+    """
+    frame = GridFrame(
+        setting=setting,
+        th_step=_TH_STEP,
+        max_terms=None,
+        normalization="cafa",
+        prop="fill",
+        no_orphans=True,
+        ontology_snapshot_id="11111111-1111-1111-1111-111111111111",
+        evaluation_set_id="22222222-2222-2222-2222-222222222222",
+        information_accretion_frame="null",
+        producer_git_sha="0" * 40,
+    )
+    artifact = GridArtifact(rows=rows, variants=(variant,), n_tau=len(_TAUS), dropped=[])
+    write_grid_parquet(root / setting / GRID_FILENAME, artifact, frame.stamp((variant,)))
+    namespaces = sorted({r["namespace"] for r in rows})
+    lines = ["filename\tns\ttau\tf"]
+    lines += [f"predictions.tsv\t{ns}\t{_REPORTED_TAU}\t0.5" for ns in namespaces]
+    (root / setting / BEST_F_FILENAME).write_text("\n".join(lines) + "\n")
+    return root
 
 
 class TestTheSettingNamesTheCategory:
@@ -181,10 +253,16 @@ class _FakeSession:
 
 class TestTheOperationEndToEnd:
     def _artifacts(self, tmp_path, rows):
-        d = tmp_path / "NK"
-        d.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(rows).to_parquet(d / "per_protein.parquet", index=False)
-        return tmp_path
+        return _grid(tmp_path, rows)
+
+    @staticmethod
+    def _payload(root, **extra):
+        base = {
+            "prediction_set_id": str(uuid.uuid4()),
+            "artifacts_root": str(root),
+            "variant": "unweighted",
+        }
+        return {**base, **extra}
 
     def _session(self):
         return _FakeSession(
@@ -203,8 +281,7 @@ class TestTheOperationEndToEnd:
         )
         out = StratifyEvaluationOperation().execute(
             self._session(),
-            {"prediction_set_id": str(uuid.uuid4()), "artifacts_root": str(root),
-             "axes": ["homology"], "min_population": 1},
+            self._payload(root, axes=["homology"], min_population=1),
             emit=lambda *a, **k: None,
         )
         frame = pd.read_parquet(root / "NK" / "strata.parquet")
@@ -220,8 +297,7 @@ class TestTheOperationEndToEnd:
         root = self._artifacts(tmp_path, [_row("Q1", "molecular_function")])
         StratifyEvaluationOperation().execute(
             self._session(),
-            {"prediction_set_id": str(uuid.uuid4()), "artifacts_root": str(root),
-             "axes": ["category", "aspect"], "min_population": 1},
+            self._payload(root, axes=["category", "aspect"], min_population=1),
             emit=lambda *a, **k: None,
         )
         frame = pd.read_parquet(root / "NK" / "strata.parquet")
@@ -234,8 +310,7 @@ class TestTheOperationEndToEnd:
         root = self._artifacts(tmp_path, [_row("Q1", "molecular_function")])
         StratifyEvaluationOperation().execute(
             self._session(),
-            {"prediction_set_id": str(uuid.uuid4()), "artifacts_root": str(root),
-             "axes": ["homology"], "min_population": 99},
+            self._payload(root, axes=["homology"], min_population=99),
             emit=lambda *a, **k: None,
         )
         frame = pd.read_parquet(root / "NK" / "strata.parquet")
@@ -251,24 +326,42 @@ class TestTheOperationEndToEnd:
         )
         StratifyEvaluationOperation().execute(
             self._session(),
-            {"prediction_set_id": str(uuid.uuid4()), "artifacts_root": str(root),
-             "axes": ["aspect"], "min_population": 1},
+            self._payload(root, axes=["aspect"], min_population=1),
             emit=lambda *a, **k: None,
         )
         frame = pd.read_parquet(root / "NK" / "strata.parquet")
-        assert frame.precision_w.tolist() == [pytest.approx(2 / 11)]
-        assert frame.recall_w.tolist() == [pytest.approx(2 / 11)]
+        assert frame.precision.tolist() == [pytest.approx(2 / 11)]
+        assert frame.recall.tolist() == [pytest.approx(2 / 11)]
+        # and it says which weighting those two numbers are
+        assert frame.variant.tolist() == ["unweighted"]
 
 
 class TestThePayload:
     def test_the_default_axes_are_the_four_a_first_table_reports(self) -> None:
-        p = StratifyEvaluationPayload(prediction_set_id="x", artifacts_root="/tmp")
+        p = StratifyEvaluationPayload(
+            prediction_set_id="x", artifacts_root="/tmp", variant="unweighted"
+        )
         assert p.axes == ["category", "aspect", "length", "homology"]
 
     def test_the_population_floor_cannot_be_zero(self) -> None:
         with pytest.raises(ValueError):
             StratifyEvaluationPayload(
-                prediction_set_id="x", artifacts_root="/tmp", min_population=0
+                prediction_set_id="x",
+                artifacts_root="/tmp",
+                variant="unweighted",
+                min_population=0,
+            )
+
+    def test_the_variant_has_no_default(self) -> None:
+        """The two weightings are different term sets over different rows, so a
+        default would quietly decide which quantity a published cell holds."""
+        with pytest.raises(ValueError, match="variant"):
+            StratifyEvaluationPayload(prediction_set_id="x", artifacts_root="/tmp")
+
+    def test_an_unknown_weighting_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="unknown variant"):
+            StratifyEvaluationPayload(
+                prediction_set_id="x", artifacts_root="/tmp", variant="ia"
             )
 
 
@@ -286,7 +379,7 @@ class TestReadingFromTheArtifactStore:
     def test_neither_source_is_refused_rather_than_guessed(self) -> None:
         from protea.core.operations.stratify_evaluation import _resolve_source
 
-        p = StratifyEvaluationPayload(prediction_set_id="x")
+        p = StratifyEvaluationPayload(prediction_set_id="x", variant="unweighted")
         with pytest.raises(ValueError, match="nothing to read"):
             _resolve_source(p, lambda *a, **k: None)
 
@@ -294,7 +387,9 @@ class TestReadingFromTheArtifactStore:
         from protea.core.operations.stratify_evaluation import _resolve_source
 
         root, store, tmp = _resolve_source(
-            StratifyEvaluationPayload(prediction_set_id="x", artifacts_root=str(tmp_path)),
+            StratifyEvaluationPayload(
+                prediction_set_id="x", artifacts_root=str(tmp_path), variant="unweighted"
+            ),
             lambda *a, **k: None,
         )
         assert (root, store, tmp) == (tmp_path, None, None)
@@ -314,7 +409,175 @@ class TestReadingFromTheArtifactStore:
         found = _settings_from_store(store, rid, tmp_path)
 
         assert found == ["NK"]
-        assert (tmp_path / "NK" / "per_protein.parquet").read_bytes() == b"parquet-bytes"
-        # the three CAFA categories are probed, and nothing else
-        assert len(store.asked) == 3
+        assert (tmp_path / "NK" / GRID_FILENAME).read_bytes() == b"parquet-bytes"
+        # The grid is what it asks for. It used to ask for per_protein.parquet,
+        # which the producer stopped writing, and an absent file reads as a
+        # setting that was not evaluated: the operation found nothing on every
+        # result in the store and reported success.
+        assert all(GRID_FILENAME in key or BEST_F_FILENAME in key for key in store.asked)
+        assert not any("per_protein.parquet" in key for key in store.asked)
+        # three categories probed for the grid, and the best-F table fetched
+        # only for the one that had one
+        assert len([k for k in store.asked if GRID_FILENAME in k]) == 3
         assert all(rid in key for key in store.asked)
+
+
+def _is_grid_refusal(error: BaseException, expected: str) -> None:
+    """Assert the reader refused, by class NAME and not by class identity.
+
+    ``tests/test_per_protein_grid_producer.py`` loads the consumer's reader a
+    second time through ``importlib`` so it can check the producer against the
+    version that will run in production. That leaves two
+    ``ThresholdGridUnavailableError`` classes alive in one session, so
+    ``pytest.raises`` on an imported name passes or fails depending on which
+    test file ran first -- which is a fact about module loading and not about
+    what the operation refused. The name and the message are what this is
+    actually asserting.
+    """
+    assert type(error).__name__ == "ThresholdGridUnavailableError", type(error).__name__
+    assert expected in str(error)
+
+
+class TestItReadsTheFileTheProducerWrites:
+    """The defect this file's shape exists to prevent, asserted directly."""
+
+    def _session(self):
+        return _FakeSession(
+            [
+                {
+                    "acc": "Q1",
+                    "best_identity": 45.0,
+                    "evidence_code": "IDA",
+                    "taxonomic_relation": "close",
+                    "nearest_any": 0.1,
+                    "nearest_experimental": 0.1,
+                }
+            ],
+            [("Q1", 300)],
+        )
+
+    def test_the_slice_is_at_the_published_threshold(self, tmp_path) -> None:
+        """Not the first column, not the last: the one the best-F table names.
+
+        The row carries tp 101 at tau 0.25, 1 at 0.5 and 0 at 0.75, and the
+        table reports 0.5. A cell of 101 or of 0 would mean the index came from
+        somewhere other than the artefact's own grid.
+        """
+        root = _grid(tmp_path, [_row("Q1", "molecular_function", tp=1.0, pred=2.0, n_gt=2.0)])
+        StratifyEvaluationOperation().execute(
+            self._session(),
+            {
+                "prediction_set_id": str(uuid.uuid4()),
+                "artifacts_root": str(root),
+                "variant": "unweighted",
+                "axes": ["aspect"],
+                "min_population": 1,
+            },
+            emit=lambda *a, **k: None,
+        )
+        frame = pd.read_parquet(root / "NK" / "strata.parquet")
+        assert frame.precision.tolist() == [pytest.approx(0.5)]
+        assert frame.recall.tolist() == [pytest.approx(0.5)]
+
+    def test_a_result_with_no_grid_is_refused_not_reported_as_success(self, tmp_path) -> None:
+        """The whole defect in one assertion.
+
+        Six jobs over five stored results each found zero settings and each
+        returned SUCCEEDED with an empty summary, so the strata screens had
+        nothing to read and no job said why.
+        """
+        (tmp_path / "NK").mkdir()
+        with pytest.raises(ValueError, match="no setting yielded a single stratum"):
+            StratifyEvaluationOperation().execute(
+                self._session(),
+                {
+                    "prediction_set_id": str(uuid.uuid4()),
+                    "artifacts_root": str(tmp_path),
+                    "variant": "unweighted",
+                    "axes": ["aspect"],
+                    "min_population": 1,
+                },
+                emit=lambda *a, **k: None,
+            )
+
+    def test_the_legacy_file_is_refused_by_name(self, tmp_path) -> None:
+        """A legacy table standing where the grid belongs is not an absence.
+
+        It is sliced at one tau and its rows were never filtered on ground
+        truth, so pooling it would publish numbers over a population nobody
+        chose. The resolver the paired panels already use says so by name.
+        """
+        (tmp_path / "NK").mkdir()
+        pd.DataFrame(
+            [{"protein_accession": "Q1", "namespace": "molecular_function", "tau": 0.5}]
+        ).to_parquet(tmp_path / "NK" / "per_protein.parquet", index=False)
+        with pytest.raises(Exception) as err:
+            StratifyEvaluationOperation().execute(
+                self._session(),
+                {
+                    "prediction_set_id": str(uuid.uuid4()),
+                    "artifacts_root": str(tmp_path),
+                    "variant": "unweighted",
+                    "axes": ["aspect"],
+                    "min_population": 1,
+                },
+                emit=lambda *a, **k: None,
+            )
+        _is_grid_refusal(err.value, GRID_FILENAME)
+
+    def test_a_weighting_the_file_does_not_carry_is_refused(self, tmp_path) -> None:
+        """Every evaluation stored on this deployment ran with no accretion
+        table, so its grid declares the unweighted variant alone. Pooling it
+        under the weighted name is the one thing that must not happen."""
+        root = _grid(tmp_path, [_row("Q1", "molecular_function")])
+        with pytest.raises(Exception) as err:
+            StratifyEvaluationOperation().execute(
+                self._session(),
+                {
+                    "prediction_set_id": str(uuid.uuid4()),
+                    "artifacts_root": str(root),
+                    "variant": "weighted",
+                    "axes": ["aspect"],
+                    "min_population": 1,
+                },
+                emit=lambda *a, **k: None,
+            )
+        _is_grid_refusal(err.value, "variants")
+
+    def test_a_grid_without_its_best_f_table_is_refused(self, tmp_path) -> None:
+        """The grid holds the sweep and nothing in it says which column was
+        published. Every column is a defensible number and only one is the one
+        already reported."""
+        root = _grid(tmp_path, [_row("Q1", "molecular_function")])
+        (root / "NK" / BEST_F_FILENAME).unlink()
+        with pytest.raises(ValueError, match="nothing says which column"):
+            StratifyEvaluationOperation().execute(
+                self._session(),
+                {
+                    "prediction_set_id": str(uuid.uuid4()),
+                    "artifacts_root": str(root),
+                    "variant": "unweighted",
+                    "axes": ["aspect"],
+                    "min_population": 1,
+                },
+                emit=lambda *a, **k: None,
+            )
+
+    def test_the_variant_reaches_the_summary_and_the_table(self, tmp_path) -> None:
+        """A cell is only readable beside the weighting it was pooled under."""
+        root = _grid(tmp_path, [_row("Q1", "molecular_function")])
+        out = StratifyEvaluationOperation().execute(
+            self._session(),
+            {
+                "prediction_set_id": str(uuid.uuid4()),
+                "artifacts_root": str(root),
+                "variant": "unweighted",
+                "axes": ["aspect"],
+                "min_population": 1,
+            },
+            emit=lambda *a, **k: None,
+        )
+        assert out.result["variant"] == "unweighted"
+        frame = pd.read_parquet(root / "NK" / "strata.parquet")
+        assert frame.variant.tolist() == ["unweighted"]
+        assert "precision_w" not in frame.columns

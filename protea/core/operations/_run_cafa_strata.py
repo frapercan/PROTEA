@@ -142,25 +142,51 @@ def _micro(tp: float, pred: float, n_gt: float, n: int) -> Cell:
     return Cell(n, tp, pred, n_gt, precision, recall, f)
 
 
+#: Which three columns hold the components, per weighting. Same mapping as
+#: ``_run_cafa_grid_artifact.GRID_VARIANT_COLUMNS`` and deliberately not
+#: imported from it: the two sides agree through the FILE, and a shared
+#: constant would make one module's typo the other module's behaviour.
+#:
+#: The weighted branch scores ``toi_ia`` and the unweighted branch ``toi``,
+#: which are different term sets over different rows, so neither is ever
+#: derived from the other.
+VARIANT_COLUMNS: dict[str, tuple[str, str, str]] = {
+    "weighted": ("tp_w", "pred_w", "n_gt_w"),
+    "unweighted": ("tp", "pred", "n_gt"),
+}
+
+
 def micro_cells(
     rows: Iterable[Mapping[str, Any]],
     key_for: Callable[[Mapping[str, Any]], Any],
+    columns: tuple[str, str, str] = VARIANT_COLUMNS["weighted"],
 ) -> dict[Any, Cell]:
     """Pool per-protein rows into one micro-averaged cell per key.
 
     ``key_for`` returns whatever the caller groups by, which is how a run
     chooses its axes: the full stratum, or a projection onto the two or three
     that a given table reports.
+
+    ``columns`` names the three components to sum. It defaults to the weighted
+    triple, which is what every existing caller passes rows keyed by, and it is
+    a parameter because an evaluation run without an information-accretion set
+    has no weighted components at all: its file carries ``tp``/``pred``/
+    ``n_gt`` and pooling those under the weighted names would publish an
+    unweighted number as ``f_micro_w``. The CELL's own field names keep the
+    ``_w`` suffix because the type is the pooled-sums type and renaming it
+    would collide with ``f_micro_w`` the published metric; which weighting a
+    cell holds is recorded by the caller that writes it out.
     """
+    tp_col, pred_col, gt_col = columns
     sums: dict[Any, list[float]] = {}
     for row in rows:
         key = key_for(row)
         if key is None:
             continue
         acc = sums.setdefault(key, [0.0, 0.0, 0.0, 0.0])
-        acc[0] += float(row["tp_w"])
-        acc[1] += float(row["pred_w"])
-        acc[2] += float(row["n_gt_w"])
+        acc[0] += float(row[tp_col])
+        acc[1] += float(row[pred_col])
+        acc[2] += float(row[gt_col])
         acc[3] += 1.0
     return {k: _micro(v[0], v[1], v[2], int(v[3])) for k, v in sums.items()}
 

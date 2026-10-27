@@ -33,7 +33,23 @@ router = APIRouter(prefix="/strata", tags=["strata"])
 _SETTINGS = ("NK", "LK", "PK")
 
 #: Columns the parquet always carries, whatever axes were crossed.
-_MEASURES = ("n_proteins", "precision_w", "recall_w", "f_micro_w", "reportable")
+#: Columns that are the cell's numbers rather than one of its axes. Everything
+#: else in the table is a dimension, which is how the endpoint discovers the
+#: axes a run crossed without being told.
+#:
+#: ``variant`` is in here as a measure and not as an axis: it says which
+#: weighting the three numbers beside it hold, so it describes them rather
+#: than slicing the population. Reading it as an axis would publish one cell
+#: per weighting and invite a reader to compare two different term sets as if
+#: they were two strata.
+_MEASURES = (
+    "n_proteins",
+    "variant",
+    "precision",
+    "recall",
+    "f_micro",
+    "reportable",
+)
 
 
 def _cells(raw: bytes) -> list[dict[str, Any]]:
