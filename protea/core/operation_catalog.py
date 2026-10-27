@@ -68,6 +68,9 @@ from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperat
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingOperation,
 )
+from protea.core.operations.load_ontology_aliases import (
+    LoadOntologyAliasesOperation,
+)
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
 from protea.core.operations.load_swissprot_release import (
@@ -138,6 +141,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(CountBackendParametersOperation())
     registry.register(ExportEvaluationTargetsOperation())
     registry.register(IngestMethodPredictionsOperation())
+    registry.register(LoadOntologyAliasesOperation())
     registry.register(EncodeResidueSparseOperation())
     registry.register(EncodeResidueSparseBatchOperation())
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer

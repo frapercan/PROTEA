@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from protea.core.evaluation import (
     EvaluationData,
+    ReconciledWindow,
     _apply_negatives,
     _bfs_closure,
     _build_negative_keys,
@@ -13,7 +14,6 @@ from protea.core.evaluation import (
     _load_experimental_annotations_by_ns,
     _load_go_maps,
     compute_evaluation_data,
-    ReconciledWindow,
     compute_evaluation_data_reconciled,
 )
 

@@ -28,8 +28,8 @@ import pytest
 
 from protea.core.embedding_identity import derive_embedding_config_id, recipe_of
 from protea.infrastructure.orm.models.embedding.embedding_config import (
-    EmbeddingConfig,
     _DEFAULT_MAX_LENGTH,
+    EmbeddingConfig,
     _derive_id_from_recipe,
     _was_not_set,
 )
