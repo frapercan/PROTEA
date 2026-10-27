@@ -105,7 +105,10 @@ class EmbeddingConfig(Base):
     embedding_scale: Mapped[float] = mapped_column(
         Float, nullable=False, default=1.0, server_default="1.0"
     )
-    max_length: Mapped[int] = mapped_column(Integer, nullable=False, default=1022)
+    #: Residues the model sees. NULL means full length: no truncation was
+    #: applied. A sentinel integer would make the recipe a function of the
+    #: corpus, and max_length is an identity field.
+    max_length: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1022)
     use_chunking: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=512)
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

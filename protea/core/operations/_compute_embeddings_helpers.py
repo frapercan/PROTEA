@@ -100,7 +100,10 @@ def _residue_budget(sequences: list[Sequence], config: EmbeddingConfig) -> dict[
     """
     lengths = [len(s.sequence) for s in sequences]
     available = sum(lengths)
-    if config.use_chunking:
+    if config.use_chunking or config.max_length is None:
+        # Chunking feeds every residue through; a NULL max_length means the
+        # forward pass was never asked to truncate. Either way nothing is lost,
+        # so processed equals available rather than min() against a None.
         processed = available
     else:
         processed = sum(min(n, config.max_length) for n in lengths)
