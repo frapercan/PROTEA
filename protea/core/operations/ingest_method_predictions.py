@@ -94,7 +94,23 @@ TSV_COLUMNS: tuple[str, ...] = ("protein", "go_id", "aspect", "score")
 #: How many rows ride in one INSERT. Rows are streamed rather than read whole:
 #: the long window's dump is 5,295,100 lines and holding it as Python tuples
 #: costs about a gigabyte, on a machine whose /tmp is RAM.
+#:
+#: NOT the number that goes in the statement. The PostgreSQL wire protocol
+#: carries at most 65,535 bound parameters per statement, and a chunk costs
+#: one parameter PER COLUMN, so 50,000 rows of a six-column row is 300,000 and
+#: the driver refuses before the server sees it:
+#:
+#:     (psycopg.OperationalError) sending query and params failed:
+#:     number of parameters must be between 0 and 65535
+#:
+#: Measured the hard way on the lab's first real file, 12,159,300 rows: the
+#: three-row fixtures in the tests never came near it. :func:`_rows_per_insert`
+#: derives the real cap from the row itself, so adding a column narrows the
+#: chunk instead of breaking the insert.
 DEFAULT_CHUNK = 50_000
+
+#: What the protocol allows in one statement.
+MAX_BOUND_PARAMS = 65_535
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
@@ -383,10 +399,15 @@ class IngestMethodPredictionsOperation:
         difference is the only place it shows.
         """
         inserted = 0
+        limit = chunk_size
         chunk: list[dict[str, Any]] = []
         for row in rows:
+            if not chunk:
+                # Resolved from the first row and then fixed: every row the
+                # builder makes has the same columns.
+                limit = _rows_per_insert(row, chunk_size)
             chunk.append(row)
-            if len(chunk) >= chunk_size:
+            if len(chunk) >= limit:
                 inserted += _flush(session, chunk)
                 chunk = []
         if chunk:
@@ -458,6 +479,16 @@ class IngestMethodPredictionsOperation:
             "info",
         )
         return OperationResult(result=result)
+
+
+def _rows_per_insert(row: dict[str, Any], asked: int) -> int:
+    """How many of these rows fit in one statement, at most ``asked``.
+
+    Derived from the row, not configured: a column added to the row builder
+    narrows this automatically, which is the difference between a cap that
+    stays true and a number somebody remembered.
+    """
+    return max(1, min(asked, MAX_BOUND_PARAMS // max(1, len(row))))
 
 
 def _flush(session: Session, chunk: list[dict[str, Any]]) -> int:

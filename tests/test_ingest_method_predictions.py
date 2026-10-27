@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from protea.core.operations.ingest_method_predictions import (
+    DEFAULT_CHUNK,
     IngestMethodPredictionsOperation,
     IngestMethodPredictionsPayload,
     _read_rows,
@@ -356,6 +357,56 @@ class TestWhatItReportsWhenItWorks:
         result = op.execute(session, payload, emit=_emit)
         assert session.inserted == [2, 1]
         assert result.result["inserted"] == 3
+
+    def test_no_insert_can_exceed_the_protocols_parameter_limit(self) -> None:
+        """The defect this class was missing, as arithmetic instead of a file.
+
+        The chunk was 50,000 rows and a row has six columns, so the first
+        real file -- the lab's 12,159,300 rows -- died before the server saw
+        it:
+
+            (psycopg.OperationalError) sending query and params failed:
+            number of parameters must be between 0 and 65535
+
+        The three-row fixtures above never came near 65,535, and a 65k-row
+        fixture would make the suite slow to assert something that is one
+        division. So the cap is asserted directly, and it is derived from the
+        row so that adding a column narrows the chunk instead of breaking the
+        insert.
+        """
+        from protea.core.operations.ingest_method_predictions import (
+            MAX_BOUND_PARAMS,
+            _rows_per_insert,
+        )
+
+        row = {
+            "prediction_set_id": uuid.uuid4(),
+            "protein_accession": "P00001",
+            "go_term_id": 11,
+            "ref_protein_accession": "m",
+            "distance": None,
+            "method_score": 0.5,
+        }
+        for asked in (1, 100, DEFAULT_CHUNK, 10**6):
+            rows = _rows_per_insert(row, asked)
+            assert rows >= 1
+            assert rows <= asked
+            assert rows * len(row) <= MAX_BOUND_PARAMS, (asked, rows)
+
+    def test_a_wider_row_gets_a_narrower_chunk(self) -> None:
+        # The property that keeps the cap true without anyone maintaining it.
+        from protea.core.operations.ingest_method_predictions import _rows_per_insert
+
+        narrow = _rows_per_insert({"a": 1, "b": 2}, DEFAULT_CHUNK)
+        wide = _rows_per_insert({str(i): i for i in range(20)}, DEFAULT_CHUNK)
+        assert wide < narrow
+
+    def test_a_small_payload_chunk_is_still_honoured(self) -> None:
+        # The cap is an upper bound, not a floor: a caller asking for small
+        # batches gets them.
+        from protea.core.operations.ingest_method_predictions import _rows_per_insert
+
+        assert _rows_per_insert({"a": 1}, 7) == 7
 
     def test_the_summary_names_the_method(self) -> None:
         op = IngestMethodPredictionsOperation()
