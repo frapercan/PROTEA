@@ -91,6 +91,9 @@ from protea.core.operations.predict_go_terms_from_interpro import (
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesOperation,
 )
+from protea.core.operations.register_ingested_method import (
+    RegisterIngestedMethodOperation,
+)
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesOperation,
 )
@@ -125,6 +128,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(LoadInterProGoMappingOperation())
     registry.register(RunInterProScanBatchOperation())
     registry.register(GenerateEvaluationSetOperation())
+    registry.register(RegisterIngestedMethodOperation())
     registry.register(VerifyWindowAgainstReferenceOperation())
     registry.register(RunCafaEvaluationOperation())
     registry.register(BatchRescoreEvaluationOperation())
