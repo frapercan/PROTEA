@@ -11,13 +11,22 @@ and is what selects a method, the LAFA one is the official check -- and their
 figures are not comparable with each other.
 
 WHAT THIS PROVES. Given the lab's ground truth, its information accretion, its
-terms of interest, its excluded-known base and its two frozen prediction
+terms of interest, its excluded-known base and its three frozen prediction
 dumps, PROTEA's evaluator reproduces the lab's nine published cells
-**exactly**: thirteen of eighteen at a difference of 0.0 and the remaining
-five at one double rounding unit, 1.1e-16, with both nine-cell means at 0.0.
-Two independent implementations of the same scoring profile agreeing to the
-bit is the strongest statement available about either, and it is what licenses
-reading a platform figure beside a lab figure at all.
+**exactly**: twenty of twenty-seven at a difference of 0.0 and the remaining
+seven at one double rounding unit, 1.1e-16, with all three nine-cell means at
+0.0. Two independent implementations of the same scoring profile agreeing to
+the bit is the strongest statement available about either, and it is what
+licenses reading a platform figure beside a lab figure at all.
+
+THE THIRD ARM IS THE ONE THAT MATTERS MOST AND ARRIVED LAST. The deployable
+recipe (eight readers, no residue similarity, headline 0.454665) was read
+after the package was closed, so it ships as a supplement that reuses the
+package's frame without touching a byte of it. Before it had a dump, the
+recipe's headline was the one published figure with no evidence behind it on
+this side, and it is precisely the figure the lab's single executable has to
+reproduce. The older recipe with residue similarity, 0.454030, still has no
+dump, so nothing here claims to reproduce it.
 
 WHY THE ROUNDING IS LOAD-BEARING. The predictions must reach cafaeval at four
 decimals. That is not a tolerance granted to make the test pass: it is what
@@ -26,8 +35,9 @@ which formats every row as ``{score:.4f}``, and the comment there records why
 -- two code paths that rounded differently put 9 of 396 cells exactly 0.0001
 apart. The lab's wrapper does the same with ``float_format="%.4f"``. Feeding
 the dumps' full nine decimals instead moves the cells by up to 1.6e-04 and the
-means by 2.4e-05, which still rounds to the published 0.2930 and 0.4531 but is
-not identity. The drift was measured, not assumed, and these were ruled out as
+means by 2.4e-05, which still rounds to the published 0.2930, 0.4531 and
+0.4547 but is not identity. The dumps themselves carry nine significant
+digits, so the rounding is the CONSUMER's job and the fixtures below do it. The drift was measured, not assumed, and these were ruled out as
 its cause first: threshold tie-breaking (the argmax lands on the same tau in
 all nine cells and the value differs AT that tau), the ontology (term census
 and the is_a/part_of edge vocabulary both match), namespace assignment (one
@@ -49,10 +59,12 @@ Layers
 2. The pinned contract agrees with the handoff package on disk, whose files
    verify against their own ``.sha256``. Runs when the package is present
    (``PROTEA_LONG_WINDOW_DIR``, default
-   ``~/handoff/sfjepa-2026-10-27-validacion-larga``).
-3. PROTEA's evaluator reproduces the cells from that package. Runs when the
+   ``~/handoff/sfjepa-2026-10-27-validacion-larga``). The supplement has its
+   own directory (``PROTEA_LONG_WINDOW_ENS8_DIR``, default the package path
+   with ``-ens8``); when it is absent only its own arm skips.
+3. PROTEA's evaluator reproduces the cells from those dumps. Runs when the
    package is present and ``PROTEA_LONG_WINDOW_OBO`` points at the 2022-07-01
-   ``go-basic.obo``. Opt-in because it is minutes of work over 6.2 million
+   ``go-basic.obo``. Opt-in because it is minutes of work over 11.5 million
    prediction rows, and because the ontology is a 31 MB file a test must never
    fetch for itself.
 """
@@ -137,12 +149,26 @@ SCORING = {
     "known_on": "PK",
 }
 
-#: The two arms with a frozen dump in the package, and the nine cells each.
+#: The three arms with a frozen dump, and the nine cells each.
 #: ``mean_of_9_cells`` is the headline figure; it is a flat mean, so the test
 #: below re-derives it rather than trusting the pair.
+#:
+#: ``home`` says which directory ships the dump. Two arms come from the
+#: package; ``ens_ts44_noresim8`` was read at 05:31 on 2026-10-27, after the
+#: package closed at 04:13, so it ships as a separate supplement that reuses
+#: the package's frame untouched. It is not folded into the package precisely
+#: because the package's digests are pinned here: a supplement must not be
+#: able to change a byte of what was already accepted.
+#:
+#: ``fixture_sha256`` is the dump itself. Layer 2 checks it even when layer 3
+#: is not run, because the sidecar sweep only proves that a file agrees with
+#: the digest shipped NEXT TO IT, and a replaced pair of files agrees with
+#: itself.
 ARMS: dict[str, dict] = {
     "knn3": {
+        "home": "package",
         "fixture": "predictions/knn3.tsv",
+        "fixture_sha256": "7cffd1b51652baef6c81a7de34e53899fd800507e3cc43544a86ec67878423f0",
         "mean_of_9_cells": 0.29299219982554986,
         "cells": {
             "NK/P": 0.3497460880313072,
@@ -157,7 +183,9 @@ ARMS: dict[str, dict] = {
         },
     },
     "ens_ts43_noresim": {
+        "home": "package",
         "fixture": "predictions/deployable-reader-ens4.tsv",
+        "fixture_sha256": "72a8a64e8ff2506e6fdd9ba07bf0cdac96737239ea00293d18f7443db1a2b988",
         "mean_of_9_cells": 0.4530671354437508,
         "cells": {
             "NK/P": 0.5948937078229356,
@@ -171,7 +199,32 @@ ARMS: dict[str, dict] = {
             "PK/C": 0.31421737606932965,
         },
     },
+    # The deployable recipe: the average of eight readers with no residue
+    # similarity, four of holes and four of history. This is the headline of
+    # the clean 211-cut recipe and the figure the lab's single executable has
+    # to reproduce, so until it had a dump it was the one published number
+    # with no evidence behind it on this side.
+    "ens_ts44_noresim8": {
+        "home": "supplement",
+        "fixture": "predictions/deployable-recipe-ens8.tsv",
+        "fixture_sha256": "66b7a67cb8047c94e6d1b1dc27acb882110972991aec5fa498dd0a60816922e2",
+        "mean_of_9_cells": 0.45466520460860976,
+        "cells": {
+            "NK/P": 0.5938682536333848,
+            "NK/F": 0.7121032678632635,
+            "NK/C": 0.5491363606810096,
+            "LK/P": 0.39744018144383075,
+            "LK/F": 0.5789627503181802,
+            "LK/C": 0.49360488310285666,
+            "PK/P": 0.18795394323597708,
+            "PK/F": 0.2629708102008154,
+            "PK/C": 0.3159463909981702,
+        },
+    },
 }
+
+#: The arms that read, as opposed to the neighbour-transfer baseline.
+READER_ARMS = ("ens_ts43_noresim", "ens_ts44_noresim8")
 
 #: Agreement at four decimals is identity, not approximation. One double
 #: rounding unit is the only slack: five of the eighteen cells land there and
@@ -198,6 +251,57 @@ _NS_LETTER = {
 _DEFAULT_PACKAGE = Path.home() / "handoff" / "sfjepa-2026-10-27-validacion-larga"
 PACKAGE_DIR = Path(os.environ.get("PROTEA_LONG_WINDOW_DIR", _DEFAULT_PACKAGE))
 _PACKAGE_PRESENT = (PACKAGE_DIR / "acceptance.json").is_file()
+
+_DEFAULT_SUPPLEMENT = Path(f"{_DEFAULT_PACKAGE}-ens8")
+SUPPLEMENT_DIR = Path(os.environ.get("PROTEA_LONG_WINDOW_ENS8_DIR", _DEFAULT_SUPPLEMENT))
+
+#: Where each ``home`` lives, and which file carries that home's claim. The
+#: supplement states one arm at the top level; the package nests its arms
+#: under ``arms``, so the record is read through :func:`_published_record`
+#: rather than indexed the same way in both.
+HOMES = {
+    "package": (PACKAGE_DIR, "acceptance.json"),
+    "supplement": (SUPPLEMENT_DIR, "acceptance-ens8.json"),
+}
+
+
+def _acceptance_path(home: str) -> Path:
+    directory, filename = HOMES[home]
+    return directory / filename
+
+
+def _arm_dir(arm: str) -> Path:
+    return HOMES[ARMS[arm]["home"]][0]
+
+
+def _published_record(arm: str) -> dict:
+    """What the arm's own home publishes about it."""
+    home = ARMS[arm]["home"]
+    document = json.loads(_acceptance_path(home).read_text())
+    if home == "package":
+        return document["arms"][arm]
+    assert document["arm"] == arm, (document["arm"], arm)
+    return document
+
+
+#: Arms whose home is on this disk. An absent supplement skips its own arm
+#: and leaves the package's two running, which is the behaviour a machine
+#: that only has the original package needs.
+PRESENT_ARMS = tuple(arm for arm in sorted(ARMS) if _acceptance_path(ARMS[arm]["home"]).is_file())
+
+
+def _arm_params() -> list:
+    """Every arm, each skipped individually when its home is absent."""
+    return [
+        pytest.param(
+            arm,
+            marks=pytest.mark.skipif(
+                arm not in PRESENT_ARMS,
+                reason=f"{ARMS[arm]['home']} of arm {arm} absent at {_arm_dir(arm)}",
+            ),
+        )
+        for arm in sorted(ARMS)
+    ]
 
 _OBO_ENV = os.environ.get("PROTEA_LONG_WINDOW_OBO", "")
 OBO_PATH = Path(_OBO_ENV) if _OBO_ENV else None
@@ -263,13 +367,28 @@ class TestTheContractHoldsTogether:
         expected = {f"{s}/{a}" for s in SETTINGS for a in ASPECTS}
         assert set(ARMS[arm]["cells"]) == expected
 
-    def test_the_reader_beats_the_neighbour_transfer_in_every_cell(self) -> None:
+    @pytest.mark.parametrize("arm", READER_ARMS)
+    def test_the_reader_beats_the_neighbour_transfer_in_every_cell(self, arm: str) -> None:
         # The claim the window exists to support. If it held only on average
-        # the mean would be hiding a cell where the method is worse.
-        knn, reader = ARMS["knn3"]["cells"], ARMS["ens_ts43_noresim"]["cells"]
+        # the mean would be hiding a cell where the method is worse. It holds
+        # for both reader arms, in all nine.
+        knn, reader = ARMS["knn3"]["cells"], ARMS[arm]["cells"]
         assert all(reader[c] > knn[c] for c in knn), {
             c: (knn[c], reader[c]) for c in knn if reader[c] <= knn[c]
         }
+
+    def test_the_recipe_of_eight_leads_on_the_mean_and_not_in_every_cell(self) -> None:
+        # Between the two reader arms the improvement is NOT uniform: eight
+        # readers lead in seven cells and lose NK/P and LK/F. So the ordering
+        # of the two headlines is a statement about the mean of nine, and
+        # writing it as "eight readers beat four" without that qualifier
+        # would be claiming something the cells do not say. Pinned with the
+        # two exceptions named, so a future arm that happens to win
+        # everywhere fails here and gets its claim upgraded on purpose.
+        four, eight = ARMS["ens_ts43_noresim"], ARMS["ens_ts44_noresim8"]
+        assert eight["mean_of_9_cells"] > four["mean_of_9_cells"]
+        worse = sorted(c for c, v in eight["cells"].items() if v <= four["cells"][c])
+        assert worse == ["LK/F", "NK/P"], worse
 
     def test_terms_of_interest_are_the_live_intersection_and_not_the_present_one(
         self,
@@ -352,18 +471,16 @@ class TestThePackageSaysWhatTheContractSays:
         assert rule["terms"] == TERMS["live_in_both"]
         assert "live" in rule["rule"], rule["rule"]
 
-    def test_the_cells_match(self, contract: dict) -> None:
-        for arm, pinned in ARMS.items():
-            published = contract["arms"][arm]
-            assert published["fixture"] == pinned["fixture"], arm
-            assert published["mean_of_9_cells"] == pytest.approx(
-                pinned["mean_of_9_cells"], abs=5e-16
-            ), arm
-            for cell, value in pinned["cells"].items():
-                assert published["cells"][cell] == pytest.approx(value, abs=5e-15), (
-                    arm,
-                    cell,
-                )
+    @pytest.mark.parametrize("arm", _arm_params())
+    def test_the_cells_match(self, arm: str) -> None:
+        pinned = ARMS[arm]
+        published = _published_record(arm)
+        assert published["fixture"] == pinned["fixture"], arm
+        assert published["mean_of_9_cells"] == pytest.approx(
+            pinned["mean_of_9_cells"], abs=5e-16
+        ), arm
+        for cell, value in pinned["cells"].items():
+            assert published["cells"][cell] == pytest.approx(value, abs=5e-15), (arm, cell)
 
     @pytest.mark.parametrize("setting", SETTINGS)
     def test_each_ground_truth_file_has_the_pairs_the_contract_claims(self, setting: str) -> None:
@@ -386,9 +503,17 @@ class TestThePackageSaysWhatTheContractSays:
         path = PACKAGE_DIR / "frame" / "ia-211.tsv"
         assert _line_count(path) == TERMS["live_in_211"]
 
-    @pytest.mark.parametrize("arm", sorted(ARMS))
+    @pytest.mark.parametrize("arm", _arm_params())
+    def test_each_frozen_dump_is_the_file_the_cells_were_measured_from(self, arm: str) -> None:
+        # The sidecar sweep below cannot say this: it compares a file with
+        # the digest shipped beside it, so a dump replaced together with its
+        # sidecar passes. The cells are pinned against THIS file.
+        path = _arm_dir(arm) / ARMS[arm]["fixture"]
+        assert _sha256(path) == ARMS[arm]["fixture_sha256"], path.name
+
+    @pytest.mark.parametrize("arm", _arm_params())
     def test_each_frozen_dump_covers_every_protein_with_a_gain(self, arm: str) -> None:
-        path = PACKAGE_DIR / ARMS[arm]["fixture"]
+        path = _arm_dir(arm) / ARMS[arm]["fixture"]
         proteins = set()
         with path.open() as handle:
             next(handle)
@@ -396,16 +521,33 @@ class TestThePackageSaysWhatTheContractSays:
                 proteins.add(line.split("\t", 1)[0])
         assert len(proteins) == COUNTS["delta_proteins"]
 
-    def test_every_shipped_file_verifies_against_its_own_sidecar(self) -> None:
+    @pytest.mark.parametrize(
+        ("home", "minimum"),
+        [
+            pytest.param("package", 12, id="package"),
+            pytest.param(
+                "supplement",
+                2,
+                id="supplement",
+                marks=pytest.mark.skipif(
+                    not _acceptance_path("supplement").is_file(),
+                    reason=f"supplement absent at {SUPPLEMENT_DIR}",
+                ),
+            ),
+        ],
+    )
+    def test_every_shipped_file_verifies_against_its_own_sidecar(
+        self, home: str, minimum: int
+    ) -> None:
         checked = 0
-        for sidecar in sorted(PACKAGE_DIR.rglob("*.sha256")):
+        for sidecar in sorted(HOMES[home][0].rglob("*.sha256")):
             target = sidecar.with_suffix("")
             if not target.is_file():
                 continue
             expected = sidecar.read_text().split()[0]
             assert _sha256(target) == expected, target.name
             checked += 1
-        assert checked >= 12, f"only {checked} files carried a verifiable sidecar"
+        assert checked >= minimum, f"only {checked} files in {home} carried a sidecar"
 
 
 # ---------------------------------------------------------------------------
@@ -434,8 +576,8 @@ class TestProteaReproducesTheCells:
         method, so both arms go in one directory and one pass covers both.
         """
         out = tmp_path_factory.mktemp("predictions")
-        for arm in sorted(ARMS):
-            source = PACKAGE_DIR / ARMS[arm]["fixture"]
+        for arm in PRESENT_ARMS:
+            source = _arm_dir(arm) / ARMS[arm]["fixture"]
             target = out / Path(ARMS[arm]["fixture"]).name
             with source.open() as handle, target.open("w") as sink:
                 next(handle)
@@ -481,10 +623,10 @@ class TestProteaReproducesTheCells:
                 )
         return out
 
-    def test_both_arms_were_scored(self, measured: dict) -> None:
-        assert set(measured) == {Path(a["fixture"]).name for a in ARMS.values()}
+    def test_every_present_arm_was_scored(self, measured: dict) -> None:
+        assert set(measured) == {Path(ARMS[arm]["fixture"]).name for arm in PRESENT_ARMS}
 
-    @pytest.mark.parametrize("arm", sorted(ARMS))
+    @pytest.mark.parametrize("arm", _arm_params())
     def test_every_cell_reproduces(self, measured: dict, arm: str) -> None:
         name = Path(ARMS[arm]["fixture"]).name
         got = measured[name]
@@ -496,7 +638,7 @@ class TestProteaReproducesTheCells:
         }
         assert not off, off
 
-    @pytest.mark.parametrize("arm", sorted(ARMS))
+    @pytest.mark.parametrize("arm", _arm_params())
     def test_the_headline_reproduces(self, measured: dict, arm: str) -> None:
         name = Path(ARMS[arm]["fixture"]).name
         mean = sum(measured[name].values()) / 9
@@ -508,10 +650,12 @@ class TestProteaReproducesTheCells:
         # future change turned this into rounding agreement the test above
         # would still pass at 1e-4, so the strength is asserted separately.
         exact = 0
-        for arm, pinned in ARMS.items():
+        for arm in PRESENT_ARMS:
+            pinned = ARMS[arm]
             got = measured[Path(pinned["fixture"]).name]
             for cell, want in pinned["cells"].items():
                 diff = abs(got[cell] - want)
                 assert diff <= CELL_TOLERANCE, (arm, cell, diff)
                 exact += diff == 0.0
-        assert exact >= 9, f"only {exact} of 18 cells landed exactly on 0.0"
+        cells = 9 * len(PRESENT_ARMS)
+        assert exact >= cells // 2, f"only {exact} of {cells} cells landed exactly on 0.0"
