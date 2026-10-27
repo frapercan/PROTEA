@@ -83,11 +83,20 @@ _Q_ACCRETION = text(
 
 _Q_QUERY_SETS = text(
     """
-    SELECT qs.id::text AS id,
-           qs.name     AS name,
-           (SELECT count(*) FROM query_set_entry e WHERE e.query_set_id = qs.id) AS entries,
+    SELECT qs.id::text              AS id,
+           qs.name                  AS name,
+           COALESCE(e.entries, 0)   AS entries,
            EXISTS (SELECT 1 FROM prediction_set ps WHERE ps.query_set_id = qs.id) AS in_use
     FROM query_set qs
+    -- Grouped once and joined, not one correlated count per set. The
+    -- correlated form cost 106 ms for two rows, because the planner cannot
+    -- estimate a correlated value and sizes the filter at the whole table.
+    -- ``prediction_set`` holds eight rows, so its EXISTS stays correlated.
+    LEFT JOIN (
+        SELECT query_set_id, count(*) AS entries
+        FROM query_set_entry
+        GROUP BY query_set_id
+    ) e ON e.query_set_id = qs.id
     ORDER BY qs.created_at
     """
 )
@@ -137,9 +146,19 @@ _Q_SUBSTRATES = text(
            EXISTS (
                SELECT 1 FROM prediction_set ps WHERE ps.embedding_config_id = ec.id
            )                                        AS in_use,
-           EXISTS (
-               SELECT 1 FROM sequence_embedding se WHERE se.embedding_config_id = ec.id
-           )                                        AS producible
+           -- The SAME FACT as ``stored > 0``, and it used to be asked for a
+           -- second time as a correlated EXISTS. That cost 905 ms of the
+           -- graph's 1.37 s of reads, for ten rows: the planner cannot
+           -- estimate ``embedding_config_id = ec.id``, sizes the filter at
+           -- the whole table and picks a sequential scan, so the EXISTS
+           -- scanned all 615,643 rows ONCE PER CONFIGURATION -- ten passes
+           -- over a gigabyte, 1,055,187 blocks read, to answer a question
+           -- the aggregate below had already answered in 37 ms.
+           --
+           -- Verified equal on the live record before the change: ten
+           -- configurations, ten agreements, the one built representation
+           -- true in both and the nine unbuilt ones false in both.
+           COALESCE(cov.stored, 0) > 0              AS producible
     FROM embedding_config ec
     LEFT JOIN annotation_set tr ON tr.id = ec.trained_on_annotation_set_id
     -- Grouped once and joined, not one correlated count per configuration.

@@ -1065,20 +1065,8 @@
     }
   },
   "evaluation": {
-    "title": "CAFA 评估",
-    "generateSection": {
-      "heading": "新建评估集",
-      "description": "计算两个 GOA 版本之间的差异。",
-      "oldSetLabel": "旧 GOA 集（参考）",
-      "selectSet": "— 选择 —",
-      "newSetLabel": "新 GOA 集（真实标注）",
-      "errorSameSets": "旧集和新集必须不同。",
-      "generateEvaluationSet": "生成评估集",
-      "generating": "排队中…"
-    },
-    "evaluationSetsSection": {
-      "heading": "评估集"
-    },
+    "backToList": "返回评估集",
+    "detailTitle": "评估集详情",
     "evaluationSetCard": {
       "deleteConfirm": "删除此评估集及其所有结果？",
       "delete": "删除",
@@ -1115,6 +1103,30 @@
       "resultDelete": "删除",
       "deleteResultConfirm": "删除此评估结果？"
     },
+    "evaluationSetsSection": {
+      "heading": "评估集"
+    },
+    "generateSection": {
+      "heading": "新建评估集",
+      "description": "计算两个 GOA 版本之间的差异。",
+      "oldSetLabel": "旧 GOA 集（参考）",
+      "selectSet": "— 选择 —",
+      "newSetLabel": "新 GOA 集（真实标注）",
+      "errorSameSets": "旧集和新集必须不同。",
+      "generateEvaluationSet": "生成评估集",
+      "generating": "排队中…"
+    },
+    "jumpToContext": "跳转到上下文",
+    "loading": "正在加载评估集…",
+    "manualEvaluatorSection": {
+      "heading": "手动评估器命令"
+    },
+    "modelUsed": "所用重排模型",
+    "noResults": "该评估集尚无评估结果。",
+    "openPredictionSet": "打开预测集",
+    "openReranker": "打开重排模型",
+    "proteinExamples": "蛋白示例（预测集）",
+    "provenanceLabel": "来源",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -1128,9 +1140,9 @@
       "coverage": "覆盖率",
       "tau": "τ"
     },
-    "manualEvaluatorSection": {
-      "heading": "手动评估器命令"
-    }
+    "statDelta": "差集蛋白数",
+    "statsTitle": "评估集统计",
+    "title": "CAFA 评估"
   },
   "scoring": {
     "title": "评分配置",

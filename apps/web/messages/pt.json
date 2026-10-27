@@ -1065,20 +1065,8 @@
     }
   },
   "evaluation": {
-    "title": "Avaliação CAFA",
-    "generateSection": {
-      "heading": "Novo conjunto de avaliação",
-      "description": "Computa o delta entre duas releases GOA. Aplica filtragem de evidência experimental e propagação do qualificador NOT pelo DAG GO.",
-      "oldSetLabel": "Conjunto GOA antigo (referência)",
-      "selectSet": "— selecionar —",
-      "newSetLabel": "Conjunto GOA novo (ground truth)",
-      "errorSameSets": "Os conjuntos antigo e novo devem ser diferentes.",
-      "generateEvaluationSet": "Gerar conjunto de avaliação",
-      "generating": "Enfileirando…"
-    },
-    "evaluationSetsSection": {
-      "heading": "Conjuntos de avaliação"
-    },
+    "backToList": "Voltar aos conjuntos de avaliação",
+    "detailTitle": "Detalhe do conjunto de avaliação",
     "evaluationSetCard": {
       "deleteConfirm": "Excluir este conjunto de avaliação e todos os resultados?",
       "delete": "Excluir",
@@ -1115,6 +1103,30 @@
       "resultDelete": "Excluir",
       "deleteResultConfirm": "Excluir este resultado de avaliação?"
     },
+    "evaluationSetsSection": {
+      "heading": "Conjuntos de avaliação"
+    },
+    "generateSection": {
+      "heading": "Novo conjunto de avaliação",
+      "description": "Computa o delta entre duas releases GOA. Aplica filtragem de evidência experimental e propagação do qualificador NOT pelo DAG GO.",
+      "oldSetLabel": "Conjunto GOA antigo (referência)",
+      "selectSet": "— selecionar —",
+      "newSetLabel": "Conjunto GOA novo (ground truth)",
+      "errorSameSets": "Os conjuntos antigo e novo devem ser diferentes.",
+      "generateEvaluationSet": "Gerar conjunto de avaliação",
+      "generating": "Enfileirando…"
+    },
+    "jumpToContext": "Ir para o contexto",
+    "loading": "A carregar o conjunto de avaliação...",
+    "manualEvaluatorSection": {
+      "heading": "Comando do avaliador manual"
+    },
+    "modelUsed": "Modelo de reordenação usado",
+    "noResults": "Este conjunto ainda não tem resultados de avaliação.",
+    "openPredictionSet": "Abrir o conjunto de previsões",
+    "openReranker": "Abrir o modelo de reordenação",
+    "proteinExamples": "Exemplos de proteínas (conjunto de previsões)",
+    "provenanceLabel": "procedência",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -1128,9 +1140,9 @@
       "coverage": "Cobertura",
       "tau": "τ"
     },
-    "manualEvaluatorSection": {
-      "heading": "Comando do avaliador manual"
-    }
+    "statDelta": "proteínas do delta",
+    "statsTitle": "Estatísticas do conjunto",
+    "title": "Avaliação CAFA"
   },
   "scoring": {
     "title": "Scoring",

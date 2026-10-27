@@ -1064,20 +1064,8 @@
     }
   },
   "evaluation": {
-    "title": "CAFA Evaluation",
-    "generateSection": {
-      "heading": "New Evaluation Set",
-      "description": "Computes the delta between two GOA releases. Applies experimental evidence filtering and NOT-qualifier propagation through the GO DAG.",
-      "oldSetLabel": "Old GOA set (reference)",
-      "selectSet": "— select —",
-      "newSetLabel": "New GOA set (ground truth)",
-      "errorSameSets": "Old and new sets must be different.",
-      "generateEvaluationSet": "Generate Evaluation Set",
-      "generating": "Queuing…"
-    },
-    "evaluationSetsSection": {
-      "heading": "Evaluation Sets"
-    },
+    "backToList": "Back to evaluation sets",
+    "detailTitle": "Evaluation set detail",
     "evaluationSetCard": {
       "deleteConfirm": "Delete this evaluation set and all its results?",
       "delete": "Delete",
@@ -1114,6 +1102,30 @@
       "resultDelete": "Delete",
       "deleteResultConfirm": "Delete this evaluation result?"
     },
+    "evaluationSetsSection": {
+      "heading": "Evaluation Sets"
+    },
+    "generateSection": {
+      "heading": "New Evaluation Set",
+      "description": "Computes the delta between two GOA releases. Applies experimental evidence filtering and NOT-qualifier propagation through the GO DAG.",
+      "oldSetLabel": "Old GOA set (reference)",
+      "selectSet": "— select —",
+      "newSetLabel": "New GOA set (ground truth)",
+      "errorSameSets": "Old and new sets must be different.",
+      "generateEvaluationSet": "Generate Evaluation Set",
+      "generating": "Queuing…"
+    },
+    "jumpToContext": "Jump to context",
+    "loading": "Loading evaluation set...",
+    "manualEvaluatorSection": {
+      "heading": "Manual evaluator command"
+    },
+    "modelUsed": "Reranker model used",
+    "noResults": "No evaluation results yet for this set.",
+    "openPredictionSet": "Open prediction set",
+    "openReranker": "Open reranker model",
+    "proteinExamples": "Protein examples (prediction set)",
+    "provenanceLabel": "provenance",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -1127,9 +1139,9 @@
       "coverage": "Coverage",
       "tau": "τ"
     },
-    "manualEvaluatorSection": {
-      "heading": "Manual evaluator command"
-    }
+    "statDelta": "delta proteins",
+    "statsTitle": "Set stats",
+    "title": "CAFA Evaluation"
   },
   "scoring": {
     "title": "Scoring Configs",

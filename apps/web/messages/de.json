@@ -1065,20 +1065,8 @@
     }
   },
   "evaluation": {
-    "title": "CAFA-Evaluierung",
-    "generateSection": {
-      "heading": "Neues Evaluierungsset",
-      "description": "Berechnet das Delta zwischen zwei GOA-Releases. Wendet experimentelle Evidenzfilterung und NOT-Qualifier-Propagation durch den GO-DAG an.",
-      "oldSetLabel": "Altes GOA-Set (Referenz)",
-      "selectSet": "— auswählen —",
-      "newSetLabel": "Neues GOA-Set (Ground Truth)",
-      "errorSameSets": "Altes und neues Set müssen unterschiedlich sein.",
-      "generateEvaluationSet": "Evaluierungsset generieren",
-      "generating": "Wird eingereiht…"
-    },
-    "evaluationSetsSection": {
-      "heading": "Evaluierungssets"
-    },
+    "backToList": "Zurück zu den Evaluationssets",
+    "detailTitle": "Details zum Evaluationsset",
     "evaluationSetCard": {
       "deleteConfirm": "Dieses Evaluierungsset und alle Ergebnisse löschen?",
       "delete": "Löschen",
@@ -1115,6 +1103,30 @@
       "resultDelete": "Löschen",
       "deleteResultConfirm": "Dieses Evaluierungsergebnis löschen?"
     },
+    "evaluationSetsSection": {
+      "heading": "Evaluierungssets"
+    },
+    "generateSection": {
+      "heading": "Neues Evaluierungsset",
+      "description": "Berechnet das Delta zwischen zwei GOA-Releases. Wendet experimentelle Evidenzfilterung und NOT-Qualifier-Propagation durch den GO-DAG an.",
+      "oldSetLabel": "Altes GOA-Set (Referenz)",
+      "selectSet": "— auswählen —",
+      "newSetLabel": "Neues GOA-Set (Ground Truth)",
+      "errorSameSets": "Altes und neues Set müssen unterschiedlich sein.",
+      "generateEvaluationSet": "Evaluierungsset generieren",
+      "generating": "Wird eingereiht…"
+    },
+    "jumpToContext": "Zum Kontext springen",
+    "loading": "Evaluationsset wird geladen...",
+    "manualEvaluatorSection": {
+      "heading": "Manueller Evaluator-Befehl"
+    },
+    "modelUsed": "Verwendetes Reranker-Modell",
+    "noResults": "Für dieses Set liegen noch keine Evaluationsergebnisse vor.",
+    "openPredictionSet": "Vorhersagesatz öffnen",
+    "openReranker": "Reranker-Modell öffnen",
+    "proteinExamples": "Proteinbeispiele (Vorhersagesatz)",
+    "provenanceLabel": "Herkunft",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -1128,9 +1140,9 @@
       "coverage": "Abdeckung",
       "tau": "τ"
     },
-    "manualEvaluatorSection": {
-      "heading": "Manueller Evaluator-Befehl"
-    }
+    "statDelta": "Delta-Proteine",
+    "statsTitle": "Statistiken des Sets",
+    "title": "CAFA-Evaluierung"
   },
   "scoring": {
     "title": "Scoring",
