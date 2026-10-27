@@ -47,7 +47,6 @@ from protea.core._binding_rule import PROTEIN_BINDING, drop_binding_only_mfo
 from protea.core._evaluation_graph import (
     _bfs_closure,
     _get_descendants,
-    _live_terms_with_aspect,
     _load_children_by_go_id,
     _load_children_map,
     _load_parents_by_go_id,
@@ -64,15 +63,19 @@ from protea.core._evaluation_snapshot_routing import (
     compute_evaluation_data_for_sets as compute_evaluation_data_for_sets,
 )
 from protea.core._truth_projection import (
-    Graph,
     Projection,
     project_direct_annotations,
 )
-from protea.core._truth_projection import (
-    Request as ProjectionRequest,
+from protea.core._truth_rules import (
+    GAIN_RULES,
+    TRUTH_PROFILES,
+    ProjectionRequest,
+    ReconciledWindow,
+    _keep_within_toi,
+    _projection_request,
+    _terms_of_interest,
 )
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
-from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 
 # Parquet column for the bucket each (protein, go_id) row belongs to.
 _GROUNDTRUTH_BUCKETS = ("nk", "lk", "pk", "known", "pk_known", "removed")
@@ -86,18 +89,6 @@ _EXP_CODES: list[str] = list(
 
 _NAMESPACES = ("F", "P", "C")
 
-#: How the t1 side's truth is built, by the name a payload asks for it with.
-#:
-#: ``as_closed`` is what the platform has always done: a term the pivot cannot
-#: express is dropped by the closure intersection, and the gain disappears
-#: with it. It stays the default, so no stored window moves.
-#:
-#: ``projected`` adds the lab's rule (see :mod:`protea.core._truth_projection`):
-#: a direct t1 term with no node at t0 is replaced by its first live ancestors
-#: before the binding rule and the closure. On the 211 -> 227 window the two
-#: profiles differ by 646 proteins and 2,610 entries, which is the whole of
-#: the difference between PROTEA's truth and the lab's.
-TRUTH_PROFILES: tuple[str, ...] = ("as_closed", "projected")
 
 
 # ---------------------------------------------------------------------------
@@ -119,24 +110,6 @@ class EvalContext(NamedTuple):
     ontology_snapshot_id: uuid.UUID
 
 
-class ReconciledWindow(NamedTuple):
-    """The five ids a reconciled delta is built from, plus how to build it.
-
-    One object for the same reason :class:`EvalContext` is one: the five
-    travel together through every lookup, every refusal and every insert, and
-    a signature that took them loose is a signature somebody can call with
-    four. The profile joins them because it decides what the delta IS, not
-    how it is stored: two profiles over the same five ids are two different
-    truths, which is why it is part of the window's identity in the database
-    too.
-    """
-
-    old_annotation_set_id: uuid.UUID
-    new_annotation_set_id: uuid.UUID
-    old_native_snapshot_id: uuid.UUID
-    new_native_snapshot_id: uuid.UUID
-    pivot_snapshot_id: uuid.UUID
-    truth_profile: str = TRUTH_PROFILES[0]
 
 
 @dataclass
@@ -565,58 +538,12 @@ def _apply_negatives(
     return cleaned
 
 
-def _projection_request(session: Session, window: ReconciledWindow) -> ProjectionRequest:
-    """Which graph the projection climbs, and which terms it may land on.
 
-    READ FROM THE ANNOTATION SETS, NOT FROM THE WINDOW'S NATIVE FIELDS, and
-    this is not a stylistic preference: it is the defect this function exists
-    to avoid, measured.
 
-    ``old_native_snapshot_id`` and ``new_native_snapshot_id`` do two jobs.
-    They say which graph closes each side, and they are the only other record
-    of which ontologies the window spans. Asking for a closure under t0's
-    graph alone -- supported, and done on the 211 -> 227 validation window --
-    means setting BOTH to t0, which erases t1.
 
-    The first wiring of this used them, and on that window it climbed the
-    2022-07-01 graph while believing it was climbing t1's. Asking "is this
-    term live at t1" of t0's graph answers no for every term t0 does not
-    have, so all 2,619 candidates were classified as obsolete-at-t1, nothing
-    projected at all, and the populations did not move. The lab projects
-    2,610 of those and remaps the other 9 through ``replaced_by``, which is
-    how the number told us which half was wrong: the terms were identified
-    correctly and the graph was not.
 
-    ``AnnotationSet.ontology_snapshot_id`` is fixed when the corpus is
-    loaded and is independent of any later closure choice, so it answers the
-    question the native fields were overloaded with. Same reason, same fix
-    and same regression test as the terms of interest in
-    ``_run_cafa_setup._window_end_snapshots``.
-    """
-    sides = []
-    for set_id in (window.old_annotation_set_id, window.new_annotation_set_id):
-        row = session.get(AnnotationSet, set_id)
-        if row is None:
-            raise ValueError(
-                f"EvaluationSet names an AnnotationSet that is gone ({set_id}); the "
-                "projection cannot be resolved from the window's two ends"
-            )
-        sides.append(row.ontology_snapshot_id)
-    old_snapshot, new_snapshot = sides
 
-    target, _ = _live_terms_with_aspect(session, old_snapshot)
-    live, aspect = _live_terms_with_aspect(session, new_snapshot)
-    return ProjectionRequest(
-        graph=Graph(
-            parents=_load_parents_by_go_id(session, new_snapshot),
-            aspect=aspect,
-            live=live,
-            binding=frozenset(
-                _bfs_closure({PROTEIN_BINDING}, _load_children_by_go_id(session, new_snapshot))
-            ),
-        ),
-        target=target,
-    )
+
 
 
 def _reconcile_both_sides(
@@ -698,6 +625,10 @@ def compute_evaluation_data_reconciled(
             f"unknown truth_profile {window.truth_profile!r}; expected one of "
             f"{TRUTH_PROFILES}"
         )
+    if window.toi_rule not in GAIN_RULES:
+        raise ValueError(
+            f"unknown toi_rule {window.toi_rule!r}; expected one of {GAIN_RULES}"
+        )
     pivot_go_ids, pivot_aspect = _load_pivot_term_universe(session, window.pivot_snapshot_id)
     pivot_children = _load_children_by_go_id(session, window.pivot_snapshot_id)
 
@@ -711,6 +642,10 @@ def compute_evaluation_data_reconciled(
 
     old_by_ns = _apply_negatives(old_exp, merged_neg)
     new_by_ns = _apply_negatives(new_exp, merged_neg)
+    if window.toi_rule == "live_in_both_ends":
+        new_by_ns = _keep_within_toi(
+            new_by_ns, old_by_ns, _terms_of_interest(session, window)
+        )
     nk, lk, pk, pk_known, removed = _classify_protein_deltas(old_by_ns, new_by_ns)
     known = {
         p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()
@@ -740,6 +675,7 @@ __all__ = [
     "EvalContext",
     "EvaluationData",
     "compute_evaluation_data",
+    "GAIN_RULES",
     "ReconciledWindow",
     "TRUTH_PROFILES",
     "compute_evaluation_data_reconciled",

@@ -241,7 +241,7 @@ class TestWhereTheRuleIsAllowedToRun:
         assert source.index("project_direct_annotations") < source.index("_drop_binding_only")
 
     def test_the_profile_vocabulary_is_closed_and_defaults_to_today(self) -> None:
-        from protea.core.evaluation import TRUTH_PROFILES, ReconciledWindow
+        from protea.core._truth_rules import TRUTH_PROFILES, ReconciledWindow
 
         assert TRUTH_PROFILES == ("as_closed", "projected")
         window = ReconciledWindow(1, 2, 3, 4, 5)  # type: ignore[arg-type]
@@ -307,7 +307,7 @@ class TestWhichGraphItClimbs:
     T1_GRAPH = "graph-of-2025-07-22"
 
     def _window(self):
-        from protea.core.evaluation import ReconciledWindow
+        from protea.core._truth_rules import ReconciledWindow
 
         # Both native fields collapsed onto t0, as the real window's are.
         return ReconciledWindow(
@@ -329,7 +329,7 @@ class TestWhichGraphItClimbs:
         return _Session()
 
     def test_it_reads_the_annotation_sets_and_not_the_native_fields(self, monkeypatch) -> None:
-        import protea.core.evaluation as ev
+        import protea.core._truth_rules as ev
 
         asked: list[str] = []
 
@@ -352,7 +352,7 @@ class TestWhichGraphItClimbs:
     def test_a_window_whose_corpus_is_gone_raises(self) -> None:
         import pytest
 
-        import protea.core.evaluation as ev
+        import protea.core._truth_rules as ev
 
         class _Empty:
             def get(self, _model, _ident):
@@ -364,7 +364,7 @@ class TestWhichGraphItClimbs:
     def test_the_binding_closure_also_comes_from_t1(self, monkeypatch) -> None:
         # It feeds a counter about the binding rule, which runs on the t1
         # side right after; the subtree is not a constant across the series.
-        import protea.core.evaluation as ev
+        import protea.core._truth_rules as ev
 
         asked: list[str] = []
         monkeypatch.setattr(
@@ -379,3 +379,75 @@ class TestWhichGraphItClimbs:
         monkeypatch.setattr(ev, "_load_children_by_go_id", _children)
         ev._projection_request(self._session(), self._window())
         assert asked == [self.T1_GRAPH]
+
+
+class TestTheGainIsRestrictedBeforeItIsClassified:
+    """``kept = (new & toi) | (new & old)``, and each clause is a decision.
+
+    The lab's rule, from ``single_truth``: "only the gains are cut: the
+    categories come from the whole known state at q, and removed stays
+    old - new". It is the second of the two causes between PROTEA's delta and
+    theirs, and the only one that is not ``replaced_by``: on 211 -> 227 it is
+    one protein, ``Q9FNK4``, whose four gains were alive in 2022 and are
+    obsolete in 2025, so they fall outside the terms of interest and the
+    protein is not a target at all.
+
+    It does not move the figure -- cafaeval discards a protein with no truth
+    inside the terms of interest either way -- it moves the COUNTS, which is
+    what a published population is.
+    """
+
+    TOI = {"GO:0000001", "GO:0000002"}
+
+    def _trim(self, new, old):
+        from protea.core._truth_rules import _keep_within_toi
+
+        return _keep_within_toi(new, old, self.TOI)
+
+    def test_a_gain_outside_the_terms_of_interest_is_dropped(self) -> None:
+        kept = self._trim({"P1": {"F": {"GO:0009999"}}}, {})
+        assert kept == {}
+
+    def test_a_gain_inside_them_survives(self) -> None:
+        kept = self._trim({"P1": {"F": {"GO:0000001"}}}, {})
+        assert kept == {"P1": {"F": {"GO:0000001"}}}
+
+    def test_a_term_already_known_survives_even_from_outside(self) -> None:
+        # Otherwise removed = old - new would acquire a loss the restriction
+        # invented: the protein never lost it, we stopped looking at it.
+        kept = self._trim({"P1": {"F": {"GO:0009999"}}}, {"P1": {"F": {"GO:0009999"}}})
+        assert kept == {"P1": {"F": {"GO:0009999"}}}
+
+    def test_the_old_side_is_not_trimmed(self) -> None:
+        # The classification reads t0 WHOLE, which is what keeps a protein in
+        # PK rather than LK: a term outside the terms of interest that it
+        # already had still makes that aspect non-empty. This is why the
+        # function takes old and returns only new.
+        old = {"P1": {"F": {"GO:0009999"}}}
+        self._trim({"P1": {"F": {"GO:0000001"}}}, old)
+        assert old == {"P1": {"F": {"GO:0009999"}}}
+
+    def test_an_aspect_left_empty_is_dropped_and_not_left_blank(self) -> None:
+        kept = self._trim({"P1": {"F": {"GO:0009999"}, "P": {"GO:0000002"}}}, {})
+        assert kept == {"P1": {"P": {"GO:0000002"}}}
+
+    def test_the_default_rule_does_not_restrict_anything(self) -> None:
+        from protea.core._truth_rules import GAIN_RULES
+
+        assert GAIN_RULES[0] == "pivot_terms"
+        assert GAIN_RULES == ("pivot_terms", "live_in_both_ends")
+
+    def test_the_rule_is_read_from_the_window_and_defaults_to_today(self) -> None:
+        from protea.core._truth_rules import GAIN_RULES, ReconciledWindow
+
+        window = ReconciledWindow(1, 2, 3, 4, 5)  # type: ignore[arg-type]
+        assert window.toi_rule == GAIN_RULES[0]
+
+    def test_the_two_rules_are_independent(self) -> None:
+        # Four combinations, not two: the projection decides what a gain CAN
+        # be and the restriction decides which gains COUNT. Folding them into
+        # one field would be the single-field comparison this project keeps
+        # paying for.
+        from protea.core._truth_rules import GAIN_RULES, TRUTH_PROFILES
+
+        assert len(TRUTH_PROFILES) * len(GAIN_RULES) == 4

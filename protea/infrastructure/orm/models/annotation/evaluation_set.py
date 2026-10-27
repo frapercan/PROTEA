@@ -82,6 +82,7 @@ class EvaluationSet(Base):
             "old_native_snapshot_id",
             "new_native_snapshot_id",
             "truth_profile",
+            "toi_rule",
             name="uq_evaluation_set_identity",
         ),
         # ADR D40: keep the protocol-window vocabulary closed at the DB
@@ -97,6 +98,10 @@ class EvaluationSet(Base):
         CheckConstraint(
             "truth_profile IN ('as_closed', 'projected')",
             name="ck_evaluation_set_truth_profile",
+        ),
+        CheckConstraint(
+            "toi_rule IN ('pivot_terms', 'live_in_both_ends')",
+            name="ck_evaluation_set_toi_rule",
         ),
     )
 
@@ -160,6 +165,22 @@ class EvaluationSet(Base):
     #: build and not of the truth.
     truth_profile: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default="as_closed"
+    )
+    #: Which terms the GAIN may contain. ``pivot_terms`` is what every row
+    #: written before this column did: the gain is whatever the pivot can
+    #: name, and the restriction to the terms of interest happens later, when
+    #: cafaeval is told what to score. ``live_in_both_ends`` restricts it
+    #: BEFORE the delta is classified, which is what the lab's frame does: a
+    #: protein whose only gain is a term obsolete by t1 is not a target at
+    #: all.
+    #:
+    #: In the identity for the same reason as ``truth_profile``, and
+    #: SEPARATE from it for a different one: the projection decides what a
+    #: gain CAN be and this decides which gains COUNT. Four combinations, not
+    #: two, and folding them into one field would be the single-field
+    #: comparison this project keeps paying for.
+    toi_rule: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="pivot_terms"
     )
 
     old_annotation_set: Mapped[AnnotationSet] = relationship(

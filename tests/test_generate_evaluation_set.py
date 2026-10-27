@@ -474,9 +474,10 @@ class TestGenerateEvaluationSetExecute:
     def test_identity_lookup_filters_on_every_field_of_the_identity(self):
         """A lookup on fewer fields would serve a delta the caller did not ask for.
 
-        Six now, not five: ``truth_profile`` decides what the delta is, so a
-        lookup that ignored it would hand back the closed window to a caller
-        who asked for the projected one.
+        Seven now, not five. ``truth_profile`` decides how the t1 truth is
+        built and ``toi_rule`` decides which part of it counts as a gain, so
+        a lookup that ignored either would hand back a delta the caller did
+        not ask for.
         """
         session = MagicMock()
         old_set = _make_annotation_set(uuid.uuid4())
@@ -500,6 +501,7 @@ class TestGenerateEvaluationSetExecute:
             "old_native_snapshot_id",
             "new_native_snapshot_id",
             "truth_profile",
+            "toi_rule",
         }
 
 
