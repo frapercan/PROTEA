@@ -145,8 +145,34 @@ def test_the_material_is_resolved_and_not_the_raw_row() -> None:
     assert material["max_distance"] is None
 
 
-def test_an_unrecoverable_frame_is_still_refused() -> None:
+def test_a_row_with_no_population_is_still_refused() -> None:
     """Widening the material must not turn a row that cannot be attributed
-    into one that can."""
+    into one that can.
+
+    The evaluation set is the one field whose absence leaves nothing to seal:
+    without it the population is unknown, so there is no frame.
+    """
     assert _seal(evaluation_set_id=None) is None
-    assert _seal(information_accretion_set_id=None) is None
+
+
+def test_an_unweighted_frame_seals_and_seals_DIFFERENTLY() -> None:
+    """An absent accretion set is a weighting, not a missing field.
+
+    This used to be refused, on the reasoning that without the accretion set
+    "the weighting is unknown". It is not unknown: it is none. Null is a value
+    here exactly as it is for the caps, whose own rule two lines up in
+    ``frame_digest`` says a cap absent from the payload is encoded as null
+    rather than skipped so that it cannot collide with a run that set it.
+
+    Measured 2026-10-27 over the seven stored results: five sealed into four
+    frames and two came back unattributable, and those two were precisely the
+    runs with no ``information_accretion_set_id``. So an unweighted run could
+    never carry a seal, and two unweighted runs under different caps were
+    indistinguishable by the one column that exists to tell them apart.
+
+    The second assertion is the one that matters. Sealing both is useless if
+    they seal alike.
+    """
+    unweighted = _seal(information_accretion_set_id=None)
+    assert unweighted is not None
+    assert unweighted != _seal()
