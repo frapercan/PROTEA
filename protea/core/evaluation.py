@@ -63,8 +63,16 @@ from protea.core._evaluation_snapshot_routing import (
 from protea.core._evaluation_snapshot_routing import (
     compute_evaluation_data_for_sets as compute_evaluation_data_for_sets,
 )
-from protea.core._truth_projection import Graph, Projection, project_direct_annotations
+from protea.core._truth_projection import (
+    Graph,
+    Projection,
+    project_direct_annotations,
+)
+from protea.core._truth_projection import (
+    Request as ProjectionRequest,
+)
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
+from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 
 # Parquet column for the bucket each (protein, go_id) row belongs to.
 _GROUNDTRUTH_BUCKETS = ("nk", "lk", "pk", "known", "pk_known", "removed")
@@ -473,7 +481,7 @@ def _reconcile_experimental_side(
     native_snapshot_id: uuid.UUID,
     pivot_go_ids: set[str],
     pivot_aspect: dict[str, str],
-    project_onto: set[str] | None = None,
+    project: ProjectionRequest | None = None,
 ) -> tuple[dict[str, dict[str, set[str]]], Projection | None]:
     """CAFA steps 1–2 for experimental positives on one side.
 
@@ -485,25 +493,11 @@ def _reconcile_experimental_side(
     native_parents = _load_parents_by_go_id(session, native_snapshot_id)
     raw = _load_experimental_raw_go_ids(session, annotation_set_id)
     projection = None
-    if project_onto is not None:
+    if project is not None:
         # Before the binding rule and before any propagation: the rule is
         # about DIRECT annotations, and after either step the substitution
         # would mean something else.
-        native_live, native_aspect = _live_terms_with_aspect(session, native_snapshot_id)
-        projection = project_direct_annotations(
-            raw,
-            Graph(
-                parents=native_parents,
-                aspect=native_aspect,
-                live=native_live,
-                binding=frozenset(
-                    _bfs_closure(
-                        {PROTEIN_BINDING}, _load_children_by_go_id(session, native_snapshot_id)
-                    )
-                ),
-            ),
-            project_onto,
-        )
+        projection = project_direct_annotations(raw, project.graph, project.target)
     _drop_binding_only(session, native_snapshot_id, raw)
 
     out: dict[str, dict[str, set[str]]] = {}
@@ -571,6 +565,60 @@ def _apply_negatives(
     return cleaned
 
 
+def _projection_request(session: Session, window: ReconciledWindow) -> ProjectionRequest:
+    """Which graph the projection climbs, and which terms it may land on.
+
+    READ FROM THE ANNOTATION SETS, NOT FROM THE WINDOW'S NATIVE FIELDS, and
+    this is not a stylistic preference: it is the defect this function exists
+    to avoid, measured.
+
+    ``old_native_snapshot_id`` and ``new_native_snapshot_id`` do two jobs.
+    They say which graph closes each side, and they are the only other record
+    of which ontologies the window spans. Asking for a closure under t0's
+    graph alone -- supported, and done on the 211 -> 227 validation window --
+    means setting BOTH to t0, which erases t1.
+
+    The first wiring of this used them, and on that window it climbed the
+    2022-07-01 graph while believing it was climbing t1's. Asking "is this
+    term live at t1" of t0's graph answers no for every term t0 does not
+    have, so all 2,619 candidates were classified as obsolete-at-t1, nothing
+    projected at all, and the populations did not move. The lab projects
+    2,610 of those and remaps the other 9 through ``replaced_by``, which is
+    how the number told us which half was wrong: the terms were identified
+    correctly and the graph was not.
+
+    ``AnnotationSet.ontology_snapshot_id`` is fixed when the corpus is
+    loaded and is independent of any later closure choice, so it answers the
+    question the native fields were overloaded with. Same reason, same fix
+    and same regression test as the terms of interest in
+    ``_run_cafa_setup._window_end_snapshots``.
+    """
+    sides = []
+    for set_id in (window.old_annotation_set_id, window.new_annotation_set_id):
+        row = session.get(AnnotationSet, set_id)
+        if row is None:
+            raise ValueError(
+                f"EvaluationSet names an AnnotationSet that is gone ({set_id}); the "
+                "projection cannot be resolved from the window's two ends"
+            )
+        sides.append(row.ontology_snapshot_id)
+    old_snapshot, new_snapshot = sides
+
+    target, _ = _live_terms_with_aspect(session, old_snapshot)
+    live, aspect = _live_terms_with_aspect(session, new_snapshot)
+    return ProjectionRequest(
+        graph=Graph(
+            parents=_load_parents_by_go_id(session, new_snapshot),
+            aspect=aspect,
+            live=live,
+            binding=frozenset(
+                _bfs_closure({PROTEIN_BINDING}, _load_children_by_go_id(session, new_snapshot))
+            ),
+        ),
+        target=target,
+    )
+
+
 def _reconcile_both_sides(
     session: Session,
     window: ReconciledWindow,
@@ -594,9 +642,9 @@ def _reconcile_both_sides(
     same-snapshot path does: a term a protein is known NOT to have at either
     end is not a gain at the other.
     """
-    project_onto = None
-    if window.truth_profile == "projected":
-        project_onto, _ = _live_terms_with_aspect(session, window.old_native_snapshot_id)
+    project = (
+        _projection_request(session, window) if window.truth_profile == "projected" else None
+    )
 
     old_exp, _ = _reconcile_experimental_side(
         session,
@@ -611,7 +659,7 @@ def _reconcile_both_sides(
         window.new_native_snapshot_id,
         pivot_go_ids,
         pivot_aspect,
-        project_onto,
+        project,
     )
     merged_neg: dict[str, set[str]] = defaultdict(set)
     for side, native in (

@@ -180,7 +180,7 @@ class TestWhereTheRuleIsAllowedToRun:
     def test_the_experimental_side_does_not_project_unless_asked(self) -> None:
         from protea.core.evaluation import _reconcile_experimental_side
 
-        default = inspect.signature(_reconcile_experimental_side).parameters["project_onto"].default
+        default = inspect.signature(_reconcile_experimental_side).parameters["project"].default
         assert default is None
 
     def test_it_runs_before_the_binding_rule(self) -> None:
@@ -233,3 +233,101 @@ class TestTheWindowsIdentityHoldsTheProfile:
             GenerateEvaluationSetPayload(
                 old_annotation_set_id="a", new_annotation_set_id="b", truth_profile="remapped"
             )
+
+
+class TestWhichGraphItClimbs:
+    """The regression, and it is the one that actually happened.
+
+    ``old_native_snapshot_id`` and ``new_native_snapshot_id`` do two jobs:
+    they say which graph closes each side, and they are the only other record
+    of which ontologies the window spans. Asking for a closure under t0's
+    graph alone means setting BOTH to t0, which erases t1, and the 211 -> 227
+    validation window has that done.
+
+    The first wiring read them. On that window it climbed the 2022-07-01
+    graph while believing it was climbing t1's, so "is this term live at t1"
+    answered no for every term t0 does not have: 2,619 candidates classified
+    as obsolete, nothing projected, populations unmoved. The lab projects
+    2,610 of those and remaps 9 through ``replaced_by``, and that 2,610 + 9
+    is what said the terms had been identified correctly and the graph had
+    not.
+    """
+
+    T0_CORPUS = "corpus-of-t0"
+    T1_CORPUS = "corpus-of-t1"
+    T0_GRAPH = "graph-of-2022-07-01"
+    T1_GRAPH = "graph-of-2025-07-22"
+
+    def _window(self):
+        from protea.core.evaluation import ReconciledWindow
+
+        # Both native fields collapsed onto t0, as the real window's are.
+        return ReconciledWindow(
+            self.T0_CORPUS, self.T1_CORPUS, self.T0_GRAPH, self.T0_GRAPH, self.T0_GRAPH,
+            "projected",
+        )
+
+    def _session(self):
+        class _Set:
+            def __init__(self, snapshot: str) -> None:
+                self.ontology_snapshot_id = snapshot
+
+        sets = {self.T0_CORPUS: _Set(self.T0_GRAPH), self.T1_CORPUS: _Set(self.T1_GRAPH)}
+
+        class _Session:
+            def get(self, _model, ident):
+                return sets.get(ident)
+
+        return _Session()
+
+    def test_it_reads_the_annotation_sets_and_not_the_native_fields(self, monkeypatch) -> None:
+        import protea.core.evaluation as ev
+
+        asked: list[str] = []
+
+        def _live(_session, snapshot):
+            asked.append(snapshot)
+            return {f"live-of-{snapshot}"}, {f"live-of-{snapshot}": "F"}
+
+        monkeypatch.setattr(ev, "_live_terms_with_aspect", _live)
+        monkeypatch.setattr(ev, "_load_parents_by_go_id", lambda _s, snap: {"graph": {snap}})
+        monkeypatch.setattr(ev, "_load_children_by_go_id", lambda _s, _snap: {})
+
+        request = ev._projection_request(self._session(), self._window())
+
+        # One of each, in order: the landings come from t0, the climb from t1.
+        assert asked == [self.T0_GRAPH, self.T1_GRAPH]
+        assert request.target == {f"live-of-{self.T0_GRAPH}"}
+        assert request.graph.live == {f"live-of-{self.T1_GRAPH}"}
+        assert request.graph.parents == {"graph": {self.T1_GRAPH}}
+
+    def test_a_window_whose_corpus_is_gone_raises(self) -> None:
+        import pytest
+
+        import protea.core.evaluation as ev
+
+        class _Empty:
+            def get(self, _model, _ident):
+                return None
+
+        with pytest.raises(ValueError, match="AnnotationSet that is gone"):
+            ev._projection_request(_Empty(), self._window())
+
+    def test_the_binding_closure_also_comes_from_t1(self, monkeypatch) -> None:
+        # It feeds a counter about the binding rule, which runs on the t1
+        # side right after; the subtree is not a constant across the series.
+        import protea.core.evaluation as ev
+
+        asked: list[str] = []
+        monkeypatch.setattr(
+            ev, "_live_terms_with_aspect", lambda _s, snap: (set(), {})
+        )
+        monkeypatch.setattr(ev, "_load_parents_by_go_id", lambda _s, _snap: {})
+
+        def _children(_session, snapshot):
+            asked.append(snapshot)
+            return {}
+
+        monkeypatch.setattr(ev, "_load_children_by_go_id", _children)
+        ev._projection_request(self._session(), self._window())
+        assert asked == [self.T1_GRAPH]
