@@ -15,7 +15,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
-import { DATA_SURFACES_HAVE_DATA } from "@/lib/campaign";
+import { surfaceHasRows } from "@/lib/campaign";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/en" }));
 
@@ -96,7 +96,9 @@ describe("Sidebar nav", () => {
     // a flag: at most one.
     const graph = railHrefs().filter((h) => h.endsWith("/instrument/graph"));
     expect(graph.length).toBeLessThanOrEqual(1);
-    if (DATA_SURFACES_HAVE_DATA) expect(graph).toEqual(["/en/instrument/graph"]);
+    if (surfaceHasRows("/instrument/graph")) {
+      expect(graph).toEqual(["/en/instrument/graph"]);
+    }
   });
 
   it("hides the operator-gated maintenance page from an anonymous visitor", () => {
@@ -135,13 +137,35 @@ describe("Sidebar nav", () => {
     }
   });
 
-  it("hides the result surfaces only while there are no results", () => {
+  it("hides a result surface only while THAT surface has no rows", () => {
+    // The gate used to be one boolean over eleven routes, so a single
+    // empty table hid the six surfaces holding the campaign's work. Each
+    // route now answers for itself; the assertion is the same: offered
+    // iff it has rows.
     render(<Sidebar />);
     const hrefs = railHrefs();
-    const awaiting = ["/instrument/benchmark", "/instrument/evaluation", "/instrument/embeddings"];
-    for (const route of awaiting) {
-      expect(hrefs.some((h) => h.endsWith(route)), route).toBe(DATA_SURFACES_HAVE_DATA);
+    const gated = [
+      "/instrument/embeddings",
+      "/instrument/functional-annotation",
+      "/instrument/annotations",
+      "/instrument/query-sets",
+      "/instrument/evaluation",
+      "/instrument/graph",
+      "/instrument/benchmark",
+      "/instrument/datasets",
+      "/instrument/reranker",
+      "/instrument/scoring",
+    ];
+    for (const route of gated) {
+      expect(hrefs.some((h) => h.endsWith(route)), route).toBe(surfaceHasRows(route));
     }
+  });
+
+  it("does not gate a route the table never mentions", () => {
+    // The failure direction matters: an unlisted surface is visible and
+    // possibly empty, which an operator notices, rather than invisible
+    // and live, which took three weeks to notice.
+    expect(surfaceHasRows("/instrument/something-new")).toBe(true);
   });
 
   it("offers the code, which needs no data at all", () => {

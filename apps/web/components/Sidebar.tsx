@@ -44,7 +44,7 @@ import {
 import { publicBaseUrl } from "@/lib/api";
 import { useHasRole, useIsAuthenticated, useRole } from "@/lib/useRole";
 import { hasRole, type Role } from "@/lib/auth";
-import { DATA_SURFACES_HAVE_DATA, LINKS } from "@/lib/campaign";
+import { LINKS, surfaceHasRows } from "@/lib/campaign";
 
 /**
  * Primary navigation for PROTEA, rendered as a LEFT SIDEBAR rail.
@@ -433,7 +433,7 @@ export function Sidebar({
     items: group.items.filter(
       (item) =>
         (item.minRole === undefined || hasRole(role, item.minRole)) &&
-        (!item.needsData || DATA_SURFACES_HAVE_DATA),
+        (!item.needsData || surfaceHasRows(item.href)),
     ),
   })).filter((group) => group.items.length > 0);
 
