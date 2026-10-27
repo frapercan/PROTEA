@@ -8,8 +8,23 @@ import { baseUrl } from "@/lib/api";
 import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import StrataPanel from "@/components/StrataPanel";
 import { RunReceipt } from "@/components/RunReceipt";
+import { PRIMARY_METRIC, metricTooltip, metricValue } from "@/lib/metrics";
 
 type NsMetrics = {
+  /**
+   * The IA-weighted micro-averaged F: ``PRIMARY_METRIC``, and the only figure
+   * in this cell comparable to the LAFA / CAFA leaderboards. Optional because
+   * the ``_w`` keys are written only when a real IA table reached cafaeval.
+   */
+  f_micro_w?: number;
+  precision_w?: number;
+  recall_w?: number;
+  coverage_w?: number;
+  /**
+   * Unweighted, kept for history and NOT LAFA-comparable -- the
+   * EvaluationResult model says exactly that in its own docstring. This page
+   * printed it as the cell value.
+   */
   fmax: number;
   aupr?: number;
   smin?: number;
@@ -341,11 +356,16 @@ export default function EvaluationDetailPage() {
                                   className="px-2 py-2 text-right font-mono tabular-nums"
                                   title={
                                     cell
-                                      ? `fmax=${cell.fmax.toFixed(4)} coverage=${cell.coverage.toFixed(3)}`
+                                      ? `${metricTooltip(PRIMARY_METRIC)} · fmax=${cell.fmax.toFixed(4)} (unweighted) · coverage=${cell.coverage.toFixed(3)}`
                                       : "no data"
                                   }
                                 >
-                                  {cell ? cell.fmax.toFixed(3) : "—"}
+                                  {cell === undefined
+                                    ? "—"
+                                    : // metricValue returns null for an absent key rather than zero, so
+                                      // a cell scored without an IA says so instead of borrowing the
+                                      // unweighted figure and reading as the headline.
+                                      (metricValue(cell, PRIMARY_METRIC)?.toFixed(3) ?? "no IA")}
                                 </td>
                               );
                             }),
