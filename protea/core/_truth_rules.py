@@ -34,6 +34,7 @@ from protea.core._evaluation_graph import (
 )
 from protea.core._truth_projection import Graph
 from protea.core._truth_projection import Request as ProjectionRequest
+from protea.core._truth_remap import Remap, alias_rows, build_remap
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 
 #: How the t1 side's truth is built, by the name a payload asks for it with.
@@ -124,6 +125,35 @@ def _terms_of_interest(session: Session, window: ReconciledWindow) -> set[str]:
     new_live, _ = _live_terms_with_aspect(session, new_snapshot)
     return old_live & new_live
 
+def _remap_of_t0(session: Session, window: ReconciledWindow) -> Remap:
+    """The t0 snapshot's own statements about ids it no longer uses as primary.
+
+    FROM t0 AND ONLY t0, which is the lab's answer and the one that makes
+    sense: the question is what a t1 id is called in the space the window is
+    scored in. t1's own alias statements are about t1's space and would
+    answer a question nobody asked.
+
+    REFUSES WITHOUT THE MAP, and that refusal is what keeps the profile name
+    honest. ``projected`` means "remapped, then projected"; a build that
+    found no alias rows would silently mean "projected only", and the same
+    four letters would name two different truths in two different windows.
+    Load them with ``load_ontology_aliases``, which reads the ARCHIVED OBO
+    and verifies its sha256.
+    """
+    old_snapshot, _ = _window_end_snapshots(session, window)
+    rows = alias_rows(session, old_snapshot)
+    if not rows:
+        raise ValueError(
+            f"ontology snapshot {old_snapshot} has no rows in go_term_alias, so a "
+            "term obsolete at t0 with a published successor cannot be told from one "
+            "with none. Run load_ontology_aliases on it: without the map this "
+            "profile would quietly mean 'projected without remapping', which is a "
+            "different truth under the same name"
+        )
+    live, _ = _live_terms_with_aspect(session, old_snapshot)
+    return build_remap(rows, live)
+
+
 def _projection_request(session: Session, window: ReconciledWindow) -> ProjectionRequest:
     """Which graph the projection climbs, and which terms it may land on.
 
@@ -165,7 +195,12 @@ def _projection_request(session: Session, window: ReconciledWindow) -> Projectio
             ),
         ),
         target=target,
+        remap=_remap_of_t0(session, window),
+        # Resolved here, with the graph and the landings, because all three
+        # come from the SAME two ends and the trap is the same for all three:
+        # the native fields cannot answer which ontologies the window spans.
     )
+
 
 def _keep_within_toi(
     new_by_ns: dict[str, dict[str, set[str]]],
