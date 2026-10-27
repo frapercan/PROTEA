@@ -145,6 +145,9 @@ from protea.core.operations.run_interproscan_batch import (
 )
 from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
+from protea.core.operations.verify_window_against_reference import (
+    VerifyWindowAgainstReferencePayload,
+)
 
 # (op_name, payload_class, bad_payload, expected_error_field)
 #
@@ -646,6 +649,34 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "batch_size": 0,
         },
         ("batch_size",),
+    ),
+    (
+        # invariant: the whole worth of the claim this operation writes is that
+        # it names the bytes it was made against. A digest that is not 64 hex
+        # characters names no file, so the comparison would be published
+        # against an unidentified contract -- which is the state the row exists
+        # to replace.
+        "verify_window_against_reference",
+        VerifyWindowAgainstReferencePayload,
+        {
+            "evaluation_set_id": "set",
+            "contract_path": "contract.json",
+            "expected_sha256": "deadbeef",
+        },
+        ("expected_sha256",),
+    ),
+    (
+        # A blank path reads as "the contract that happens to be at the
+        # working directory", and a claim is not allowed to be about whatever
+        # was lying there.
+        "verify_window_against_reference",
+        VerifyWindowAgainstReferencePayload,
+        {
+            "evaluation_set_id": "set",
+            "contract_path": "   ",
+            "expected_sha256": "0" * 64,
+        },
+        ("contract_path",),
     ),
 ]
 

@@ -100,6 +100,9 @@ from protea.core.operations.seal_evaluation_frames import (
     SealEvaluationFramesOperation,
 )
 from protea.core.operations.stratify_evaluation import StratifyEvaluationOperation
+from protea.core.operations.verify_window_against_reference import (
+    VerifyWindowAgainstReferenceOperation,
+)
 
 
 def build_operation_registry() -> OperationRegistry:
@@ -122,6 +125,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(LoadInterProGoMappingOperation())
     registry.register(RunInterProScanBatchOperation())
     registry.register(GenerateEvaluationSetOperation())
+    registry.register(VerifyWindowAgainstReferenceOperation())
     registry.register(RunCafaEvaluationOperation())
     registry.register(BatchRescoreEvaluationOperation())
     registry.register(ComputeEmbeddingsOperation())

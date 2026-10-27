@@ -144,20 +144,76 @@ router = APIRouter(prefix="/graph", tags=["graph"])
 # ── The frame ─────────────────────────────────────────────────────────────────
 
 
+def _pivot_of(head: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The window's pivot snapshot, or nothing. Never a half-filled record:
+    an id with no version reads as a resolved pivot and is not one."""
+    if not head or not head["pivot_snapshot_id"]:
+        return None
+    return {"id": head["pivot_snapshot_id"], "version": head["pivot_version"]}
+
+
+def _accretion_of(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The accretion table in use, with the digest that fixes its bytes."""
+    if not row:
+        return None
+    return {"id": row["id"], "regime": row["regime"], "sha256": row["sha256"]}
+
+
+def _query_set_of(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The query set in use, with its size: a named set of unknown size
+    cannot say what a panel was drawn from."""
+    if not row:
+        return None
+    return {"id": row["id"], "name": row["name"], "entries": row["entries"]}
+
+
+def _reproductions_of(
+    record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """What this window reproduces, newest claim first.
+
+    A DECLARED frame is one a reader cannot misread. A FAITHFUL one computes
+    what somebody else's implementation computes from the same inputs, and no
+    amount of declaring gets the second. These rows are the only place the
+    platform states it.
+
+    Each carries its denominator, because "reproduces" over one counter and
+    over twenty-six are both true and only one of them says anything. The
+    digest and the commit are shortened for reading and are a prefix of what
+    the row holds, so a reader who needs the whole value goes to the row.
+    """
+    return [
+        {
+            "reference": r["reference_key"],
+            "compared": r["compared"],
+            "agreed": r["agreed"],
+            "disagreements": r["disagreements"],
+            "digest": r["reference_digest"][:12],
+            "commit": (r["reference_commit"] or "")[:12] or None,
+            "verified_on": r["verified_on"],
+        }
+        for r in record.get("reproductions", [])
+        if head and r["evaluation_set_id"] == head["id"]
+    ]
+
+
 def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     """The frame every number below is read in, and whether it is declared.
 
     ``declared`` is not "a frame exists". It is true only when the record leaves
     a reader nothing to guess: exactly one evaluation set, so there is a single
-    window under measurement; both ends of that window resolve to a release; a
-    pivot snapshot, an accretion table and a query set all resolve; and no
-    published result is unsealed. A result is sealed when its ``frame`` column
-    says which scoring frame it lives in. Today every one of them is null, which
-    is why the block below can be fully populated and still report false: the
-    frame is recoverable, but no published number states it.
+    window under measurement; both ends resolve to a release; a pivot snapshot,
+    an accretion table and a query set all resolve; and no published result is
+    unsealed. So the block can be fully populated and still report false -- the
+    frame recoverable, and no published number stating it.
+
+    ``reproduces`` is the other half, and the two are not the same property: a
+    declared frame is one a reader cannot misread, a faithful one computes what
+    another implementation computes. See :func:`_reproductions_of`.
     """
     heads = record["evaluation_sets"]
     head = heads[0] if heads else None
+    claims = _reproductions_of(record, head)
     accretion = next((a for a in record["accretion"] if a["in_use"]), None)
     query_set = next((q for q in record["query_sets"] if q["in_use"]), None)
     results = record["results"]
@@ -170,11 +226,7 @@ def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     # of a temporal benchmark: it bounds how much annotation could accumulate,
     # and therefore what any panel drawn from it could possibly resolve.
     span = _window_span(head) if head else None
-    pivot = (
-        {"id": head["pivot_snapshot_id"], "version": head["pivot_version"]}
-        if head and head["pivot_snapshot_id"]
-        else None
-    )
+    pivot = _pivot_of(head)
     return {
         "declared": bool(
             head is not None
@@ -191,18 +243,15 @@ def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         "window_role": head["window_role"] if head else None,
         "mode": head["mode"] if head else None,
         "pivot_snapshot": pivot,
-        "information_accretion_set": (
-            {"id": accretion["id"], "regime": accretion["regime"], "sha256": accretion["sha256"]}
-            if accretion
-            else None
-        ),
-        "query_set": (
-            {"id": query_set["id"], "name": query_set["name"], "entries": query_set["entries"]}
-            if query_set
-            else None
-        ),
+        "information_accretion_set": _accretion_of(accretion),
+        "query_set": _query_set_of(query_set),
         "sealed_rows": sealed,
         "unsealed_rows": unsealed,
+        # Declared says the record is unambiguous. This says it is faithful:
+        # the counters agree with an external implementation's, named with
+        # their denominator and the bytes they were checked against. Empty
+        # until verify_window_against_reference has run on this window.
+        "reproduces": claims,
     }
 
 
