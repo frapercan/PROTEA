@@ -80,7 +80,10 @@ from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
-from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
+from protea.infrastructure.orm.models.embedding.embedding_config import (
+    INGESTED_METHOD_BACKEND,
+    EmbeddingConfig,
+)
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 
@@ -332,7 +335,21 @@ class IngestMethodPredictionsOperation:
             if row is None:
                 raise ValueError(f"{model.__name__} {raw} not found")
             found.append(row)
-        return found[0], found[1], found[2]
+        config = found[0]
+        # The backend tag has to be the one this operation writes under, and
+        # the refusal is what makes it mean anything: ``_evaluation_leakage``
+        # treats ``ingested-method`` as evidence that the rows came from a
+        # model fitted elsewhere, and therefore demands a training cut. If any
+        # config could be named here, that evidence would be a convention.
+        if config.model_backend != INGESTED_METHOD_BACKEND:
+            raise ValueError(
+                f"EmbeddingConfig {config.id} has backend "
+                f"{config.model_backend!r}; an ingested method's set must point "
+                f"at a config whose backend is {INGESTED_METHOD_BACKEND!r}, "
+                "which is what tells the leakage guard this arm was fitted and "
+                "owes a cut"
+            )
+        return config, found[1], found[2]
 
     @staticmethod
     def _verify(path: str, expected: str | None, emit: EmitFn) -> str:

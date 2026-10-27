@@ -114,7 +114,20 @@ def test_fitted_is_decided_by_the_backend_tag():
     # Not by the cut column: an artifact fitted and undeclared has NULL
     # there, and reading NULL as "not fitted" waves through exactly the
     # case this exists to catch.
-    assert FITTED_BACKENDS == {"residue-sparse", "learned-code"}
+    #
+    # Pinned by equality on purpose. Adding a tag here decides that an arm
+    # owes a training cut, which is a decision and not a detail, so it has to
+    # arrive with a reason written down:
+    #
+    #   residue-sparse    written only by encode_residue_sparse
+    #   learned-code      written only by apply_learned_encoder
+    #   ingested-method   written only by ingest_method_predictions, for a
+    #                     method the platform did not score itself, which is a
+    #                     model fitted elsewhere against some release of our
+    #                     annotations. That operation refuses a config carrying
+    #                     any other tag, which is what keeps the tag evidence
+    #                     rather than a label.
+    assert FITTED_BACKENDS == {"residue-sparse", "learned-code", "ingested-method"}
 
 
 def test_the_boundary_is_where_the_guard_says_it_is():

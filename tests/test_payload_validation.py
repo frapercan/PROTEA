@@ -79,9 +79,6 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
 )
-from protea.core.operations.ingest_method_predictions import (
-    IngestMethodPredictionsPayload,
-)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsPayload,
 )
@@ -107,6 +104,9 @@ from protea.core.operations.fetch_uniprot_metadata import (
 )
 from protea.core.operations.generate_evaluation_set import (
     GenerateEvaluationSetPayload,
+)
+from protea.core.operations.ingest_method_predictions import (
+    IngestMethodPredictionsPayload,
 )
 from protea.core.operations.insert_proteins import InsertProteinsPayload
 from protea.core.operations.load_goa_annotations import (

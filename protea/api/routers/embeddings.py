@@ -12,6 +12,7 @@ from protea.api.auth.anon_quota import require_anon_quota
 from protea.api.cache import cached, refresh
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
+from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -142,6 +143,20 @@ def create_embedding_config(
     validated = _validate_embedding_config_body(body)
 
     with session_scope(factory) as session:
+        # The two provenance ids are foreign keys, so an id that names nothing
+        # would come back as a 500 from the constraint. Checked here, where
+        # there is a session, rather than in the body validator, which has
+        # none: a config that points at a missing cut is a 422.
+        for field, model in (
+            ("trained_on_annotation_set_id", AnnotationSet),
+            ("derived_from_embedding_config_id", EmbeddingConfig),
+        ):
+            ident = validated.get(field)
+            if ident is not None and session.get(model, UUID(str(ident))) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"errors": [f"{field} names no {model.__name__}"]},
+                )
         config = EmbeddingConfig(**validated)
         session.add(config)
         session.flush()
