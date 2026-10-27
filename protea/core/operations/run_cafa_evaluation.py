@@ -98,8 +98,12 @@ def _refuse_a_cyclic_snapshot(session: Session, snapshot: Any, emit: EmitFn) -> 
     emit(
         "run_cafa_evaluation.cyclic_snapshot",
         None,
-        {"snapshot_id": str(snapshot.id), "obo_version": snapshot.obo_version,
-         "components": len(components), "terms": terms},
+        {
+            "snapshot_id": str(snapshot.id),
+            "obo_version": snapshot.obo_version,
+            "components": len(components),
+            "terms": terms,
+        },
         "error",
     )
     raise ValueError(
@@ -193,11 +197,14 @@ class RunCafaEvaluationOperation:
         provenance = self._build_eval_provenance(p, inputs.eval_set, bool(reranker_models))
         eval_result = build_result_row(
             ResultRow(
-                result_id=result_id, inputs=inputs, payload=payload,
+                result_id=result_id,
+                inputs=inputs,
+                payload=payload,
                 scoring_config_id=p.scoring_config_id,
                 first_reranker_id=first_reranker_id,
                 reranker_config_snapshot=reranker_config_snapshot,
-                results=results, provenance=provenance,
+                results=results,
+                provenance=provenance,
                 max_sequence_rank=p.max_sequence_rank,
                 max_k_position=p.max_k_position,
             )
@@ -264,7 +271,8 @@ class RunCafaEvaluationOperation:
             data=data,
             snapshot=snapshot,
             pivot_snapshot_id=pivot_snapshot_id,
-            toi_go_ids=_load_terms_of_interest(session, pivot_snapshot_id),
+            toi_go_ids=_load_terms_of_interest(session, pivot_snapshot_id, eval_set, p.toi_rule),
+            toi_rule=p.toi_rule,
         )
         _emit_evaluation_setup_events(emit, inputs)
         if data.delta_proteins == 0:
