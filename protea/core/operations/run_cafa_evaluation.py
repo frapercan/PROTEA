@@ -60,6 +60,7 @@ from protea.core.operations._run_cafa_setup import (  # noqa: F401
     _PipelineCtx,
     bundle_run_context,
 )
+from protea.core.operations.compute_information_accretion import ia_key_for
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -475,7 +476,17 @@ class RunCafaEvaluationOperation:
             session,
             p.information_accretion_set_id,
         )
-        cls._enforce_band(p.band, snapshot, p.ia_file, emit)
+        # The guard gets the SOURCE reference, not the tempfile: a downloaded
+        # copy is always called ia.tsv and would tokenise to that. When the IA
+        # was pinned by set id, the canonical key for that set is the reference,
+        # and ia_key_for is the same builder compute_information_accretion wrote
+        # it with, so the two cannot drift.
+        band_ref = (
+            ia_key_for(p.information_accretion_set_id)
+            if p.information_accretion_set_id
+            else p.ia_file
+        )
+        cls._enforce_band(p.band, snapshot, band_ref, emit)
         return ia_path
 
     @staticmethod
@@ -495,13 +506,22 @@ class RunCafaEvaluationOperation:
         the band is checked against the source artifact, not a downloaded
         tempfile copy. No-op when ``declared_band`` is None (ad-hoc episode).
 
-        Note that the IA half of this guard resolves by BASENAME
-        (``band_registry.ia_token``), which cannot distinguish two tables built
-        from different corpora that happen to share a filename. An
-        ``InformationAccretionSet`` always serialises to ``IA.tsv``, so a band
-        whose token set omits that name rejects it. That is the safe direction:
-        promoting a computed table to authoritative for a band is a registry
-        decision, not something this resolver should infer.
+        THE IA HALF USED TO RESOLVE BY BASENAME, AND THAT IS WHY A PLATFORM
+        TABLE COULD NOT PASS. ``band_registry.ia_token`` returned the file name,
+        an ``InformationAccretionSet`` always serialises to ``IA.tsv``, and so a
+        band whose token set omitted that name rejected every computed table.
+        The note that used to sit here called that the safe direction, and it
+        was: the registry could not tell two tables apart, so inferring that one
+        was authoritative would have been a guess.
+
+        That premise is gone. ``ia_token`` now returns the SET ID for a platform
+        artifact, which is the three-axis identity the row is keyed by, so the
+        registry distinguishes them exactly. A band pins its own table by id --
+        ``v211`` pins ``80bbc9e4-...`` -- and the only thing left to get right is
+        giving this guard the source reference rather than the tempfile. Before
+        that, pinning the IA the traceable way (by set id) was the one way a
+        band-declared cell could NOT pass, which is the opposite of what both
+        guards are for.
         """
         if not declared_band:
             return
