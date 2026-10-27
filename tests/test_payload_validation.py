@@ -115,6 +115,9 @@ from protea.core.operations.load_goa_annotations import (
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingPayload,
 )
+from protea.core.operations.load_ontology_aliases import (
+    LoadOntologyAliasesPayload,
+)
 from protea.core.operations.load_ontology_snapshot import (
     LoadOntologySnapshotPayload,
 )
@@ -576,6 +579,15 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
     # name identifies the arm and is written on every row, and prediction_set
     # has no column for a method, so a set ingested without it is one nothing
     # downstream can tell apart from another method's.
+    # invariant: an alias map is only as trustworthy as the bytes it was read
+    # from, so the snapshot has to be named and the operation refuses one with
+    # no archive. An empty id would read the aliases of nothing.
+    (
+        "load_ontology_aliases",
+        LoadOntologyAliasesPayload,
+        {"ontology_snapshot_id": "   "},
+        ("ontology_snapshot_id",),
+    ),
     (
         "ingest_method_predictions",
         IngestMethodPredictionsPayload,
