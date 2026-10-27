@@ -75,7 +75,14 @@ _Q_ACCRETION = text(
                FROM evaluation_result er
                JOIN job j ON j.id = er.job_id
                WHERE j.payload ->> 'information_accretion_set_id' = ia.id::text
-           )                             AS in_use
+           )                             AS in_use,
+           -- The first published number this table weighted. ``ia.created_at``
+           -- dates the table; this dates its entry into the campaign.
+           (SELECT min(er.created_at)::date::text
+            FROM evaluation_result er
+            JOIN job j ON j.id = er.job_id
+            WHERE j.payload ->> 'information_accretion_set_id' = ia.id::text)
+                                         AS first_used_on
     FROM information_accretion_set ia
     ORDER BY ia.created_at
     """
@@ -86,7 +93,10 @@ _Q_QUERY_SETS = text(
     SELECT qs.id::text              AS id,
            qs.name                  AS name,
            COALESCE(e.entries, 0)   AS entries,
-           EXISTS (SELECT 1 FROM prediction_set ps WHERE ps.query_set_id = qs.id) AS in_use
+           EXISTS (SELECT 1 FROM prediction_set ps WHERE ps.query_set_id = qs.id) AS in_use,
+           (SELECT min(ps.created_at)::date::text
+            FROM prediction_set ps
+            WHERE ps.query_set_id = qs.id) AS first_used_on
     FROM query_set qs
     -- Grouped once and joined, not one correlated count per set. The
     -- correlated form cost 106 ms for two rows, because the planner cannot
@@ -143,9 +153,14 @@ _Q_SUBSTRATES = text(
            tr.source_version                        AS trained_on_version,
            tr.source_published_at::date::text       AS trained_on_date,
            COALESCE(cov.stored, 0)                  AS stored,
-           EXISTS (
-               SELECT 1 FROM prediction_set ps WHERE ps.embedding_config_id = ec.id
-           )                                        AS in_use,
+           use.first_used IS NOT NULL               AS in_use,
+           -- WHEN this configuration became a LEVEL, which is not when it was
+           -- registered. ``ec.created_at`` dates the row; a representation
+           -- becomes a level of this node the day something is retrieved
+           -- against it, and the two are months apart for the nine that never
+           -- were. Reading the wrong one would date every unbuilt alternative
+           -- as though it had been tried.
+           use.first_used::date::text               AS first_used_on,
            -- The SAME FACT as ``stored > 0``, and it used to be asked for a
            -- second time as a correlated EXISTS. That cost 905 ms of the
            -- graph's 1.37 s of reads, for ten rows: the planner cannot
@@ -170,6 +185,17 @@ _Q_SUBSTRATES = text(
         FROM sequence_embedding
         GROUP BY embedding_config_id
     ) cov ON cov.embedding_config_id = ec.id
+    -- Grouped for the same reason, and it REPLACES the correlated EXISTS that
+    -- answered ``in_use``: one scan of an eight-row table now answers both
+    -- whether a prediction set names this configuration and when the first one
+    -- did. Two correlated subqueries for one fact and its date is the shape
+    -- #1055 took out of this query. Verified equal on the live record before
+    -- the change: ten configurations, ten agreements.
+    LEFT JOIN (
+        SELECT embedding_config_id, min(created_at) AS first_used
+        FROM prediction_set
+        GROUP BY embedding_config_id
+    ) use ON use.embedding_config_id = ec.id
     ORDER BY ec.model_name
     """
 )
@@ -191,6 +217,7 @@ _Q_CORPUS = text(
 _Q_PREDICTION_SETS = text(
     """
     SELECT ps.id::text                             AS id,
+           ps.created_at::date::text               AS created_on,
            ps.embedding_config_id::text            AS embedding_config_id,
            ps.annotation_set_id::text              AS annotation_set_id,
            a.source                                AS bank_source,
@@ -233,6 +260,11 @@ _Q_BANKS = text(
     SELECT a.id::text       AS id,
            a.source         AS source,
            a.source_version AS source_version,
+           -- The day this corpus became a level: the first prediction set
+           -- drawn from it, not the day the release was loaded.
+           (SELECT min(ps.created_at)::date::text
+            FROM prediction_set ps
+            WHERE ps.annotation_set_id = a.id) AS first_used_on,
            EXISTS (
                SELECT 1 FROM prediction_set ps WHERE ps.annotation_set_id = a.id
            )                AS in_use
@@ -250,7 +282,12 @@ _Q_SCORING = text(
            sc.evidence_weights::text AS evidence_weights,
            sc.params::text           AS params,
            (SELECT count(*) FROM evaluation_result er WHERE er.scoring_config_id = sc.id)
-                                     AS results
+                                     AS results,
+           -- A scoring configuration becomes a level when it scores something.
+           (SELECT min(er.created_at)::date::text
+            FROM evaluation_result er
+            WHERE er.scoring_config_id = sc.id)
+                                     AS first_used_on
     FROM scoring_config sc
     ORDER BY sc.name
     """
@@ -263,6 +300,7 @@ _Q_SCORING = text(
 _Q_RESULTS = text(
     """
     SELECT er.id::text                  AS id,
+           er.created_at::date::text    AS created_on,
            er.evaluation_set_id::text   AS evaluation_set_id,
            er.prediction_set_id::text   AS prediction_set_id,
            er.scoring_config_id::text   AS scoring_config_id,
@@ -287,7 +325,7 @@ _Q_RESULTS = text(
 #: non-object raises rather than skipping.
 _Q_PANELS = text(
     with_arm_identity(
-    """
+        """
     SELECT er.id::text                              AS result_id,
            -- The seal, carried into the panels so a comparison can refuse two
            -- arms that were not scored under the same frame. Without it
@@ -469,7 +507,8 @@ _Q_FLOORS = text(
     f"""
     SELECT er.config ->> 'graph_node' AS node,
            er.config ->> 'floor'      AS floor,
-           er.name                    AS name
+           er.name                    AS name,
+           er.created_at::date::text  AS declared_on
     FROM experiment_run er
     WHERE er.config ? 'graph_node' AND er.config ? 'floor'
       AND er.status IN ({_STANDING_FLOOR_STATUSES})
