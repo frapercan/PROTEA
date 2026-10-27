@@ -22,6 +22,10 @@ Formulas
 --------
 linear
     score = Σ(w_i · s_i) / Σ(w_i)  for all active (w_i > 0, s_i available) signals.
+method_score
+    score = ``GOPrediction.method_score``, unchanged. For predictions whose
+    method scored its own candidates; the signal weights are not read at
+    all, and a row with no ``method_score`` raises instead of scoring 0.
 evidence_weighted
     Same as linear but the resolved evidence weight is always applied as a
     final multiplier on top of the weighted sum — even when its signal weight is
@@ -56,7 +60,14 @@ from protea.infrastructure.orm.base import Base
 
 FORMULA_LINEAR = "linear"
 FORMULA_EVIDENCE_WEIGHTED = "evidence_weighted"
-VALID_FORMULAS = (FORMULA_LINEAR, FORMULA_EVIDENCE_WEIGHTED)
+#: The score is the one the method produced: ``GOPrediction.method_score``,
+#: returned unchanged. No signal is read and no weight applies, which is the
+#: point -- a method that emits its own probability has nothing for the
+#: retrieval signals to average. ``weights`` is ignored under this formula,
+#: so a config that declares it says exactly one thing and cannot half-mix
+#: a method's number with a neighbour's distance.
+FORMULA_METHOD_SCORE = "method_score"
+VALID_FORMULAS = (FORMULA_LINEAR, FORMULA_EVIDENCE_WEIGHTED, FORMULA_METHOD_SCORE)
 
 # ---------------------------------------------------------------------------
 # Signal weight defaults
