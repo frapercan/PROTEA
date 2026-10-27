@@ -134,7 +134,7 @@ _COMPARE_TTL = 300.0
 #: project has already hit and named: a single-field comparison that was not.
 _ARMS = text(
     with_arm_identity(
-    """
+        """
     SELECT er.id            AS evaluation_result_id,
            ec.id            AS embedding_config_id,
            ec.model_name    AS model,
@@ -211,7 +211,7 @@ def _label(arms: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # Layer first when it is what differs, since it is the axis rung 2
         # declares. Otherwise the config id, which always distinguishes.
         suffix = f"L{layers}" if layers is not None else a["embedding_config_id"][:8]
-        a["display_name"] = f'{a["display_name"]} [{suffix}]'
+        a["display_name"] = f"{a['display_name']} [{suffix}]"
     return arms
 
 

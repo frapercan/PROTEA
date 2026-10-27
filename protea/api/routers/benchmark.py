@@ -387,11 +387,7 @@ def _grids(
     can ask "is this the absolute champion?" without the answer moving as
     filters change. Both are about the same window.
     """
-    window = (
-        str(evaluation_set_id)
-        if evaluation_set_id
-        else newest_window(eval_sets_payload, rows)
-    )
+    window = str(evaluation_set_id) if evaluation_set_id else newest_window(eval_sets_payload, rows)
     return _Grids(
         make_leaderboard(rows, cfg.categories, cfg.aspects, window=window),
         make_leaderboard(

@@ -371,9 +371,7 @@ def build_graph(
     }
 
 
-def _promote_head(
-    record: dict[str, list[dict[str, Any]]], evaluation_set_id: str | None
-) -> None:
+def _promote_head(record: dict[str, list[dict[str, Any]]], evaluation_set_id: str | None) -> None:
     """Move the requested evaluation set to the front of the record, in place.
 
     The graph reads its window from ``record["evaluation_sets"][0]`` in four
