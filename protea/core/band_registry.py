@@ -109,6 +109,13 @@ class Band:
 #     lafa_t0_Sep_2025/IA.tsv (39906 terms), the exact table the deployed LAFA
 #     endpoint scored against (docs/IA_PROVENANCE_v227.md). The generic
 #     IA_cafa6.tsv is a DIFFERENT corpus and is rejected for v227.
+##   * v211 (t0 = goa 211, 2022-09-16): latest GO release on/before that date is
+#     releases/2022-07-01, which is the snapshot annotation set 42dd5f0e is
+#     already bound to. IA = the table over that snapshot and that corpus
+#     (80bbc9e4, 43558 terms, lafa regime). This is the LONG VALIDATION window,
+#     211 -> 227: it ends ON the board mark, so split_registry lets it inform a
+#     decision without a waiver, which is what makes it the window where
+#     selection is allowed to happen.
 #
 # PROTEA had only ingested releases/2024-03-28 and releases/2026-01-23, so the
 # pre-registry v226/v227/v230 eval_sets all shared releases/2026-01-23 (a
@@ -129,10 +136,33 @@ BANDS: dict[str, Band] = {
             "numbers; kept for history."
         ),
     ),
+    "v211": Band(
+        name="v211",
+        obo_versions=frozenset({"releases/2022-07-01"}),
+        ia_tokens=frozenset({"80bbc9e4-c037-4416-a06e-4982eba58008"}),
+        t0_cutoff=date(2022, 9, 16),
+        description=(
+            "Long validation window (GOA v211 to v227, t0 2022-09-16). Congruent "
+            "GO ontology = releases/2022-07-01, the latest release on or before "
+            "t0 and the snapshot the v211 annotation set already carries. IA = "
+            "the table over that snapshot and that corpus (43558 terms, lafa "
+            "regime). This window ENDS ON the board mark, so it may inform a "
+            "decision without the holdout waiver: it is where selection belongs, "
+            "and the only window in the registry where that is true. It also "
+            "covers 1084 days against v227's 181, which is why it has samples in "
+            "nearly every identity and length band and the test window does not."
+        ),
+    ),
     "v227": Band(
         name="v227",
         obo_versions=frozenset({"releases/2025-07-22"}),
-        ia_tokens=frozenset({"IA.tsv", "IA-swissprot-exp-v227.txt"}),
+        ia_tokens=frozenset(
+            {
+                "IA.tsv",  # LAFA's own lafa_t0_Sep_2025/IA.tsv, supplied
+                "IA-swissprot-exp-v227.txt",  # the lab recompute, r=0.98
+                "1aaff913-46b6-4c44-b7f7-13de0e4676c5",  # ours, 39906 terms
+            }
+        ),
         t0_cutoff=date(2025, 9, 4),
         description=(
             "Deployed LAFA window (GOA v227 to v230, t0 2025-09-04). Congruent "
@@ -146,16 +176,52 @@ BANDS: dict[str, Band] = {
 }
 
 
+#: A platform-produced IA artifact, whose key ``compute_information_accretion``
+#: builds as ``information_accretion/<ia_set_id>/IA.tsv``. The basename is the
+#: same for every one of them, so the SET ID is what identifies it.
+_PLATFORM_IA_KEY = re.compile(
+    r"(?:^|/)information_accretion/"
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/[^/]+$",
+    re.IGNORECASE,
+)
+
+
 def ia_token(ia_ref: str | None) -> str | None:
     """Stable IA-artifact token from a path or URL.
 
-    The token is the basename (``IA.tsv``, ``IA_cafa6.tsv``, ...), which is how
-    bands identify their IA without pinning a host-specific absolute path or a
-    URL. Query strings and fragments are stripped. ``None`` for a missing ref.
+    For an IA this platform produced, the token is its **set id**. For anything
+    else it is the basename (``IA_cafa6.tsv``, LAFA's own ``IA.tsv``, ...), which
+    is how bands identify a supplied table without pinning a host-specific
+    absolute path. Query strings and fragments are stripped; ``None`` for a
+    missing ref.
+
+    WHY THE BASENAME IS NOT ENOUGH, and it was not a theoretical gap.
+    ``compute_information_accretion`` names every artifact it writes ``IA.tsv``
+    (``ia_key_for``), so all 17 IA sets on this server share that basename while
+    differing in all three axes that define an IA table: the ontology snapshot,
+    the annotation corpus and the evidence regime. With the basename as the
+    token, any of them satisfied any band that accepts ``IA.tsv``.
+
+    MEASURED on 2026-10-27 against the registry as it then stood: a cell
+    declaring ``v227`` -- the LAFA-comparable band -- and handed the IA computed
+    over the **2022** snapshot and the **2022** corpus
+    (``information_accretion/80bbc9e4-.../IA.tsv``, 43558 terms) was ACCEPTED,
+    because its basename is ``IA.tsv`` and v227 accepts ``IA.tsv`` for LAFA's own
+    file. The obo_version check could not catch it: the snapshot and the IA are
+    separate fields, and the snapshot was the right one. So the guard whose
+    docstring says it rejects "a cell whose snapshot or IA come from a foreign
+    band" rejected the snapshot and admitted the IA.
+
+    The set id closes it because the id IS the identity: it is minted per
+    ``(ontology_snapshot_id, annotation_set_id, evidence_regime)``, which is the
+    table's own unique constraint.
     """
     if not ia_ref:
         return None
     cleaned = re.split(r"[?#]", ia_ref, maxsplit=1)[0].rstrip("/")
+    platform = _PLATFORM_IA_KEY.search(cleaned)
+    if platform:
+        return platform.group(1).lower()
     base = os.path.basename(cleaned)
     return base or None
 

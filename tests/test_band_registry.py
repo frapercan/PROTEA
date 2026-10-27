@@ -333,3 +333,81 @@ class TestManifestCutoffViolations:
 
     def test_no_cutoff_key_is_noop(self):
         assert manifest_cutoff_violations({"obo_version": "releases/2099-01-01"}) == []
+
+class TestPlatformIaIsIdentifiedByItsSetId:
+    """The basename cannot tell two platform IA tables apart, and that was a hole.
+
+    ``compute_information_accretion`` names every artifact it writes ``IA.tsv``
+    (``ia_key_for``), so all 17 IA sets on the server share that basename while
+    differing in every axis that defines an IA table. With the basename as the
+    token, any of them satisfied any band accepting ``IA.tsv``.
+    """
+
+    #: Computed over the 2022 snapshot and the 2022 corpus, 43558 terms.
+    IA_211 = (
+        "s3://protea/information_accretion/"
+        "80bbc9e4-c037-4416-a06e-4982eba58008/IA.tsv"
+    )
+    #: Computed over the v227 snapshot and corpus, 39906 terms -- LAFA's count.
+    IA_227 = (
+        "s3://protea/information_accretion/"
+        "1aaff913-46b6-4c44-b7f7-13de0e4676c5/IA.tsv"
+    )
+
+    def test_a_platform_artifact_tokenises_to_its_set_id(self):
+        assert ia_token(self.IA_211) == "80bbc9e4-c037-4416-a06e-4982eba58008"
+        assert ia_token(self.IA_227) == "1aaff913-46b6-4c44-b7f7-13de0e4676c5"
+
+    def test_a_supplied_file_still_tokenises_to_its_basename(self):
+        # LAFA's own table and the historical benchmark one are supplied, not
+        # produced here, and bands identify them by name.
+        assert ia_token("/data/lafa_t0_Sep_2025/IA.tsv") == "IA.tsv"
+        assert ia_token("https://example.com/data/IA_cafa6.tsv") == "IA_cafa6.tsv"
+
+    def test_the_hole_is_closed(self):
+        # Measured 2026-10-27: this combination was ACCEPTED. A cell declaring
+        # the LAFA-comparable band, with the right snapshot, was handed the IA
+        # of a window three years earlier and the guard admitted it, because
+        # both artifacts are called IA.tsv.
+        with pytest.raises(BandMismatchError):
+            assert_band_consistency(
+                "v227", obo_version="releases/2025-07-22", ia_ref=self.IA_211
+            )
+
+    def test_each_band_still_accepts_its_own(self):
+        assert (
+            assert_band_consistency(
+                "v227", obo_version="releases/2025-07-22", ia_ref=self.IA_227
+            ).name
+            == "v227"
+        )
+        assert (
+            assert_band_consistency(
+                "v211", obo_version="releases/2022-07-01", ia_ref=self.IA_211
+            ).name
+            == "v211"
+        )
+
+    def test_the_mirror_case_is_refused_too(self):
+        with pytest.raises(BandMismatchError):
+            assert_band_consistency(
+                "v211", obo_version="releases/2022-07-01", ia_ref=self.IA_227
+            )
+
+
+class TestV211IsTheWindowWhereSelectionBelongs:
+    def test_it_ends_on_the_board_mark_so_it_needs_no_waiver(self):
+        from datetime import date
+
+        from protea.core.split_registry import BOARD_MARK, release
+
+        # 211 -> 227 ends ON the mark, so assert_window_may_inform lets it
+        # inform a decision. That is what makes it the selection window, and
+        # the test window is the one that cannot be.
+        assert release(BOARD_MARK).published == date(2025, 9, 4)
+        assert not date(2025, 9, 4) > release(BOARD_MARK).published
+
+    def test_its_ontology_is_the_one_current_at_its_t0(self):
+        band = resolve_band("v211")
+        assert band.obo_versions == frozenset({"releases/2022-07-01"})
+        assert band.t0_cutoff.isoformat() == "2022-09-16"
