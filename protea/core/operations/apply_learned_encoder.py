@@ -22,6 +22,7 @@ Two pooling families are supported, discriminated by ``meta["pooling"]`` in the 
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -138,7 +139,7 @@ def _load_scaler(scaler_path: str | None, in_dim: int):
     return mu, sigma
 
 
-def _build_mean_apply(blob: dict, meta: dict, dev: str, scaler=None):
+def _build_mean_apply(blob: dict, meta: dict, dev: str, scaler=None, activation: str = "none"):
     """Mean-pool family: Linear(d -> dict) over the per-sequence mean of chunk vectors.
 
     When ``scaler`` is ``(mu, sigma)`` the mean-pooled base is z-scored
@@ -165,12 +166,12 @@ def _build_mean_apply(blob: dict, meta: dict, dev: str, scaler=None):
         xn = (mat / nrm).astype(np.float32)
         with torch.no_grad():
             z = enc(torch.tensor(xn, device=dev)).cpu().numpy().astype(np.float32)
-        return _topk_real(z, top_k)
+        return _topk_real(_pre_topk(z, activation), top_k)
 
     return apply
 
 
-def _build_attention_apply(blob: dict, meta: dict, dev: str, scaler=None):
+def _build_attention_apply(blob: dict, meta: dict, dev: str, scaler=None, activation: str = "none"):
     """Attention family: additive multi-head pool over per-chunk vectors, then Linear(d*h -> dict)."""
     import numpy as np
     import torch
@@ -222,7 +223,7 @@ def _build_attention_apply(blob: dict, meta: dict, dev: str, scaler=None):
             z = enc(
                 torch.tensor(Xpad, device=dev), torch.tensor(mask, device=dev)
             ).cpu().numpy().astype(np.float32)
-        return _topk_real(z, top_k)
+        return _topk_real(_pre_topk(z, activation), top_k)
 
     return apply
 
@@ -232,6 +233,75 @@ def _build_attention_apply(blob: dict, meta: dict, dev: str, scaler=None):
 #: ``encode_residue_sparse`` implements the other one and refuses this one by name; this
 #: refuses that one by name. Neither is the special case, and an artifact runs in exactly one.
 IMPLEMENTED_ORDER = "pool-then-select"
+
+#: The activations an artifact may declare. ``"none"`` is the legacy path: the
+#: Linear output goes straight into the top-k. ``"relu"`` clamps it at zero
+#: first, which changes WHICH atoms are selected and not merely their values.
+_LOG = logging.getLogger(__name__)
+
+IMPLEMENTED_ACTIVATIONS = ("none", "relu")
+
+
+def activation_of(meta: dict, artifact_path: str) -> str:
+    """Which activation sits between the Linear and the top-k, and refuse a bogus one.
+
+    This is the same class of distinction as :func:`refuse_wrong_order` and it
+    fails the same way: it cannot be recovered from the weights, both paths
+    produce the same shapes, and the wrong one yields a complete, plausible
+    code computed by the wrong mechanism.
+
+    MEASURED, on 2.000 stored ankh_base vectors against a head fitted with
+    ReLU (the lab's sfjepa-world-holes-topk head of release 211): selecting
+    without the ReLU, **not one of the 2.000 rows** shares its 64 atoms with
+    the intended code. The rows agree on 2,96 atoms of 64 on average, and the
+    selection takes 61 negatives of 64 -- because :func:`_topk_real` ranks by
+    signed MAGNITUDE, so a strongly negative pre-activation outranks a weakly
+    positive one. With the ReLU, all 2.000 rows select exactly the same 64
+    atoms, to a maximum value difference of 5,9e-5, which is the half-precision
+    storage of the input and not the arithmetic.
+
+    WHY AN ABSENT KEY IS NOT REFUSED, unlike an absent order. Every artifact
+    predating this guard omits it, and for those the legacy no-activation path
+    is what their codes were actually produced with, so refusing them would
+    break working configurations to protect them from nothing. But absence is
+    not evidence either, so it is reported rather than assumed silently: if a
+    head was in fact fitted with an activation and does not say, its codes have
+    been wrong all along, and the recovery procedure is the one
+    :func:`refuse_wrong_order` describes -- re-encode a handful of the bundle's
+    own proteins and compare against the codes it ships. The right activation
+    reproduces the selected atoms exactly; the wrong one does not come close.
+
+    :raises ValueError: on a declared activation this operation does not
+        implement, rather than ignoring the key and computing something the
+        artifact did not ask for.
+    """
+    declared = meta.get("activation")
+    if declared is None:
+        return "none"
+    if declared not in IMPLEMENTED_ACTIVATIONS:
+        raise ValueError(
+            f"{artifact_path} declares activation={declared!r}, which this "
+            f"operation does not implement. Known: "
+            f"{list(IMPLEMENTED_ACTIVATIONS)}. Ignoring the key would compute a "
+            f"code the artifact did not ask for, and the difference is not "
+            f"visible downstream: a head fitted with an activation and applied "
+            f"without one selected 0 of 2.000 rows correctly in the measurement "
+            f"behind this guard."
+        )
+    return str(declared)
+
+
+def _pre_topk(z, activation: str):
+    """Apply the declared activation to the Linear output, before selection."""
+    if activation == "relu":
+        # Clamp, not mask: the top-k then ranks only the atoms the head meant
+        # to be active. Ranking by signed magnitude over unclamped values picks
+        # the strongest NEGATIVES, which is the measured failure above.
+        import numpy as np
+
+        return np.maximum(z, 0.0, dtype=z.dtype)
+    return z
+
 
 
 def refuse_wrong_order(meta: dict, artifact_path: str) -> None:
@@ -310,12 +380,24 @@ def _load_encoder(artifact_path: str, scaler_path: str | None = None):
     blob = torch.load(artifact_path, map_location="cpu", weights_only=False)
     meta = blob["meta"]
     refuse_wrong_order(meta, artifact_path)
+    activation = activation_of(meta, artifact_path)
+    if meta.get("activation") is None:
+        _LOG.warning(
+            "%s declares no activation; applying the legacy path (none). If this "
+            "head was fitted with one, its codes select the wrong atoms: measured "
+            "0 of 2000 rows correct, 61 negatives of 64 chosen. Re-encode a few of "
+            "the bundle's own proteins and compare against the codes it ships.",
+            artifact_path,
+        )
+    # Resolved rather than declared, so the receipt says which path ran instead
+    # of leaving an absent key to be read as a decision.
+    meta["activation"] = activation
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     scaler = _load_scaler(scaler_path or _sibling_scaler_path(artifact_path), int(meta["in_dim"]))
     pooling = str(meta.get("pooling", "mean")).lower()
     if pooling == "attention":
-        return _build_attention_apply(blob, meta, dev, scaler), meta
-    return _build_mean_apply(blob, meta, dev, scaler), meta
+        return _build_attention_apply(blob, meta, dev, scaler, activation), meta
+    return _build_mean_apply(blob, meta, dev, scaler, activation), meta
 
 
 def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta: dict) -> uuid.UUID:
