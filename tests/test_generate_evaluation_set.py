@@ -474,10 +474,12 @@ class TestGenerateEvaluationSetExecute:
     def test_identity_lookup_filters_on_every_field_of_the_identity(self):
         """A lookup on fewer fields would serve a delta the caller did not ask for.
 
-        Seven now, not five. ``truth_profile`` decides how the t1 truth is
-        built and ``toi_rule`` decides which part of it counts as a gain, so
-        a lookup that ignored either would hand back a delta the caller did
-        not ask for.
+        Eight now, not five. ``truth_profile`` decides how the t1 truth is
+        built, ``toi_rule`` which part of it counts as a gain, and
+        ``not_codes`` which denials may take it away, so a lookup that
+        ignored any of them would hand back a delta the caller did not ask
+        for. The literal list is the point: it is what fails when a ninth
+        field is added to the identity and not to the lookup.
         """
         session = MagicMock()
         old_set = _make_annotation_set(uuid.uuid4())
@@ -502,7 +504,11 @@ class TestGenerateEvaluationSetExecute:
             "new_native_snapshot_id",
             "truth_profile",
             "toi_rule",
+            "not_codes",
         }
+        assert len(session.query.return_value.filter_by.call_args.kwargs) == len(
+            _Identity._fields
+        )
 
 
 class TestDeltaModeAndEmptyRefusal:

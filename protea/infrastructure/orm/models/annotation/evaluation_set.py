@@ -83,6 +83,7 @@ class EvaluationSet(Base):
             "new_native_snapshot_id",
             "truth_profile",
             "toi_rule",
+            "not_codes",
             name="uq_evaluation_set_identity",
         ),
         # ADR D40: keep the protocol-window vocabulary closed at the DB
@@ -102,6 +103,10 @@ class EvaluationSet(Base):
         CheckConstraint(
             "toi_rule IN ('pivot_terms', 'live_in_both_ends')",
             name="ck_evaluation_set_toi_rule",
+        ),
+        CheckConstraint(
+            "not_codes IN ('any', 'experimental')",
+            name="ck_evaluation_set_not_codes",
         ),
     )
 
@@ -182,6 +187,18 @@ class EvaluationSet(Base):
     toi_rule: Mapped[str] = mapped_column(
         String(24), nullable=False, server_default="pivot_terms"
     )
+    #: Which NOT annotations may take truth away. ``any`` is what every row
+    #: written before this column did: every NOT row whatever its evidence,
+    #: so a ``NOT|IBA`` removes a term from a truth whose positives are
+    #: experimental only. ``experimental`` restricts the negation to the
+    #: thirteen experimental codes, which is the lab's frame and what
+    #: Francisco declared for the long validation window on 2026-10-27.
+    #:
+    #: In the identity for the same reason as the other two: it changes the
+    #: delta. Measured on 211 -> 227 it is three proteins of the delta, two
+    #: of them LK, and nine projected entries: small, and exactly the
+    #: difference between reproducing the lab's truth and missing it.
+    not_codes: Mapped[str] = mapped_column(String(16), nullable=False, server_default="any")
 
     old_annotation_set: Mapped[AnnotationSet] = relationship(
         "AnnotationSet", foreign_keys=[old_annotation_set_id]

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evaluation import (
     GAIN_RULES,
+    NOT_CODE_RULES,
     TRUTH_PROFILES,
     ReconciledWindow,
     compute_evaluation_data,
@@ -29,7 +30,7 @@ from protea.infrastructure.storage import get_artifact_store
 
 
 class _Identity(NamedTuple):
-    """The six fields that decide which delta a row holds.
+    """The seven fields that decide which delta a row holds.
 
     Kept as one object because they travel together: every lookup, every
     refusal and every insert needs all of them, and a signature that took
@@ -50,6 +51,7 @@ class _Identity(NamedTuple):
     new_native: uuid.UUID
     truth_profile: str = TRUTH_PROFILES[0]
     toi_rule: str = GAIN_RULES[0]
+    not_codes: str = NOT_CODE_RULES[0]
 
 
 class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
@@ -84,6 +86,13 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     # the profile: the projection decides what a gain CAN be, this decides
     # which gains COUNT.
     toi_rule: str = GAIN_RULES[0]
+    # Which NOT annotations may take truth away. ``any`` (the default) is what
+    # every stored window did: every NOT row whatever its evidence.
+    # ``experimental`` restricts the negation to the thirteen experimental
+    # codes, which is the lab's frame. Independent of the other two: they
+    # decide what a gain can be and which gains count, this decides which
+    # denials bind.
+    not_codes: str = NOT_CODE_RULES[0]
 
     @field_validator("truth_profile")
     @classmethod
@@ -97,6 +106,13 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     def _known_gain_rule(cls, value: str) -> str:
         if value not in GAIN_RULES:
             raise ValueError(f"unknown toi_rule {value!r}; expected one of {GAIN_RULES}")
+        return value
+
+    @field_validator("not_codes")
+    @classmethod
+    def _known_not_rule(cls, value: str) -> str:
+        if value not in NOT_CODE_RULES:
+            raise ValueError(f"unknown not_codes {value!r}; expected one of {NOT_CODE_RULES}")
         return value
     #: The sentence a caller must repeat verbatim to build a window that reads
     #: past the board's mark. Deliberately not a boolean: the holdout is meant
@@ -196,6 +212,7 @@ class GenerateEvaluationSetOperation:
             new_native,
             p.truth_profile,
             p.toi_rule,
+            p.not_codes,
         )
         short = self._maybe_reuse_existing(session, ident, p.window_role, emit)
         if short is not None:
@@ -212,6 +229,7 @@ class GenerateEvaluationSetOperation:
             new_native_snapshot_id=new_native,
             truth_profile=p.truth_profile,
             toi_rule=p.toi_rule,
+            not_codes=p.not_codes,
             stats=stats,
             window_role=p.window_role,
             job_id=job_id_from_payload(payload),
@@ -284,7 +302,12 @@ class GenerateEvaluationSetOperation:
         emit(
             "generate_evaluation_set.computing_delta",
             None,
-            {"mode": mode, "truth_profile": ident.truth_profile, "toi_rule": ident.toi_rule},
+            {
+                "mode": mode,
+                "truth_profile": ident.truth_profile,
+                "toi_rule": ident.toi_rule,
+                "not_codes": ident.not_codes,
+            },
             "info",
         )
         if mode == "same_snapshot":
@@ -302,6 +325,7 @@ class GenerateEvaluationSetOperation:
                     ident.pivot_id,
                     ident.truth_profile,
                     ident.toi_rule,
+                    ident.not_codes,
                 ),
             )
         stats = data.stats()
@@ -309,6 +333,7 @@ class GenerateEvaluationSetOperation:
         stats["pivot_ontology_snapshot_id"] = str(ident.pivot_id)
         stats["truth_profile"] = ident.truth_profile
         stats["toi_rule"] = ident.toi_rule
+        stats["not_codes"] = ident.not_codes
         emit("generate_evaluation_set.delta_done", None, stats, "info")
         return data, stats
 
@@ -366,6 +391,7 @@ class GenerateEvaluationSetOperation:
                 new_native_snapshot_id=ident.new_native,
                 truth_profile=ident.truth_profile,
                 toi_rule=ident.toi_rule,
+                not_codes=ident.not_codes,
             )
             .one_or_none()
         )
