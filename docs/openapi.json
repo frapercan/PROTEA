@@ -7198,6 +7198,26 @@
       "get": {
         "description": "The experiment graph as the record currently supports it.\n\nReads and returns. The session is opened directly rather than through\n``session_scope``, which commits on exit; there is nothing to commit and a\nreporting surface should not hold a transaction open that could.",
         "operationId": "get_graph_v1_graph_get",
+        "parameters": [
+          {
+            "description": "Which window to read. Defaults to the most recently built one, which is the historical behaviour; 404 on an unknown id rather than falling back to another window.",
+            "in": "query",
+            "name": "evaluation_set_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which window to read. Defaults to the most recently built one, which is the historical behaviour; 404 on an unknown id rather than falling back to another window.",
+              "title": "Evaluation Set Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7210,6 +7230,31 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "The requested evaluation set is not in the experiment record. Declared because the alternative -- answering with another window's numbers -- is the failure this parameter exists to prevent."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Graph",

@@ -103,7 +103,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory, get_settings
@@ -322,8 +322,67 @@ def build_graph(
     }
 
 
-@router.get("")
+def _promote_head(
+    record: dict[str, list[dict[str, Any]]], evaluation_set_id: str | None
+) -> None:
+    """Move the requested evaluation set to the front of the record, in place.
+
+    The graph reads its window from ``record["evaluation_sets"][0]`` in four
+    places, and the query returns every set ordered by ``created_at DESC``. So
+    without this the surface shows whichever window was built LAST and offers
+    no way to ask for another -- which was fine with one window and is not with
+    three: the campaign has a long validation (211 to 227), a single-pass test
+    (227 to 230) and LAFA's external window, and a reader following the
+    argument has to be able to point the page at the one being discussed.
+
+    Reordering rather than filtering, because the other rows are not noise: the
+    ``declared`` block counts the published results and the sets it did not
+    choose still belong to the record.
+
+    :raises HTTPException: 404 on an id that is not in the record. Falling back
+        to the newest window would answer a question about one window with the
+        numbers of another, and nothing in the response would say so.
+    """
+    if evaluation_set_id is None:
+        return
+    sets = record["evaluation_sets"]
+    wanted = str(evaluation_set_id)
+    for i, row in enumerate(sets):
+        if str(row.get("id")) == wanted:
+            if i:
+                sets.insert(0, sets.pop(i))
+            return
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            f"evaluation set {wanted} is not in the experiment record. "
+            "Omit the parameter to read the most recently built window."
+        ),
+    )
+
+
+@router.get(
+    "",
+    responses={
+        404: {
+            "description": (
+                "The requested evaluation set is not in the experiment record. "
+                "Declared because the alternative -- answering with another "
+                "window's numbers -- is the failure this parameter exists to "
+                "prevent."
+            )
+        }
+    },
+)
 def get_graph(
+    evaluation_set_id: str | None = Query(
+        None,
+        description=(
+            "Which window to read. Defaults to the most recently built one, "
+            "which is the historical behaviour; 404 on an unknown id rather "
+            "than falling back to another window."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
@@ -335,6 +394,12 @@ def get_graph(
     """
     with factory() as session:
         record = read_record(session)
+        # BEFORE read_pivot_aspects, and the order is load-bearing: that read
+        # takes the pivot snapshot from evaluation_sets[0] and the aspect of a
+        # term decides which of the nine panels it lands in. Promoting after it
+        # would label the chosen window's panels with another window's pivot,
+        # and the response would say nothing about it.
+        _promote_head(record, evaluation_set_id)
         aspect_of_term = read_pivot_aspects(session, record)
     units = _counted_units(record, aspect_of_term, settings)
     return build_graph(record, units)
