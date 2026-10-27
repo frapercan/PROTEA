@@ -112,6 +112,17 @@ class TestWhatItDoesToTheDirectAnnotations:
         assert raw == {"P1": {"GO:A", "GO:B"}}
         assert (report.entries, report.pairs, report.proteins) == (1, 2, 1)
 
+    def test_the_landings_are_not_pruned_to_the_most_specific(self) -> None:
+        # Read from the lab's code rather than assumed: first_live_ancestors
+        # adds every live term a step reaches and only keeps climbing
+        # through the ones that are not live. If one landing is an ancestor
+        # of another, BOTH stay. Pruning would have been a plausible
+        # optimisation and it is not the rule.
+        parents = {"GO:N": {"GO:B", "GO:A"}, "GO:B": {"GO:A"}}
+        aspect = {"GO:N": "F", "GO:A": "F", "GO:B": "F"}
+        graph = _graph(parents=parents, aspect=aspect, live=set(aspect))
+        assert first_live_ancestors("GO:N", graph, {"GO:A", "GO:B"}) == {"GO:A", "GO:B"}
+
     def test_what_lands_nowhere_is_discarded_and_counted(self) -> None:
         # A gain the old ontology cannot express at all. Losing it is the
         # rule; losing it in silence is what the counter is for.
@@ -137,7 +148,9 @@ class TestWhatItDoesToTheDirectAnnotations:
     def test_a_landing_the_protein_already_had_is_not_a_special_case(self) -> None:
         # The delta subtracts the two sides afterwards and a term present at
         # both ends vanishes there. Handling it here would duplicate the
-        # subtraction in a second place.
+        # subtraction in a second place. It also still counts as a projected
+        # pair, because the count is taken before the projection is merged
+        # with the protein's other direct terms, which is what the lab does.
         raw = {"P1": {"GO:NEW", "GO:B"}}
         report = project_direct_annotations(raw, _graph(), TARGET)
         assert raw == {"P1": {"GO:A", "GO:B"}}
@@ -149,12 +162,46 @@ class TestWhatItDoesToTheDirectAnnotations:
         assert (report.proteins, report.entries) == (1, 2)
 
     def test_a_landing_inside_the_binding_subtree_is_counted(self) -> None:
-        # The lab reports zero of these on this window. A non-zero would mean
-        # the projection is feeding the binding rule terms it did not see,
-        # and the binding rule runs right after.
+        # Informative, not a problem: it stays a direct F term and the
+        # binding rule then runs over the already-projected directs.
         graph = _graph(binding=frozenset({"GO:A"}))
         report = project_direct_annotations({"P1": {"GO:NEW"}}, graph, TARGET)
         assert report.binding_landings == 1
+
+    def test_an_entry_that_straddles_the_binding_subtree_is_the_mixed_one(self) -> None:
+        # The lab's counter is this one, and their zero says no entry on the
+        # long window lands on both sides. GO:NEW lands on A and B; with
+        # only A inside, the entry straddles.
+        graph = _graph(binding=frozenset({"GO:A"}))
+        report = project_direct_annotations({"P1": {"GO:NEW"}}, graph, TARGET)
+        assert report.binding_mixed == 1
+
+    def test_an_entry_entirely_inside_it_is_not_mixed(self) -> None:
+        graph = _graph(binding=frozenset({"GO:A", "GO:B"}))
+        report = project_direct_annotations({"P1": {"GO:NEW"}}, graph, TARGET)
+        assert (report.binding_mixed, report.binding_landings) == (0, 2)
+
+    def test_pairs_are_unique_per_protein_and_not_per_entry(self) -> None:
+        # Two new terms of the same protein landing on the same ancestor
+        # count ONCE, which is what the lab's projection.nnz counts: a
+        # boolean matrix product, where a cell is a cell. Counting
+        # (entry, landing) reported 4,050 against their 3,821 on the long
+        # window, and the whole difference was this double counting.
+        parents = {"GO:N1": {"GO:A"}, "GO:N2": {"GO:A"}}
+        aspect = {"GO:N1": "F", "GO:N2": "F", "GO:A": "F"}
+        graph = _graph(parents=parents, aspect=aspect, live=set(aspect))
+        report = project_direct_annotations({"P1": {"GO:N1", "GO:N2"}}, graph, {"GO:A"})
+        assert (report.entries, report.pairs) == (2, 1)
+
+    def test_the_same_ancestor_for_two_proteins_counts_twice(self) -> None:
+        # Unique per PROTEIN, not globally: the pair is (protein, ancestor).
+        parents = {"GO:N1": {"GO:A"}}
+        aspect = {"GO:N1": "F", "GO:A": "F"}
+        graph = _graph(parents=parents, aspect=aspect, live=set(aspect))
+        report = project_direct_annotations(
+            {"P1": {"GO:N1"}, "P2": {"GO:N1"}}, graph, {"GO:A"}
+        )
+        assert (report.entries, report.pairs, report.proteins) == (2, 2, 2)
 
     def test_the_report_names_every_counter_the_lab_publishes(self) -> None:
         keys = project_direct_annotations({}, _graph(), TARGET).as_dict()
@@ -164,6 +211,7 @@ class TestWhatItDoesToTheDirectAnnotations:
             "projected_discarded",
             "projected_proteins",
             "projected_not_live_at_t1",
+            "projected_binding_mixed",
             "projected_binding_landings",
         }
 
