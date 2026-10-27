@@ -84,11 +84,11 @@ function BandRow({ band, rows }: { band: string; rows: StratumRow[] }) {
               {best.display_name.split("/").pop()}
             </span>{" "}
             K={best.k}{" "}
-            <span className="font-mono">{best.f_micro_w.toFixed(4)}</span>
+            <span className="font-mono">{best.f_micro.toFixed(4)}</span>
           </span>
           <span className="text-slate-500">
             worst {worst.display_name.split("/").pop()} K={worst.k}{" "}
-            <span className="font-mono">{worst.f_micro_w.toFixed(4)}</span>
+            <span className="font-mono">{worst.f_micro.toFixed(4)}</span>
           </span>
         </div>
       ) : null}

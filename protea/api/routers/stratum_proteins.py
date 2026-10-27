@@ -6,11 +6,27 @@ them has nowhere to go: the population is a count and the score is a micro sum,
 and neither can be opened. This serves the rows underneath.
 
 Where the rows come from. ``run_cafa_evaluation`` writes one
-``<setting>/per_protein.parquet`` beside each result, holding the per-protein
-precision, recall and F at the threshold the run reported. Its rows for one
-namespace under one setting are the panel's population: the category is the
-directory and the aspect is the column, so nothing has to be joined and nothing
-can drift out of a join.
+``<setting>/per_protein_grid.parquet`` beside each result, holding each
+protein's components over the WHOLE threshold sweep; this slices it at the
+threshold the run reported and divides. Its rows for one namespace under one
+setting are the panel's population: the category is the directory and the
+aspect is the namespace column, so nothing has to be joined and nothing can
+drift out of a join.
+
+IT USED TO READ ``per_protein.parquet``, AND THAT MADE A PANEL OPENABLE ONLY
+WHEN THE RUN HAD BEEN WEIGHTED. ``rows_from_sink`` keeps the weighted variant
+alone, so a run with no ``information_accretion_set_id`` produced no weighted
+records, wrote no file, and emitted ``per_protein_empty`` as a warning. This
+endpoint then answered 404 saying "this run wrote no per-protein scores for
+this setting", which was false: it wrote the grid. Measured 2026-10-27 over the
+seven scoring runs on this deployment, the correlation is perfect -- four runs
+with an accretion set wrote three files each, three runs without wrote none and
+emitted nine warnings between them -- so whether a reader could open a panel
+depended on a weighting choice nobody connected to it.
+
+The grid is also the better source. The legacy file's rows were never filtered
+on ground truth, which is the defect ``audit_per_protein_artifacts`` exists to
+count, so the two are not the same population and the grid's is the right one.
 
 Measured against the graph's own panel counts on this campaign, eight of the
 nine agree to the protein. The ninth, PK x BPO, is one short: 5,810 here
@@ -43,9 +59,10 @@ on every row is read, not derived.
 from __future__ import annotations
 
 import io
+import json
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
@@ -55,7 +72,12 @@ from protea.api.cache import cached
 from protea.api.deps import get_session_factory, get_settings
 from protea.api.routers._arm_identity import with_arm_identity
 from protea.core.domain.category import Category
+from protea.core.operations._run_cafa_grid_artifact import (
+    GRID_FILENAME,
+    GRID_META_PREFIX,
+)
 from protea.core.operations._run_cafa_helpers import eval_artifact_key
+from protea.core.operations._run_cafa_strata import VARIANT_COLUMNS as _VARIANT_COLUMNS
 from protea.core.operations._run_cafa_strata import neighbourhoods_for
 
 # The namespace-to-aspect map is imported from the operation that WRITES the
@@ -63,7 +85,7 @@ from protea.core.operations._run_cafa_strata import neighbourhoods_for
 # thing to keep in sync, and the failure it would produce is silent: a panel
 # opened under one map and pooled under another disagrees about which proteins
 # it holds without either side raising.
-from protea.core.operations.stratify_evaluation import _ASPECT_FOR_NAMESPACE
+from protea.core.operations.stratify_evaluation import _ASPECT_FOR_NAMESPACE, BEST_F_FILENAME
 from protea.core.strata import stratum_for
 from protea.infrastructure.storage.factory import ArtifactStoreUnavailable, get_artifact_store
 
@@ -185,6 +207,233 @@ class _Placed:
         return sum(1 for r in self.rows if r["length_band"] is not None)
 
 
+def _validated_cell(at: _Where, sort: str) -> tuple[str, str]:
+    """The setting, the namespace and the sort, or a 422 naming the vocabulary.
+
+    Three refusals that were inline and are the same kind of thing: a caller
+    asking for a cell this endpoint does not have. Together because a reader
+    checking what a bad request returns should find them in one place.
+    """
+    if at.setting.upper() not in _SETTINGS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"setting {at.setting!r} is not one of {', '.join(_SETTINGS)}",
+        )
+    if sort not in _SORTS:
+        raise HTTPException(
+            status_code=422, detail=f"sort {sort!r} is not one of {', '.join(_SORTS)}"
+        )
+    return at.setting.upper(), _namespace_for(at.aspect)
+
+
+def _panel_keys(store: Any, result_id: uuid.UUID, setting: str) -> tuple[str, str]:
+    """The grid and the best-F table, both present, or a 404 saying which is not.
+
+    Existence is checked before the cache and not inside the producer. A
+    missing artefact is a 404 and has to stay one: raised inside the producer
+    it would be swallowed the moment a stale page for another cell was in the
+    store.
+
+    Two keys and two different refusals. No grid means the run scored nothing
+    in this setting, which is an absence. A grid with no best-F table means the
+    sweep is there and nothing says which column of it the panel published,
+    which is a damaged result: every column is a defensible number and only one
+    of them is the one already reported.
+    """
+    grid = eval_artifact_key(result_id, f"{setting}/{GRID_FILENAME}")
+    if not store.exists(grid):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"no {setting}/{GRID_FILENAME} for evaluation result {result_id}; this "
+                "run scored no proteins in this setting, so its panels cannot be opened"
+            ),
+        )
+    best_f = eval_artifact_key(result_id, f"{setting}/{BEST_F_FILENAME}")
+    if not store.exists(best_f):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"evaluation result {result_id} has a {setting}/{GRID_FILENAME} and no "
+                f"{setting}/{BEST_F_FILENAME}, so the grid holds the whole sweep and "
+                "nothing says which threshold the panel published. Refusing rather than "
+                "picking one: every column is a defensible number and only one of them "
+                "is the one already reported"
+            ),
+        )
+    return grid, best_f
+
+
+class _Footer(NamedTuple):
+    """What the grid's own metadata says about the numbers inside it."""
+
+    tau_grid: Any
+    variant: str
+
+
+def _grid_footer(table: Any, *, result_id: str, setting: str) -> _Footer:
+    """The tau grid and the weighting, read from the file and never assumed.
+
+    The grid is a property of the artefact: reconstructing it from ``th_step``
+    alone attributes every protein a neighbouring threshold's score, which is
+    a mistake this codebase has already rejected once. The variant comes from
+    the same footer, because a run with no accretion set declares
+    ``unweighted`` alone and its components are the only ones there are.
+    """
+    import numpy as np
+
+    meta = {
+        k.decode().split(GRID_META_PREFIX)[-1]: v.decode()
+        for k, v in (table.schema.metadata or {}).items()
+    }
+    try:
+        tau_grid = np.asarray(json.loads(meta["tau_grid"]), dtype=np.float64)
+        variants = json.loads(meta["variants"])
+        variant = "weighted" if "weighted" in variants else str(variants[0])
+    except (KeyError, ValueError, TypeError, IndexError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"evaluation result {result_id}, setting {setting}: {GRID_FILENAME} does "
+                f"not carry a readable tau grid or variant list ({exc}). Both are what "
+                "say which number each column is, and a file that does not stamp them "
+                "cannot be read into a page that claims a threshold"
+            ),
+        ) from exc
+    return _Footer(tau_grid, variant)
+
+
+def _tau_column(footer: _Footer, best_f: str, namespace: str, *, where: str) -> tuple[float, int]:
+    """The threshold this namespace published, and the column that holds it.
+
+    Read from cafaeval's own best-F table and not chosen here. A page of
+    proteins shown at a threshold other than its panel's would be a different
+    measurement wearing the same label, and nothing downstream could tell.
+    """
+    import numpy as np
+
+    lines = [line for line in best_f.strip().splitlines() if line.strip()]
+    head = lines[0].split("\t")
+    i_ns, i_tau = head.index("ns"), head.index("tau")
+    tau = None
+    for line in lines[1:]:
+        fields = line.split("\t")
+        if fields[i_ns] == namespace:
+            tau = float(fields[i_tau])
+    if tau is None:
+        raise _NamespaceNotScored
+    hits = np.flatnonzero(np.abs(footer.tau_grid - tau) <= 1e-9)
+    if hits.size != 1:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{where}: the panel reports tau {tau}, which is not a threshold this "
+                f"grid carries ({footer.tau_grid.size} from {float(footer.tau_grid.min())} "
+                f"to {float(footer.tau_grid.max())}). Refusing rather than reading the "
+                "nearest column: a page shown at a threshold it was not scored at is not "
+                "recoverable from itself"
+            ),
+        )
+    return tau, int(hits[0])
+
+
+class _NamespaceNotScored(Exception):
+    """This namespace is not in the best-F table, so the run never reported it."""
+
+
+def _sliced_at_the_published_tau(
+    grid: Any,
+    best_f: str,
+    namespace: str,
+    *,
+    result_id: str,
+    setting: str,
+) -> Any:
+    """The grid's rows for one namespace, as scalars at the reported threshold.
+
+    The grid holds ``tp`` and ``pred`` as list columns, one value per
+    threshold, and ``n_gt`` as a scalar because the ground truth does not move
+    with the threshold. The three ratios are divided from those components
+    here, which is the same arithmetic over the same columns at the same tau
+    that produces the panel's own cell -- so a row cannot disagree with the
+    cell it is inside, which is a stronger property than reading a stored
+    ratio from a second file.
+    """
+    import pandas as pd
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(grid)
+    footer = _grid_footer(table, result_id=result_id, setting=setting)
+    try:
+        tau, position = _tau_column(
+            footer, best_f, namespace, where=f"evaluation result {result_id}, setting {setting}"
+        )
+    except _NamespaceNotScored:
+        return pd.DataFrame(columns=["protein_accession", "namespace", "tau"])
+    tp_col, pred_col, gt_col = _VARIANT_COLUMNS[footer.variant]
+
+    frame = table.to_pandas()
+    frame = frame[frame["namespace"] == namespace]
+    rows = []
+    for record in frame.to_dict("records"):
+        tp = float(record[tp_col][position])
+        pred = float(record[pred_col][position])
+        gt = float(record[gt_col])
+        precision = tp / pred if pred > 0 else 0.0
+        recall = tp / gt if gt > 0 else 0.0
+        denom = precision + recall
+        rows.append(
+            {
+                "protein_accession": record["protein_accession"],
+                "namespace": namespace,
+                "tau": tau,
+                "variant": footer.variant,
+                "precision": precision,
+                "recall": recall,
+                "f": (2 * precision * recall / denom) if denom > 0 else 0.0,
+                "n_gt": gt,
+                "pred": pred,
+                "tp": tp,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _row(
+    record: dict[str, Any],
+    accession: str,
+    residues: int | None,
+    stratum: Any,
+    hood: Any,
+) -> dict[str, Any]:
+    """One protein's row: where it sits, and what it scored.
+
+    The three components come from the artefact and the three ratios are
+    divided from them in :func:`_sliced_at_the_published_tau`, at the one
+    threshold the panel published. ``variant`` says which weighting they are:
+    these names used to end in ``_w`` whatever the run had done, and three of
+    the seven scoring runs on this deployment were unweighted, so for those the
+    suffix was a false label on a correct number.
+    """
+    return {
+        "accession": accession,
+        "residues": residues,
+        "length_band": None if stratum is None else str(stratum.length),
+        "homology_band": None if stratum is None else str(stratum.homology),
+        "donor_evidence": None if stratum is None else str(stratum.donor_evidence),
+        "best_identity": None if hood is None else hood.best_identity,
+        "donor_is_experimental": None if hood is None else hood.donor_is_experimental,
+        "taxonomic_relation": None if hood is None else hood.taxonomic_relation,
+        "variant": str(record["variant"]),
+        "precision": float(record["precision"]),
+        "recall": float(record["recall"]),
+        "f": float(record["f"]),
+        "n_gt": float(record["n_gt"]),
+        "pred": float(record["pred"]),
+        "tp": float(record["tp"]),
+    }
+
+
 def _join(
     frame: Any,
     namespace: str,
@@ -226,26 +475,7 @@ def _join(
                 # rather than clamped: clamping would put the protein in a band
                 # nobody measured it into.
                 off_scale += 1
-        rows.append(
-            {
-                "accession": accession,
-                "residues": residues,
-                "length_band": None if stratum is None else str(stratum.length),
-                "homology_band": None if stratum is None else str(stratum.homology),
-                "donor_evidence": None if stratum is None else str(stratum.donor_evidence),
-                "best_identity": None if hood is None else hood.best_identity,
-                "donor_is_experimental": None if hood is None else hood.donor_is_experimental,
-                "taxonomic_relation": None if hood is None else hood.taxonomic_relation,
-                # Read from the artefact, never recomputed. The panel's score is
-                # a micro sum over exactly these three columns.
-                "precision_w": float(record["precision_w"]),
-                "recall_w": float(record["recall_w"]),
-                "f_w": float(record["f_w"]),
-                "n_gt_w": float(record["n_gt_w"]),
-                "pred_w": float(record["pred_w"]),
-                "tp_w": float(record["tp_w"]),
-            }
-        )
+        rows.append(_row(record, accession, residues, stratum, hood))
 
     return _Placed(
         rows=rows,
@@ -339,18 +569,7 @@ def stratum_proteins(
     retrieval gap, a filter and a page size into one number that answers none
     of the three questions.
     """
-    if at.setting.upper() not in _SETTINGS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"setting {at.setting!r} is not one of {', '.join(_SETTINGS)}",
-        )
-    setting = at.setting.upper()
-    if sort not in _SORTS:
-        raise HTTPException(
-            status_code=422, detail=f"sort {sort!r} is not one of {', '.join(_SORTS)}"
-        )
-    namespace = _namespace_for(at.aspect)
-
+    setting, namespace = _validated_cell(at, sort)
     try:
         store = get_artifact_store(settings)
     except ArtifactStoreUnavailable as exc:  # pragma: no cover - config failure
@@ -370,25 +589,17 @@ def stratum_proteins(
             ),
         )
 
-    # Existence is checked before the cache, not inside the producer. A missing
-    # artefact is a 404 and has to stay one: raised inside the producer it would
-    # be swallowed the moment a stale page for another cell was in the store.
-    key = eval_artifact_key(evaluation_result_id, f"{setting}/per_protein.parquet")
-    if not store.exists(key):
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"no {setting}/per_protein.parquet for evaluation result "
-                f"{evaluation_result_id}; this run wrote no per-protein scores for "
-                f"this setting, so its panels cannot be opened"
-            ),
-        )
+    key, best_f_key = _panel_keys(store, evaluation_result_id, setting)
 
     def produce() -> _Placed:
-        import pandas as pd
 
-        frame = pd.read_parquet(io.BytesIO(store.get(key)))
-        frame = frame[frame["namespace"] == namespace]
+        frame = _sliced_at_the_published_tau(
+            io.BytesIO(store.get(key)),
+            store.get(best_f_key).decode(),
+            namespace,
+            result_id=str(evaluation_result_id),
+            setting=setting,
+        )
         accessions = frame["protein_accession"].unique().tolist()
         with factory() as session:
             lengths = {

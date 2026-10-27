@@ -31,16 +31,21 @@ export type StratumProtein = {
   best_identity: number | null;
   donor_is_experimental: boolean | null;
   taxonomic_relation: string | null;
-  precision_w: number;
-  recall_w: number;
-  f_w: number;
+  /** Which weighting the three ratios below are. The API used to call them
+   *  `precision_w` / `recall_w` / `f_w` whatever the run had done, and three
+   *  of the seven scoring runs on this deployment were unweighted, so for
+   *  those the suffix was a false label on a correct number. */
+  variant: "weighted" | "unweighted";
+  precision: number;
+  recall: number;
+  f: number;
   /** Weight of the ground truth this protein carried, which is what the
    *  weighted metrics are weighted BY. A protein with almost none of it moves
    *  the panel almost not at all, and a table without this column invites
    *  reading every row as equally load-bearing. */
-  n_gt_w: number;
-  pred_w: number;
-  tp_w: number;
+  n_gt: number;
+  pred: number;
+  tp: number;
 };
 
 /** Which arm produced these scores, named by everything that can vary. */

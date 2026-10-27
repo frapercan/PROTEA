@@ -13,9 +13,9 @@ import { KNOWLEDGE_LABEL_LOWER } from "@/lib/knowledgeRegimes";
 
 export type StratumCell = {
   n_proteins: number;
-  precision_w: number;
-  recall_w: number;
-  f_micro_w: number;
+  precision: number;
+  recall: number;
+  f_micro: number;
   reportable: boolean;
   // Axis columns are dynamic: whichever axes the run crossed.
   [axis: string]: string | number | boolean;
@@ -148,13 +148,13 @@ export function withheldShare(cells: StratumCell[]): number {
 /**
  * Colour ramp for a score, relative to the reportable cells beside it.
  *
- * Relative rather than absolute because f_micro_w over one stratum is not
+ * Relative rather than absolute because f_micro over one stratum is not
  * comparable to a headline number: biological process at low homology reads
  * around 0.11 while molecular function at mid homology reads 0.46, and a fixed
  * scale would paint the whole BP column as failure.
  */
 export function scoreShade(value: number, cells: StratumCell[]): string {
-  const scores = cells.filter((c) => c.reportable).map((c) => c.f_micro_w);
+  const scores = cells.filter((c) => c.reportable).map((c) => c.f_micro);
   if (scores.length < 2) return "bg-slate-50";
   const lo = Math.min(...scores);
   const hi = Math.max(...scores);

@@ -36,9 +36,9 @@ export type CompareRow = {
   length?: string;
   homology?: string;
   n_proteins: number;
-  precision_w?: number;
-  recall_w?: number;
-  f_micro_w?: number;
+  precision?: number;
+  recall?: number;
+  f_micro?: number;
   reportable?: boolean;
 };
 

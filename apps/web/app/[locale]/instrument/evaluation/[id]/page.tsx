@@ -16,9 +16,9 @@ type NsMetrics = {
    * in this cell comparable to the LAFA / CAFA leaderboards. Optional because
    * the ``_w`` keys are written only when a real IA table reached cafaeval.
    */
-  f_micro_w?: number;
-  precision_w?: number;
-  recall_w?: number;
+  f_micro?: number;
+  precision?: number;
+  recall?: number;
   coverage_w?: number;
   /**
    * Unweighted, kept for history and NOT LAFA-comparable -- the
