@@ -45,6 +45,7 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
+from protea.core.operations._band_guard import refuse_if_the_band_is_foreign
 from protea.core.operations._evaluation_artifacts import (
     resolve_ia_file,
     resolve_obo,
@@ -345,7 +346,9 @@ class BatchRescoreEvaluationOperation:
             str(tmpdir), inputs.snapshot, base_payload.ia_file, emit,
             session, base_payload.information_accretion_set_id,
         )
-        self._single._enforce_band(base_payload.band, inputs.snapshot, base_payload.ia_file, emit)
+        refuse_if_the_band_is_foreign(
+            base_payload.band, inputs.snapshot, base_payload.ia_file, emit
+        )
 
         data = self._restrict_cohort(
             session, base_payload, inputs, ctx.fold_spec, emit, ctx.subset_spec
