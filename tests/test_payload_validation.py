@@ -136,6 +136,9 @@ from protea.core.operations.predict_go_terms_from_interpro import (
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesPayload,
 )
+from protea.core.operations.register_ingested_method import (
+    RegisterIngestedMethodPayload,
+)
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesPayload,
 )
@@ -649,6 +652,34 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "batch_size": 0,
         },
         ("batch_size",),
+    ),
+    (
+        # invariant: the name is written on every candidate row and read back as
+        # a key, so whitespace inside it makes one arm come back as two. This is
+        # not cosmetic: the arm is what a published number is attributed to.
+        "register_ingested_method",
+        RegisterIngestedMethodPayload,
+        {
+            "method_name": "sfjepa recipe cut230",
+            "display_name": "d",
+            "description": "x",
+            "trained_on_annotation_set_id": "set",
+        },
+        ("method_name",),
+    ),
+    (
+        # A method that cannot say which release it was fitted against cannot be
+        # placed on the window it is scored on, and a null there would read as
+        # "pretrained, owes no cut" for an arm that owes one.
+        "register_ingested_method",
+        RegisterIngestedMethodPayload,
+        {
+            "method_name": "sfjepa-recipe-cut230",
+            "display_name": "d",
+            "description": "x",
+            "trained_on_annotation_set_id": "   ",
+        },
+        ("trained_on_annotation_set_id",),
     ),
     (
         # invariant: the whole worth of the claim this operation writes is that
