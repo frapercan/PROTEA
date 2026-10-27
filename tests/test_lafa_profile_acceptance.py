@@ -17,12 +17,21 @@ test:
   7,415 targets; the sequence rule removes exactly the 14 whose sequence
   changed between 2025_03 and 2026_01, leaving LAFA's 7,401.
 * **binding** drops a ``(protein, F)`` whose t1 *propagated* F set is
-  exactly ``{GO:0003674, GO:0005488, GO:0005515}``, and drops nothing at
-  t0. PROTEA's own rule (:mod:`protea.core._binding_rule`) closes the
-  full descendant set of ``GO:0005515`` over *direct* annotations and
-  applies to both ends; it is strictly broader, and would discard
-  entries LAFA keeps. The divergence is pinned below so that the two
-  rules can coexist under their own names without either silently
+  a SUBSET of ``{GO:0003674, GO:0005488, GO:0005515}``, and drops
+  nothing at t0. Those three are the ancestors of "protein binding",
+  not its descendants: democafa builds them with
+  ``nx.descendants(F_subgraph, "GO:0005515")``, and obonet orients its
+  edges child to parent, so ``nx.descendants`` returns superterms. That
+  is where the set of three comes from, and it is what democafa's own
+  "Remove 3 binding terms" comment counts.
+
+  PROTEA's rule (:mod:`protea.core._binding_rule`) already tests the
+  same subset relation, but against a different set and at a different
+  moment: ``protea/core/evaluation.py:526`` descends *children* from
+  ``GO:0005515``, so the set is the full descendant closure rather than
+  the three ancestors, and the test runs on *direct* annotations before
+  propagation and on *both* ends. The divergence is pinned below so the
+  two rules can coexist under their own names without either silently
   becoming the default.
 
 Layers
@@ -139,8 +148,22 @@ BINDING_DIVERGENCE = {
     "PK": {"of": 1086, "would_drop": 38},
 }
 
-#: The exact propagated t1 F set that LAFA's binding rule drops on.
-BINDING_EXACT_SET = ("GO:0003674", "GO:0005488", "GO:0005515")
+#: The three terms LAFA's binding rule drops within: "protein binding" and its
+#: two ancestors, which is what ``nx.descendants`` returns on an obonet graph.
+BINDING_TERMS = ("GO:0003674", "GO:0005488", "GO:0005515")
+
+#: Subset, not equality. The two agree on this window only because no target is
+#: annotated directly to ``GO:0005488`` or to the F root, which is why an
+#: equality reading also reproduced LAFA here. Encode the subset form so a
+#: window where that does hold does not quietly diverge.
+BINDING_FORM = "subset"
+
+#: What PROTEA's own rule uses instead, and the three ways it differs.
+PROTEA_BINDING_DIFFERS_BY = (
+    "set: the descendant closure of GO:0005515, not its three ancestors",
+    "moment: direct annotations before propagation, not the propagated set",
+    "side: both ends, not t1 only",
+)
 
 SCORES = {
     "sfjepa-reader": {
@@ -297,8 +320,10 @@ class TestPinnedContractIsCoherent:
     def test_the_binding_divergence_is_a_strict_subset(self) -> None:
         for tier, counts in BINDING_DIVERGENCE.items():
             assert 0 < counts["would_drop"] < counts["of"], tier
-        assert len(BINDING_EXACT_SET) == 3
-        assert "GO:0005515" in BINDING_EXACT_SET
+        assert len(BINDING_TERMS) == 3
+        assert "GO:0005515" in BINDING_TERMS
+        assert BINDING_FORM == "subset"
+        assert len(PROTEA_BINDING_DIFFERS_BY) == 3
 
     def test_the_corpus_admits_thirteen_codes(self) -> None:
         assert len(CORPUS_CODES) == len(set(CORPUS_CODES)) == 13
@@ -407,11 +432,14 @@ class TestPackageMatchesPinnedContract:
         # naming it, the harness is no longer pinning what it claims to.
         assert "md5" in contract["rules"]["targets"].lower()
 
-    def test_binding_is_stated_as_exact_and_t1_only(self, contract: dict) -> None:
+    def test_binding_names_the_three_terms_and_spares_t0(self, contract: dict) -> None:
+        # The delivered contract words this as equality; democafa's code is a
+        # subset test. The two coincide on this window, so the wording is not
+        # asserted -- what is asserted is the part that decides the population:
+        # which three terms, and that t0 is untouched.
         binding = contract["rules"]["binding"]
-        for term in BINDING_EXACT_SET:
+        for term in BINDING_TERMS:
             assert term in binding, term
-        assert "EXACTLY" in binding
         assert "nothing is dropped at t0" in binding.lower()
 
     def test_swissprot_inputs_verify_against_their_published_digests(self) -> None:
@@ -447,7 +475,7 @@ _PROFILE_PIECES = (
     "targets restricted to the same sequence at both ends",
     "terms of interest alive in both ontologies, trimmed before classifying",
     "PK known restricted to the terms of interest",
-    "the exact t1-only binding rule, named alongside PROTEA's own",
+    "the t1-only subset binding rule, named alongside PROTEA's own",
     "information accretion over t0's Swiss-Prot cohort",
 )
 
