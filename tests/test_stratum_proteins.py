@@ -159,9 +159,9 @@ def test_absent_identities_sort_last_under_every_ordering():
     # zero puts the retrieval failures at the head of a table about homology,
     # where they read as the hardest cases rather than as the absent ones.
     rows = [
-        {"accession": "A", "best_identity": None, "f_w": 0.9},
-        {"accession": "B", "best_identity": 20.0, "f_w": 0.1},
-        {"accession": "C", "best_identity": 80.0, "f_w": 0.5},
+        {"accession": "A", "best_identity": None, "f": 0.9},
+        {"accession": "B", "best_identity": 20.0, "f": 0.1},
+        {"accession": "C", "best_identity": 80.0, "f": 0.5},
     ]
     assert [r["accession"] for r in _ordered(rows, "identity_asc")] == ["B", "C", "A"]
     assert [r["accession"] for r in _ordered(rows, "identity_desc")] == ["C", "B", "A"]
@@ -170,8 +170,8 @@ def test_absent_identities_sort_last_under_every_ordering():
 def test_the_default_ordering_opens_on_what_failed():
     # The reason to open a cell is usually to see what makes it hard.
     rows = [
-        {"accession": "A", "best_identity": 20.0, "f_w": 0.9},
-        {"accession": "B", "best_identity": 80.0, "f_w": 0.0},
+        {**_row("A"), "accession": "A", "best_identity": 20.0, "f": 0.9},
+        {**_row("B"), "accession": "B", "best_identity": 80.0, "f": 0.0},
     ]
     assert _ordered(rows, "f_asc")[0]["accession"] == "B"
     assert "f_asc" == _SORTS[0]
@@ -182,9 +182,9 @@ def test_ties_are_broken_by_accession_so_paging_is_stable():
     # exactly zero. Without a tiebreak, page two can repeat a row from page one
     # after the cache is rebuilt.
     rows = [
-        {"accession": "C", "best_identity": 10.0, "f_w": 0.0},
-        {"accession": "A", "best_identity": 20.0, "f_w": 0.0},
-        {"accession": "B", "best_identity": 30.0, "f_w": 0.0},
+        {"accession": "C", "best_identity": 10.0, "f": 0.0},
+        {"accession": "A", "best_identity": 20.0, "f": 0.0},
+        {"accession": "B", "best_identity": 30.0, "f": 0.0},
     ]
     assert [r["accession"] for r in _ordered(rows, "f_asc")] == ["A", "B", "C"]
 
@@ -418,3 +418,45 @@ def test_the_zero_count_is_a_count_and_not_a_share():
     from protea.api.routers.stratum_proteins import _scored_zero
 
     assert _scored_zero([_row("P1", f=0.0)] * 4) == 4
+
+
+class TestTheRowShapeIsAContract:
+    """What ``_join`` produces is exactly what the page consumers read.
+
+    This class exists because a rename shipped a KeyError to production. The
+    row's metric lost its ``_w`` suffix; ``_scored_zero`` and ``_ordered`` both
+    still read ``f_w``, and neither ruff nor the suite objected. ``_ordered``
+    had two tests and they passed, because they built their rows as inline
+    literals carrying the OLD key -- so the tests did not merely fail to catch
+    the drift, they kept the old shape alive and hid it.
+
+    So the assertion here is not on a value. It is that the keys the producer
+    writes and the keys each consumer reads are the same set, derived from the
+    producer on every run.
+    """
+
+    _CONSUMED = ("f", "best_identity", "accession", "variant")
+
+    def test_every_key_the_consumers_read_is_a_key_the_producer_writes(self) -> None:
+        frame = _frame([_row("P1"), _row("P2")])
+        placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": 300, "P2": 300}, "NK")
+        produced = set(placed.rows[0])
+        missing = [k for k in self._CONSUMED if k not in produced]
+        assert not missing, f"the page reads {missing}, which _join does not write"
+
+    def test_the_orderings_run_on_produced_rows(self) -> None:
+        # Not on literals. Every sort the endpoint offers, over rows that came
+        # out of the producer, so a key the producer stops writing fails here
+        # instead of at the first request.
+        frame = _frame([_row("P1"), _row("P2")])
+        placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": 300, "P2": 300}, "NK")
+        for sort in _SORTS:
+            page = _ordered(placed.rows, sort)
+            assert len(page) == len(placed.rows), sort
+
+    def test_the_zero_count_runs_on_produced_rows(self) -> None:
+        from protea.api.routers.stratum_proteins import _scored_zero
+
+        frame = _frame([_row("P1", f=0.0), _row("P2", f=0.5)])
+        placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": 300, "P2": 300}, "NK")
+        assert _scored_zero(placed.rows) == 1

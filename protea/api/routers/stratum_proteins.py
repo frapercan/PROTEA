@@ -599,7 +599,7 @@ def _ordered(rows: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
     """
     if sort == "accession":
         return sorted(rows, key=lambda r: r["accession"])
-    field = "f_w" if sort.startswith("f_") else "best_identity"
+    field = "f" if sort.startswith("f_") else "best_identity"
     reverse = sort.endswith("_desc")
     # The accession is the last key under every ordering. Scores tie in bulk
     # here (every protein the run predicted nothing for scores exactly zero),
