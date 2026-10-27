@@ -652,7 +652,9 @@ class TestComputeEvaluationDataReconciled:
             patch("protea.core.evaluation._load_pivot_term_universe"),
             patch("protea.core.evaluation._load_children_by_go_id"),
             patch("protea.core.evaluation._reconcile_experimental_side"),
-            patch("protea.core.evaluation._reconcile_not_side"),
+            patch(
+                "protea.core.evaluation._reconcile_not_side", return_value=({}, None)
+            ),
         ]
 
     def test_same_terms_no_delta(self):
@@ -666,11 +668,11 @@ class TestComputeEvaluationDataReconciled:
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
                 side_effect=[
-                    ({"P1": {"F": {"GO:0001"}}}, None),
-                    ({"P1": {"F": {"GO:0001"}}}, None),
+                    ({"P1": {"F": {"GO:0001"}}}, (None, None)),
+                    ({"P1": {"F": {"GO:0001"}}}, (None, None)),
                 ],
             ),
-            patch("protea.core.evaluation._reconcile_not_side", return_value={}),
+            patch("protea.core.evaluation._reconcile_not_side", return_value=({}, None)),
         ):
             result = compute_evaluation_data_reconciled(
                 MagicMock(),
@@ -688,9 +690,9 @@ class TestComputeEvaluationDataReconciled:
             patch("protea.core.evaluation._load_children_by_go_id", return_value={}),
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
-                side_effect=[({}, None), ({"P1": {"F": {"GO:0001"}}}, None)],
+                side_effect=[({}, (None, None)), ({"P1": {"F": {"GO:0001"}}}, (None, None))],
             ),
-            patch("protea.core.evaluation._reconcile_not_side", return_value={}),
+            patch("protea.core.evaluation._reconcile_not_side", return_value=({}, None)),
         ):
             result = compute_evaluation_data_reconciled(
                 MagicMock(),
@@ -712,13 +714,15 @@ class TestComputeEvaluationDataReconciled:
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
                 side_effect=[
-                    ({"P1": {"F": {"GO:0001", "GO:0002"}}}, None),
-                    ({"P1": {"F": {"GO:0001", "GO:0002", "GO:0003"}}}, None),
+                    ({"P1": {"F": {"GO:0001", "GO:0002"}}}, (None, None)),
+                    ({"P1": {"F": {"GO:0001", "GO:0002", "GO:0003"}}}, (None, None)),
                 ],
             ),
             patch(
                 "protea.core.evaluation._reconcile_not_side",
-                side_effect=[{}, {"P1": {"GO:0002"}}],  # NOT from new side
+                # (negatives, remap report) per side; the NOT side remaps
+                # too, and reports nothing when no profile asked for it.
+                side_effect=[({}, None), ({"P1": {"GO:0002"}}, None)],
             ),
         ):
             result = compute_evaluation_data_reconciled(
@@ -741,11 +745,11 @@ class TestComputeEvaluationDataReconciled:
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
                 side_effect=[
-                    ({"P1": {"F": {"GO:0001"}}}, None),
-                    ({"P1": {"F": {"GO:0001"}, "P": {"GO:0002"}}}, None),
+                    ({"P1": {"F": {"GO:0001"}}}, (None, None)),
+                    ({"P1": {"F": {"GO:0001"}, "P": {"GO:0002"}}}, (None, None)),
                 ],
             ),
-            patch("protea.core.evaluation._reconcile_not_side", return_value={}),
+            patch("protea.core.evaluation._reconcile_not_side", return_value=({}, None)),
         ):
             result = compute_evaluation_data_reconciled(
                 MagicMock(),

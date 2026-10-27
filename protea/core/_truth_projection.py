@@ -50,6 +50,8 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+from protea.core._truth_remap import Remap
+
 
 class Graph(NamedTuple):
     """The t1 side's ontology, as the projection needs to read it.
@@ -82,6 +84,10 @@ class Request(NamedTuple):
     graph: Graph
     #: The t0 side's live ids: the landings.
     target: set[str]
+    #: What t0 says about ids it no longer uses as primary. Applied BEFORE
+    #: the projection and winning over it: a term the ontology itself
+    #: renamed is not a term to be generalised.
+    remap: Remap | None = None
 
 
 class Projection(NamedTuple):
