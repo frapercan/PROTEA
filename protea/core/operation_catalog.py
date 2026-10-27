@@ -60,6 +60,9 @@ from protea.core.operations.export_research_dataset import (
 from protea.core.operations.extract_goa_universe import ExtractGoaUniverseOperation
 from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOperation
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetOperation
+from protea.core.operations.ingest_method_predictions import (
+    IngestMethodPredictionsOperation,
+)
 from protea.core.operations.insert_proteins import InsertProteinsOperation
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
 from protea.core.operations.load_interpro_go_mapping import (
@@ -134,6 +137,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(ArchiveOntologySnapshotOperation())
     registry.register(CountBackendParametersOperation())
     registry.register(ExportEvaluationTargetsOperation())
+    registry.register(IngestMethodPredictionsOperation())
     registry.register(EncodeResidueSparseOperation())
     registry.register(EncodeResidueSparseBatchOperation())
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer

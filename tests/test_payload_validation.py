@@ -79,6 +79,9 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
 )
+from protea.core.operations.ingest_method_predictions import (
+    IngestMethodPredictionsPayload,
+)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsPayload,
 )
@@ -568,6 +571,22 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ExportEvaluationTargetsPayload,
         {"evaluation_set_id": "e", "categories": ["removed"]},
         ("categories",),
+    ),
+    # invariant: a method's prediction set has to say what produced it. The
+    # name identifies the arm and is written on every row, and prediction_set
+    # has no column for a method, so a set ingested without it is one nothing
+    # downstream can tell apart from another method's.
+    (
+        "ingest_method_predictions",
+        IngestMethodPredictionsPayload,
+        {
+            "predictions_path": "/tmp/preds.tsv",
+            "embedding_config_id": "cfg",
+            "annotation_set_id": "ann",
+            "ontology_snapshot_id": "snap",
+            "method": {"band": "v211"},
+        },
+        ("method",),
     ),
     (
         # An unnamed encoder would silently pick nothing to project through.
