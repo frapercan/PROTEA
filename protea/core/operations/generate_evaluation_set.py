@@ -20,7 +20,7 @@ from protea.core.evaluation import (
     groundtruth_key_for,
     serialize_evaluation_data_to_parquet,
 )
-from protea.core.operations._holdout_guard import refuse_if_the_set_reads_the_holdout
+from protea.core.operations._holdout_guard import Claim, refuse_if_the_set_reads_the_holdout
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -119,6 +119,13 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     #: to be scored once, at the end, and a flag that can be set by reflex is a
     #: flag that gets set by reflex. See split_registry.HOLDOUT_WAIVER.
     holdout_waiver: str | None = None
+    #: The other sentence: a band BEYOND the spent holdout, which begins at or
+    #: after it and therefore cannot be a second look at it. Separate from the
+    #: waiver because the waiver says of itself that it is the single pass, and
+    #: that pass is written on a row already. Honoured only when the window's
+    #: start is at or after the band's end; a straddle is refused by name. See
+    #: split_registry.PROSPECTIVE_DECLARATION.
+    prospective_declaration: str | None = None
 
     @field_validator("old_annotation_set_id", "new_annotation_set_id", mode="before")
     @classmethod
@@ -198,7 +205,8 @@ class GenerateEvaluationSetOperation:
         # Before anything is built: the holdout is scored once, at the end.
         refuse_if_the_set_reads_the_holdout(
             new_set,
-            waiver=p.holdout_waiver,
+            claim=Claim(p.holdout_waiver, p.prospective_declaration),
+            old_set=old_set,
             context="building the window ending at",
             emit=emit,
         )
