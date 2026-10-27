@@ -20,17 +20,8 @@
       "kind": "class",
       "path": "protea/infrastructure/queue/consumer.py",
       "name": "OperationConsumer",
-      "line": 326,
+      "line": 325,
       "metric": 510,
-      "threshold": 500
-    },
-    {
-      "key": "class::protea/workers/base_worker.py::BaseWorker",
-      "kind": "class",
-      "path": "protea/workers/base_worker.py",
-      "name": "BaseWorker",
-      "line": 58,
-      "metric": 501,
       "threshold": 500
     },
     {
@@ -39,7 +30,7 @@
       "path": "protea/infrastructure/queue/consumer.py",
       "name": "",
       "line": 0,
-      "metric": 835,
+      "metric": 834,
       "threshold": 800
     },
     {
@@ -47,17 +38,8 @@
       "kind": "method",
       "path": "protea/api/routers/benchmark.py",
       "name": "_aggregate_benchmark_matrix",
-      "line": 507,
+      "line": 516,
       "metric": 69,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/api/routers/stratum_proteins.py::_join",
-      "kind": "method",
-      "path": "protea/api/routers/stratum_proteins.py",
-      "name": "_join",
-      "line": 188,
-      "metric": 72,
       "threshold": 60
     },
     {
@@ -65,8 +47,8 @@
       "kind": "method",
       "path": "protea/api/routers/stratum_proteins.py",
       "name": "stratum_proteins",
-      "line": 323,
-      "metric": 134,
+      "line": 667,
+      "metric": 82,
       "threshold": 60
     },
     {
@@ -74,7 +56,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms/_batch_op_reference.py",
       "name": "_ReferenceMixin._load_reference_data_per_aspect",
-      "line": 446,
+      "line": 536,
       "metric": 66,
       "threshold": 60
     },
@@ -88,20 +70,11 @@
       "threshold": 60
     },
     {
-      "key": "params::protea/api/routers/stratum_proteins.py::stratum_proteins",
-      "kind": "params",
-      "path": "protea/api/routers/stratum_proteins.py",
-      "name": "stratum_proteins",
-      "line": 323,
-      "metric": 7,
-      "threshold": 6
-    },
-    {
       "key": "params::protea/core/operations/predict_go_terms/_batch_op_reference.py::_ReferenceMixin._assemble_all_aspect_views",
       "kind": "params",
       "path": "protea/core/operations/predict_go_terms/_batch_op_reference.py",
       "name": "_ReferenceMixin._assemble_all_aspect_views",
-      "line": 513,
+      "line": 603,
       "metric": 7,
       "threshold": 6
     }

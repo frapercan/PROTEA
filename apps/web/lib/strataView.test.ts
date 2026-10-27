@@ -33,9 +33,9 @@ function cell(
     length,
     homology,
     n_proteins: n,
-    precision_w: f,
-    recall_w: f,
-    f_micro_w: f,
+    precision: f,
+    recall: f,
+    f_micro: f,
     reportable,
   };
 }
@@ -71,7 +71,7 @@ describe("toGrid", () => {
 
   it("indexes cells by their two axes", () => {
     const g = toGrid(cells, "length", "homology", LENGTH_ORDER, HOMOLOGY_ORDER);
-    expect(g.at("<=512", "60-90")?.f_micro_w).toBeCloseTo(0.45);
+    expect(g.at("<=512", "60-90")?.f_micro).toBeCloseTo(0.45);
     expect(g.rows).toEqual(["<=512", "512-1024"]);
     expect(g.cols).toEqual(["<=30", "60-90"]);
   });

@@ -29,9 +29,9 @@ export type StratumRow = {
   donor_policy?: string | null;
   metric?: string | null;
   n_proteins: number;
-  f_micro_w: number;
-  precision_w?: number;
-  recall_w?: number;
+  f_micro: number;
+  precision?: number;
+  recall?: number;
   reportable?: boolean;
   category?: string;
   aspect?: string;
@@ -62,7 +62,7 @@ export function rankArms(rows: StratumRow[]): StratumRow[] {
   return rows
     .filter((r) => r.reportable !== false)
     .slice()
-    .sort((a, b) => b.f_micro_w - a.f_micro_w);
+    .sort((a, b) => b.f_micro - a.f_micro);
 }
 
 export type Spread = {
@@ -88,7 +88,7 @@ export function spreadOf(rows: StratumRow[], minArms = 3): Spread | null {
   return {
     best,
     worst,
-    value: best.f_micro_w - worst.f_micro_w,
+    value: best.f_micro - worst.f_micro,
     arms: ranked.length,
   };
 }

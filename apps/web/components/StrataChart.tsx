@@ -204,20 +204,20 @@ function AspectGrid({
                         thin
                           ? undefined
                           : {
-                              background: heatColour(cell.f_micro_w, lo, hi),
-                              color: textOn(cell.f_micro_w, lo, hi),
+                              background: heatColour(cell.f_micro, lo, hi),
+                              color: textOn(cell.f_micro, lo, hi),
                             }
                       }
                       title={
                         thin
                           ? `withheld: ${cell.n_proteins} proteins, below the population floor`
-                          : `${cell.f_micro_w.toFixed(4)} over ${formatCount(cell.n_proteins)} proteins`
+                          : `${cell.f_micro.toFixed(4)} over ${formatCount(cell.n_proteins)} proteins`
                       }
                     >
                       <span
                         className={`text-[11px] tabular-nums ${thin ? "text-slate-400" : ""}`}
                       >
-                        {cell.f_micro_w.toFixed(3)}
+                        {cell.f_micro.toFixed(3)}
                       </span>
                       <span
                         className={`text-[9px] tabular-nums ${thin ? "text-slate-400" : "opacity-80"}`}
