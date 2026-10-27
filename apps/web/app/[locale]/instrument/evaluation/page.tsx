@@ -11,6 +11,7 @@ import {
   listRerankers, baseUrl,
 } from "@/lib/api";
 import type { AnnotationSet, PredictionSet, ScoringConfig, RerankerModel } from "@/lib/api";
+import { KNOWLEDGE_DEFINITION } from "@/lib/knowledgeRegimes";
 
 const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 const selectClass =
@@ -172,11 +173,10 @@ function ResultsTable({ results }: { results: Record<string, SettingResults> }) 
     CCO: t("resultMetrics.cellularComponent"),
   };
 
-  const SETTING_TOOLTIPS: Record<string, string> = {
-    NK: "No-Knowledge: proteins with no experimental annotations in any namespace at t0. Evaluated without -known.",
-    LK: "Limited-Knowledge: proteins annotated in some namespaces at t0 but not in the evaluated namespace. Evaluated without -known.",
-    PK: "Partial-Knowledge: proteins that already had annotations in the evaluated namespace at t0. Evaluated with -known (old terms excluded from scoring).",
-  };
+  // These were the most accurate of the five copies -- the only ones that
+  // named the -known consequence -- so lib/knowledgeRegimes was written
+  // from them, and they now come from there.
+  const SETTING_TOOLTIPS: Record<string, string> = KNOWLEDGE_DEFINITION;
 
   return (
     <div className="space-y-4">

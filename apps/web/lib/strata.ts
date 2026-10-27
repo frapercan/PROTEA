@@ -1,3 +1,5 @@
+import { KNOWLEDGE_LABEL_LOWER } from "@/lib/knowledgeRegimes";
+
 // Resolvers for the per-stratum cells an evaluation produces.
 //
 // The API serves one cell per stratum with the population it was pooled over,
@@ -27,11 +29,7 @@ export type StrataResponse = {
 
 /** Human labels for the axis values, so a column reads as prose. */
 const AXIS_LABELS: Record<string, Record<string, string>> = {
-  category: {
-    NK: "no knowledge",
-    LK: "limited knowledge",
-    PK: "prior knowledge",
-  },
+  category: KNOWLEDGE_LABEL_LOWER,
   aspect: {
     P: "biological process",
     F: "molecular function",
