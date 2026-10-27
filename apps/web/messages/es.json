@@ -1064,20 +1064,8 @@
     }
   },
   "evaluation": {
-    "title": "Evaluación CAFA",
-    "generateSection": {
-      "heading": "Nuevo conjunto de evaluación",
-      "description": "Calcula el delta entre dos versiones GOA. Aplica filtrado de evidencia experimental y propagación del calificador NOT a través del DAG GO.",
-      "oldSetLabel": "Conjunto GOA antiguo (referencia)",
-      "selectSet": "— seleccionar —",
-      "newSetLabel": "Nuevo conjunto GOA (ground truth)",
-      "errorSameSets": "Los conjuntos antiguo y nuevo deben ser diferentes.",
-      "generateEvaluationSet": "Generar conjunto de evaluación",
-      "generating": "Encolando…"
-    },
-    "evaluationSetsSection": {
-      "heading": "Conjuntos de evaluación"
-    },
+    "backToList": "Volver a los conjuntos de evaluación",
+    "detailTitle": "Detalle del conjunto de evaluación",
     "evaluationSetCard": {
       "deleteConfirm": "¿Eliminar este conjunto de evaluación y todos sus resultados?",
       "delete": "Eliminar",
@@ -1114,6 +1102,30 @@
       "resultDelete": "Eliminar",
       "deleteResultConfirm": "¿Eliminar este resultado de evaluación?"
     },
+    "evaluationSetsSection": {
+      "heading": "Conjuntos de evaluación"
+    },
+    "generateSection": {
+      "heading": "Nuevo conjunto de evaluación",
+      "description": "Calcula el delta entre dos versiones GOA. Aplica filtrado de evidencia experimental y propagación del calificador NOT a través del DAG GO.",
+      "oldSetLabel": "Conjunto GOA antiguo (referencia)",
+      "selectSet": "— seleccionar —",
+      "newSetLabel": "Nuevo conjunto GOA (ground truth)",
+      "errorSameSets": "Los conjuntos antiguo y nuevo deben ser diferentes.",
+      "generateEvaluationSet": "Generar conjunto de evaluación",
+      "generating": "Encolando…"
+    },
+    "jumpToContext": "Ir al contexto",
+    "loading": "Cargando el conjunto de evaluación...",
+    "manualEvaluatorSection": {
+      "heading": "Comando manual del evaluador"
+    },
+    "modelUsed": "Modelo de reordenación usado",
+    "noResults": "Este conjunto todavía no tiene resultados de evaluación.",
+    "openPredictionSet": "Abrir el conjunto de predicciones",
+    "openReranker": "Abrir el modelo de reordenación",
+    "proteinExamples": "Ejemplos de proteínas (conjunto de predicciones)",
+    "provenanceLabel": "procedencia",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -1127,9 +1139,9 @@
       "coverage": "Cobertura",
       "tau": "τ"
     },
-    "manualEvaluatorSection": {
-      "heading": "Comando manual del evaluador"
-    }
+    "statDelta": "proteínas del delta",
+    "statsTitle": "Estadísticas del conjunto",
+    "title": "Evaluación CAFA"
   },
   "scoring": {
     "title": "Configuraciones de scoring",
