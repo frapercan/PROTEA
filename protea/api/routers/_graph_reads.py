@@ -503,6 +503,29 @@ _TIMELINE = text("""
     ORDER BY 4
 """)
 
+#: What each window reproduces, and how much of it was comparable.
+#:
+#: ``compared`` travels with ``agreed`` because a claim without its
+#: denominator is unreadable: twenty-six of twenty-six and one of one are both
+#: "reproduces", and only the first says anything. Newest first, so the frame
+#: shows the claim made against the latest bytes of a contract that can be
+#: regenerated.
+_Q_REPRODUCTIONS = text(
+    """
+    SELECT rr.evaluation_set_id::text AS evaluation_set_id,
+           rr.reference_key           AS reference_key,
+           rr.reference_digest        AS reference_digest,
+           rr.reference_commit        AS reference_commit,
+           rr.compared                AS compared,
+           rr.agreed                  AS agreed,
+           jsonb_array_length(rr.disagreements) AS disagreements,
+           rr.created_at::date::text  AS verified_on
+    FROM reference_reproduction rr
+    ORDER BY rr.created_at DESC
+    """
+)
+
+
 QUERIES: dict[str, TextClause] = {
     "timeline": _TIMELINE,
     "evaluation_sets": _Q_EVALUATION_SETS,
@@ -520,6 +543,7 @@ QUERIES: dict[str, TextClause] = {
     "artifacts": _Q_ARTIFACTS,
     "feature_selections": _Q_FEATURE_SELECTIONS,
     "floors": _Q_FLOORS,
+    "reproductions": _Q_REPRODUCTIONS,
 }
 
 
