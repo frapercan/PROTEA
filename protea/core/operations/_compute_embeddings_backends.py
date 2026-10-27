@@ -197,9 +197,8 @@ def _embed_esm_one(
     tokens = tokenizer(
         seq_str,
         return_tensors="pt",
-        truncation=True,
-        max_length=config.max_length,
         add_special_tokens=True,
+        **_truncation_kwargs(config),
     )
     tokens = {k: v.to(device) for k, v in tokens.items()}
     outputs = model(**tokens, output_hidden_states=True)
@@ -246,6 +245,21 @@ def _embed_esm(
     return results
 
 
+def _truncation_kwargs(config: EmbeddingConfig) -> dict[str, Any]:
+    """Tokeniser truncation arguments for this config.
+
+    A NULL ``max_length`` means full length, so truncation is not requested at
+    all. Passing ``truncation=True`` with ``max_length=None`` would NOT mean
+    that: Hugging Face then falls back to the checkpoint's own
+    ``model_max_length``, which is 512 on some encoders and a sentinel in the
+    quintillions on T5. The truncation point would come from the checkpoint
+    instead of from the configuration, and nothing would say so.
+    """
+    if config.max_length is None:
+        return {"truncation": False}
+    return {"truncation": True, "max_length": config.max_length}
+
+
 # ---------------------------------------------------------------------------
 # Backend: T5 (HuggingFace T5EncoderModel)
 # ---------------------------------------------------------------------------
@@ -280,20 +294,18 @@ def _t5_tokenise(
         return tokenizer.batch_encode_plus(
             [list(c) for c in cleaned],
             padding="longest",
-            truncation=True,
-            max_length=config.max_length,
             add_special_tokens=True,
             is_split_into_words=True,
             return_tensors="pt",
+            **_truncation_kwargs(config),
         )
     processed = [("<AA2fold> " if use_aa2fold else "") + " ".join(c) for c in cleaned]
     return tokenizer.batch_encode_plus(
         processed,
         padding="longest",
-        truncation=True,
-        max_length=config.max_length,
         add_special_tokens=True,
         return_tensors="pt",
+        **_truncation_kwargs(config),
     )
 
 
