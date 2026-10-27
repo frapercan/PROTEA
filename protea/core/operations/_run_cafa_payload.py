@@ -23,7 +23,6 @@ from protea.core.operations._depth_unit_guard import (
 class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
     """The evaluation request. See ``max_sequence_rank`` on counting depth."""
 
-
     evaluation_set_id: str
     #: Permits the single pass on the holdout; see split_registry.HOLDOUT_WAIVER.
     holdout_waiver: str | None = None
@@ -42,6 +41,7 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
     max_sequence_rank: int | None = Field(
         default=None, ge=1, description=SEQUENCE_DEPTH_DESCRIPTION
     )
+
     @model_validator(mode="after")
     def _a_depth_is_counted_in_one_unit(self) -> RunCafaEvaluationPayload:
         """See ``assert_one_depth_unit``; both null is the whole neighbourhood."""
@@ -193,6 +193,24 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "docs/EVAL_LAFA_PARITY.md."
         ),
     )
+    toi_rule: str = Field(
+        default="pivot_terms",
+        description=(
+            "How PROTEA derives the terms of interest when no toi_file is "
+            "given. 'pivot_terms' (the default, and what the platform has "
+            "always sent) is every GO id under the pivot snapshot, obsolete "
+            "ones included. 'live_in_both_ends' is the ids non-obsolete in "
+            "the ontology of BOTH ends of the window, read from the two "
+            "annotation sets rather than from the native snapshot fields, "
+            "which collapse when a run asks for closure under one end's "
+            "graph. The two differ twice over: the default keeps obsolete "
+            "terms cafaeval's own parser excludes from the graphs it builds, "
+            "and it consults one snapshot, so a term obsolete by t1 is scored "
+            "as though it still existed. On the 211 -> 227 window they are "
+            "43,558 terms against 39,028, and the second is the lab's rule. "
+            "Ignored when toi_file is set, since that file IS the answer."
+        ),
+    )
 
     frame: str | None = Field(
         default=None,
@@ -249,6 +267,18 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
         return v.strip()
+
+    @field_validator("toi_rule")
+    @classmethod
+    def _toi_rule_vocab(cls, v: str) -> str:
+        from protea.core.operations._run_cafa_setup import TOI_RULES
+
+        # Read from the rules themselves: a vocabulary restated here would let
+        # a rule be added that no payload can ask for, or asked for by a name
+        # the loader does not know.
+        if v not in TOI_RULES:
+            raise ValueError(f"toi_rule must be one of {TOI_RULES}")
+        return v
 
     @field_validator("frame")
     @classmethod

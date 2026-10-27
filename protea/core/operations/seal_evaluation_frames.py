@@ -78,6 +78,9 @@ PositiveInt = Annotated[int, Field(gt=0)]
 #: * ``toi_file`` decides which terms count toward precision and recall at all.
 #:   Null means the terms were derived from the pivot snapshot, which is a
 #:   different frame from any supplied file.
+#: * ``toi_rule`` decides HOW they are derived when no file is given, and the
+#:   two rules are not a near thing: on the 211 -> 227 window ``pivot_terms``
+#:   yields 43,558 terms and ``live_in_both_ends`` 39,028.
 #:
 #: ``toi_file`` is sealed as the PATH, which is weaker than the thing that
 #: matters: two different files written to one path seal alike, and one file
@@ -97,6 +100,7 @@ _FRAME_FIELDS: tuple[str, ...] = (
     "restrict_gt_to_predicted",
     "th_step",
     "toi_file",
+    "toi_rule",
 )
 
 #: Fields whose absence from a payload means the payload's default VALUE, not
@@ -113,6 +117,7 @@ _FRAME_FIELDS: tuple[str, ...] = (
 _PAYLOAD_DEFAULTS: dict[str, Any] = {
     "restrict_gt_to_predicted": True,
     "th_step": 0.01,
+    "toi_rule": "pivot_terms",
 }
 
 #: Fields read out of JSONB as text that name a number.
@@ -142,6 +147,7 @@ _ROWS = text("""
            j.payload ->> 'restrict_gt_to_predicted'       AS restrict_gt_to_predicted,
            j.payload ->> 'th_step'                        AS th_step,
            j.payload ->> 'toi_file'                       AS toi_file,
+           j.payload ->> 'toi_rule'                       AS toi_rule,
            (j.id IS NOT NULL)                             AS has_job
     FROM evaluation_result r
     LEFT JOIN evaluation_set es ON es.id = r.evaluation_set_id

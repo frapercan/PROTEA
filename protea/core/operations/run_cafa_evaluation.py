@@ -11,17 +11,13 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from protea.core._evaluation_leakage import refuse_uncertifiable_encoding
-from protea.core.band_registry import (
-    assert_band_consistency,
-    assert_release_not_after_cutoff,
-    ia_token,
-)
 from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.ia import PROPAGATE_RELATIONS, strongly_connected_components
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
 from protea.core.operations import _run_cafa_summary as _summary
+from protea.core.operations._band_guard import refuse_if_the_band_is_foreign
 from protea.core.operations._depth_unit_guard import (
     assert_depth_unit_is_available,
 )
@@ -98,8 +94,12 @@ def _refuse_a_cyclic_snapshot(session: Session, snapshot: Any, emit: EmitFn) -> 
     emit(
         "run_cafa_evaluation.cyclic_snapshot",
         None,
-        {"snapshot_id": str(snapshot.id), "obo_version": snapshot.obo_version,
-         "components": len(components), "terms": terms},
+        {
+            "snapshot_id": str(snapshot.id),
+            "obo_version": snapshot.obo_version,
+            "components": len(components),
+            "terms": terms,
+        },
         "error",
     )
     raise ValueError(
@@ -193,11 +193,14 @@ class RunCafaEvaluationOperation:
         provenance = self._build_eval_provenance(p, inputs.eval_set, bool(reranker_models))
         eval_result = build_result_row(
             ResultRow(
-                result_id=result_id, inputs=inputs, payload=payload,
+                result_id=result_id,
+                inputs=inputs,
+                payload=payload,
                 scoring_config_id=p.scoring_config_id,
                 first_reranker_id=first_reranker_id,
                 reranker_config_snapshot=reranker_config_snapshot,
-                results=results, provenance=provenance,
+                results=results,
+                provenance=provenance,
                 max_sequence_rank=p.max_sequence_rank,
                 max_k_position=p.max_k_position,
             )
@@ -264,7 +267,8 @@ class RunCafaEvaluationOperation:
             data=data,
             snapshot=snapshot,
             pivot_snapshot_id=pivot_snapshot_id,
-            toi_go_ids=_load_terms_of_interest(session, pivot_snapshot_id),
+            toi_go_ids=_load_terms_of_interest(session, pivot_snapshot_id, eval_set, p.toi_rule),
+            toi_rule=p.toi_rule,
         )
         _emit_evaluation_setup_events(emit, inputs)
         if data.delta_proteins == 0:
@@ -458,9 +462,8 @@ class RunCafaEvaluationOperation:
             scoring_config=ctx.scoring_snapshot,
         )
 
-    @classmethod
+    @staticmethod
     def _resolve_and_gate_ia(
-        cls,
         tmpdir: str,
         snapshot: OntologySnapshot,
         p: RunCafaEvaluationPayload,
@@ -486,66 +489,8 @@ class RunCafaEvaluationOperation:
             if p.information_accretion_set_id
             else p.ia_file
         )
-        cls._enforce_band(p.band, snapshot, band_ref, emit)
+        refuse_if_the_band_is_foreign(p.band, snapshot, band_ref, emit)
         return ia_path
-
-    @staticmethod
-    def _enforce_band(
-        declared_band: str | None,
-        snapshot: OntologySnapshot,
-        payload_ia_file: str | None,
-        emit: EmitFn,
-    ) -> None:
-        """Phantom-gap guard: when the payload declares a band, reject the run
-        if the pivot ontology snapshot or the resolved IA come from a foreign
-        band, and forbid the uniform IC=1 fallback.
-
-        Binds propagation / term-universe / orphans (the snapshot) AND the IA
-        to the declared band, extending the #599 IA-only resolver. Resolves the
-        IA *reference* (payload ``ia_file`` first, else snapshot ``ia_url``) so
-        the band is checked against the source artifact, not a downloaded
-        tempfile copy. No-op when ``declared_band`` is None (ad-hoc episode).
-
-        THE IA HALF USED TO RESOLVE BY BASENAME, AND THAT IS WHY A PLATFORM
-        TABLE COULD NOT PASS. ``band_registry.ia_token`` returned the file name,
-        an ``InformationAccretionSet`` always serialises to ``IA.tsv``, and so a
-        band whose token set omitted that name rejected every computed table.
-        The note that used to sit here called that the safe direction, and it
-        was: the registry could not tell two tables apart, so inferring that one
-        was authoritative would have been a guess.
-
-        That premise is gone. ``ia_token`` now returns the SET ID for a platform
-        artifact, which is the three-axis identity the row is keyed by, so the
-        registry distinguishes them exactly. A band pins its own table by id --
-        ``v211`` pins ``80bbc9e4-...`` -- and the only thing left to get right is
-        giving this guard the source reference rather than the tempfile. Before
-        that, pinning the IA the traceable way (by set id) was the one way a
-        band-declared cell could NOT pass, which is the opposite of what both
-        guards are for.
-        """
-        if not declared_band:
-            return
-        ia_ref = payload_ia_file or snapshot.ia_url
-        band = assert_band_consistency(
-            declared_band, obo_version=snapshot.obo_version, ia_ref=ia_ref
-        )
-        # No-future-data: even a set-canonical snapshot must not post-date the
-        # band's t0 (the set-membership check and the temporal ordering are
-        # independent; a band could in principle accept a date-bearing OBO that
-        # is still after its cutoff). Raises CutoffViolationError.
-        assert_release_not_after_cutoff(
-            declared_band, artifact="ontology snapshot", release_ref=snapshot.obo_version
-        )
-        emit(
-            "run_cafa_evaluation.band_verified",
-            None,
-            {
-                "band": band.name,
-                "obo_version": snapshot.obo_version,
-                "ia_token": ia_token(ia_ref),
-            },
-            "info",
-        )
 
     @staticmethod
     def _upload_artifacts(
