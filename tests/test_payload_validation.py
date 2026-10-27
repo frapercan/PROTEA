@@ -118,6 +118,9 @@ from protea.core.operations.load_ontology_snapshot import (
 from protea.core.operations.load_quickgo_annotations import (
     LoadQuickGOAnnotationsPayload,
 )
+from protea.core.operations.load_swissprot_release import (
+    LoadSwissProtReleasePayload,
+)
 from protea.core.operations.measure_embedding_magnitude import (
     MeasureEmbeddingMagnitudePayload,
 )
@@ -298,6 +301,20 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         LoadOntologySnapshotPayload,
         {"force_relationships": True},
         ("obo_url",),
+    ),
+    # A window's Swiss-Prot membership is named by the UniProt release it comes
+    # from, and "latest" names a moving target: the whole point of the table is
+    # that a release is a fixed set of accessions. A release string that is not
+    # <YYYY>_<NN> is refused before anything is downloaded.
+    (
+        "load_swissprot_release",
+        LoadSwissProtReleasePayload,
+        {
+            "release": "latest",
+            "published_at": "2025-06-18",
+            "expected_sha256": "0" * 64,
+        },
+        ("release",),
     ),
     # missing-required: source_version
     (

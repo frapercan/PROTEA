@@ -25,6 +25,7 @@ import gzip
 import hashlib
 import tarfile
 import time
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -53,6 +54,22 @@ _ARCHIVE_URL = (
 _FASTA_MEMBER = "uniprot_sprot.fasta.gz"
 
 _INSERT_CHUNK = 10_000
+
+
+@dataclass(frozen=True)
+class _Resolved:
+    """What the gate produced, once it has accepted the release.
+
+    Bundled rather than passed field by field so that the writing step takes
+    the release it verified, and cannot be handed a digest from one read and
+    rows from another.
+    """
+
+    url: str
+    members: dict[str, str]
+    blob: bytes
+    digest: str
+    started: float
 
 
 class LoadSwissProtReleasePayload(ProteaPayload, frozen=True):
@@ -150,7 +167,12 @@ def parse_swissprot_fasta(lines: Any) -> dict[str, str]:
             return
         if not chunks:
             raise ValueError(f"{accession} has a header but no sequence")
-        digest = hashlib.md5("".join(chunks).encode()).hexdigest()  # noqa: S324
+        # md5 is UniProt's own sequence fingerprint, not a security primitive:
+        # the digests have to match the ones the reference tables carry, so the
+        # algorithm is fixed by the data and not a choice made here.
+        digest = hashlib.md5(
+            "".join(chunks).encode(), usedforsecurity=False
+        ).hexdigest()
         if accession in members:
             raise ValueError(f"{accession} appears twice in the FASTA")
         members[accession] = digest
@@ -228,6 +250,27 @@ class LoadSwissProtReleaseOperation:
             "info",
         )
 
+        resolved = self._resolve_and_gate(p, url, started, emit)
+
+        existing = session.execute(
+            select(SwissProtRelease).where(SwissProtRelease.release == p.release)
+        ).scalar_one_or_none()
+        if existing is not None:
+            return self._already_loaded(
+                existing, resolved.digest, len(resolved.members), emit
+            )
+
+        return self._create(session, p, resolved, payload, emit)
+
+    def _resolve_and_gate(
+        self,
+        p: LoadSwissProtReleasePayload,
+        url: str,
+        started: float,
+        emit: EmitFn,
+    ) -> _Resolved:
+        """Read the release, canonicalise it, and refuse it if it is not what
+        the provenance declares. Nothing is written before this returns."""
         members = self._read(p, url, emit)
         blob = canonical_table(members)
         digest = hashlib.sha256(blob).hexdigest()
@@ -250,24 +293,30 @@ class LoadSwissProtReleaseOperation:
                 f"release {p.release} parsed {len(members)} accessions but the "
                 f"provenance declares {p.expected_accessions}"
             )
+        return _Resolved(
+            url=url, members=members, blob=blob, digest=digest, started=started
+        )
 
-        existing = session.execute(
-            select(SwissProtRelease).where(SwissProtRelease.release == p.release)
-        ).scalar_one_or_none()
-        if existing is not None:
-            return self._already_loaded(existing, digest, len(members), emit)
-
+    def _create(
+        self,
+        session: Session,
+        p: LoadSwissProtReleasePayload,
+        resolved: _Resolved,
+        payload: dict[str, Any],
+        emit: EmitFn,
+    ) -> OperationResult:
+        members, digest = resolved.members, resolved.digest
         row = SwissProtRelease(
             release=p.release,
             published_at=p.published_date,
-            source_url=url,
+            source_url=resolved.url,
             accession_count=len(members),
             content_sha256=digest,
             job_id=job_id_from_payload(payload),
             meta={
                 "source": p.source,
                 "local_path": p.local_path,
-                "canonical_bytes": len(blob),
+                "canonical_bytes": len(resolved.blob),
             },
         )
         session.add(row)
@@ -275,7 +324,7 @@ class LoadSwissProtReleaseOperation:
 
         self._insert_members(session, row.id, members, emit)
 
-        elapsed = time.perf_counter() - started
+        elapsed = time.perf_counter() - resolved.started
         emit(
             "load_swissprot_release.done",
             f"{p.release}: {len(members)} accessions in {elapsed:.1f}s",
