@@ -422,6 +422,22 @@ class TestReadingFromTheArtifactStore:
         assert all(rid in key for key in store.asked)
 
 
+def _is_grid_refusal(error: BaseException, expected: str) -> None:
+    """Assert the reader refused, by class NAME and not by class identity.
+
+    ``tests/test_per_protein_grid_producer.py`` loads the consumer's reader a
+    second time through ``importlib`` so it can check the producer against the
+    version that will run in production. That leaves two
+    ``ThresholdGridUnavailableError`` classes alive in one session, so
+    ``pytest.raises`` on an imported name passes or fails depending on which
+    test file ran first -- which is a fact about module loading and not about
+    what the operation refused. The name and the message are what this is
+    actually asserting.
+    """
+    assert type(error).__name__ == "ThresholdGridUnavailableError", type(error).__name__
+    assert expected in str(error)
+
+
 class TestItReadsTheFileTheProducerWrites:
     """The defect this file's shape exists to prevent, asserted directly."""
 
@@ -491,15 +507,11 @@ class TestItReadsTheFileTheProducerWrites:
         truth, so pooling it would publish numbers over a population nobody
         chose. The resolver the paired panels already use says so by name.
         """
-        from protea.core.operations._paired_panels_artifact import (
-            ThresholdGridUnavailableError,
-        )
-
         (tmp_path / "NK").mkdir()
         pd.DataFrame(
             [{"protein_accession": "Q1", "namespace": "molecular_function", "tau": 0.5}]
         ).to_parquet(tmp_path / "NK" / "per_protein.parquet", index=False)
-        with pytest.raises(ThresholdGridUnavailableError):
+        with pytest.raises(Exception) as err:
             StratifyEvaluationOperation().execute(
                 self._session(),
                 {
@@ -511,17 +523,14 @@ class TestItReadsTheFileTheProducerWrites:
                 },
                 emit=lambda *a, **k: None,
             )
+        _is_grid_refusal(err.value, GRID_FILENAME)
 
     def test_a_weighting_the_file_does_not_carry_is_refused(self, tmp_path) -> None:
         """Every evaluation stored on this deployment ran with no accretion
         table, so its grid declares the unweighted variant alone. Pooling it
         under the weighted name is the one thing that must not happen."""
-        from protea.core.operations._paired_panels_artifact import (
-            ThresholdGridUnavailableError,
-        )
-
         root = _grid(tmp_path, [_row("Q1", "molecular_function")])
-        with pytest.raises(ThresholdGridUnavailableError, match="variants"):
+        with pytest.raises(Exception) as err:
             StratifyEvaluationOperation().execute(
                 self._session(),
                 {
@@ -533,6 +542,7 @@ class TestItReadsTheFileTheProducerWrites:
                 },
                 emit=lambda *a, **k: None,
             )
+        _is_grid_refusal(err.value, "variants")
 
     def test_a_grid_without_its_best_f_table_is_refused(self, tmp_path) -> None:
         """The grid holds the sweep and nothing in it says which column was
