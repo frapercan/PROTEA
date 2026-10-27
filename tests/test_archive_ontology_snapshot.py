@@ -98,6 +98,47 @@ def test_parser_returns_none_version_when_header_absent() -> None:
 
 
 # --------------------------------------------------------------------------
+# The seam between the parser and the gate
+#
+# Every test above unpacks the parser's answer (``ids, version = ...``), which
+# a plain tuple satisfies just as well as the NamedTuple the signature
+# promises, and every test below builds a ``_Fetched`` by hand. So the one
+# place where the two meet -- production code, which reads the fields BY NAME
+# -- was the only thing neither side exercised, and it was broken from the
+# first commit: the parser ended on ``return ids, version``.
+#
+# Measured on this server 2026-10-27, archiving the two publishing pivots
+# (releases/2022-07-01 and releases/2025-07-22), the first time this operation
+# had ever been run:
+#
+#     AttributeError: 'tuple' object has no attribute 'version'
+#
+# after the 31 MB download and the sha256, which is the part that costs. The
+# three checks below are the seam, not the parser and not the gate.
+# --------------------------------------------------------------------------
+def test_the_parser_answers_by_field_name() -> None:
+    fetched = ArchiveOntologySnapshotOperation._parse_ids_and_version(OBO)
+    assert fetched.version == "releases/2025-03-16"
+    assert fetched.ids == {"GO:0000001", "GO:0000002"}
+
+
+def test_the_parser_returns_the_type_its_signature_promises() -> None:
+    assert isinstance(ArchiveOntologySnapshotOperation._parse_ids_and_version(OBO), _Fetched)
+
+
+def test_the_gate_accepts_the_parser_output_unaltered() -> None:
+    # No hand-built _Fetched: whatever the parser returns goes straight in, as
+    # it does in execute().
+    op = ArchiveOntologySnapshotOperation()
+    fetched = ArchiveOntologySnapshotOperation._parse_ids_and_version(OBO)
+    stats = op._gate_congruence(
+        _Session({"GO:0000001", "GO:0000002"}), _Snapshot(), fetched, 0.0, _emit
+    )
+    assert stats["missing_from_fetch"] == 0
+    assert stats["db_terms"] == 2
+
+
+# --------------------------------------------------------------------------
 # Congruence gate
 # --------------------------------------------------------------------------
 def _gate(db_ids, fetched_ids, version="releases/2025-03-16", max_drift=0.0):
