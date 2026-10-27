@@ -56,20 +56,24 @@ import {
   type PerTaskAggregate,
 } from "@/lib/api";
 
-/** Canonical category definitions. Anchored to the leakage-fixed champion
- *  memory (project_lb2_leakage_fixed_champion) and the paired bootstrap
- *  result (project_lb3_paired_ci_2026_05_18): NK = the strict CAFA "no
- *  knowledge" split (no experimental annotations exist for the test
- *  protein in the train cutoff), LK = limited knowledge (some aspects
- *  annotated but not the one under evaluation), PK = partial knowledge
- *  (the protein is annotated for the same aspect but with at least one
- *  new term added in the evaluation cutoff). Selective-deploy memory
- *  (project_v27_binary_multiseed) explains why PK is policy-zero for
- *  the v27-binary reranker. */
+/** Canonical category definitions, and nothing but definitions.
+ *
+ *  These three tooltips used to carry figures: "0.7291 +/- 0.0028 multiseed
+ *  Fmax on v27-binary (NK+LK pooled)" on NK, "the publishable selective-deploy
+ *  claim" on LK, "the KNN baseline drives selective deploy" on PK. Those
+ *  numbers and claims came from the campaign whose stored results were deleted
+ *  on 2026-09-14, so not one row behind them exists in this database. A screen
+ *  that prints a figure the platform cannot produce is worse than a screen
+ *  that prints nothing: the reader has no way to tell it apart from a figure
+ *  that was measured this morning.
+ *
+ *  What a definition CAN say without a measurement is what the split is, and
+ *  that is what these say now. Any number belongs in a cell, beside its
+ *  population and its frame, where the matrix endpoint puts it. */
 const CATEGORY_TOOLTIPS: Record<string, string> = {
-  NK: "No Knowledge — the test protein has no experimental annotations of any aspect at the train cutoff. Strictest CAFA split: 0.7291 ± 0.0028 multiseed Fmax on v27-binary (NK+LK pooled).",
-  LK: "Limited Knowledge — the protein carries annotations in other aspects but not the one being evaluated. Paired with NK in the publishable selective-deploy claim.",
-  PK: "Partial Knowledge — the protein already has annotations for the same aspect; the evaluation only scores newly added terms. Reranker stays policy-zero here; KNN baseline drives selective deploy.",
+  NK: "No Knowledge — at the window's start the protein has no experimental annotation in any aspect. The strictest CAFA split: nothing about this protein's function was known when the model was fitted.",
+  LK: "Limited Knowledge — the protein carries annotation in other aspects at the window's start, but not in the aspect being scored.",
+  PK: "Partial Knowledge — the protein is already annotated in the aspect being scored, and only the terms added inside the window count as truth.",
 };
 
 /** Lineage chip filter — decomposes the BenchmarkEvalSet.stats counters
@@ -98,14 +102,14 @@ const LINEAGE_CHIPS: {
     label: "NK + LK only",
     cats: ["NK", "LK"],
     tooltip:
-      "Selective-deploy window: the v27-binary reranker is published only on NK + LK splits (0.7291 ± 0.0028 multiseed pooled). Removes PK from the matrix.",
+      "Keeps the two splits where nothing was known about the scored aspect at the window's start, and removes PK. A filter on the rows in hand, not a different measurement.",
   },
   {
     key: "pk_only",
     label: "PK only",
     cats: ["PK"],
     tooltip:
-      "Partial Knowledge in isolation. The reranker stays policy-zero here, so the matrix surfaces the KNN baseline that drives the selective-deploy decision.",
+      "Partial Knowledge in isolation: proteins already annotated in the scored aspect, where only the terms added inside the window count. A filter on the rows in hand, not a different measurement.",
   },
   {
     key: "nk",
