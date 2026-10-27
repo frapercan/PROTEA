@@ -240,11 +240,30 @@ def frame_digest(row: dict[str, Any]) -> str | None:
     draws that line and :data:`_PAYLOAD_DEFAULTS` says which side each is on.
 
     Returns nothing when a field that changes the meaning of the number is
-    missing. The evaluation set and the accretion set are both required for
-    that reason: without the first the population is unknown, and without the
-    second the weighting is.
+    missing. That is the evaluation set alone: without it the population is
+    unknown and there is nothing to seal.
+
+    THE ACCRETION SET USED TO BE REQUIRED TOO, on the reasoning that without
+    it "the weighting is unknown". That reasoning does not hold, and it is the
+    mirror of the rule two lines up: an absent accretion set does not make the
+    weighting unknown, it makes it known and equal to none. Null is a value
+    here exactly as it is for the caps -- "a cap absent from the payload is
+    encoded as null rather than skipped" -- and an unweighted frame is a
+    different frame from any weighted one, which is what the digest is for.
+
+    Measured 2026-10-27 over the seven stored results: five sealed into four
+    frames and two were reported unattributable, and those two were precisely
+    the runs with no ``information_accretion_set_id``. So an unweighted run
+    could never carry a seal, and two unweighted runs under different caps or
+    a different threshold grid were indistinguishable by the one column that
+    exists to distinguish them.
+
+    Nothing already sealed moves: ``information_accretion_set_id`` is in
+    :data:`_FRAME_FIELDS` either way, so a row that carried a set id hashes the
+    same material as before. The only rows that change are the ones that had
+    no digest at all.
     """
-    if not row.get("evaluation_set_id") or not row.get("information_accretion_set_id"):
+    if not row.get("evaluation_set_id"):
         return None
     canonical = json.dumps(frame_material(row), sort_keys=True, separators=(",", ":"))
     return "f-" + hashlib.sha256(canonical.encode()).hexdigest()[:_DIGEST_WIDTH]
@@ -291,9 +310,10 @@ def _walk(session: Session, rows: list[dict[str, Any]], p: Any) -> _Tally:
                     {
                         "id": row["id"],
                         "why": (
-                            "no producing job, so the accretion set is unrecoverable"
+                            "no producing job, so the frame is unrecoverable"
                             if not row["has_job"]
-                            else "the evaluation set or accretion set is missing"
+                            else "the evaluation set is missing, so the population "
+                            "is unknown"
                         ),
                     }
                 )
