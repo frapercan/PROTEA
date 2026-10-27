@@ -433,7 +433,7 @@ class StratifyEvaluationOperation(Operation):
             )
             if written is not None:
                 summary["settings"][setting_dir.name] = written
-        if not summary["settings"]:
+        if not any(w["cells"] for w in summary["settings"].values()):
             if tmp is not None:
                 tmp.cleanup()
             raise ValueError(
@@ -442,8 +442,10 @@ class StratifyEvaluationOperation(Operation):
                 "which is how the operation ran six times over five stored results and "
                 "produced no artefact anybody could read. Either the result has no "
                 f"<SETTING>/{GRID_FILENAME}, or no protein in it could be placed on the "
-                "requested axes: the sliced and read-versus-placed counts in this job's "
-                "events say which."
+                "requested axes -- which is what happens when a run crosses a donor axis "
+                "over a prediction set that has no donors at all, such as one ingested "
+                "from a method's own file. The sliced and read-versus-placed counts in "
+                "this job's events say which."
             )
         if tmp is not None:
             tmp.cleanup()

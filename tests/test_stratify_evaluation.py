@@ -581,3 +581,52 @@ class TestItReadsTheFileTheProducerWrites:
         frame = pd.read_parquet(root / "NK" / "strata.parquet")
         assert frame.variant.tolist() == ["unweighted"]
         assert "precision_w" not in frame.columns
+
+
+class TestASettingThatPooledNothingIsNotSuccess:
+    """Measured in production, an hour after the refusal was merged.
+
+    The refusal asked whether any setting had been READ, and three had: the
+    grid was there, the rows were sliced, and every one of them was then
+    skipped because the run crossed ``homology`` over a prediction set ingested
+    from a method's own file, which carries no donor neighbourhoods at all.
+    ``rows_placed: 0``, ``cells: 0`` in all three settings, and the job came
+    back SUCCEEDED -- the same shape of lie the refusal was written to stop,
+    one level further in.
+    """
+
+    def _session(self):
+        return _FakeSession([], [("Q1", 300)])
+
+    def test_three_settings_and_no_cells_is_refused(self, tmp_path) -> None:
+        root = _grid(tmp_path, [_row("Q1", "molecular_function")])
+        with pytest.raises(ValueError, match="no setting yielded a single stratum"):
+            StratifyEvaluationOperation().execute(
+                self._session(),
+                {
+                    "prediction_set_id": str(uuid.uuid4()),
+                    "artifacts_root": str(root),
+                    "variant": "unweighted",
+                    # the donor axis, over a set with no donors
+                    "axes": ["category", "aspect", "homology"],
+                    "min_population": 1,
+                },
+                emit=lambda *a, **k: None,
+            )
+
+    def test_the_same_run_without_the_donor_axis_still_writes(self, tmp_path) -> None:
+        # The refusal must not swallow the case it is next to: the rows are
+        # placeable on the axes that need no alignment.
+        root = _grid(tmp_path, [_row("Q1", "molecular_function")])
+        out = StratifyEvaluationOperation().execute(
+            self._session(),
+            {
+                "prediction_set_id": str(uuid.uuid4()),
+                "artifacts_root": str(root),
+                "variant": "unweighted",
+                "axes": ["category", "aspect"],
+                "min_population": 1,
+            },
+            emit=lambda *a, **k: None,
+        )
+        assert out.result["settings"]["NK"]["cells"] == 1
