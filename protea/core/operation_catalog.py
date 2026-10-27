@@ -67,6 +67,9 @@ from protea.core.operations.load_interpro_go_mapping import (
 )
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
+from protea.core.operations.load_swissprot_release import (
+    LoadSwissProtReleaseOperation,
+)
 from protea.core.operations.measure_embedding_magnitude import (
     MeasureEmbeddingMagnitudeOperation,
 )
@@ -123,6 +126,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(PredictGOTermsBatchOperation())
     registry.register(StorePredictionsOperation())
     registry.register(PredictGOTermsFromInterProOperation())
+    registry.register(LoadSwissProtReleaseOperation())
     registry.register(RefreshGoaReleaseDatesOperation())
     registry.register(BuildGoCooccurrenceOperation())
     registry.register(AnalyzeAnnotationEvolutionOperation())
