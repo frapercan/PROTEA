@@ -56,62 +56,25 @@ from protea.core.contracts.operation import (
     ProteaPayload,
 )
 from protea.core.operations._compute_embeddings_helpers import (
-    fetch_embedding_scale,
     scale_and_clip_embedding,
 )
 from protea.core.operations._encode_residue_sparse_batch import encode_until_done
 from protea.core.operations._encoder_artifact import (
-    resolve_encoder_artifact,
+    REQUIRED_META,
     resolve_training_cut,
 )
 from protea.core.operations._residue_count_guard import assert_one_row_per_residue
+from protea.core.operations._residue_pass_group import (
+    ResidueHead,
+    drop_encoded_by_every_head,
+    load_batch_heads,
+    pending_sequences_for_group,
+    resolve_head_group,
+)
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
-
-#: Fields the artifact must declare. Absent any of them the artifact is refused:
-#: defaulting them would let a pooled-encoder artifact run through the residue path
-#: and produce codes that look right and were computed from something else.
-#:
-#: ``aggregate`` joined this list once the aggregate stopped being a constant. A code
-#: built from two moments and one built from the mean have the same weights and
-#: different widths, so a default here would silently halve or double a corpus.
-REQUIRED_META = (
-    "k_residue",
-    "k_sequence",
-    "dict_dim",
-    "in_dim",
-    "layer_indices",
-    "aggregate",
-    "order",
-    "training_release",
-)
-
-#: Which of two pipelines the map was fitted for.
-#:
-#: ``select-then-pool`` applies the map per residue, keeps ``k_residue``
-#: atoms of each, aggregates, then keeps ``k_sequence``. It is what this
-#: operation implements and what every shipped recipe uses.
-#:
-#: ``pool-then-select`` aggregates the residues first and applies the map
-#: to the result. It is the natural control arm, and it is NOT implemented
-#: here: declaring it is refused with a message saying so, rather than
-#: executed as the other order.
-#:
-#: The distinction cannot be recovered from the weights. The map is affine,
-#: so mean(X @ W + b) equals mean(X) @ W + b to within 7e-07, and an
-#: artifact fitted either way has identical shapes and passes every check
-#: on them. Served under the wrong order it produced a code sharing 130 of
-#: 2048 atoms with the intended one, at cosine 0.10. Not a degradation, a
-#: different encoder.
-ORDERS = ("select-then-pool", "pool-then-select")
-
-#: How the per-residue codes become one code. ``mean`` is the first moment alone;
-#: ``moments`` concatenates the mean with the per-atom dispersion and therefore emits
-#: twice the dictionary width. Both are a fixed-width reduction over residues, which is
-#: what keeps a corpus pass costing one protein of memory rather than the corpus.
-AGGREGATES = ("mean", "moments")
 
 #: Backend tag on the produced config, so a code produced here is never confused
 #: with one produced from pooled vectors when both are in the same table.
@@ -141,6 +104,21 @@ class EncodeResidueSparsePayload(ProteaPayload, frozen=True):
     source_embedding_config_id: str
     encoder_artifact_path: str | None = None
     encoder_artifact_uri: str | None = None
+    #: Several heads over ONE forward pass. The pass is the cost on this path --
+    #: 299.373.587 residues with no truncation -- and a head is a matmul over
+    #: the states it produces, so one artifact per job paid the model again for
+    #: every arm. ``_residue_pass_group`` says which heads may share it.
+    #:
+    #: A payload written in the one-artifact shape is folded into this field and
+    #: behaves exactly as it did, which is how ``compute_embeddings`` took
+    #: ``embedding_config_id`` to ``embedding_config_ids``.
+    #:
+    #: Each entry is a store key, a store URI, or a local path, resolved by
+    #: ``resolve_encoder_artifact``. A LOCAL PATH resolves against whichever host
+    #: runs the work, and the dispatcher and the card are different machines
+    #: here, so a path is usable only when they are the same one; a store
+    #: address is what means the same thing on both.
+    encoder_artifact_addresses: list[str] = Field(default_factory=list)
     target_model_name: str = "residue-sparse"
     device: str = "cuda"
     batch_size: PositiveInt = 32
@@ -157,24 +135,47 @@ class EncodeResidueSparsePayload(ProteaPayload, frozen=True):
         return v.strip()
 
     @model_validator(mode="after")
-    def _exactly_one_address(self) -> EncodeResidueSparsePayload:
-        """Refuse both addresses and refuse neither.
+    def _fold_the_single_address(self) -> EncodeResidueSparsePayload:
+        """Fold a one-artifact payload into the list, and refuse an empty group.
 
-        A local path resolves against whichever host runs the work, and with the
-        dispatcher and the card on different machines there is no path that means the
-        same thing on both. The URI is the address that does, so both are accepted and
-        the ambiguity of carrying both is not.
+        The two singular fields stay because every dispatched job in this
+        deployment is written with them, and a payload shape that stops working
+        is a worse defect than a field that outlives its reason.
         """
-        has_path = bool((self.encoder_artifact_path or "").strip())
-        has_uri = bool((self.encoder_artifact_uri or "").strip())
-        if has_path == has_uri:
+        # Recortado y no en crudo: "   " es verdadero en Python, asi que un filtro
+        # sobre el valor sin recortar admite una direccion de espacios en blanco.
+        # El validador que esto sustituye usaba strip() y perderlo fue un defecto
+        # que los tests de payload cazaron.
+        singular = [
+            a.strip()
+            for a in (self.encoder_artifact_path, self.encoder_artifact_uri)
+            if (a or "").strip()
+        ]
+        if len(singular) > 1:
             raise ValueError(
-                "give exactly one of encoder_artifact_path and encoder_artifact_uri. "
-                "The path resolves on whichever host runs the work, so it is usable "
-                "only when the dispatcher and the card are the same machine; the URI "
-                "resolves through the artifact store and is usable when they are not"
+                "give exactly one of encoder_artifact_path and encoder_artifact_uri, or "
+                "use encoder_artifact_addresses for a group"
             )
+        if singular and self.encoder_artifact_addresses:
+            raise ValueError(
+                "a singular address and encoder_artifact_addresses were both given, so "
+                "the group this job encodes is ambiguous. Put every head in "
+                "encoder_artifact_addresses"
+            )
+        addresses = [a.strip() for a in self.encoder_artifact_addresses if a.strip()] or singular
+        if not addresses:
+            raise ValueError(
+                "give at least one encoder artifact: encoder_artifact_addresses, or one "
+                "of encoder_artifact_path / encoder_artifact_uri"
+            )
+        if len(set(addresses)) != len(addresses):
+            raise ValueError(
+                "the head group names the same artifact twice, which would create one "
+                "target config and write its rows twice from one pass"
+            )
+        object.__setattr__(self, "encoder_artifact_addresses", addresses)
         return self
+
 
 
 class EncodeResidueSparseBatchPayload(ProteaPayload, frozen=True):
@@ -187,9 +188,12 @@ class EncodeResidueSparseBatchPayload(ProteaPayload, frozen=True):
     """
 
     source_embedding_config_id: str
-    target_embedding_config_id: str
-    sequence_ids: list[int]
-    parent_job_id: str
+    target_embedding_config_id: str | None = None
+    #: One entry per head: ``{"address": ..., "target_embedding_config_id": ...}``.
+    #: The pass is run once and every head reads its residues.
+    heads: list[dict[str, str]] = Field(default_factory=list)
+    sequence_ids: list[int] = Field(default_factory=list)
+    parent_job_id: str = ""
     encoder_artifact_path: str | None = None
     encoder_artifact_uri: str | None = None
     device: str = "cuda"
@@ -211,60 +215,6 @@ def refuse_backend_without_residues(backend: Any, model_backend: str) -> None:
             "backend that emits residues, or apply_learned_encoder if a pooled code is "
             "what is wanted"
         )
-
-
-def load_frozen_encoder(path: str) -> tuple[np.ndarray, np.ndarray, dict]:
-    """Read the map and its recipe, refusing anything that does not declare one.
-
-    The refusal is the point. An artifact fitted for pooled use has the same tensor
-    shapes as one fitted for residue use, so nothing about the weights themselves
-    would reveal the mistake, and the codes it produced would be complete and wrong.
-    """
-    data = np.load(path, allow_pickle=True)
-    missing = [k for k in REQUIRED_META if k not in data]
-    if missing:
-        raise ValueError(
-            f"{path} declares no {missing}; a residue-level encoder must state its "
-            "recipe, and defaulting it would let a pooled-encoder artifact produce "
-            "codes through this path that look right and were computed differently"
-        )
-    meta = {k: data[k].tolist() for k in REQUIRED_META}
-    weight = np.asarray(data["W"], dtype=np.float32)
-    bias = np.asarray(data["b"], dtype=np.float32)
-    if weight.shape != (meta["in_dim"], meta["dict_dim"]):
-        raise ValueError(
-            f"the map is {weight.shape} but the recipe declares "
-            f"({meta['in_dim']}, {meta['dict_dim']})"
-        )
-    if str(meta["aggregate"]) not in AGGREGATES:
-        raise ValueError(
-            f"{path} declares aggregate {meta['aggregate']!r}, which is not one of "
-            f"{list(AGGREGATES)}. The aggregate decides the code's width, so an "
-            "unknown one cannot be guessed"
-        )
-    order = str(meta["order"])
-    if order not in ORDERS:
-        raise ValueError(
-            f"{path} declares order {order!r}, which is not one of {list(ORDERS)}. "
-            "The order decides what the code IS, and it cannot be recovered from the "
-            "weights: an artifact fitted either way has identical shapes"
-        )
-    if order == "pool-then-select":
-        raise ValueError(
-            f"{path} declares order 'pool-then-select', which this operation does not "
-            "implement. Refused rather than run as 'select-then-pool', because the two "
-            "produce different codes from the same weights and the difference is "
-            "invisible in the output"
-        )
-    if int(meta["k_residue"]) >= int(meta["dict_dim"]):
-        raise ValueError(
-            f"k_residue {meta['k_residue']} selects the whole {meta['dict_dim']}-atom "
-            "dictionary, which is not a sparse code. Note that under "
-            "'pool-then-select' this is exactly the right value, since the map is "
-            "affine and k_residue = dict_dim expresses pooling exactly; that is the "
-            "hole this check used to have, and the order field is what closes it"
-        )
-    return weight, bias, meta
 
 
 def topk_real(matrix: np.ndarray, keep: int) -> np.ndarray:
@@ -348,18 +298,27 @@ def _emit_scope(emit: EmitFn, pending: list, source: EmbeddingConfig, meta: dict
 def _dispatch_result(
     operations: list[tuple[str, dict]],
     sequence_ids: list[int],
-    target_id: uuid.UUID,
-    meta: dict,
+    heads: list[tuple[str, dict, uuid.UUID]],
 ) -> OperationResult:
-    """What the coordinator returns: the scope of the fan-out and where to read the codes."""
+    """What the coordinator returns: the scope of the fan-out and where to read the codes.
+
+    One entry per head, because a group that reported a single config id would
+    leave the other heads' codes addressable only by guessing their names.
+    """
     return OperationResult(
         result={
             "batches": len(operations),
             "sequences": len(sequence_ids),
-            "embedding_config_id": str(target_id),
-            "recipe": {k: meta[k] for k in REQUIRED_META},
+            "heads": [
+                {
+                    "embedding_config_id": str(tid),
+                    "recipe": {k: meta[k] for k in REQUIRED_META},
+                }
+                for _addr, meta, tid in heads
+            ],
+            "passes_saved": len(heads) - 1,
             "caveat": (
-                "point predict_go_terms at this embedding_config_id to retrieve on "
+                "point predict_go_terms at one head's embedding_config_id to retrieve on "
                 "these codes. Retrieval, the re-ranker and the evaluation are "
                 "unchanged; only what they retrieve on differs"
             ),
@@ -373,7 +332,7 @@ def build_encode_batch_messages(
     p: EncodeResidueSparsePayload,
     parent_job_id: uuid.UUID,
     source_id: uuid.UUID,
-    target_id: uuid.UUID,
+    heads: list[tuple[str, dict, uuid.UUID]],
     sequence_ids: list[int],
 ) -> list[tuple[str, dict]]:
     """Partition the pending sequences and address one message per batch to the card queue.
@@ -395,7 +354,10 @@ def build_encode_batch_messages(
                 "job_id": parent,
                 "payload": {
                     "source_embedding_config_id": str(source_id),
-                    "target_embedding_config_id": str(target_id),
+                    "heads": [
+                        {"address": addr, "target_embedding_config_id": str(tid)}
+                        for addr, _meta, tid in heads
+                    ],
                     "sequence_ids": chunk,
                     "parent_job_id": parent,
                     "encoder_artifact_path": p.encoder_artifact_path,
@@ -505,17 +467,32 @@ class _Run:
     backend: Any
     model: Any
     tokenizer: Any
-    weight: np.ndarray
-    bias: np.ndarray
-    meta: dict
-    target_id: uuid.UUID
-    scale: float
+    heads: list[ResidueHead]
     batch_size: int
     residue_budget: int
 
+    @property
+    def meta(self) -> dict:
+        """The first head's meta, for the fields the whole group shares.
+
+        Only :data:`_residue_pass_group.PASS_FIELDS` may be read through this,
+        and that is exactly what the forward pass needs: the layers. Every
+        reduction field belongs to one head and is read off that head.
+        """
+        return self.heads[0].meta
+
 
 def _encode_batch(run: _Run, batch: list[tuple[int, str]], emit: EmitFn) -> tuple[list[dict], dict]:
-    """One forward pass, one code per sequence, plus what the caller reports on."""
+    """ONE forward pass, one code per sequence PER HEAD.
+
+    The pass is the cost on this path and it is outside the head loop, which is
+    the whole of this operation's economy: five heads over the same residues are
+    one pass of the model and five matmuls, where they used to be five passes.
+
+    ``residues_seen`` counts the PASS and not the writes, so it stays the number
+    of residues the model actually read however many heads consume them. A
+    counter that multiplied by the head count would report work nobody did.
+    """
     result = run.backend.embed_batch_per_residue(
         run.model,
         run.tokenizer,
@@ -529,27 +506,28 @@ def _encode_batch(run: _Run, batch: list[tuple[int, str]], emit: EmitFn) -> tupl
     for (sequence_id, seq), residues in zip(batch, result.residues, strict=True):
         assert_one_row_per_residue(seq, residues, sequence_id=sequence_id)
         residues_seen += int(residues.shape[0])
-        code = encode_one(
-            residues,
-            run.weight,
-            run.bias,
-            int(run.meta["k_residue"]),
-            int(run.meta["k_sequence"]),
-            str(run.meta["aggregate"]),
-        )
-        densities.append(code_density(code))
-        vector, n_clipped = scale_and_clip_embedding(code.tolist(), run.scale)
-        clipped += n_clipped
-        rows.append(
-            {
-                "sequence_id": sequence_id,
-                "embedding_config_id": run.target_id,
-                "chunk_index_s": 0,
-                "chunk_index_e": None,
-                "embedding": vector,
-                "embedding_dim": int(code.size),
-            }
-        )
+        for head in run.heads:
+            code = encode_one(
+                residues,
+                head.weight,
+                head.bias,
+                int(head.meta["k_residue"]),
+                int(head.meta["k_sequence"]),
+                str(head.meta["aggregate"]),
+            )
+            densities.append(code_density(code))
+            vector, n_clipped = scale_and_clip_embedding(code.tolist(), head.scale)
+            clipped += n_clipped
+            rows.append(
+                {
+                    "sequence_id": sequence_id,
+                    "embedding_config_id": head.target_id,
+                    "chunk_index_s": 0,
+                    "chunk_index_e": None,
+                    "embedding": vector,
+                    "embedding_dim": int(code.size),
+                }
+            )
     return rows, {"clipped": clipped, "residues": residues_seen, "densities": densities}
 
 
@@ -586,29 +564,33 @@ class EncodeResidueSparseOperation(Operation):
             _resolve_backend(source.model_backend), source.model_backend
         )
 
-        artifact = resolve_encoder_artifact(p.encoder_artifact_path, p.encoder_artifact_uri)
-        _weight, _bias, meta = load_frozen_encoder(artifact)
-        target_id = _ensure_target_config(session, p, meta, source)
-        pending = _pending_sequences(session, source.id, target_id, p)
-        _emit_scope(emit, pending, source, meta)
+        heads = resolve_head_group(session, p, source)
+        target_ids = [t for _a, _m, t in heads]
+        pending = pending_sequences_for_group(session, source.id, target_ids, p)
+        _emit_scope(emit, pending, source, heads[0][1])
         if not pending:
             return OperationResult(
                 result={
                     "encoded": 0,
-                    "embedding_config_id": str(target_id),
-                    "note": "every sequence already had a code",
+                    "embedding_config_ids": [str(t) for t in target_ids],
+                    "note": "every sequence already had a code for every head",
                 }
             )
 
         ids = [i for i, _s in pending]
-        operations = build_encode_batch_messages(p, parent_job_id, source.id, target_id, ids)
+        operations = build_encode_batch_messages(p, parent_job_id, source.id, heads, ids)
         emit(
             "encode.dispatching",
-            f"{len(operations)} batches to {_BATCH_QUEUE}",
-            {"batches": len(operations), "sequences": len(ids), "device": p.device},
+            f"{len(operations)} batches to {_BATCH_QUEUE} for {len(heads)} head(s)",
+            {
+                "batches": len(operations),
+                "sequences": len(ids),
+                "heads": len(heads),
+                "device": p.device,
+            },
             "info",
         )
-        return _dispatch_result(operations, ids, target_id, meta)
+        return _dispatch_result(operations, ids, heads)
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         return (
@@ -680,10 +662,7 @@ class EncodeResidueSparseBatchOperation(Operation):
         source = session.get(EmbeddingConfig, uuid.UUID(p.source_embedding_config_id))
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")
-        target_id = uuid.UUID(p.target_embedding_config_id)
-
-        artifact = resolve_encoder_artifact(p.encoder_artifact_path, p.encoder_artifact_uri)
-        weight, bias, meta = load_frozen_encoder(artifact)
+        heads = load_batch_heads(session, p)
 
         rows = session.execute(
             select(Sequence.id, Sequence.sequence).where(Sequence.id.in_(p.sequence_ids))
@@ -704,22 +683,24 @@ class EncodeResidueSparseBatchOperation(Operation):
 
         backend = _resolve_backend(source.model_backend)
         refuse_backend_without_residues(backend, source.model_backend)
-        pending = _drop_already_encoded(session, target_id, pending, emit)
+        # A sequence is dropped only when EVERY head already holds its code. One
+        # head still missing it is a sequence the pass has to run for, and the
+        # heads that hold it skip it at write time.
+        pending = drop_encoded_by_every_head(session, heads, pending, emit)
         if not pending:
             return OperationResult(
-                result={"encoded": 0, "embedding_config_id": str(target_id),
-                        "note": "every sequence in this batch already had a code"}
+                result={
+                    "encoded": 0,
+                    "embedding_config_ids": [str(h.target_id) for h in heads],
+                    "note": "every sequence in this batch already had a code for every head",
+                }
             )
         model, tokenizer = _get_or_load_model(source, p.device, emit)
         run = _Run(
             backend=backend,
             model=model,
             tokenizer=tokenizer,
-            weight=weight,
-            bias=bias,
-            meta=meta,
-            target_id=target_id,
-            scale=fetch_embedding_scale(session, target_id),
+            heads=heads,
             batch_size=p.batch_size,
             residue_budget=p.residue_budget,
         )
