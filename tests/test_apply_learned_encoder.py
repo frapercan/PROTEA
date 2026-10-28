@@ -6,11 +6,13 @@ import uuid
 import numpy as np
 import pytest
 
+from protea.core.operations._learned_code_embed import _base_config_prefix
 from protea.core.operations.apply_learned_encoder import (
     IMPLEMENTED_ORDER,
     ApplyLearnedEncoderOperation,
     ApplyLearnedEncoderPayload,
     _load_encoder,
+    _target_model_name,
     refuse_wrong_order,
 )
 
@@ -245,3 +247,58 @@ def test_the_order_is_checked_before_the_cut():
     """A wrong-order artifact hears about the order, not about a field it also lacks."""
     with pytest.raises(ValueError, match="encode_residue_sparse"):
         refuse_wrong_order({"order": "select-then-pool"}, "e.pt")
+
+
+def _sfjepa_meta(release: str) -> dict:
+    """The lab's two heads, which differ in the cut and in nothing else a name read."""
+    return {
+        "pooling": "mean",
+        "objective": "sfjepa-world-holes-topk",
+        "dict_dim": 8192,
+        "top_k": 64,
+        "training_release": release,
+    }
+
+
+def _payload(source: str) -> ApplyLearnedEncoderPayload:
+    return ApplyLearnedEncoderPayload(
+        source_embedding_config_id=source, encoder_artifact_path="/tmp/head.pt"
+    )
+
+
+def test_two_cuts_over_one_source_do_not_resolve_to_the_same_name():
+    """The regression. Both of the lab's heads pool over the same stored vector
+    with the same objective, so without the cut in the name the second apply
+    finds the first's row, skips every sequence under ``skip_existing``, and
+    leaves the first cut's config claiming to be the second's codes."""
+    source = "e7ba37da-c18d-5261-b5b4-49a3093d9d4d"
+    name_211 = _target_model_name(_payload(source), _sfjepa_meta("211"), "mean")
+    name_227 = _target_model_name(_payload(source), _sfjepa_meta("227"), "mean")
+
+    assert name_211 != name_227
+    assert "cut211" in name_211
+    assert "cut227" in name_227
+
+
+def test_the_source_id_stays_the_last_segment_so_the_parent_is_still_recoverable():
+    """``_base_config_prefix`` recovers the base config with ``rsplit(":", 1)``,
+    so the cut has to go in FRONT of the id. Putting it after would name the
+    config correctly and lose its parent, which is the same bug one field over."""
+    source = "e7ba37da-c18d-5261-b5b4-49a3093d9d4d"
+    name = _target_model_name(_payload(source), _sfjepa_meta("211"), "mean")
+
+    assert name.endswith(":e7ba37da")
+
+    class _Cfg:
+        model_name = name
+
+    assert _base_config_prefix(_Cfg()) == "e7ba37da"
+
+
+def test_a_name_cannot_be_built_for_an_artifact_that_declares_no_cut():
+    """Consistent with ``refuse_wrong_order``, which refuses the same artifact
+    for the same reason: a cut nobody recorded cannot distinguish two heads."""
+    meta = _sfjepa_meta("211")
+    del meta["training_release"]
+    with pytest.raises(KeyError, match="training_release"):
+        _target_model_name(_payload(str(uuid.uuid4())), meta, "mean")
