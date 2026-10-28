@@ -39,6 +39,7 @@ import socket
 import sys
 from typing import Any
 
+from protea.core.code_revision import code_revision
 from protea.core.parquet_export import resolve_protea_git_sha
 from protea.core.utils import utcnow
 
@@ -141,17 +142,47 @@ def capture_provenance(extra: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def stamp_library_provenance(emit: Any) -> None:
-    """Record, through ``emit``, the library versions about to compute.
+    """Record, through ``emit``, the library versions AND the revision that runs.
 
     Called by the worker immediately before an operation executes. The job row
-    records WHAT ran and the revision guard records WHICH CODE; this is the
-    third quantity, and the one that decides the numbers.
+    records WHAT ran; this says WHICH CODE and WITH WHICH BUILDS, which together
+    are what decide the numbers.
 
     Emitted from the worker and never from the server, because the two machines
     run different ``torch`` builds by design: only the process that executes an
     operation can say which build produced a given vector.
+
+    WHY THE REVISION BELONGS HERE AND NOT ONLY IN THE GUARD. This function used
+    to emit the libraries alone, and said so on the grounds that "the revision
+    guard records WHICH CODE". The guard does -- to the journal, at the moment a
+    worker STARTS. Nothing of it reaches the job. So a worker replaced between
+    two batches of one job writes rows under the same job id, with the same
+    library versions, from different code, and the record cannot tell them
+    apart.
+
+    That is not hypothetical on this deployment. The compute node syncs itself
+    to the declared revision on a 3-minute timer, and its in-flight guard only
+    defers while a batch is actually mid-operation: between batches the gap is
+    0,16 s in a 3,2 s cycle, so a tick lands in it with probability around 5%
+    and therefore within about an hour. On 2026-10-28 that was the reason the
+    declaration could not be merged while job ``cbaba8bb`` was alive -- 545.488
+    of its 684.048 vectors were still to compute -- and had it been merged, the
+    mixed provenance would have left no trace anywhere.
+
+    ``code_revision`` and not ``resolve_protea_git_sha``: the first is stamped
+    at IMPORT, so it names the code this process actually loaded rather than
+    whatever the tree says when asked, and it returns a bare sha only when that
+    sha is genuinely identifying. It is also free, where the other shells out
+    to ``git rev-parse`` -- which ``capture_provenance`` was doing on every
+    batch of every run and then discarding, 10.689 subprocesses on this job
+    alone. Taking the libraries straight from the probe removes that.
     """
-    emit("provenance.libraries", None, capture_provenance()["libraries"], "info")
+    emit(
+        "provenance.libraries",
+        None,
+        {**_library_versions(), "code_revision": code_revision()},
+        "info",
+    )
 
 
 __all__ = ["capture_provenance", "stamp_library_provenance"]
