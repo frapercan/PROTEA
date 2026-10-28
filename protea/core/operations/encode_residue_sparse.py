@@ -64,6 +64,7 @@ from protea.core.operations._encoder_artifact import (
     resolve_encoder_artifact,
     resolve_training_cut,
 )
+from protea.core.operations._residue_count_guard import assert_one_row_per_residue
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -525,7 +526,8 @@ def _encode_batch(run: _Run, batch: list[tuple[int, str]], emit: EmitFn) -> tupl
     rows: list[dict] = []
     densities: list[float] = []
     residues_seen = clipped = 0
-    for (sequence_id, _seq), residues in zip(batch, result.residues, strict=True):
+    for (sequence_id, seq), residues in zip(batch, result.residues, strict=True):
+        assert_one_row_per_residue(seq, residues, sequence_id=sequence_id)
         residues_seen += int(residues.shape[0])
         code = encode_one(
             residues,
