@@ -93,8 +93,16 @@ def test_a_fitted_encoding_that_declares_nothing_is_refused():
 
 
 def test_a_cut_inside_the_frame_is_refused():
-    with pytest.raises(LeakageRefusal, match="lies inside"):
+    with pytest.raises(LeakageRefusal, match="later than the 220"):
         _call(_session(backend="residue-sparse", cut_release="227"))
+
+
+def test_a_cut_past_the_frame_end_is_refused_through_this_caller_too():
+    # The guard stopped calling a late cut clean on 2026-10-28, and this is
+    # the path that reaches it from a real prediction set. 240 is past the
+    # 230 end of the frame, so the encoder read every term it scores.
+    with pytest.raises(LeakageRefusal, match="later than the 220"):
+        _call(_session(backend="learned-code", cut_release="240"))
 
 
 def test_a_cut_at_the_frame_start_is_allowed():
