@@ -36,10 +36,10 @@ from protea.core.operations._compute_embeddings_helpers import (
     scale_and_clip_embedding,
 )
 from protea.core.operations._encoder_artifact import (
+    ORDERS,
     resolve_encoder_artifact,
     resolve_training_cut,
 )
-from protea.core.operations.encode_residue_sparse import ORDERS
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
