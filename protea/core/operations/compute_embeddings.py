@@ -10,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload, RetryLaterError
-from protea.core.contracts.parent_progress import update_parent_progress
 from protea.core.operations._compute_embeddings_backends import (
     ChunkEmbedding,
     _aggregate_1d,
@@ -28,11 +27,9 @@ from protea.core.operations._compute_embeddings_helpers import (
     build_batch_dispatch_messages,
     build_store_message,
     clean_config_ids,
-    fold_legacy_store_groups,
     missing_for_any_config,
     normalise_config_ids,
     serialize_inferred_chunks,
-    store_group_rows,
 )
 from protea.core.operations._embedding_pass_group import (
     assert_layers_available,
@@ -40,6 +37,12 @@ from protea.core.operations._embedding_pass_group import (
     run_group_inference,
     shared_pass_emitter,
     warn_if_pass_not_shared,
+)
+from protea.core.operations._long_sequence_isolation import load_lengths_for_isolation
+from protea.core.operations.store_embeddings import (
+    StoredConfigEmbeddings,
+    StoreEmbeddingsOperation,
+    StoreEmbeddingsPayload,
 )
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
@@ -54,8 +57,17 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence
 #   * the documented ``unittest.mock.patch(
 #       "protea.core.operations.compute_embeddings._embed_*")``
 #     pattern keeps working without any test changes.
+#
+# The three ``Store*`` names moved to ``store_embeddings`` on 2026-10-28 and are
+# re-exported here for the same reason: every caller that reads them from this
+# module keeps working, and the registry does not move. Listing them is not
+# decoration -- implicit re-export is off, so without it the catalog's import
+# fails type checking.
 __all__ = [
     "ChunkEmbedding",
+    "StoreEmbeddingsOperation",
+    "StoreEmbeddingsPayload",
+    "StoredConfigEmbeddings",
     "_aggregate_1d",
     "_aggregate_residue_layers",
     "_chunk_and_pool",
@@ -125,6 +137,10 @@ class ComputeEmbeddingsPayload(_ConfigGroupPayload, frozen=True):
         ``1`` because the largest supported backend (``prot_t5_xl_uniref50``
         at ``max_length=2048``) OOMs on a 12 GB GPU with anything higher.
         Callers running smaller models on roomier GPUs can raise it explicitly.
+    isolate_above_residues : int | None
+        A batch of its own for anything longer, so one sequence the card cannot
+        fit cannot dead-letter the 63 beside it. Absent by default; the
+        measurement is in ``_long_sequence_isolation``.
     """
 
     accessions: list[str] | None = None
@@ -133,6 +149,7 @@ class ComputeEmbeddingsPayload(_ConfigGroupPayload, frozen=True):
     device: str = "cuda"
     skip_existing: bool = True
     batch_size: PositiveInt = 1
+    isolate_above_residues: PositiveInt | None = None
 
 
 class ComputeEmbeddingsBatchPayload(_ConfigGroupPayload, frozen=True):
@@ -265,7 +282,8 @@ class ComputeEmbeddingsOperation:
             emit("compute_embeddings.no_sequences", None, {}, "warning")
             return OperationResult(result={"batches": 0, "sequences": 0, "configs": n_configs})
 
-        operations = build_batch_dispatch_messages(p, parent_job_id, sequence_ids)
+        lengths = load_lengths_for_isolation(session, sequence_ids, p, emit)
+        operations = build_batch_dispatch_messages(p, parent_job_id, sequence_ids, lengths)
         n_batches = len(operations)
         result = {
             "batches": n_batches,
@@ -281,6 +299,7 @@ class ComputeEmbeddingsOperation:
                 "sequences_per_job": p.sequences_per_job,
                 "batches": n_batches,
                 "configs": n_configs,
+                "isolate_above_residues": p.isolate_above_residues,
             },
             "info",
         )
@@ -568,104 +587,6 @@ class ComputeEmbeddingsBatchOperation:
 # ---------------------------------------------------------------------------
 
 
-class StoredConfigEmbeddings(ProteaPayload, frozen=True):
-    """One config's share of a batch's vectors inside a store message."""
-
-    embedding_config_id: str
-    sequences: list[dict[str, Any]]  # [{"sequence_id": int, "chunks": [...]}]
-
-
-class StoreEmbeddingsPayload(ProteaPayload, frozen=True):
-    """Payload published by ComputeEmbeddingsBatchOperation after inference.
-
-    One message per batch carrying every config the pass served, so the write is
-    all or nothing; see :func:`~protea.core.operations
-    ._compute_embeddings_helpers.build_store_message`. A message in the
-    one-config shape is folded into a single group and behaves as it did.
-    """
-
-    parent_job_id: str
-    skip_existing: bool = True
-    groups: list[StoredConfigEmbeddings]
-
-    _accept_legacy = model_validator(mode="before")(fold_legacy_store_groups)
-
-
-class StoreEmbeddingsOperation:
-    """Writes pre-computed embeddings to the DB and updates parent job progress.
-
-    Runs on a CPU-only worker (protea.embeddings.write queue) so the GPU
-    worker is free to start the next inference batch immediately.
-    """
-
-    name = "store_embeddings"
-    description = (
-        "CPU child job: bulk-insert pre-computed pgvector embeddings and "
-        "atomically increment the parent compute_embeddings job's progress."
-    )
-
-    def summarize_payload(self, payload: dict[str, Any]) -> str:
-        p = payload or {}
-        groups = p.get("groups") or [p]
-        n = sum(len(g.get("sequences") or []) for g in groups if isinstance(g, dict))
-        bits = [f"n={n}"] if n else []
-        if len(groups) > 1:
-            bits.append(f"{len(groups)} configs")
-        return " · ".join(bits)
-
-    def execute(
-        self, session: Session, payload: dict[str, Any], *, emit: EmitFn
-    ) -> OperationResult:
-        p = StoreEmbeddingsPayload.model_validate(contract_payload(payload))
-        parent_job_id = UUID(p.parent_job_id)
-
-        parent = session.get(Job, parent_job_id)
-        if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit(
-                "store_embeddings.skipped",
-                None,
-                {"reason": "parent_not_running", "parent_status": parent.status.value},
-                "warning",
-            )
-            return OperationResult(result={"skipped": True})
-
-        # Every config in one call, so every config lands in one transaction.
-        counts = store_group_rows(session, p)
-        if counts["components_clipped"]:
-            emit(
-                "store_embeddings.halfvec_clipped",
-                None,
-                {
-                    "components_clipped": counts["components_clipped"],
-                    "reason": "embedding_scale too small; values exceeded fp16 range "
-                    "and were clipped to [-65504, 65504]",
-                },
-                "warning",
-            )
-
-        emit("store_embeddings.done", None, counts, "info")
-
-        self._update_parent_progress(session, parent_job_id, emit)
-
-        return OperationResult(result=counts)
-
-    def _update_parent_progress(self, session: Session, parent_job_id: UUID, emit: EmitFn) -> None:
-        update_parent_progress(
-            session,
-            parent_job_id,
-            emit,
-            event_name="store_embeddings.parent_succeeded",
-        )
-
-
-# ---------------------------------------------------------------------------
-# Shared model loader (with process-level cache)
-# ---------------------------------------------------------------------------
-
-# Keyed by (model_name, model_backend, device) — one entry per worker process.
-# Workers are long-lived processes, so the model is loaded once and reused for
-# all subsequent batch messages with the same config.  Max 1 entry to avoid
-# accumulating multi-GB models in GPU memory when configs change.
 _MODEL_CACHE: dict[tuple[str, str, str], tuple[Any, Any]] = {}
 
 
