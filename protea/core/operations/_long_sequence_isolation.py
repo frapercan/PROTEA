@@ -59,7 +59,7 @@ length actually observed to pass. Refusing one that would have fitted loses
 that vector for good, while isolating one that does not fit costs 155 s -- so
 the refusal ceiling goes UP when in doubt.
 
-Measured 2026-10-28 at 19:10 against the running job: the longest sequence that
+Measured 2026-10-28 at 17:10 UTC against the running job: the longest sequence that
 has fitted is 8.002 residues, so that is the isolation ceiling. The refusal one
 is harder, and 8.650 is an ESTIMATE of the crossover rather than a demonstrated
 failure: the compute node's lower bound crosses usable memory somewhere between
@@ -70,14 +70,27 @@ individual lengths at 8.602, 8.648, 8.697, 8.710 and 8.749. Given the direction
 of its asymmetry, the refusal ceiling belongs at the top of that band or above
 it until the card has measured one.
 
-WHICH IT IS ABOUT TO. Those sequences go out tonight in their ordinary batches,
-so by morning there are two measured numbers: the longest that passed and the
-shortest that killed a message. The culprit of a dead batch is its only
-sequence above the longest that passed. Note, though, that
-``child.cuda_oom_dead_letter`` does NOT carry the batch's sequence ids -- it
-records the operation, the retry count and the error string -- so the ids come
-from the dead-letter queue and not from the audit trail. That is a separate gap
-and it is written down rather than guessed at.
+WHICH IT IS ABOUT TO. Those sequences go out in their ordinary batches, so two
+numbers come out of the run: the longest that passed and the shortest that
+killed a message.
+
+AND "KILLED" MEANS DEAD-LETTERED, NOT "RAISED OOM". Five batches raised CUDA
+OOM in the first two hours of the run and all five came back on retry 1 of 5,
+with nothing lost: a flushed cache and five seconds were enough. An
+out-of-memory that clears on the first retry is about the MOMENT -- allocator
+fragmentation, or another user of the card -- and not about the length, so only
+a dead letter sets the refusal ceiling. That is also why retries are worth
+keeping for the uncertain band and why the refusal is a separate ceiling rather
+than fewer retries.
+
+TWO REASONS THE FAILING BATCH'S LENGTH IS NOT IN THE AUDIT TRAIL, and both were
+found by trying: ``child.cuda_oom_retry`` and ``child.cuda_oom_dead_letter``
+carry the operation, the retry count and the error string, but no sequence ids;
+and ``_republish_oom`` publishes to ``routing_key=self._queue_name``, which is
+the TAIL of the queue, so the rows written after a retry belong to the next
+batch in line and not to the one that failed. Correlating the two gives a
+confident, wrong answer. The ids of a dead batch come from the dead-letter
+queue, filtered by job id, and nothing else recovers them.
 
 A REFUSAL IS NOT A FAILURE, AND THAT IS THE POINT. The alternative the compute
 node offered was to stop retrying isolated messages, which saves the same time
