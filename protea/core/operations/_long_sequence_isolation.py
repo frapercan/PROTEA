@@ -70,27 +70,61 @@ individual lengths at 8.602, 8.648, 8.697, 8.710 and 8.749. Given the direction
 of its asymmetry, the refusal ceiling belongs at the top of that band or above
 it until the card has measured one.
 
-WHICH IT IS ABOUT TO. Those sequences go out in their ordinary batches, so two
-numbers come out of the run: the longest that passed and the shortest that
-killed a message.
+WHICH IT IS ABOUT TO, AND THE TWO NUMBERS HAVE TO BE NAMED CAREFULLY. The
+isolation ceiling is the longest sequence OBSERVED TO PASS. The refusal ceiling
+is the LEAST MAXIMUM OF A DEAD BATCH, which is not the same thing as the
+shortest sequence in one: memory grows with length, so a dead batch proves its
+own maximum cannot run -- either that sequence failed, or a shorter one in the
+same batch did and then the maximum would have failed too. The other long
+sequences in a dead batch are NOT measured. Said loosely as "the shortest that
+killed a message", the statistic reads as 6.713 on this run, which is simply
+the shortest sequence that happened to share a batch with a doomed one.
 
-AND "KILLED" MEANS DEAD-LETTERED, NOT "RAISED OOM". Five batches raised CUDA
-OOM in the first two hours of the run and all five came back on retry 1 of 5,
-with nothing lost: a flushed cache and five seconds were enough. An
-out-of-memory that clears on the first retry is about the MOMENT -- allocator
-fragmentation, or another user of the card -- and not about the length, so only
-a dead letter sets the refusal ceiling. That is also why retries are worth
-keeping for the uncertain band and why the refusal is a separate ceiling rather
-than fewer retries.
+THE DEAD BATCHES ARE READABLE FROM THE DATABASE, which is how the numbers below
+were obtained and which corrects an earlier claim here that they were not.
+Dispatch order is ascending ``sequence_id``: over the 103.104 rows written by
+17:50 UTC the correlation between position-by-time and position-by-id is
+exactly 1. Batches are 64 consecutive ids in that order, so a batch that failed
+is SKIPPED -- its 64 ids stay unwritten while higher ids are already in -- and
+the dead batches are the gaps inside the processed id range. Nothing in the
+queue needs reading.
 
-TWO REASONS THE FAILING BATCH'S LENGTH IS NOT IN THE AUDIT TRAIL, and both were
-found by trying: ``child.cuda_oom_retry`` and ``child.cuda_oom_dead_letter``
-carry the operation, the retry count and the error string, but no sequence ids;
-and ``_republish_oom`` publishes to ``routing_key=self._queue_name``, which is
-the TAIL of the queue, so the rows written after a retry belong to the next
-batch in line and not to the one that failed. Correlating the two gives a
-confident, wrong answer. The ids of a dead batch come from the dead-letter
-queue, filtered by job id, and nothing else recovers them.
+MEASURED THAT WAY: six gaps of exactly 64 ids, matching the six
+``child.cuda_oom_retry`` events one for one, with maxima of 8.545, 8.922,
+10.287, 10.746, 11.103 and 13.084 residues. Every gap holds a sequence above
+8.002 and nothing above 8.002 has passed. So on this card these failures are
+about LENGTH and not about the moment: there is no evidence here of a transient
+out-of-memory, and an earlier version of this paragraph claimed the opposite
+from a correlation that did not hold.
+
+Of the 13 sequences above 8.002 in the processed range, 6 are their batch's
+maximum and are therefore proven to fail; the other 7 are unmeasured. "13 of
+13 failed" is the batch's observation attributed to its members, which is the
+error this campaign keeps paying for, one level down.
+
+SO THE EVIDENCE POINTS AT 8.544 AND NOT AT A ROUND 8.500. The field is strict,
+so 8.544 refuses 8.545 and dispatches everything shorter. Between 8.500 and
+8.545 nothing has been measured and four sequences live there -- 8.515, 8.525
+twice and 8.527 -- so refusing at 8.500 would lose four vectors with no
+evidence, 155 refused against 151, while isolating them costs at most 155 s
+each. The refusal asymmetry says the ceiling goes up, and a round number is not
+a measurement. It becomes final when a dead letter confirms it: so far there
+are six retries and zero dead letters, because a republish goes to the TAIL of
+the queue (``_republish_oom`` publishes to ``routing_key=self._queue_name``),
+so those six batches have not been retried yet and will come back near the end
+of the run.
+
+AND THE FORECAST FOLLOWS THE REAL PARTITION, not one doomed sequence per batch.
+The 187 pending sequences above 8.002 fall into only 96 distinct batches,
+because long sequences cluster: 4,1 h of backoff rather than 6,9, and 6.144
+sequences at risk of which 5.957 are bystanders. 73 of those 96 batches have a
+maximum above 8.545 and 23 sit in the band the run is about to narrow.
+
+WHAT THE EVENTS STILL DO NOT CARRY. ``child.cuda_oom_retry`` and
+``child.cuda_oom_dead_letter`` record the operation, the retry count and the
+error string, and no sequence ids. The gap query above answers the question
+better than they would, so this is noted rather than worked around; the
+dead-letter queue, filtered by job id, remains a second source.
 
 A REFUSAL IS NOT A FAILURE, AND THAT IS THE POINT. The alternative the compute
 node offered was to stop retrying isolated messages, which saves the same time
