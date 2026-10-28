@@ -395,6 +395,97 @@ def test_a_namespace_the_run_never_reported_comes_back_empty():
     assert frame.empty
 
 
+def test_a_namespace_the_panel_reports_and_the_grid_lacks_is_refused():
+    """The 500 this pair of tests exists to remove.
+
+    The best-F table reports the namespace, so the run DID score it; the grid
+    holds no row for it. ``pd.DataFrame([])`` carries no columns, so the first
+    column access raised ``KeyError: 'protein_accession'`` and the endpoint
+    answered 500. On the live record that was three of the nine published cells
+    of the 211 -> 227 window.
+    """
+    from fastapi import HTTPException
+
+    other = _grid_row("P1")
+    other["namespace"] = "cellular_component"
+    with pytest.raises(HTTPException) as caught:
+        _slice(_grid_bytes([other]), _best_f(ns="biological_process"))
+    assert caught.value.status_code == 409
+    # The message has to say that the two sources disagree, because that is a
+    # different state from either the run not scoring it or the producer
+    # dropping it on purpose, and only this one is unexplained.
+    assert "recorded no reason" in caught.value.detail
+
+
+class _OneRow:
+    """A session that answers one query, which is all the relay reads."""
+
+    def __init__(self, row: dict | None) -> None:
+        self._row = row
+        self.params: dict | None = None
+
+    def execute(self, _stmt, params):  # noqa: ANN001, ANN202
+        self.params = params
+        row = self._row
+
+        class _Result:
+            def mappings(self):  # noqa: ANN202
+                class _M:
+                    def first(self):  # noqa: ANN202
+                        return row
+
+                return _M()
+
+        return _Result()
+
+
+def test_a_namespace_the_producer_dropped_is_relayed_with_its_recorded_reason():
+    """The producer already said why; this is the half that reads it.
+
+    ``run_cafa_evaluation`` writes one ``per_protein_grid_namespace_dropped``
+    event per drop with a machine-readable ``code`` and a prose ``reason``, and
+    the endpoint used to ignore both.
+    """
+    import uuid as _uuid
+
+    from fastapi import HTTPException
+
+    from protea.api.routers._stratum_drops import refuse_a_dropped_namespace
+
+    rid = _uuid.uuid4()
+    session = _OneRow(
+        {
+            "code": "variant_populations_differ",
+            "reason": "the weighted branch scores 11927 proteins and the unweighted 11944",
+        }
+    )
+    with pytest.raises(HTTPException) as caught:
+        refuse_a_dropped_namespace(session, rid, "PK", "biological_process")
+
+    assert caught.value.status_code == 404
+    detail = caught.value.detail
+    # The code so a caller can branch without parsing prose, the reason so a
+    # reader does not have to go to the job events, and the cell so the message
+    # is about this panel and not about the result as a whole.
+    assert "variant_populations_differ" in detail
+    assert "11927" in detail
+    assert "PK/biological_process" in detail
+    # And it says the pooled number still stands, because it does: what is
+    # missing is the per-protein detail, not the cell.
+    assert "pooled cell" in detail
+    assert session.params == {"rid": rid, "setting": "PK", "namespace": "biological_process"}
+
+
+def test_a_namespace_with_no_recorded_drop_lets_the_read_proceed():
+    """The relay refuses only what the producer said it refused."""
+    import uuid as _uuid
+
+    from protea.api.routers._stratum_drops import refuse_a_dropped_namespace
+
+    session = _OneRow(None)
+    assert refuse_a_dropped_namespace(session, _uuid.uuid4(), "NK", "biological_process") is None
+
+
 def test_a_threshold_the_grid_does_not_carry_is_refused():
     from fastapi import HTTPException
 

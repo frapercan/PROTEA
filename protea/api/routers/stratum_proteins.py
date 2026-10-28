@@ -70,6 +70,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached
 from protea.api.deps import get_session_factory, get_settings
+from protea.api.routers import _stratum_drops as drops
 from protea.api.routers._arm_identity import with_arm_identity
 from protea.core.domain.category import Category
 from protea.core.operations._run_cafa_grid_artifact import (
@@ -503,6 +504,8 @@ def _sliced_at_the_published_tau(
                 "tp": tp,
             }
         )
+    drops.refuse_when_the_grid_and_the_record_disagree(
+        rows, result_id=result_id, setting=setting, namespace=namespace)
     return pd.DataFrame(rows)
 
 
@@ -738,18 +741,9 @@ def stratum_proteins(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     with factory() as session:
-        arm = session.execute(_ARM, {"rid": evaluation_result_id}).mappings().first()
-    if arm is None:
-        raise HTTPException(status_code=404, detail=f"no evaluation result {evaluation_result_id}")
+        arm = drops.arm_for_an_openable_cell(
+            session, _ARM, evaluation_result_id, setting, namespace)
     prediction_set_id = arm["prediction_set_id"]
-    if prediction_set_id is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"evaluation result {evaluation_result_id} names no prediction set, "
-                "so its proteins cannot be placed on the retrieval axes"
-            ),
-        )
 
     key, best_f_key = _panel_keys(store, evaluation_result_id, setting)
 
