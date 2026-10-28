@@ -12,8 +12,8 @@ need somebody to remember.
 
 Three states, and the middle one is the reason this module exists:
 
-    fitted, cut outside the frame   allowed
-    fitted, cut inside the frame    refused
+    fitted, cut at or before t0     allowed
+    fitted, cut after t0            refused
     fitted, cut not declared        refused, and NOT because it is
                                     suspected. Because it cannot be
                                     checked, and an artifact that cannot
@@ -24,6 +24,24 @@ Three states, and the middle one is the reason this module exists:
 A pretrained backbone used as it ships declares no cut and is not fitted,
 which is a fourth state and is allowed. The column distinguishes them:
 NULL means not fitted, and `fitted` is what the caller asserts.
+
+WHY "OUTSIDE THE FRAME" IS NOT THE RULE
+
+The table above said "cut outside the frame" until 2026-10-28 and the
+comparison read ``frame.start < cut <= frame.end``, which treats the frame
+as an interval a cut can leave through either side. It has one. A cut
+LATER than t1 is outside that interval and is the worst case there is: an
+encoder fitted on release 230 has seen every term the 211-to-227 frame
+scores and then some, and the condition returned "clean" for it.
+
+Unreachable while the only fitted cuts in the campaign were 211 and 227,
+because 227 falls inside the 211-to-227 frame and was caught. It became
+reachable the moment the second cut moved to 230, which is the cut of the
+arm the 230-to-235 panel is built on: point that same arm at the
+211-to-227 panel and the guard waved it through.
+
+So t1 does not enter the comparison at all. What makes a cut dirty is that
+it is after t0.
 """
 
 from __future__ import annotations
@@ -63,14 +81,15 @@ def training_cut_verdict(
 
     The boundary is deliberate and lives here, once. A cut AT the frame start
     is clean: the encoder saw the state of the world at t0, which is what
-    every arm is entitled to. A cut one release later is not, because the
-    terms gained in between are part of what the frame scores.
+    every arm is entitled to. ANY later cut is not, and it does not matter
+    whether it falls inside the window or past its end: a cut inside has seen
+    part of what the frame scores, a cut past t1 has seen all of it.
     """
     if not fitted:
         return "not_fitted"
     if training_release is None:
         return "undeclared"
-    if frame.start < training_release <= frame.end:
+    if training_release > frame.start:
         return "contaminated"
     return "clean"
 
@@ -101,11 +120,14 @@ def check_training_cut(
             "frame. Record the annotation set it was fitted against, or refit it."
         )
     if verdict == "contaminated":
+        # Says "later than t0" and not "inside the frame", because a cut past
+        # t1 is also refused and naming it the wrong way was the defect.
         raise LeakageRefusal(
-            f"{name} was fitted on release {training_release}, which lies inside the "
-            f"{frame.start} to {frame.end} frame. The terms gained between "
-            f"{frame.start} and {training_release} are part of what this frame "
-            "scores, so the evaluation would measure the encoder's memory of them."
+            f"{name} was fitted on release {training_release}, later than the "
+            f"{frame.start} where the frame it would be scored on starts. That frame "
+            f"scores the terms gained between {frame.start} and {frame.end}, and the "
+            f"encoder had already read release {training_release}, so the evaluation "
+            "would measure its memory of them."
         )
 
 
