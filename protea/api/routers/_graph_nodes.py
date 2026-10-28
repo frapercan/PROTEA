@@ -36,6 +36,10 @@ from protea.api.routers._graph_panels import (
     reading_against_floor,
     separated_from_floor,
 )
+from protea.api.routers._graph_producer_column import (
+    NO_DONORLESS_ROW,
+    sentinel_sentence,
+)
 
 #
 # One per node. Each returns the node, the artifact it cannot produce, and the
@@ -332,14 +336,9 @@ def _donor_required(record: dict[str, list[dict[str, Any]]]) -> bool:
     return any(row.get("is_nullable") == "NO" for row in record["donor_column"])
 
 
-#: Why three nodes have nowhere to write their artifact while every candidate
-#: must name a donor. Written once: they argue it off one catalog row, and a
-#: second copy is the one that goes stale.
-_NO_DONORLESS_ROW = (
-    "The candidate column naming the donor is NOT NULL, so a term that arrived without one has "
-    "nowhere to be written, and neither has an answer carrying two flows. That is the shape of "
-    "the record rather than its contents: no run moves it, only a migration."
-)
+#: Re-exported under its old name so the three nodes that argue off it read
+#: unchanged. The string and the reasoning live in :mod:`_graph_producer_column`.
+_NO_DONORLESS_ROW = NO_DONORLESS_ROW
 
 #: What a node the record cannot express is waiting for. A column and never a
 #: table: a reader sent to load one would be producing rows that could not show
@@ -445,15 +444,16 @@ def _generator_node(
     )
     counts = (
         f"interpro_annotation holds {interpro} rows, interpro_go_mapping {mappings}, "
-        f"reranker_model {models}."
+        f"reranker_model {models}." + sentinel_sentence(record)
     )
     reason = (
-        "No candidate arrives without a donor. The candidate column naming the donor is "
-        f"nullable, so one could be stored, and the artifacts a second source would draw on "
-        f"are absent. {counts}"
+        "No candidate arrives with no producer at all. The column naming it is nullable, so "
+        f"one without could be stored, and the artifacts a second source would draw on are "
+        f"absent. {counts}"
         if expressible
-        else f"No candidate CAN arrive without a donor. {_NO_DONORLESS_ROW} The artifacts a "
-        f"second source would draw on would not move it if every one of them were full. {counts}"
+        else f"No candidate CAN arrive with no producer at all. {_NO_DONORLESS_ROW} The "
+        f"artifacts a second source would draw on would not move it if every one of them were "
+        f"full. {counts}"
     )
     return (
         _node("generator", edge, reason, ([], [])),
