@@ -634,7 +634,15 @@ export type Prediction = {
   go_id: string;
   name: string | null;
   aspect: string | null;
-  distance: number;
+  /**
+   * Cosine distance to the donor, or null when there was no retrieval.
+   *
+   * Declared non-nullable until 2026-10-28, which is why nothing warned: a
+   * set written by `ingest_method_predictions` has no donor and no distance,
+   * and the detail page called `.toFixed(4)` on it. Measured on prediction
+   * set ac1d4f00: 0 of 12.159.300 rows carry one.
+   */
+  distance: number | null;
   ref_protein_accession: string;
   qualifier: string | null;
   evidence_code: string | null;

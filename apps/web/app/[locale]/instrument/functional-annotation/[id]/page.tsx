@@ -73,11 +73,14 @@ function resolveEvidenceWeight(
  * the two-level evidence weight resolution so the UI score always matches
  * the backend TSV export exactly.
  */
-function computeScore(pred: Prediction, config: ScoringConfig): number {
+export function computeScore(pred: Prediction, config: ScoringConfig): number {
   const evWeight = resolveEvidenceWeight(pred.evidence_code, config.evidence_weights);
 
   const signals: Record<string, number | null> = {
-    embedding_similarity: 1 - pred.distance / 2,
+    // null, not NaN, when the set came from an ingested method: there was no
+    // retrieval, so there is no distance to turn into a similarity. The loop
+    // below already skips a null signal and renormalises the weights.
+    embedding_similarity: pred.distance != null ? 1 - pred.distance / 2 : null,
     identity_nw: pred.identity_nw,
     identity_sw: pred.identity_sw,
     evidence_weight: pred.evidence_code != null ? evWeight : null,
@@ -107,7 +110,7 @@ function computeScore(pred: Prediction, config: ScoringConfig): number {
 // ── Scoring signals ───────────────────────────────────────────────────────────
 
 const SIGNALS: { key: string; label: string; hint: string }[] = [
-  { key: "embedding_similarity", label: "Emb. similarity", hint: "1 − cosine_distance / 2, always available" },
+  { key: "embedding_similarity", label: "Emb. similarity", hint: "1 − cosine_distance / 2 (requires a retrieval arm)" },
   { key: "identity_nw",          label: "Identity NW",     hint: "Global identity Needleman-Wunsch (requires compute_alignments)" },
   { key: "identity_sw",          label: "Identity SW",     hint: "Local identity Smith-Waterman (requires compute_alignments)" },
   { key: "evidence_weight",      label: "Evidence",        hint: "GO evidence code quality (EXP→1.0, IEA→0.3)" },
@@ -346,12 +349,16 @@ function groupAnnotations(anns: ProteinAnnotation[]): Map<string, GroupedAnnotat
   return map;
 }
 
-function PredictionTable({ preds, knownByGoId, scoringConfig }: {
+export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
   preds: Prediction[];
   knownByGoId: Map<string, GroupedAnnotation>;
   scoringConfig?: ScoringConfig;
 }) {
   const locale = useLocale();
+  // Every candidate of a retrieval arm has one; a set written by
+  // ingest_method_predictions has none, because nothing was retrieved. The
+  // page used to assume it was always there and crashed on .toFixed().
+  const hasDistance = preds.some((p) => p.distance != null);
   const hasAlignment = preds.some((p) => p.identity_nw != null);
   const hasTaxonomy = preds.some((p) => p.taxonomic_relation != null);
   const hasReranker = preds.some((p) => p.vote_count != null);
@@ -359,10 +366,15 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
   const hasDetail = hasAlignment || hasTaxonomy || hasReranker;
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  // Sort: by score desc if config active, else by distance asc
+  // Sort: by score desc if config active, else by distance asc. With no
+  // distance the comparator returned NaN for every pair, which leaves the
+  // order up to the sort implementation: by GO id instead, so the same set
+  // reads the same way twice.
   const sorted = hasScore
     ? [...preds].sort((a, b) => computeScore(b, scoringConfig!) - computeScore(a, scoringConfig!))
-    : [...preds].sort((a, b) => a.distance - b.distance);
+    : hasDistance
+      ? [...preds].sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
+      : [...preds].sort((a, b) => a.go_id.localeCompare(b.go_id));
 
   // Tailwind requires complete class strings — no dynamic construction
   const gridClass = hasScore
@@ -403,7 +415,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                       {computeScore(pred, scoringConfig!).toFixed(3)}
                     </span>
                   )}
-                  <span className="font-mono text-slate-500 text-[10px]">{pred.distance.toFixed(4)}</span>
+                  <span className="font-mono text-slate-500 text-[10px]">{pred.distance != null ? pred.distance.toFixed(4) : "—"}</span>
                   {hasDetail && <span className="text-slate-300 text-[10px]">{isExpanded ? "▲" : "▼"}</span>}
                 </div>
               </div>
@@ -464,7 +476,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                   </span>
                 )) : <span className="text-slate-300">—</span>}
               </div>
-              <span className="font-mono text-slate-500">{pred.distance.toFixed(4)}</span>
+              <span className="font-mono text-slate-500">{pred.distance != null ? pred.distance.toFixed(4) : "—"}</span>
             </div>
 
             {/* Expanded: alignment + taxonomy + reranker detail */}
