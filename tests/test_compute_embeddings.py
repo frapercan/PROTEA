@@ -729,6 +729,14 @@ class TestComputeEmbeddingsBatchExecute:
         session = MagicMock()
         session.get.return_value = config
         session.query.return_value.filter.return_value.all.return_value = sequences
+        # The batch now honours ``skip_existing`` BEFORE the pass, which adds a
+        # second ``filter`` for ``missing_for_any_config``. Unconfigured, that
+        # chain returns a MagicMock whose ``len`` is 0, so the batch would read
+        # as fully stored and skip -- silently, since 0 inferred is a legal
+        # answer. These sequences are the ones no config holds.
+        session.query.return_value.filter.return_value.filter.return_value.all.return_value = (
+            sequences
+        )
         if no_existing:
             session.query.return_value.filter_by.return_value.first.return_value = None
         else:

@@ -185,6 +185,12 @@ def _batch_session(configs, sequences):
     by_id = {cfg.id: cfg for cfg in configs}
     session.get.side_effect = lambda _model, key: by_id.get(key)
     session.query.return_value.filter.return_value.all.return_value = sequences
+    # Second ``filter``: the batch honours ``skip_existing`` before the pass,
+    # so an unconfigured chain would read as "everything already stored" and
+    # skip. Here nothing is stored yet.
+    session.query.return_value.filter.return_value.filter.return_value.all.return_value = (
+        sequences
+    )
     return session
 
 
