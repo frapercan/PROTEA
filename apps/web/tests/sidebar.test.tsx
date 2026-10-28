@@ -172,4 +172,14 @@ describe("Sidebar nav", () => {
     render(<Sidebar />);
     expect(railHrefs().some((h) => h === "https://github.com/frapercan/PROTEA")).toBe(true);
   });
+
+  it("offers the stratified evaluation, which had no entry anywhere", () => {
+    // Found 2026-10-28. The campaign's stated objective is a stratified
+    // evaluation, and the surface it lives on was in neither the rail nor the
+    // sitemap: the only way to it was a hand-typed URL. Its label key already
+    // existed in all five locales, so the entry had been prepared and never
+    // added.
+    render(<Sidebar />);
+    expect(railHrefs().some((h) => h.endsWith("/instrument/stratum"))).toBe(true);
+  });
 });

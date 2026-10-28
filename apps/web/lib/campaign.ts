@@ -84,10 +84,23 @@ export const SURFACE_HAS_ROWS: Record<string, boolean> = {
   "/instrument/evaluation": true,
   "/feature-registry": true,
   "/instrument/graph": true,
-  "/instrument/benchmark": false,
+  // Measured on this server 2026-10-28, and two of these had gone stale in the
+  // direction the docstring below says is the expensive one: invisible and
+  // live. evaluation_result holds 8 rows, which is what the matrix reads, and
+  // scoring_config holds 1. Both were false and both were hidden from an
+  // anonymous visitor while they had something to show.
+  "/instrument/benchmark": true,
+  "/instrument/scoring": true,
+  // Still true, and checked rather than assumed: dataset holds 0 rows and
+  // reranker_model holds 0, which the graph also reports as the reason
+  // `features` and `reranking` are blocked.
   "/instrument/datasets": false,
   "/instrument/reranker": false,
-  "/instrument/scoring": false,
+  // Stratified evaluation. Listed explicitly although an absent route defaults
+  // to visible, because this one is the surface the campaign exists to show and
+  // a reader of this table should not have to infer it: 36 cells over the
+  // 230->235 window, 32.181 rows placed.
+  "/instrument/stratum": true,
 };
 
 /**
@@ -137,10 +150,16 @@ export const CAMPAIGN_STATUS = {
  * The one result figure the public page states, and why only this one.
  *
  * External, dated, third-party, and permanent: a Kaggle leaderboard that
- * anyone can open and check. Everything else PROTEA has measured came
- * from a campaign that was wiped on 2026-09-14, and the current database
- * holds zero evaluations, so no internal figure can be stated in the
- * present tense. The LAFA board's "first in seven of nine cells" is the
+ * anyone can open and check.
+ *
+ * THE REASON IS NO LONGER THAT THERE ARE NONE. This said the database held
+ * zero evaluations, which was true when it was written and stopped being true
+ * on 2026-10-28: it holds eight results, all eight sealed, across SEVEN
+ * distinct frames. The policy does not change and the premise does. No
+ * internal figure is stated because the researcher has not declared one
+ * publishable, and because seven frames over eight numbers means almost no
+ * two of them may be read side by side -- which the seal now says out loud
+ * instead of leaving unknown. The LAFA board's "first in seven of nine cells" is the
  * one to be careful with: beyond the wipe, 594 of that campaign's 1,296
  * results had been evaluated past the v227 holdout mark. It belongs in a
  * dated record, not in a headline.
