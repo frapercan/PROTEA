@@ -447,6 +447,64 @@ class TestItDoesNotWidenInSilence:
         with pytest.raises(CrossedMethodAxes, match="does not record"):
             assert_one_axis(["annotation_set_id"], a, b)
 
+    def test_an_undeclared_population_is_not_a_shared_population(self) -> None:
+        """The same rule as the revision above, one field along.
+
+        Measured over the eleven stored prediction sets on 2026-10-28: the only
+        two that declare no query set are the ingested arms, and they hold
+        40.531 and 20.854 proteins. Letting the two absences agree would read a
+        difference in who was asked as a difference in method.
+        """
+        a, b = _a_clean_bank_contrast()
+        for row in (a, b):
+            row["query_set_id"] = None
+        with pytest.raises(CrossedMethodAxes, match="does not record"):
+            assert_one_axis(["annotation_set_id"], a, b)
+
+    def test_the_population_refusal_says_what_the_absence_means(self) -> None:
+        # The old message explained every absence as "no evidence about which
+        # code produced it", which is true of a revision and wrong about a
+        # population. One sentence per field, so the reader knows which.
+        a, b = _a_clean_bank_contrast()
+        a["query_set_id"] = None
+        with pytest.raises(CrossedMethodAxes) as exc:
+            assert_one_axis(["annotation_set_id"], a, b)
+        assert "which proteins it was asked to predict" in str(exc.value)
+        assert "which code produced it" not in str(exc.value)
+
+    def test_declaring_the_population_as_the_axis_does_not_waive_its_absence(self) -> None:
+        # An axis names a DIFFERENCE between two known values, and there is no
+        # value here to name. Pinned because naming the field is the first
+        # thing a reader will try on seeing the refusal.
+        a, b = _a_clean_bank_contrast()
+        a["query_set_id"] = None
+        with pytest.raises(CrossedMethodAxes, match="does not record"):
+            assert_one_axis(["annotation_set_id", "query_set_id"], a, b)
+
+    def test_a_declared_population_on_both_sides_still_compares(self) -> None:
+        # The nine that do declare one are unaffected, which is the whole blast
+        # radius of this rule: two of eleven sets, both ingested.
+        a, b = _a_clean_bank_contrast()
+        assert_one_axis(["annotation_set_id"], a, b)
+
+    def test_each_presence_first_field_is_read_from_the_half_it_lives_in(self) -> None:
+        """A column read out of ``meta`` is absent for every row there is.
+
+        The check used to read ``meta.get`` for every field. With a column in
+        the list that would refuse all eleven prediction sets rather than the
+        two, so the routing is the load-bearing part of this change and not an
+        implementation detail.
+        """
+        from protea.core.method_seal import MUST_BE_RECORDED, _recorded
+
+        a, _ = _a_clean_bank_contrast()
+        meta = a["meta"]
+        for field in MUST_BE_RECORDED:
+            assert _recorded(a, meta, field), f"{field} reads as absent on a complete row"
+        # And each one is genuinely taken from its own half, not from both.
+        assert _recorded({"query_set_id": "q"}, {}, "query_set_id") == "q"
+        assert _recorded({}, {"code_revision": "r"}, "code_revision") == "r"
+
     def test_a_misspelled_axis_is_refused_rather_than_ignored(self) -> None:
         # 'annotation_set' declares nothing, so the bank difference would then be
         # refused as undeclared: the right refusal for the wrong reason, sending

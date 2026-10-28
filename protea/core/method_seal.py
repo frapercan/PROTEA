@@ -192,9 +192,39 @@ EXECUTION_ONLY_FIELDS: Mapping[str, str] = {**_EXECUTION_COLUMNS, **_EXECUTION_M
 #: revision is not a revision two sets have in common, it is the absence of any
 #: evidence that they ran the same code, and this project has already had one
 #: node write 193,303 rows of a foreign format into a set that reported success.
-#: This is the presence-first rule ``_frame_gate`` applies to its markers, held
-#: to exactly the two fields it is true of.
-MUST_BE_RECORDED: tuple[str, ...] = ("code_revision", "dependency_revisions")
+#: This is the presence-first rule ``_frame_gate`` applies to its markers.
+#:
+#: ``query_set_id`` JOINED THEM 2026-10-28, and it is the same argument about
+#: the population rather than the code. Measured over the eleven stored
+#: prediction sets: nine declare a query set and in every one of the nine the
+#: declared entry count equals the distinct accessions actually predicted
+#: (5.810, 40.531 and 63.734). The two that declare nothing are the ingested
+#: arms, and they hold **40.531 and 20.854** proteins. So two absences here are
+#: demonstrably two populations, and a gate that let them agree would read a
+#: difference in who was asked as a difference in method -- which is what the
+#: comment on ``query_set_id`` in :data:`_IDENTITY_COLUMNS` already says the
+#: field is for.
+#:
+#: Not waivable by declaring the axis, like the revisions: an axis names a
+#: difference between two known values and there is no value here to name.
+#: ``ingest_method_predictions`` has accepted ``query_set_id`` all along, so the
+#: remedy for a refused ingested arm is to declare the population it predicted.
+MUST_BE_RECORDED: tuple[str, ...] = (
+    "code_revision",
+    "dependency_revisions",
+    "query_set_id",
+)
+
+#: What each presence-first field's absence means, said in the refusal.
+#:
+#: One sentence per field rather than one for all three: the old message
+#: explained every absence as "no evidence about which code produced it", which
+#: was true of the two revisions and would be simply wrong about the population.
+_ABSENCE_MEANS: Mapping[str, str] = {
+    "code_revision": "there is no evidence about which code produced it",
+    "dependency_revisions": "there is no evidence about which libraries produced it",
+    "query_set_id": "there is no evidence about which proteins it was asked to predict",
+}
 
 _CLASSIFIED_COLUMNS = frozenset(_IDENTITY_COLUMNS) | frozenset(_EXECUTION_COLUMNS)
 _CLASSIFIED_META = frozenset(_IDENTITY_META) | frozenset(_EXECUTION_META)
@@ -299,19 +329,34 @@ def method_identity(row: Mapping[str, Any], *, name: str = "prediction set") -> 
             "_EXECUTION_COLUMNS/_EXECUTION_META with the reason it cannot change a result."
         )
 
-    unrecorded = [field for field in MUST_BE_RECORDED if not meta.get(field)]
+    unrecorded = [field for field in MUST_BE_RECORDED if not _recorded(row, meta, field)]
     if unrecorded:
+        because = "; ".join(_ABSENCE_MEANS[field] for field in unrecorded)
         raise CrossedMethodAxes(
-            f"{name} does not record {unrecorded}, so there is no evidence about which code "
-            "produced it. Two unrecorded revisions are not a revision two sets share; they "
-            "are the absence of the only field that separates a stored object from the same "
-            "stored object under different semantics. This refusal is not waivable by "
-            "declaring an axis, which names a DIFFERENCE and not an absence."
+            f"{name} does not record {unrecorded}, so {because}. Two absences are not a "
+            "value two sets share; they are the absence of a field that separates a stored "
+            "object from the same stored object under different semantics. This refusal is "
+            "not waivable by declaring an axis, which names a DIFFERENCE and not an absence."
         )
 
     identity = {field: _normalise(row.get(field)) for field in _IDENTITY_COLUMNS}
     identity.update({field: _normalise(meta.get(field)) for field in _IDENTITY_META})
     return identity
+
+
+def _recorded(row: Mapping[str, Any], meta: Mapping[str, Any], field: str) -> Any:
+    """A presence-first field's value, read from wherever that field lives.
+
+    The two revisions are ``meta`` keys and ``query_set_id`` is a column, so the
+    check this replaces -- ``meta.get(field)`` for every field -- would have
+    called every prediction set in the deployment unrecorded and refused every
+    comparison, including the nine that do declare their population.
+
+    Asks the two identity lists which half a field belongs to rather than
+    keeping a third list beside them, because a third list is one that can
+    disagree with both and :func:`_assert_the_lists_partition` would not see it.
+    """
+    return row.get(field) if field in _IDENTITY_COLUMNS else meta.get(field)
 
 
 def _refuse_undeclared(
