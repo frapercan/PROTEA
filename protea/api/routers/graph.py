@@ -309,7 +309,7 @@ def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     )
     query_set, query_set_why = _one_under("query set", record["query_sets"], mine, "query_set_id")
     results = record["results"]
-    sealed = sum(1 for r in results if r["frame"])
+    sealed = sum(1 for r in results if r["frame_digest"])
     unsealed = len(results) - sealed
     ends = (head["window_from"], head["window_to"]) if head else (None, None)
     window = f"{ends[0]}->{ends[1]}" if all(ends) else None

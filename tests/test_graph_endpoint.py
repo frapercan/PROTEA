@@ -325,7 +325,9 @@ def populated_record(levels: dict[str, float]) -> dict[str, list[dict[str, Any]]
             "prediction_set_id": "ps-1",
             "scoring_config_id": f"sc-{name}",
             "reranker_model_id": None,
-            "frame": None,
+            # The seal, under its own name. It used to arrive as ``frame``,
+            # which is the harness label's key at another endpoint.
+            "frame_digest": None,
             "embedding_config_id": "ec-1",
             "annotation_set_id": "bank-1",
             "created_on": f"2026-10-{21 + index:02d}",
@@ -608,7 +610,10 @@ def test_the_frame_is_undeclared_while_any_published_result_is_unsealed() -> Non
     assert body["frame"]["declared"] is False
 
     for row in record["results"]:
-        row["frame"] = "lafa"
+        # A digest, not the harness label. Under the old alias this read
+        # ``row["frame"] = "lafa"``, which is a value the seal column can never
+        # hold and the label column always can: the key carried both meanings.
+        row["frame_digest"] = "f-c353408429d4871b759c1072"
     sealed = build_graph(record)
     assert sealed["frame"]["sealed_rows"] == 2
     assert sealed["frame"]["declared"] is True
@@ -2231,7 +2236,8 @@ class TestTheFrameDescribesItsOwnWindow:
         """
         record = self._two_windows()
         for row in record["results"]:
-            row["frame"], row["query_set_id"] = "lafa", None
+            row["frame_digest"] = "f-c353408429d4871b759c1072"
+            row["query_set_id"] = None
         frame = build_graph(record)["frame"]
         assert frame["sealed_rows"] == 2
         assert frame["declared"] is False

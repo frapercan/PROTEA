@@ -22,6 +22,10 @@ export type EvalArms = Record<string, boolean>;
  *  (which omit them entirely) type-check unchanged. */
 export type EvalProvenance = {
   frame?: EvalFrame | string | null;
+  /** The frame seal: a digest of the window, the pivot, the accretion set and
+   *  the evaluation caps. ``frame`` says which harness wrote the number;
+   *  this says whether it may be read beside another one. */
+  frame_digest?: string | null;
   temporal_window?: string | null;
   arms_enabled?: EvalArms | null;
   leakage_role?: EvalLeakageRole | string | null;
@@ -77,6 +81,34 @@ const FRAME_UNKNOWN: Badge = {
 export function frameBadge(frame: string | null | undefined): Badge {
   if (frame === "lafa" || frame === "internal") return FRAME_BADGE[frame];
   return FRAME_UNKNOWN;
+}
+
+// ── Seal ─────────────────────────────────────────────────────────────────
+//
+// The frame badge above says which harness produced a number. The seal says
+// whether it may be read beside another one, which is a different question and
+// the one the page exists to answer. Two results are comparable when their
+// digests match; an unsealed result is comparable with nothing, including
+// itself scored again.
+
+const SEAL_ABSENT: Badge = {
+  label: "unsealed",
+  className: "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200",
+  title:
+    "No frame digest: this result cannot be shown to share a frame with any other, so no comparison with it has been made. Seal the results with seal_evaluation_frames.",
+};
+
+/** Badge for the frame seal, shortened for display but never truncated to the
+ *  point of ambiguity: the digest is 24 hex chars after the ``f-`` prefix and
+ *  the first ten distinguish every frame the record holds. */
+export function sealBadge(digest: string | null | undefined): Badge {
+  const d = (digest ?? "").trim();
+  if (d === "") return SEAL_ABSENT;
+  return {
+    label: d.slice(0, 12),
+    className: "bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200",
+    title: `Frame seal ${d}. Two results are comparable when this digest matches; it is computed from the window, the pivot snapshot, the accretion set and the evaluation caps.`,
+  };
 }
 
 // ── Temporal window ────────────────────────────────────────────────────────

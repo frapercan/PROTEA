@@ -27,7 +27,19 @@ from protea.infrastructure.orm.models.embedding.scoring_config import ScoringCon
 
 
 def evaluation_result_to_dict(r: EvaluationResult) -> dict[str, Any]:
-    """Serialise an :class:`EvaluationResult` to its API dict shape."""
+    """Serialise an :class:`EvaluationResult` to its API dict shape.
+
+    ``frame_digest`` IS SERVED, AND IT IS THE ONLY FIELD HERE THAT SAYS WHETHER
+    TWO NUMBERS ARE COMPARABLE. It was the one column of the provenance group
+    this function left out, so the page that exists to check attributability
+    asked for the frame and got the harness label beside it instead. The digest
+    is computed from the material a frame is made of -- the evaluation set, the
+    pivot snapshot, the accretion set, the window and the two caps -- while
+    ``frame`` and ``temporal_window`` are strings a harness wrote and all eight
+    live rows carry ``NULL`` in both. ``compare_paired_panels`` already reads
+    the digest and refuses a pair without one; until now nothing else could see
+    what it was refusing on.
+    """
     return {
         "id": str(r.id),
         "evaluation_set_id": str(r.evaluation_set_id),
@@ -40,6 +52,7 @@ def evaluation_result_to_dict(r: EvaluationResult) -> dict[str, Any]:
         # F-METHOD-EVAL-SURFACE provenance (read-through; ``None`` on legacy
         # rows so the UI shows an "unknown" empty state).
         "frame": r.frame,
+        "frame_digest": r.frame_digest,
         "temporal_window": r.temporal_window,
         "arms_enabled": r.arms_enabled,
         "leakage_role": r.leakage_role,
@@ -144,11 +157,38 @@ def delete_eval_result_collect_keys(
 
 
 def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
-    """Serialise an :class:`EvaluationSet` to its API dict shape."""
+    """Serialise an :class:`EvaluationSet` to its API dict shape.
+
+    ALL EIGHT IDENTITY COLUMNS ARE SERVED. This function used to send two of
+    them. ``uq_evaluation_set_identity`` names eight -- the annotation pair, the
+    pivot, the two native snapshots, the truth profile, the term-of-interest
+    rule and the NOT codes -- and the model's own comment says why each one is
+    there: the same pair under a different propagation graph is a different
+    measurement by 21% of the PK bucket, and ``projected`` against ``as_closed``
+    is 646 proteins and 2.610 entries of difference on the 211 -> 227 window.
+
+    Serving two of eight meant a reader could not tell two windows apart from
+    the API at all, and the record holds exactly that case: ``7aa37929`` and
+    ``ea0f4334`` are the same pair and the same graphs, differ only in
+    ``truth_profile``, and their deltas are 39.885 and 40.531. A window cited
+    without its rules is not identified.
+    """
     return {
         "id": str(e.id),
         "old_annotation_set_id": str(e.old_annotation_set_id),
         "new_annotation_set_id": str(e.new_annotation_set_id),
+        # The other six of the identity key. Snapshots fix the graph each side
+        # is closed under; the three rules fix what the delta IS.
+        "pivot_snapshot_id": str(e.pivot_snapshot_id) if e.pivot_snapshot_id else None,
+        "old_native_snapshot_id": (
+            str(e.old_native_snapshot_id) if e.old_native_snapshot_id else None
+        ),
+        "new_native_snapshot_id": (
+            str(e.new_native_snapshot_id) if e.new_native_snapshot_id else None
+        ),
+        "truth_profile": e.truth_profile,
+        "toi_rule": e.toi_rule,
+        "not_codes": e.not_codes,
         "job_id": str(e.job_id) if e.job_id else None,
         "created_at": e.created_at.isoformat(),
         "stats": e.stats,
