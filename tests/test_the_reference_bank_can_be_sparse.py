@@ -29,7 +29,7 @@ import pytest
 from scipy.sparse import csr_array, issparse
 
 from protea.core.disk_cache import _derive_reference_views, _l2_normalise_rows_sparse
-from protea.core.operations.predict_go_terms._batch_op_reference import _bank_bytes
+from protea.core.operations.predict_go_terms._sparse_bank import bank_bytes as _bank_bytes
 from protea.infrastructure.orm.models.embedding.embedding_config import SPARSE_CODE_BACKENDS
 
 DIM = 2048
@@ -264,3 +264,65 @@ def test_the_normaliser_holds_for_any_number_of_zero_rows(zero_rows: int):
     cos = _l2_normalise_rows_sparse(csr_array(_codes(6, zero_rows=zero_rows))).toarray()
     assert np.isfinite(cos).all()
     assert int((np.linalg.norm(cos, axis=1) == 0.0).sum()) == zero_rows
+
+
+class _Row:
+    """A ``HalfVector`` as the stream sees it: one ``to_numpy``."""
+
+    def __init__(self, values: np.ndarray) -> None:
+        self._values = values
+
+    def to_numpy(self) -> np.ndarray:
+        return self._values
+
+
+class TestTheSparseStreamShapesItselfFromTheRowsItGot:
+    """The one behavioural difference from the dense path, pinned.
+
+    The dense branch pre-allocates ``COUNT(*)`` rows and fills them by
+    position, so a stream shorter than its count leaves trailing all-zero rows
+    that normalise into unit vectors and can be RETURNED AS NEIGHBOURS. There
+    is no guard: nothing checks that the loop filled what it reserved.
+    """
+
+    def test_fewer_rows_than_the_count_gives_a_shorter_bank(self):
+        from protea.core.operations.predict_go_terms._sparse_bank import stream_sparse_pool
+
+        codes = _codes(3)
+        rows = [(f"P{i}", _Row(codes[i])) for i in range(3)]
+        # The hint says five; the stream yields three.
+        accessions, bank = stream_sparse_pool(iter(rows), dim=DIM, n_accessions_hint=5)
+        assert len(accessions) == 3
+        assert bank.shape == (3, DIM)
+
+    def test_row_i_is_accession_i(self):
+        """How ``search_knn`` names its hits: ``ref_accessions[int(idx)]``.
+
+        A CSR whose rows drifted from the accession list would file every
+        donor under the wrong protein and raise nothing.
+        """
+        from protea.core.operations.predict_go_terms._sparse_bank import stream_sparse_pool
+
+        codes = _codes(4)
+        rows = [(f"Q{i}", _Row(codes[i])) for i in range(4)]
+        accessions, bank = stream_sparse_pool(iter(rows), dim=DIM, n_accessions_hint=4)
+        assert accessions == ["Q0", "Q1", "Q2", "Q3"]
+        assert np.array_equal(bank.toarray(), codes)
+
+    def test_an_empty_stream_is_a_bank_with_no_rows(self):
+        from protea.core.operations.predict_go_terms._sparse_bank import stream_sparse_pool
+
+        accessions, bank = stream_sparse_pool(iter([]), dim=DIM, n_accessions_hint=7)
+        assert accessions == []
+        assert bank.shape == (0, DIM)
+        assert bank.nnz == 0
+
+    def test_a_row_of_zeros_stores_nothing_and_still_occupies_its_slot(self):
+        from protea.core.operations.predict_go_terms._sparse_bank import stream_sparse_pool
+
+        codes = _codes(3, zero_rows=1)
+        rows = [(f"Z{i}", _Row(codes[i])) for i in range(3)]
+        accessions, bank = stream_sparse_pool(iter(rows), dim=DIM, n_accessions_hint=3)
+        assert bank.shape == (3, DIM)
+        assert int(np.diff(bank.indptr)[-1]) == 0
+        assert accessions[-1] == "Z2"

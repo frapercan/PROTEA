@@ -12,7 +12,6 @@ import uuid
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
-from scipy.sparse import csr_array, issparse
 from sqlalchemy.orm import Session
 
 from protea.core.annotation_intern import intern_string
@@ -33,29 +32,20 @@ from protea.core.operations.predict_go_terms._common import (
     _REF_CACHE,
     _UNIFIED_REF_KEY,
 )
+from protea.core.operations.predict_go_terms._sparse_bank import (
+    bank_bytes,
+    bank_is_sparse,
+    empty_sparse_bank,
+    stream_sparse_pool,
+)
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
-from protea.infrastructure.orm.models.embedding.embedding_config import (
-    SPARSE_CODE_BACKENDS,
-    EmbeddingConfig,
-)
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.protein.protein import Protein
 
 if TYPE_CHECKING:
     from protea.core.operations.predict_go_terms._common import _BatchExecCtx  # noqa: F401
 
-
-def _bank_bytes(bank: Any) -> int:
-    """How much memory a reference bank holds, dense or sparse.
-
-    ``.nbytes`` is a dense attribute and a CSR has none, so the size line of
-    ``load_references_done`` raised rather than reporting for a sparse bank.
-    The three arrays are the whole of a CSR's footprint.
-    """
-    if issparse(bank):
-        return int(bank.data.nbytes + bank.indices.nbytes + bank.indptr.nbytes)
-    return int(bank.nbytes)
 
 
 class _PoolRequest(NamedTuple):
@@ -432,7 +422,7 @@ class _ReferenceMixin:
             None,
             {
                 "references": len(accessions),
-                "embeddings_mb": round(_bank_bytes(embeddings) / 1024 / 1024),
+                "embeddings_mb": round(bank_bytes(embeddings) / 1024 / 1024),
                 "source": source,
             },
             "info",
@@ -440,21 +430,6 @@ class _ReferenceMixin:
         return _derive_reference_views(
             accessions, embeddings, need_cos=need_cos, need_plain=need_plain
         )
-
-    def _bank_is_sparse(self, session: Session, embedding_config_id: Any) -> bool:
-        """Whether this config's rows are k-WTA codes rather than dense vectors.
-
-        Read off the config's BACKEND and never off its dimension: a wide dense
-        bank is expensive and still dense, and the two want opposite treatment.
-        :data:`SPARSE_CODE_BACKENDS` names the producers whose writer applies a
-        top-k, so the tag is evidence about the shape of the rows.
-
-        A config that is absent reads as dense. Guessing sparse for a bank
-        nobody can describe would hand the search a CSR built from rows whose
-        producer is unknown; dense is the branch that has always run.
-        """
-        config = session.get(EmbeddingConfig, embedding_config_id)
-        return config is not None and config.model_backend in SPARSE_CODE_BACKENDS
 
     def _load_ref_pool(
         self,
@@ -472,22 +447,9 @@ class _ReferenceMixin:
         from protea.config.tuning import get_tuning
         from protea.core.disk_cache import _is_cache_fresh
 
-        sparse = self._bank_is_sparse(session, request.embedding_config_id)
-        if sparse:
-            # NO DISK CACHE FOR A SPARSE BANK, and this is a scope line rather
-            # than an oversight. The cache stores and reads ``np.load`` /
-            # ``np.save`` files, and its own module records a constant that must
-            # be bumped "when the MEANING of what is cached changes", with two
-            # prior incidents where it was not and stale files were served
-            # under a still-valid key. A format change there also turns any
-            # mismatch into a silent permanent MISS, because the read is
-            # wrapped in a bare ``except Exception: return None``.
-            #
-            # What it costs to go without: 10,1 minutes for the whole 684.048
-            # row bank, measured 2026-10-28 at 0,88 ms a row, against 12,6
-            # minutes for the dense ankh-base bank that DOES get cached. So the
-            # sparse bank is not the expensive one to load; it is the one whose
-            # cached format has not been designed yet.
+        # A sparse bank never reaches the disk cache; ``NO_DISK_CACHE_FOR_SPARSE``
+        # says why and what it costs.
+        if bank_is_sparse(session, request.embedding_config_id):
             accessions, codes = self._stream_reference_pool(
                 self._reference_pool_query(session, request), sparse=True
             )
@@ -573,23 +535,14 @@ class _ReferenceMixin:
         """Stream ``(accession, embedding)`` rows into a bank.
 
         Dense f16 by default, which is what every PLM bank wants. ``sparse``
-        accumulates a float32 CSR instead, for the k-WTA backends named in
-        :data:`SPARSE_CODE_BACKENDS`: 8192 dimensions with 64 non-zeros is
-        0,35 GB as a CSR against 22,41 GB dense, measured over the 684.048
-        rows of this deployment.
-
-        THE TWO BRANCHES DISAGREE ABOUT ``total`` ON PURPOSE. The dense one
-        pre-allocates ``total`` rows from a separate ``COUNT(*)`` and fills
-        them by position, so a stream that yields fewer rows than the count
-        leaves trailing ALL-ZERO rows in the bank, which become unit vectors
-        after normalisation and can be returned as neighbours. The sparse one
-        shapes the matrix from the rows it actually received, so the same
-        disagreement is a shorter bank and never a silent fake row.
+        delegates to :func:`stream_sparse_pool`, which argues why a k-WTA bank
+        gets a CSR and why its shape comes from the rows received rather than
+        from ``total``.
         """
         total = accession_q.count()
         if total == 0:
             return [], (
-                csr_array((0, 0), dtype=np.float32) if sparse else np.empty((0,), dtype=np.float16)
+                empty_sparse_bank() if sparse else np.empty((0,), dtype=np.float16)
             )
         base_q = accession_q.add_columns(SequenceEmbedding.embedding)
         # pgvector HalfVector exposes .dimensions() / .to_numpy() after the
@@ -598,28 +551,11 @@ class _ReferenceMixin:
         from protea.config.tuning import get_tuning
 
         stream_chunk = get_tuning().operation.stream_chunk_size
-        accessions: list[str] = []
         if sparse:
-            data: list[np.ndarray] = []
-            indices: list[np.ndarray] = []
-            indptr: list[int] = [0]
-            for acc, emb in base_q.yield_per(stream_chunk):
-                row = emb.to_numpy()
-                nz = np.flatnonzero(row)
-                indices.append(nz.astype(np.int32))
-                data.append(row[nz].astype(np.float32))
-                indptr.append(indptr[-1] + int(nz.size))
-                accessions.append(acc)
-            codes = csr_array(
-                (
-                    np.concatenate(data) if data else np.empty(0, dtype=np.float32),
-                    np.concatenate(indices) if indices else np.empty(0, dtype=np.int32),
-                    np.asarray(indptr, dtype=np.int64),
-                ),
-                shape=(len(accessions), dim),
-                dtype=np.float32,
+            return stream_sparse_pool(
+                base_q.yield_per(stream_chunk), dim=dim, n_accessions_hint=total
             )
-            return accessions, codes
+        accessions: list[str] = []
         embeddings = np.empty((total, dim), dtype=np.float16)
         for i, (acc, emb) in enumerate(base_q.yield_per(stream_chunk)):
             embeddings[i] = emb.to_numpy()
