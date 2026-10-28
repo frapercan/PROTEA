@@ -47,6 +47,7 @@ type EvaluationResult = {
   // null on rows written before the columns existed; the badge strip then
   // renders an explicit "unknown" state.
   frame: string | null;
+  frame_digest: string | null;
   temporal_window: string | null;
   arms_enabled: Record<string, boolean> | null;
   leakage_role: string | null;
@@ -391,6 +392,7 @@ export default function EvaluationDetailPage() {
                               <EvalProvenanceBadges
                                 provenance={{
                                   frame: r.frame,
+                                  frame_digest: r.frame_digest,
                                   temporal_window: r.temporal_window,
                                   arms_enabled: r.arms_enabled,
                                   leakage_role: r.leakage_role,

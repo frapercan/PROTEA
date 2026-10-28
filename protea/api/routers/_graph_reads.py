@@ -310,7 +310,14 @@ _Q_RESULTS = text(
            -- harness produced a number and nothing about the parameters that
            -- decide whether two numbers can be read side by side. A result is
            -- attributable when it carries a digest of those parameters.
-           er.frame_digest              AS frame,
+           --
+           -- ALIASED BY ITS OWN NAME. This used to come out as ``frame``, so
+           -- the key ``frame`` carried a digest here and the harness label at
+           -- /v1/benchmark/matrix, where the frontend tests it against the
+           -- literal "lafa". Two endpoints, one key, two meanings: the trap
+           -- this campaign exists to avoid, and the panel query one screen
+           -- down already aliased the same column correctly.
+           er.frame_digest              AS frame_digest,
            ps.embedding_config_id::text AS embedding_config_id,
            ps.annotation_set_id::text   AS annotation_set_id,
            -- WHICH query set and WHICH accretion table THIS result was read

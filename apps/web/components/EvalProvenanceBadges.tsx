@@ -19,6 +19,7 @@ import {
   generationBadge,
   hasAnyProvenance,
   leakageBadge,
+  sealBadge,
   windowLabel,
   type EvalProvenance,
 } from "@/lib/evalProvenance";
@@ -47,6 +48,7 @@ export function EvalProvenanceBadges({
 
   const p = provenance ?? {};
   const frame = frameBadge(p.frame);
+  const seal = sealBadge(p.frame_digest);
   const win = windowLabel(p.temporal_window);
   const role = leakageBadge(p.leakage_role);
   const arms = armsList(p.arms_enabled);
@@ -70,6 +72,11 @@ export function EvalProvenanceBadges({
       ) : null}
       <span className={`${CHIP} ${frame.className}`} title={frame.title}>
         {frame.label}
+      </span>
+      {/* Beside the frame label, never instead of it: one says which harness
+          wrote the number, the other whether it may be read beside another. */}
+      <span className={`${CHIP} ${seal.className}`} title={seal.title} data-testid="seal-badge">
+        {seal.label}
       </span>
       <span className={`${CHIP} ${win.className}`} title={win.title}>
         {win.label}
