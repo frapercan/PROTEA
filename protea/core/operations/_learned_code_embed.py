@@ -30,11 +30,16 @@ embeddings are computed on demand instead of read back from the DB.
 Base-config resolution
 ----------------------
 ``apply_learned_encoder`` names the learned config
-``"{target_model_name}:{pool_tag}:{objective}:{source_id[:8]}"`` (for example
-``"learned-code:hard-neg:08234f06"``). The trailing colon-segment is therefore
-the first 8 hex chars of the SOURCE (base) config id, so the base config is
-recovered by matching that id prefix (:func:`resolve_base_config`). No path or
-id is hard-coded in the serve code.
+``"{target_model_name}:{pool_tag}:{objective}:cut{training_release}:{source_id[:8]}"``
+(for example ``"learned-code:mean:hard-neg:cut211:08234f06"``). The trailing
+colon-segment is therefore the first 8 hex chars of the SOURCE (base) config
+id, so the base config is recovered by matching that id prefix
+(:func:`resolve_base_config`). No path or id is hard-coded in the serve code.
+
+The ``cut`` segment goes in FRONT of the id and not after it, for that reason.
+It was absent until two heads fitted on different releases over one stored
+vector resolved to the same name and the second apply wrote nothing; see
+:func:`protea.core.operations.apply_learned_encoder._target_model_name`.
 
 Head-artifact resolution
 -------------------------

@@ -400,12 +400,55 @@ def _load_encoder(artifact_path: str, scaler_path: str | None = None):
     return _build_mean_apply(blob, meta, dev, scaler, activation), meta
 
 
+def _target_model_name(p: ApplyLearnedEncoderPayload, meta: dict, pool_tag: str) -> str:
+    """The learned config's name, which is also its identity.
+
+    THE TRAINING CUT IS IN IT, AND THAT IS THE POINT. The first version named a
+    learned config by the target name, the pooling, the objective and the source
+    config, and left out the release the artifact was fitted on. The lab's two
+    sfjepa heads differ in exactly that and in nothing else this name reads, so
+    both resolved to
+    ``learned-code:mean:sfjepa-world-holes-topk:e7ba37da``. Applying the second
+    after the first found the first's row by name, returned its id, and with
+    ``skip_existing`` skipped every sequence: the second cut's codes were never
+    written and the first cut's config sat there claiming to be them. No error,
+    no warning, and the fitted cut recorded in ``trained_on_annotation_set_id``
+    would have said 211 for rows that the frame would read as 227.
+
+    That is the defect this campaign exists not to repeat -- one name over two
+    quantities -- in the identity of a config rather than in a measurement, so
+    it would have propagated to every number scored from it.
+
+    The source id stays the LAST colon-segment because
+    :func:`protea.core.operations._learned_code_embed._base_config_prefix`
+    recovers the base config from it with ``rsplit(":", 1)``, so the cut goes in
+    front of it and not after.
+
+    ``training_release`` is read with a hard key: an artifact that does not
+    declare its cut cannot be named unambiguously, and
+    :func:`resolve_training_cut` already refuses it one line later for the same
+    reason. Failing here says why in terms of the name.
+    """
+    release = str(meta["training_release"]).strip()
+    return (
+        f"{p.target_model_name}:{pool_tag}:{meta.get('objective', 'learned')}:"
+        f"cut{release}:{str(p.source_embedding_config_id)[:8]}"
+    )
+
+
 def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta: dict) -> uuid.UUID:
-    """Create (idempotently, keyed on model_name) the learned-code EmbeddingConfig; return its id."""
+    """Create (idempotently, keyed on model_name) the learned-code EmbeddingConfig; return its id.
+
+    ``kind`` and ``derived_from_embedding_config_id`` are set explicitly. They
+    used to be left to the column default and to NULL, so a code fitted against
+    our own annotations was stored as ``pretrained`` with no parent: the two
+    columns that say "this owes a training cut" and "this is derived from that
+    vector" both said the opposite of what the row was. The cut was already
+    being recorded one field over, which made the row disagree with itself.
+    """
     pooling = str(meta.get("pooling", "mean")).lower()
     pool_tag = "attn" if pooling == "attention" else "mean"
-    name = (f"{p.target_model_name}:{pool_tag}:{meta.get('objective', 'learned')}:"
-            f"{str(p.source_embedding_config_id)[:8]}")
+    name = _target_model_name(p, meta, pool_tag)
     existing = session.execute(
         select(EmbeddingConfig).where(EmbeddingConfig.model_name == name)
     ).scalar_one_or_none()
@@ -416,9 +459,11 @@ def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta:
         pooling=pooling if pooling == "attention" else "learned",
         normalize_residues=False, normalize=False, use_chunking=False,
         description=(f"learned GO-aligned code ({pool_tag}-pool, dict={meta['dict_dim']}, "
-                     f"top_k={meta['top_k']}, objective={meta.get('objective')}) over source config "
+                     f"top_k={meta['top_k']}, objective={meta.get('objective')}, "
+                     f"cut={meta['training_release']}) over source config "
                      f"{p.source_embedding_config_id}"),
-        display_name=name, family="learned-code",
+        display_name=name, family="learned-code", kind="learned",
+        derived_from_embedding_config_id=uuid.UUID(str(p.source_embedding_config_id)),
         trained_on_annotation_set_id=resolve_training_cut(session, meta),
     )
     session.add(cfg)
