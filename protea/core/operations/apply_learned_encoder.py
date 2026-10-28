@@ -53,6 +53,7 @@ class ApplyLearnedEncoderPayload(ProteaPayload, frozen=True):
     batch_size: int = 4000
     skip_existing: bool = True
     sequence_id_limit: int | None = None  # smoke-test cap; None = all source sequences
+    top_k: int | None = None  # None = the artifact's own; see resolve_top_k
 
     @field_validator("source_embedding_config_id", mode="before")
     @classmethod
@@ -291,6 +292,66 @@ def activation_of(meta: dict, artifact_path: str) -> str:
     return str(declared)
 
 
+def resolve_top_k(meta: dict, override: int | None, artifact_path: str) -> tuple[int, int]:
+    """``(applied, declared)``: how many atoms the code keeps, and how many the head asked for.
+
+    WHY THIS IS AN AXIS AND NOT A PROPERTY OF THE ARTIFACT. The selection runs
+    AFTER the Linear and after the activation, over values the head already
+    produced, so a different count is the same trained map read at a different
+    width. Nothing is refitted and the weights are untouched.
+
+    MEASURED on the lab's cut-211 head over 500 stored ankh_base vectors
+    (config ``e7ba37da``): the ReLU leaves **2.262 atoms alive of 8.192** on
+    average -- median 2.256, never fewer than 1.292, never more than 3.167 --
+    and the head's declared ``top_k`` of 64 keeps **15,41% of the activated
+    mass**, 7,17% in the worst row. So the 64 is not where the activation ends;
+    it is a bottleneck a long way inside it, and the atoms it drops are values
+    the head computed as positive. Not one of the 500 rows had fewer than 64
+    alive, so the declared width is never padding either.
+
+    That does NOT make a wider code better. The objective is named
+    ``sfjepa-world-holes-topk``: the head was fitted THROUGH a selection of 64,
+    so atoms ranked past it were never asked to carry anything. Whether they
+    help is a measurement, which is the reason to make the width a declared
+    level instead of a constant -- and the reason this function changes no
+    default: an absent override applies the artifact's own number, so every
+    head runs exactly as it did.
+
+    WHY IT GOES IN THE NAME, which :func:`_target_model_name` does. The stored
+    dimension is ``dict_dim`` whatever the width, because the column holds the
+    whole vector with zeros in it; ``embedding_dim`` is written from
+    ``codes.shape[1]``. Two configs over one source, one cut and one head,
+    differing only in how many of those 8.192 components are non-zero, would
+    therefore read as the same quantity in every column that identifies them.
+    That is the single-field comparison this campaign keeps paying for, and the
+    width is the field that varies.
+
+    :raises ValueError: on a width below 1 or above ``dict_dim``. At exactly
+        ``dict_dim`` there is no selection left: :func:`_topk_real` returns its
+        input whole, the code is dense, and the bank stops being 64 non-zeros
+        of 8.192. That is a real level of the axis and it is allowed, but the
+        operation says so rather than discovering it as a disk bill.
+    """
+    declared = int(meta["top_k"])
+    if override is None:
+        return declared, declared
+    dict_dim = int(meta["dict_dim"])
+    if override < 1:
+        raise ValueError(
+            f"top_k={override} keeps no atoms at all. The width is a count of "
+            f"components to keep, so the smallest meaningful override is 1; "
+            f"{artifact_path} declares {declared}"
+        )
+    if override > dict_dim:
+        raise ValueError(
+            f"top_k={override} is wider than the dictionary of {dict_dim} that "
+            f"{artifact_path} declares, so it names atoms the head cannot "
+            f"produce. At exactly {dict_dim} the selection is a no-op and the "
+            f"code is dense, which is the widest level this axis has"
+        )
+    return override, declared
+
+
 def _pre_topk(z, activation: str):
     """Apply the declared activation to the Linear output, before selection."""
     if activation == "relu":
@@ -363,7 +424,9 @@ def refuse_wrong_order(meta: dict, artifact_path: str) -> None:
         )
 
 
-def _load_encoder(artifact_path: str, scaler_path: str | None = None):
+def _load_encoder(
+    artifact_path: str, scaler_path: str | None = None, top_k: int | None = None
+):
     """Load the torch artifact -> (apply_fn, meta). Lazy-imports torch/numpy.
 
     ``apply_fn`` takes a list of per-sequence chunk-vector matrices (each ``(n_chunks, in_dim)``) and
@@ -390,8 +453,11 @@ def _load_encoder(artifact_path: str, scaler_path: str | None = None):
             artifact_path,
         )
     # Resolved rather than declared, so the receipt says which path ran instead
-    # of leaving an absent key to be read as a decision.
+    # of leaving an absent key to be read as a decision. The width is resolved
+    # the same way and for the same reason, and both builders keep reading
+    # ``meta["top_k"]`` unchanged: what they read is now what ran.
     meta["activation"] = activation
+    meta["top_k"], meta["top_k_declared"] = resolve_top_k(meta, top_k, artifact_path)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     scaler = _load_scaler(scaler_path or _sibling_scaler_path(artifact_path), int(meta["in_dim"]))
     pooling = str(meta.get("pooling", "mean")).lower()
@@ -428,12 +494,63 @@ def _target_model_name(p: ApplyLearnedEncoderPayload, meta: dict, pool_tag: str)
     declare its cut cannot be named unambiguously, and
     :func:`resolve_training_cut` already refuses it one line later for the same
     reason. Failing here says why in terms of the name.
+
+    THE WIDTH IS IN IT TOO, AND ONLY WHEN IT IS NOT THE HEAD'S OWN. Same
+    argument as the cut, one field over: :func:`resolve_top_k` explains why two
+    widths over one head are two quantities that no identifying column
+    separates. The segment is conditional because every config already stored
+    was written at the artifact's declared width, and adding ``k64`` to their
+    names unconditionally would stop this operation finding its own rows: the
+    lookup below is keyed on the name, so it would miss, build a second config,
+    and recompute 684.048 codes to say what the first already says.
     """
     release = str(meta["training_release"]).strip()
+    applied = int(meta["top_k"])
+    declared = int(meta.get("top_k_declared", applied))
+    width = f"k{applied}:" if applied != declared else ""
     return (
         f"{p.target_model_name}:{pool_tag}:{meta.get('objective', 'learned')}:"
-        f"cut{release}:{str(p.source_embedding_config_id)[:8]}"
+        f"cut{release}:{width}{str(p.source_embedding_config_id)[:8]}"
     )
+
+
+def emit_top_k_receipt(meta: dict, emit: EmitFn) -> bool:
+    """Say on the job that the width came from the payload. ``True`` if it did.
+
+    At WARNING and not info, because the arithmetic cannot complain: a wider
+    code is a valid code, every count downstream still adds up, and the only
+    thing that changed is that the atoms past the head's own width were never
+    fitted to carry anything. A run nobody flagged would be indistinguishable
+    from the lab's own recipe in the event log, which is where this campaign
+    looks when two numbers disagree.
+
+    Silent when the width IS the head's, so the ordinary path emits nothing.
+    """
+    applied = int(meta["top_k"])
+    declared = int(meta.get("top_k_declared", applied))
+    if applied == declared:
+        return False
+    emit(
+        "apply_learned_encoder.top_k_override", None,
+        {"applied": applied, "head_declares": declared, "dict_dim": meta["dict_dim"],
+         "dense": applied >= int(meta["dict_dim"]),
+         "reason": "the payload chose the code width; the head was fitted through "
+                   "its own, so atoms past it were never trained to carry anything"},
+        "warning",
+    )
+    return True
+
+
+def _declared_suffix(meta: dict) -> str:
+    """`` (head declares N)``, or nothing when the applied width IS the head's.
+
+    So a row never reads as though the artifact asked for a width the payload
+    chose. The name already separates the two configs; this is what tells a
+    reader of one row which of the two numbers came from the lab.
+    """
+    applied = int(meta["top_k"])
+    declared = int(meta.get("top_k_declared", applied))
+    return "" if applied == declared else f" (head declares {declared})"
 
 
 def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta: dict) -> uuid.UUID:
@@ -459,7 +576,8 @@ def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta:
         pooling=pooling if pooling == "attention" else "learned",
         normalize_residues=False, normalize=False, use_chunking=False,
         description=(f"learned GO-aligned code ({pool_tag}-pool, dict={meta['dict_dim']}, "
-                     f"top_k={meta['top_k']}, objective={meta.get('objective')}, "
+                     f"top_k={meta['top_k']}{_declared_suffix(meta)}, "
+                     f"objective={meta.get('objective')}, "
                      f"cut={meta['training_release']}) over source config "
                      f"{p.source_embedding_config_id}"),
         display_name=name, family="learned-code", kind="learned",
@@ -534,15 +652,19 @@ class ApplyLearnedEncoderOperation:
         limit = p.get("sequence_id_limit")
         if limit is not None:
             bits.append(f"limit={limit}")
+        top_k = p.get("top_k")
+        if top_k is not None:
+            bits.append(f"top_k={top_k}")
         return " ".join(bits)
 
     def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
         p = ApplyLearnedEncoderPayload.model_validate(contract_payload(payload))
         src_id = uuid.UUID(p.source_embedding_config_id)
         artifact = resolve_encoder_artifact(p.encoder_artifact_path, p.encoder_artifact_uri)
-        apply, meta = _load_encoder(artifact)
+        apply, meta = _load_encoder(artifact, top_k=p.top_k)
         if int(meta["in_dim"]) <= 0:
             raise ValueError("encoder meta missing in_dim")
+        emit_top_k_receipt(meta, emit)
         target_id = _ensure_target_config(session, p, meta)
         # Uniform per-config divisor + fp16 clip so a high-magnitude learned code
         # cannot overflow the halfvec column; default scale 1.0 => no-op.
