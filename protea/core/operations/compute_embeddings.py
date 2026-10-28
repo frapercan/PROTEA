@@ -38,7 +38,10 @@ from protea.core.operations._embedding_pass_group import (
     shared_pass_emitter,
     warn_if_pass_not_shared,
 )
-from protea.core.operations._long_sequence_isolation import load_lengths_for_isolation
+from protea.core.operations._long_sequence_isolation import (
+    load_lengths_for_isolation,
+    refuse_and_record,
+)
 from protea.core.operations.store_embeddings import (
     StoredConfigEmbeddings,
     StoreEmbeddingsOperation,
@@ -139,8 +142,11 @@ class ComputeEmbeddingsPayload(_ConfigGroupPayload, frozen=True):
         Callers running smaller models on roomier GPUs can raise it explicitly.
     isolate_above_residues : int | None
         A batch of its own for anything longer, so one sequence the card cannot
-        fit cannot dead-letter the 63 beside it. Absent by default; the
-        measurement is in ``_long_sequence_isolation``.
+        fit cannot dead-letter the 63 beside it. Absent by default.
+    refuse_above_residues : int | None
+        Never dispatched at all above this, and recorded as not encoded with
+        the reason. Absent by default. Both measurements, and why the two are
+        different questions, are in ``_long_sequence_isolation``.
     """
 
     accessions: list[str] | None = None
@@ -150,6 +156,7 @@ class ComputeEmbeddingsPayload(_ConfigGroupPayload, frozen=True):
     skip_existing: bool = True
     batch_size: PositiveInt = 1
     isolate_above_residues: PositiveInt | None = None
+    refuse_above_residues: PositiveInt | None = None
 
 
 class ComputeEmbeddingsBatchPayload(_ConfigGroupPayload, frozen=True):
@@ -283,6 +290,7 @@ class ComputeEmbeddingsOperation:
             return OperationResult(result={"batches": 0, "sequences": 0, "configs": n_configs})
 
         lengths = load_lengths_for_isolation(session, sequence_ids, p, emit)
+        sequence_ids = refuse_and_record(sequence_ids, p, lengths, emit, p.device)
         operations = build_batch_dispatch_messages(p, parent_job_id, sequence_ids, lengths)
         n_batches = len(operations)
         result = {
