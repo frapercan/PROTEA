@@ -17,10 +17,21 @@ const PUBLIC_PATHS: ReadonlyArray<{
   priority: number;
 }> = [
   { path: "", changeFrequency: "daily", priority: 1.0 },
+  // The book: the top-level entrance, and four pages a reader arrives on from
+  // outside. They were absent from this list while every instrument page was
+  // in it, so the crawler was told about the tools and not about the argument.
+  { path: "/pillar/1", changeFrequency: "weekly", priority: 0.9 },
+  { path: "/pillar/2", changeFrequency: "weekly", priority: 0.9 },
+  { path: "/pillar/3", changeFrequency: "weekly", priority: 0.9 },
+  { path: "/pillar/4", changeFrequency: "weekly", priority: 0.9 },
   { path: "/instrument", changeFrequency: "daily", priority: 0.9 },
   { path: "/instrument/graph", changeFrequency: "daily", priority: 0.9 },
   { path: "/instrument/benchmark", changeFrequency: "daily", priority: 0.9 },
-  { path: "/instrument/graph", changeFrequency: "daily", priority: 0.9 },
+  // Stratified evaluation, which is what a cell of the matrix opens into. It
+  // was the one result surface with no entry anywhere: not here and not in the
+  // sidebar, so the only way to it was a hand-typed URL.
+  { path: "/instrument/stratum", changeFrequency: "daily", priority: 0.8 },
+  { path: "/annotate", changeFrequency: "weekly", priority: 0.8 },
   { path: "/instrument/proteins", changeFrequency: "daily", priority: 0.8 },
   { path: "/instrument/annotations", changeFrequency: "daily", priority: 0.7 },
   { path: "/instrument/embeddings", changeFrequency: "weekly", priority: 0.7 },
