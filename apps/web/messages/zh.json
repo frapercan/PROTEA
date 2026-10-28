@@ -175,7 +175,7 @@
     "welcomeBody": "输入一条氨基酸序列，它会返回该序列可能承担的功能，取自 Gene Ontology。这是一个真正运行的平台，而非一篇论文，下方的一切都运行在提供本页面的这台机器上。",
     "welcomeResult": "它在 <cafa>{competition}</cafa> 中于 {teams, number} 支队伍里名列第 {rank, number}，这是一项公开竞赛，由其组织方评分，而非由我们自评。",
     "welcomeValidation": "该方法以运行中的容器而非预测文件的形式提交给 <lafa>LAFA 评测基准</lafa>。在本站陈述任何结论之前，我们会自行复算评分，使用<evaluator>部署在本机的 CAFA 评估器</evaluator>，它是<upstream>已发布版本</upstream>的一个分支，评分逻辑未作改动，因此第三方可以重新生成本站的任何数字。",
-    "welcomeCampaign": "新一轮数据运行正在从零重建注释语料库。截至 {asOf}，已读取该系列 {releases, number} 个 Gene Ontology 注释数据库版本中的 {read, number} 个（全系列共 {gigabytes, number} GB 文件），并载入 {proteins, number} 条蛋白质记录（规范条目加同工型），每条都标注了其来源版本。下方的工具均已构建并在运行；待本轮重建结束后其数字将恢复显示。",
+    "welcomeCampaign": "一轮数据运行已从零重建注释语料库。截至 {asOf}，已读取该系列 {releases, number} 个 Gene Ontology 注释数据库版本中的 {read, number} 个（全系列共 {gigabytes, number} GB 文件），并载入 {proteins, number} 条蛋白质记录（规范条目加同工型），每条都标注了其来源版本。下方的工具均已构建、正在运行，其数字已可查看。",
     "argumentRecord": "完整的科学论证发表于下方，其测量是针对 {frame} 期间的 LAFA 评测板进行的。",
     "headlineSentence": "连同其评测框架，封存结果为 <value></value>（<metric></metric>），九格中七格居首<note>。</note>",
     "headlineSentenceWithheld": "连同其框架一并说明：<metric></metric> 上的封存结果正在重新计算，九格中七格居首<note>。</note>",
