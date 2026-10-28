@@ -86,7 +86,7 @@ from protea.core.operations._run_cafa_strata import neighbourhoods_for
 # opened under one map and pooled under another disagrees about which proteins
 # it holds without either side raising.
 from protea.core.operations.stratify_evaluation import _ASPECT_FOR_NAMESPACE, BEST_F_FILENAME
-from protea.core.strata import stratum_for
+from protea.core.strata import UNREAD_NEIGHBOURHOOD, stratum_for
 from protea.infrastructure.storage.factory import ArtifactStoreUnavailable, get_artifact_store
 
 router = APIRouter(prefix="/strata", tags=["strata"])
@@ -189,11 +189,17 @@ def _hoods(factory: sessionmaker[Session], prediction_set_id: str) -> dict[str, 
 class _Placed:
     """The artefact's rows with the two retrieval axes attached.
 
-    ``unplaced`` is broken down rather than totalled. A protein missing from
-    this cell because no donor was retrieved is a retrieval fact; one missing
-    because the record holds no length is a corpus fact; one missing because a
-    stored identity is not a percentage is a defect. Summing the three would
-    report a single number that three different actions would fix.
+    The reasons are broken down rather than totalled. A protein missing because
+    the record holds no length is a corpus fact; one missing because a stored
+    identity is not a percentage is a defect. Summing them would report a
+    single number that two different actions would fix.
+
+    ``no_donor`` is in this list but is NOT one of those reasons, and that is
+    the distinction the first version got wrong. It counts rows whose donors
+    were never aligned: they still place on the three sequence axes and read
+    ``none`` on the four donor ones, so the number is a fact about the panel
+    and not a gap in it. The response keeps it outside ``unplaced`` so a reader
+    cannot add it to the others and get the shortfall.
     """
 
     rows: list[dict[str, Any]]
@@ -293,10 +299,11 @@ def _response(
         "panel_population": len(placed.rows),
         "placed": placed.placed,
         "unplaced": {
-            "no_donor": placed.no_donor,
             "no_length": placed.no_length,
             "off_scale": placed.off_scale,
         },
+        # Outside ``unplaced`` on purpose: these rows ARE placed. See _Placed.
+        "without_donor": placed.no_donor,
         "matched": len(counted.rows),
         "scored_zero": counted.scored_zero,
         "returned": len(counted.page),
@@ -534,6 +541,53 @@ def _row(
     }
 
 
+#: The closed set of reasons a scored protein ends up with no bands at all.
+#: Written down rather than inferred, so adding a third reason has to name
+#: itself here and in the response instead of landing in whichever counter was
+#: nearest. A missing donor is deliberately NOT one of them: see :func:`_spot`.
+_UNPLACED_REASONS: tuple[str, ...] = ("no_length", "off_scale")
+
+
+def _spot(
+    category: Category,
+    aspect: Any,
+    residues: int | None,
+    hood: Any,
+) -> tuple[Any, str | None]:
+    """Where one protein sits, and the reason when it sits nowhere.
+
+    A MISSING DONOR DOES NOT UNPLACE A ROW, which is the whole point of this
+    function existing. The endpoint used to test the neighbourhood first and
+    leave the stratum null, so the length band -- a fact about the query's own
+    sequence, needing no alignment at all -- was discarded because a different
+    axis could not be read. On the live record that silently emptied the drawer
+    for every ingested arm and for 86,5% of all candidates: the endpoint
+    answered 0 placed over a panel of thousands while the operation next door
+    placed 100% of the same rows.
+
+    Now the row places with :data:`UNREAD_NEIGHBOURHOOD`, so its length band is
+    the band it always had and its four donor axes read ``none``. Filtering on
+    a donor axis excludes it on its own, with no help from a counter.
+    """
+    if not residues:
+        return None, "no_length"
+    try:
+        return (
+            stratum_for(
+                category=category,
+                aspect=aspect,
+                residues=residues,
+                neighbourhood=hood if hood is not None else UNREAD_NEIGHBOURHOOD,
+            ),
+            None,
+        )
+    except ValueError:
+        # A stored identity outside [0, 100] cannot be banded. Counted rather
+        # than clamped: clamping would put the protein in a band nobody
+        # measured it into.
+        return None, "off_scale"
+
+
 def _join(
     frame: Any,
     namespace: str,
@@ -543,39 +597,34 @@ def _join(
 ) -> _Placed:
     """One row per protein in this panel, scored and placed.
 
-    A protein that cannot be placed on the retrieval axes stays in the list
-    with null bands. It scored, so it is part of the panel and dropping it
-    would make the count printed here smaller than the count the panel prints;
-    it just cannot answer a question about length or homology, and a null says
-    that where a zero or a band would not.
+    A protein that cannot be placed stays in the list with null bands. It
+    scored, so it is part of the panel and dropping it would make the count
+    printed here smaller than the count the panel prints; it just cannot answer
+    the question, and a null says that where a zero or a band would not.
+
+    :func:`_spot` decides each row and says why when it has no bands.
     """
     category = Category.from_code(setting)
     aspect = _ASPECT_FOR_NAMESPACE[namespace]
 
     taus = {round(float(t), 6) for t in frame["tau"].tolist()}
     rows: list[dict[str, Any]] = []
-    no_donor = no_length = off_scale = 0
+    unplaced = dict.fromkeys(_UNPLACED_REASONS, 0)
+    no_donor = 0
 
     for record in frame.to_dict("records"):
         accession = str(record["protein_accession"])
         residues = lengths.get(accession)
         hood = hoods.get(accession)
-        stratum = None
         if hood is None:
             no_donor += 1
-        elif not residues:
-            no_length += 1
-        else:
-            try:
-                stratum = stratum_for(
-                    category=category, aspect=aspect, residues=residues, neighbourhood=hood
-                )
-            except ValueError:
-                # A stored identity outside [0, 100] cannot be banded. Counted
-                # rather than clamped: clamping would put the protein in a band
-                # nobody measured it into.
-                off_scale += 1
+        stratum, why = _spot(category, aspect, residues, hood)
+        if why is not None:
+            unplaced[why] += 1
         rows.append(_row(record, accession, residues, stratum, hood))
+
+    no_length = unplaced["no_length"]
+    off_scale = unplaced["off_scale"]
 
     return _Placed(
         rows=rows,

@@ -68,9 +68,9 @@ from protea.core.operations._run_cafa_strata import (
 )
 from protea.core.strata import (
     NEIGHBOURHOOD_AXES,
+    UNREAD_NEIGHBOURHOOD,
     Aspect,
     Category,
-    Neighbourhood,
     Stratum,
     stratum_for,
 )
@@ -156,11 +156,16 @@ def _category_for(setting: str) -> Category | None:
 
 #: Stands in for the donor neighbourhood when none is needed, so that the one
 #: placement path serves both kinds of run. Every field is ``None``, so the
-#: four donor axes come out as "no donor" -- which is why it may only be used
-#: when none of those axes was requested and none of them will be read. Asking
-#: for a donor axis and getting this would report an empty neighbourhood as a
-#: measurement, and :func:`_strata_for_rows` refuses instead.
-_UNREAD_NEIGHBOURHOOD = Neighbourhood(best_identity=None, donor_is_experimental=None)
+#: four donor axes come out as "no donor" -- which is why this operation only
+#: uses it when none of those axes was requested and none of them will be read.
+#: Asking for a donor axis and getting this would report an empty neighbourhood
+#: as a measurement, and :func:`_strata_for_rows` refuses instead.
+#:
+#: The value now lives in :mod:`protea.core.strata`, beside the axis split it
+#: depends on, because the stratum endpoint needs the same sentinel and a
+#: second copy would be one name over two quantities. Kept as an alias so the
+#: reasoning above stays next to the only caller that has the refusal.
+_UNREAD_NEIGHBOURHOOD = UNREAD_NEIGHBOURHOOD
 
 
 def _rows_at_published_tau(

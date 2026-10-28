@@ -87,30 +87,54 @@ def test_the_population_is_the_panels_own_and_not_the_query_sets():
     assert len(placed.rows) == 2
 
 
-def test_a_protein_that_cannot_be_placed_stays_in_the_panel():
-    # It scored, so it is part of the population the panel prints. Dropping it
-    # would make this page's count smaller than the panel's for no reason a
-    # reader could see. It carries null bands instead, because a band it was
-    # never measured into would be worse than an absence.
+def test_a_protein_whose_donors_were_never_aligned_still_places_on_length():
+    # The regression this file exists to pin. The length band is a fact about
+    # the query's own sequence and needs no alignment, so a missing donor must
+    # not discard it. It used to: the branch tested the neighbourhood first and
+    # left the whole stratum null, which emptied this drawer for every arm
+    # whose donors had never been aligned -- on the live record, 86,5% of all
+    # candidates -- while the operation next door placed the same rows.
     frame = _frame([_row("P1"), _row("P2")])
     placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": 300, "P2": 300}, "NK")
 
     assert len(placed.rows) == 2
-    assert placed.placed == 1
-    assert placed.no_donor == 1
+    assert placed.placed == 2
+
     orphan = next(r for r in placed.rows if r["accession"] == "P2")
-    assert orphan["length_band"] is None
-    assert orphan["homology_band"] is None
+    assert orphan["length_band"] == "<=512"
+    # The four donor axes read "none" rather than a band, and the raw donor
+    # facts stay absent. A band says "not read"; an identity of zero would say
+    # "read, and distant", which is a different claim about the same protein.
+    assert orphan["homology_band"] == "none"
+    assert orphan["donor_evidence"] == "none"
     assert orphan["best_identity"] is None
+    assert orphan["taxonomic_relation"] is None
     # It still carries its score. The score is a fact about the evaluation and
-    # does not depend on the retrieval being placeable.
+    # never depended on the retrieval.
     assert orphan["f"] == 0.5
 
 
-def test_the_three_ways_of_being_unplaced_are_counted_apart():
-    # No donor is a retrieval fact, no length is a corpus fact, and an identity
-    # outside [0, 100] is a defect. One total would report a number that three
-    # different actions would fix.
+def test_a_missing_donor_is_counted_but_is_not_a_shortfall():
+    # ``no_donor`` stays on the breakdown because a reader wants to know how
+    # much of the panel answers a homology question. What it must not do is
+    # explain a gap between the population and the placed count, because there
+    # is none. The invariant is the assertion: the two real reasons account for
+    # every row that did not place, with no help from this counter.
+    frame = _frame([_row("P1"), _row("P2"), _row("P3")])
+    placed = _join(
+        frame,
+        "biological_process",
+        {"P1": _hood()},
+        {"P1": 300, "P2": 300},
+        "NK",
+    )
+    assert placed.no_donor == 2
+    assert placed.placed + placed.no_length + placed.off_scale == len(placed.rows)
+
+
+def test_the_two_ways_of_being_unplaced_are_counted_apart():
+    # No length is a corpus fact and an identity outside [0, 100] is a defect.
+    # One total would report a number that two different actions would fix.
     frame = _frame([_row("P1"), _row("P2"), _row("P3")])
     placed = _join(
         frame,
