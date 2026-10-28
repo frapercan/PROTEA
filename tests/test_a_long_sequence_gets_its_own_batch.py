@@ -147,12 +147,15 @@ class TestTheMessages:
 
 
 class TestTheHardCeiling:
-    """Isolation turns 9.198 lost sequences into 146 and leaves the other cost
-    alone: an isolated sequence that still does not fit burns six attempts and
-    155 s with the consumer stopped, which for the 146 is 6,9 h of a node
-    producing nothing. Measured at 19:10 against the running job: the longest
-    that has fitted is 8.002, 54 pending sit between that and 8.650, and 146
-    are above it."""
+    """Isolation turns thousands of lost sequences into a handful and leaves the
+    other cost alone: an isolated sequence that still does not fit burns six
+    attempts and 155 s with the consumer stopped.
+
+    Measured from the gaps in the dispatch order (ascending ``sequence_id``,
+    correlation 1 over 103.104 written rows): the longest sequence observed to
+    pass is 8.002 and the least maximum of a dead batch is 8.545, so the strict
+    field takes 8.544. The 187 pending sequences above 8.002 cluster into 96
+    batches, which is 4,1 h of backoff and 5.957 bystanders."""
 
     def test_nothing_is_refused_without_a_ceiling(self):
         ids = _ids(5)
@@ -169,6 +172,16 @@ class TestTheHardCeiling:
 
     def test_the_ceiling_is_strict_so_exactly_the_ceiling_is_dispatched(self):
         assert refuse_over_ceiling([1, 2], 8650, {1: 8650, 2: 8651}) == ([1], [2])
+
+    def test_the_measured_value_dispatches_what_passed_and_refuses_what_died(self):
+        """Why 8.544 and not a round 8.500. Strictness is what lets the field
+        hold the measurement itself: 8.545 is the least maximum of a dead batch,
+        and the four sequences at 8.515, 8.525 and 8.527 have never been
+        measured, so refusing them would lose four vectors on no evidence."""
+        lengths = {1: 8002, 2: 8515, 3: 8525, 4: 8527, 5: 8545, 6: 13084}
+        kept, refused = refuse_over_ceiling(_ids(6), 8544, lengths)
+        assert kept == [1, 2, 3, 4]
+        assert refused == [5, 6]
 
     def test_an_unknown_length_is_dispatched_and_not_refused(self):
         """An incomplete lookup must not decide that the bank lacks a protein."""
