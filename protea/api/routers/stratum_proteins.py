@@ -72,6 +72,7 @@ from protea.api.cache import cached
 from protea.api.deps import get_session_factory, get_settings
 from protea.api.routers import _stratum_drops as drops
 from protea.api.routers._arm_identity import with_arm_identity
+from protea.api.routers._stratum_hoods import hoods
 from protea.core.domain.category import Category
 from protea.core.operations._run_cafa_grid_artifact import (
     GRID_FILENAME,
@@ -79,7 +80,6 @@ from protea.core.operations._run_cafa_grid_artifact import (
 )
 from protea.core.operations._run_cafa_helpers import eval_artifact_key
 from protea.core.operations._run_cafa_strata import VARIANT_COLUMNS as _VARIANT_COLUMNS
-from protea.core.operations._run_cafa_strata import neighbourhoods_for
 
 # The namespace-to-aspect map is imported from the operation that WRITES the
 # strata rather than restated here. A second spelling of it would be a second
@@ -140,11 +140,12 @@ _ARM = text(
     )
 )
 
-#: Five minutes, matching the stratum comparison. The join behind a page is one
-#: parquet read plus one neighbourhood query, and the neighbourhood query is the
-#: expensive half: it runs over every candidate of a run and takes seconds. An
-#: operator paging through a cell or switching sort order would otherwise pay it
-#: again on every click, for an artefact that only changes when a run is rescored.
+#: Five minutes, for the panel slice ALONE. With the neighbourhoods resident
+#: that half was measured at 0,110 s, so five minutes is generous for it, and
+#: this entry is the big one in memory -- one dict per protein, eleven thousand
+#: of them on a real cell -- which is the reason it expires at all. The
+#: neighbourhoods have their own lifetime in :mod:`_stratum_hoods`, because they
+#: cost 635 s and that number does not belong under a clock.
 _TTL = 300.0
 
 #: How rows may be ordered. Weakest first is the default because the reason to
@@ -169,21 +170,6 @@ def _namespace_for(raw: str) -> str:
             ),
         )
     return ns
-
-
-def _hoods(factory: sessionmaker[Session], prediction_set_id: str) -> dict[str, Any]:
-    """The retrieval neighbourhood of a run, cached across its arms.
-
-    Eight evaluation results can share one prediction set, and the
-    neighbourhood is a property of the retrieval rather than of the scoring, so
-    switching arms inside a cell must not recompute it.
-    """
-
-    def produce() -> dict[str, Any]:
-        with factory() as session:
-            return neighbourhoods_for(session, prediction_set_id)
-
-    return cached(f"stratum:hoods:{prediction_set_id}", _TTL, produce, serve_stale_on_error=True)
 
 
 @dataclass
@@ -762,7 +748,7 @@ def stratum_proteins(
                 r["accession"]: int(r["residues"])
                 for r in session.execute(_LENGTHS, {"accessions": accessions}).mappings()
             }
-        return _join(frame, namespace, _hoods(factory, prediction_set_id), lengths, setting)
+        return _join(frame, namespace, hoods(factory, prediction_set_id), lengths, setting)
 
     placed = cached(
         f"stratum:proteins:{evaluation_result_id}:{setting}:{namespace}",
