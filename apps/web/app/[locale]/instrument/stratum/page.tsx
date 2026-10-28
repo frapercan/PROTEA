@@ -314,10 +314,14 @@ function Counts({ data }: { data: StratumProteinsResponse }) {
         <p className="text-xs leading-relaxed text-amber-800" role="status">
           {t("unplacedWhy", {
             count: gap,
-            noDonor: data.unplaced.no_donor,
             noLength: data.unplaced.no_length,
             offScale: data.unplaced.off_scale,
           })}
+        </p>
+      )}
+      {data.without_donor > 0 && (
+        <p className="text-xs leading-relaxed text-slate-500" role="status">
+          {t("withoutDonorWhy", { count: data.without_donor })}
         </p>
       )}
     </div>
