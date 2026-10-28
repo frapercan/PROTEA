@@ -32,6 +32,12 @@ from protea.core.operations.predict_go_terms._common import (
     _REF_CACHE,
     _UNIFIED_REF_KEY,
 )
+from protea.core.operations.predict_go_terms._sparse_bank import (
+    bank_bytes,
+    bank_is_sparse,
+    empty_sparse_bank,
+    stream_sparse_pool,
+)
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -39,6 +45,7 @@ from protea.infrastructure.orm.models.protein.protein import Protein
 
 if TYPE_CHECKING:
     from protea.core.operations.predict_go_terms._common import _BatchExecCtx  # noqa: F401
+
 
 
 class _PoolRequest(NamedTuple):
@@ -415,7 +422,7 @@ class _ReferenceMixin:
             None,
             {
                 "references": len(accessions),
-                "embeddings_mb": round(embeddings.nbytes / 1024 / 1024),
+                "embeddings_mb": round(bank_bytes(embeddings) / 1024 / 1024),
                 "source": source,
             },
             "info",
@@ -439,6 +446,14 @@ class _ReferenceMixin:
         """
         from protea.config.tuning import get_tuning
         from protea.core.disk_cache import _is_cache_fresh
+
+        # A sparse bank never reaches the disk cache; ``NO_DISK_CACHE_FOR_SPARSE``
+        # says why and what it costs.
+        if bank_is_sparse(session, request.embedding_config_id):
+            accessions, codes = self._stream_reference_pool(
+                self._reference_pool_query(session, request), sparse=True
+            )
+            return accessions, codes, "database"
 
         freshness_sec = get_tuning().operation.ref_cache_freshness_seconds
         source = "disk_cache"
@@ -514,11 +529,21 @@ class _ReferenceMixin:
     def _stream_reference_pool(
         self,
         accession_q: Any,
-    ) -> tuple[list[str], np.ndarray]:
-        """Stream ``(accession, embedding)`` rows into a pre-allocated f16 matrix."""
+        *,
+        sparse: bool = False,
+    ) -> tuple[list[str], Any]:
+        """Stream ``(accession, embedding)`` rows into a bank.
+
+        Dense f16 by default, which is what every PLM bank wants. ``sparse``
+        delegates to :func:`stream_sparse_pool`, which argues why a k-WTA bank
+        gets a CSR and why its shape comes from the rows received rather than
+        from ``total``.
+        """
         total = accession_q.count()
         if total == 0:
-            return [], np.empty((0,), dtype=np.float16)
+            return [], (
+                empty_sparse_bank() if sparse else np.empty((0,), dtype=np.float16)
+            )
         base_q = accession_q.add_columns(SequenceEmbedding.embedding)
         # pgvector HalfVector exposes .dimensions() / .to_numpy() after the
         # 2026-04-11 halfvec migration; pull dimension from the first row.
@@ -526,8 +551,12 @@ class _ReferenceMixin:
         from protea.config.tuning import get_tuning
 
         stream_chunk = get_tuning().operation.stream_chunk_size
-        embeddings = np.empty((total, dim), dtype=np.float16)
+        if sparse:
+            return stream_sparse_pool(
+                base_q.yield_per(stream_chunk), dim=dim, n_accessions_hint=total
+            )
         accessions: list[str] = []
+        embeddings = np.empty((total, dim), dtype=np.float16)
         for i, (acc, emb) in enumerate(base_q.yield_per(stream_chunk)):
             embeddings[i] = emb.to_numpy()
             accessions.append(acc)

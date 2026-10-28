@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 import numpy as np
+from scipy.sparse import csr_array, issparse
 
 _DISK_CACHE_DIR = Path(os.environ.get("PROTEA_REF_CACHE_DIR", "data/ref_cache"))
 
@@ -334,9 +335,80 @@ def _csr_lookup(
     return go_map
 
 
+def _l2_normalise_rows_sparse(codes: Any) -> Any:
+    """Row-wise L2 normalisation of a CSR bank, without densifying it.
+
+    The norms come from the matrix's own non-zeros rather than from its shape:
+    ``multiply(self).sum(axis=1)`` touches ``nnz`` values and returns one float
+    per row, 5,5 MB for this deployment's 684.048 rows.
+
+    THE EPSILON IS 1e-9 TO MATCH THE DENSE PATH EXACTLY. Both divide an
+    all-zero row by 1e-9 rather than by zero, so such a row stays a zero vector
+    in both instead of becoming NaN in one of them. ``_stream_reference_pool``
+    can emit a zero row when the count and the stream disagree, and a NaN bank
+    poisons every distance rather than one of them.
+
+    Written with ``np.repeat`` over ``np.diff(indptr)`` and not with
+    ``np.add.reduceat``: ``reduceat`` on two equal offsets returns the element
+    at that offset instead of the empty sum, so a row with no non-zeros would
+    silently take its neighbour's norm.
+    """
+    out = codes.copy().astype(np.float32)
+    if out.nnz == 0:
+        return out
+    sums = np.asarray(out.multiply(out).sum(axis=1), dtype=np.float64).ravel()
+    norms = np.sqrt(sums) + 1e-9
+    out.data = (out.data / np.repeat(norms, np.diff(out.indptr))).astype(np.float32)
+    return out
+
+
+def _sparse_reference_views(
+    accessions: list[str],
+    codes: Any,
+    *,
+    need_cos: bool,
+    need_plain: bool,
+) -> dict[str, Any]:
+    """The same view dict for a k-WTA bank, with nothing densified.
+
+    The keys and their meanings are the dense function's, so every reader
+    downstream selects by metric exactly as before;
+    ``protea_method.knn_search._search_numpy`` takes a ``csr_array`` as it
+    stands, verified on this venv against the dense bank: same neighbour
+    order, maximum distance difference 0,000e+00.
+
+    TWO DIFFERENCES A READER HAS TO KNOW:
+
+    ``embeddings`` holds the SAME float32 CSR and not an f16 array, because
+    scipy.sparse has no float16 at all. The dense function keeps the f16 copy
+    "for any consumer that still expects it (e.g. size reporting)", and a
+    consumer reading ``.nbytes`` off this one raises rather than lying, which
+    is the direction that fails loudly.
+
+    Emptiness is read off ``shape[0]`` and never off ``.size``. On a sparse
+    array ``.size`` is the number of STORED values, so a shaped bank whose
+    rows are all zero would take the dense function's empty branch and lose
+    its accessions.
+    """
+    if not accessions or codes.shape[0] == 0:
+        empty = csr_array((0, codes.shape[1]), dtype=np.float32)
+        return {
+            "accessions": accessions,
+            "embeddings": empty,
+            "embeddings_f32": empty,
+            "embeddings_f32_cos": empty,
+        }
+    return {
+        "accessions": accessions,
+        "embeddings": codes,
+        "embeddings_f32": codes if need_plain else None,
+        "embeddings_f32_cos": _l2_normalise_rows_sparse(codes) if need_cos else None,
+    }
+
+
 def _derive_reference_views(
     accessions: list[str],
-    embeddings_f16: np.ndarray,
+    embeddings_f16: Any,
     *,
     need_cos: bool = True,
     need_plain: bool = True,
@@ -357,7 +429,19 @@ def _derive_reference_views(
     The original f16 array is also kept on the result dict for any consumer
     that still expects it (e.g. size reporting), but the hot path reads the
     f32 views directly.
+
+    A k-WTA BANK NEVER REACHES THE LINES BELOW. The f32 copy is built
+    unconditionally and only dropped at the return, so for a bank of 684.048
+    rows by 8192 dimensions this function held f16 plus two f32 copies at
+    once: 11,21 + 22,41 + 22,41 = 56,0 GB, measured, on a machine with 30 GiB.
+    That is not a bank that is merely large; a row with 64 non-zeros of 8192
+    is the wrong shape for a dense copy at any size. See
+    :func:`_sparse_reference_views`.
     """
+    if issparse(embeddings_f16):
+        return _sparse_reference_views(
+            accessions, embeddings_f16, need_cos=need_cos, need_plain=need_plain
+        )
     if not accessions or embeddings_f16.size == 0:
         return {
             "accessions": accessions,

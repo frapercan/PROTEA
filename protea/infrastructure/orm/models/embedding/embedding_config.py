@@ -44,6 +44,24 @@ from protea.infrastructure.orm.base import Base
 #: about how the rows were produced instead of a label.
 INGESTED_METHOD_BACKEND = "ingested-method"
 
+#: Backends whose stored vectors are k-WTA codes: a fixed, small number of
+#: non-zero entries in a wide space, which makes a dense copy of the bank the
+#: wrong shape rather than merely a large one.
+#:
+#: Measured on this deployment 2026-10-28 over the whole store of 684.048
+#: sequences: the ``learned-code`` bank is 8192 dimensions with exactly 64
+#: non-zeros per row, so a dense float32 copy is 22,41 GB and the CSR of the
+#: same rows is 0,35 GB, a factor of 64. The machine has 30 GiB and
+#: ``_derive_reference_views`` used to hold f16 plus two f32 copies at once,
+#: a transient 56,0 GB, so the dense route could not run at all.
+#:
+#: A property of the PRODUCER and not of the dimension: a wide dense bank is
+#: expensive and still dense, and a narrow k-WTA code is cheap and still
+#: sparse. ``apply_learned_encoder`` is the only writer of ``learned-code``
+#: and it applies ``topk_real``, so the tag is evidence about the shape of the
+#: rows rather than a hint about their size.
+SPARSE_CODE_BACKENDS: frozenset[str] = frozenset({"learned-code"})
+
 VALID_LAYER_AGG: frozenset[str] = frozenset({"mean", "last", "concat", "none"})
 VALID_POOLING: frozenset[str] = frozenset({"mean", "max", "cls", "mean_max", "reader"})
 VALID_BACKENDS: frozenset[str] = frozenset(
