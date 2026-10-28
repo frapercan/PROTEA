@@ -10,6 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload, RetryLaterError
+from protea.core.operations._batch_skip_existing import (
+    close_fully_stored_batch,
+    sequences_still_missing,
+)
 from protea.core.operations._compute_embeddings_backends import (
     ChunkEmbedding,
     _aggregate_1d,
@@ -443,7 +447,9 @@ class ComputeEmbeddingsBatchOperation:
 
         configs = load_pass_group(session, p.embedding_config_ids)
 
-        sequences = session.query(Sequence).filter(Sequence.id.in_(p.sequence_ids)).all()
+        sequences = sequences_still_missing(session, p, configs, emit)
+        if not sequences:
+            return close_fully_stored_batch(session, parent_job_id, len(p.sequence_ids), emit)
         t0 = time.perf_counter()
         emit(
             "compute_embeddings_batch.start",
