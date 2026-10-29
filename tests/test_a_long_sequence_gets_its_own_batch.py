@@ -259,3 +259,128 @@ class TestTheTwoCeilingsTogether:
         assert partition_sequence_ids(kept, 2, p.isolate_above_residues, lengths) == [
             [1], [2], [3, 5],
         ]
+
+
+class TestTheLoaderReadsInChunks:
+    """What the unit tests could not see until it happened in production.
+
+    Job 48c500ac died in two seconds on 2026-10-29: the loader put all 399.952
+    ids of the run into one ``IN`` and psycopg answered "number of parameters
+    must be between 0 and 65535", leaving a 10,3 MB error message because the
+    driver echoes its parameters back. Every test here passed lists of three.
+    """
+
+    class _Session:
+        """Records the size of each ``IN`` the loader issues."""
+
+        def __init__(self, lengths):
+            self._lengths = lengths
+            self.chunk_sizes: list[int] = []
+
+        def execute(self, stmt):
+            # The ids of this statement's IN clause, read off the compiled
+            # parameters rather than guessed from the call count. An ``in_()``
+            # compiles to ONE expanding bindparam whose value is the whole
+            # list, which is why this flattens rather than counting keys: the
+            # first version counted 1 for a chunk of ten thousand.
+            params = stmt.compile().params
+            ids: list[int] = []
+            for k, v in params.items():
+                if not k.startswith("id_"):
+                    continue
+                ids.extend(v) if isinstance(v, (list, tuple)) else ids.append(v)
+            self.chunk_sizes.append(len(ids))
+            return _Rows([(i, self._lengths[i]) for i in ids if i in self._lengths])
+
+    def _payload(self, **kw):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            isolate_above_residues=8044, refuse_above_residues=8524,
+            sequences_per_job=64, **kw)
+
+    def test_no_in_clause_exceeds_the_chunk_size(self):
+        from protea.config.tuning import get_tuning
+        from protea.core.operations._long_sequence_isolation import (
+            load_lengths_for_isolation,
+        )
+
+        limit = get_tuning().operation.annotation_chunk_size
+        ids = list(range(1, limit * 2 + 7))
+        s = self._Session(dict.fromkeys(ids, 300))
+        load_lengths_for_isolation(s, ids, self._payload(), lambda *_a: None)
+        assert s.chunk_sizes, "the loader issued no query at all"
+        assert max(s.chunk_sizes) <= limit
+        # and it read everything: three chunks for 2*limit+6 ids
+        assert sum(s.chunk_sizes) == len(ids)
+
+    def test_it_stays_under_the_drivers_parameter_ceiling(self):
+        """The number psycopg actually refused. A chunk size raised past it in
+        tuning would make this fail here rather than in a job."""
+        from protea.config.tuning import get_tuning
+
+        assert get_tuning().operation.annotation_chunk_size < 65535
+
+    def test_every_length_survives_the_chunking(self):
+        from protea.core.operations._long_sequence_isolation import (
+            load_lengths_for_isolation,
+        )
+
+        ids = list(range(1, 25_001))
+        want = {i: (9000 if i % 5000 == 0 else 300) for i in ids}
+        s = self._Session(want)
+        got = load_lengths_for_isolation(s, ids, self._payload(), lambda *_a: None)
+        assert got == want
+
+
+class TestTheGateReadsBothCeilings:
+    """The second defect of the same edit: the loader returned None unless the
+    ISOLATION ceiling was set, while refuse_over_ceiling raises when handed a
+    refusal ceiling and no lengths. Asking only to refuse died on a message
+    that blamed the caller."""
+
+    def _s(self):
+        return TestTheLoaderReadsInChunks._Session({1: 300, 2: 9000})
+
+    def _p(self, iso, ref):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            isolate_above_residues=iso, refuse_above_residues=ref,
+            sequences_per_job=64)
+
+    def test_refusal_alone_still_loads_the_lengths(self):
+        from protea.core.operations._long_sequence_isolation import (
+            load_lengths_for_isolation,
+        )
+
+        got = load_lengths_for_isolation(self._s(), [1, 2], self._p(None, 8524), lambda *_a: None)
+        assert got == {1: 300, 2: 9000}
+
+    def test_and_emits_nothing_about_isolation(self):
+        """Reporting an isolation ceiling of 0 would read as "every sequence was
+        isolated", which is the opposite of what was asked."""
+        from protea.core.operations._long_sequence_isolation import (
+            load_lengths_for_isolation,
+        )
+
+        def boom(*_a, **_k):
+            raise AssertionError("no isolation was asked for")
+
+        load_lengths_for_isolation(self._s(), [1, 2], self._p(None, 8524), boom)
+
+    def test_neither_ceiling_still_returns_none(self):
+        from protea.core.operations._long_sequence_isolation import (
+            load_lengths_for_isolation,
+        )
+
+        assert load_lengths_for_isolation(
+            self._s(), [1, 2], self._p(None, None), lambda *_a: None) is None
+
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
