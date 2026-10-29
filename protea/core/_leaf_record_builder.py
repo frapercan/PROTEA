@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from protea.core.producer_sentinels import CLASSIFIER, NO_PRODUCER
 from protea.core.reranker import EMBEDDING_PCA_DIM, LABEL_COLUMN
 
 if TYPE_CHECKING:
@@ -248,7 +249,7 @@ class _LeafRecordBuilder:
             "aspect": ctx.aspect,
             LABEL_COLUMN: 1 if (ctx.q_acc, go_id) in self.runner.gt_pairs else 0,
             "distance": float("nan"),
-            "ref_protein_accession": "",
+            "ref_protein_accession": NO_PRODUCER,
             "qualifier": "",
             "evidence_code": "",
         }
@@ -622,7 +623,7 @@ def build_classifier_only_record(
         "aspect": aspect,
         LABEL_COLUMN: 1 if (q_acc, go_id) in builder.runner.gt_pairs else 0,
         "distance": nan,
-        "ref_protein_accession": "classifier",
+        "ref_protein_accession": CLASSIFIER,
         "qualifier": "",
         "evidence_code": "",
     }
