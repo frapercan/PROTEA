@@ -22,6 +22,7 @@ checked against them rather than restated.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -33,6 +34,15 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "mutation.yml"
 TEMPLATE = ROOT / "cosmic-ray.toml"
 SCRIPT = ROOT / "scripts" / "mutation-build-module-map.py"
+
+
+def _script():
+    """Load the hyphenated script by path; it is not importable by name."""
+    spec = importlib.util.spec_from_file_location("mutation_build_module_map", SCRIPT)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _map_as_the_workflow_builds_it() -> dict[str, str]:
@@ -52,14 +62,53 @@ def _map_as_the_workflow_builds_it() -> dict[str, str]:
 
 # --------------------------------------------------------------------- the map
 
-def test_the_map_emits_a_test_file_that_exists_for_every_property_test():
-    """A map entry whose file is missing would point the pass at nothing."""
+def test_every_entry_names_a_real_module_and_a_real_test():
+    """Both halves have to exist, and neither is checked by the filename.
+
+    The first version asserted ``test_{stem}_property.py``, which assumed the
+    test is named after the module it exercises. That holds for one of the three
+    property tests in the tree, so the assertion was encoding the defect.
+    """
     built = _map_as_the_workflow_builds_it()
 
     assert built, "no property tests found at all, so the map answers nothing"
-    for stem, test_file in built.items():
-        assert Path(test_file).name == f"test_{stem}_property.py"
+    for name, test_file in built.items():
+        assert (ROOT / "protea" / "core" / f"{name}.py").is_file(), (
+            f"{name!r} is a key and protea/core/{name}.py does not exist, so "
+            "mutation.yml's resolver can never produce that path"
+        )
         assert (ROOT / test_file).is_file(), f"{test_file} is in the map and not on disk"
+
+
+def test_the_map_finds_evaluation_through_the_test_that_imports_it():
+    """The one that fails if the key goes back to being the test's filename.
+
+    ``tests/property/test_parquet_roundtrip_property.py`` imports
+    ``protea.core.evaluation``. Keyed by filename it lands under
+    ``parquet_roundtrip``, which is not a module, so touching
+    ``protea/core/evaluation.py`` reads as "no property test" and is skipped
+    while it has one.
+    """
+    built = _map_as_the_workflow_builds_it()
+
+    assert built.get("evaluation") == "tests/property/test_parquet_roundtrip_property.py"
+    assert "parquet_roundtrip" not in built, (
+        "parquet_roundtrip is a test's filename and not a module; a key by that "
+        "name is unreachable from any changed path"
+    )
+
+
+def test_a_property_test_of_a_sibling_package_contributes_nothing():
+    """Correct rather than unfortunate: the gate's scope is protea/core/."""
+    built = _map_as_the_workflow_builds_it()
+
+    assert "contract_payloads" not in built
+    imported = _script().core_modules_imported(
+        (ROOT / "tests/property/test_contract_payloads_property.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert imported == set(), "it imports protea_contracts, not protea.core"
 
 
 def test_the_map_is_silent_about_a_module_with_no_property_test():
@@ -146,9 +195,48 @@ def test_the_template_names_a_property_test_the_workflow_can_swap():
     )
 
 
-@pytest.mark.parametrize("stem", ["scoring", "contract_payloads", "parquet_roundtrip"])
-def test_each_property_test_is_reachable_through_the_map(stem: str):
-    """Named one by one, so losing a property test fails here and not silently."""
+@pytest.mark.parametrize("module", ["scoring", "evaluation"])
+def test_each_module_with_a_kill_criterion_is_reachable(module: str):
+    """Named one by one, so losing one fails here and not silently.
+
+    These two are the whole reachable set: 58 top-level modules live in
+    ``protea/core/`` and two of them have a property test. The gate is a
+    two-module gate, which is worth being able to read off a test.
+    """
     built = _map_as_the_workflow_builds_it()
 
-    assert stem in built, f"tests/property/test_{stem}_property.py disappeared"
+    assert module in built, f"protea/core/{module}.py lost its kill criterion"
+
+
+# ------------------------------------------------------- reading the imports
+
+def test_a_deep_import_is_not_keyed():
+    """mutation.yml resolves only protea/core/*.py, so a deeper path is no use.
+
+    An entry the workflow cannot match is a promise it does not keep: the
+    module would appear to have a kill criterion and never be mutated.
+    """
+    imported = _script().core_modules_imported(
+        "from protea.core.ontology.sparse_containment import thing\n"
+        "from protea.core.scoring import other\n"
+    )
+
+    assert imported == {"scoring"}
+
+
+def test_a_module_named_in_a_string_is_not_an_import():
+    """Parsed and not grepped, which is the point of using ast."""
+    imported = _script().core_modules_imported(
+        'DOC = "see protea.core.flows for the contract"\n'
+        "# from protea.core.metrics import nothing\n"
+    )
+
+    assert imported == set()
+
+
+def test_both_import_forms_are_read():
+    imported = _script().core_modules_imported(
+        "import protea.core.utils\nfrom protea.core.retry import backoff\n"
+    )
+
+    assert imported == {"utils", "retry"}
