@@ -6,19 +6,19 @@ candidate CAN arrive without a donor", which is true of the column and false of
 the record: the constraint is about NULL, and a producer that is not a donor
 protein is exactly what an ingested method writes there.
 
-Three forms are admitted, and two of them were already in the tree before this
-module named them:
-
-- a **donor protein accession**, from the retrieval path;
-- an **InterPro accession**, which ``predict_go_terms_from_interpro`` writes for
-  the domain that voted;
-- a **method's name**, which ``ingest_method_predictions`` writes, with a
-  comment that says in as many words that it is "not a donor protein".
-
 So the column names the row's PRODUCER. Decided 2026-10-28, as the sentinel
 legitimised in writing rather than a nullable column: the constraint keeps its
 promise that nothing arrives anonymous, and the graph stops implying a stronger
 one it cannot keep.
+
+THE CATALOGUE LIVES IN :mod:`protea.core.producer_sentinels` AND IT IS SIX AND
+NOT THREE. This module said "three forms are admitted" until 2026-10-29, and
+enumerating every assignment to the column across ``protea/`` found six: the
+three opaque ones named here before (a donor accession, an InterPro accession,
+a method's name) and three fixed strings the tree also writes, ``""``,
+``"classifier"`` and ``"interpro"``. A sentinel legitimised BY WRITING is only
+legitimate while the writing covers its own inputs, so the list moved to one
+module with a test that reads the tree and fails when a seventh literal appears.
 """
 
 from __future__ import annotations
@@ -59,6 +59,22 @@ def sentinel_sets(record: dict[str, list[dict[str, Any]]]) -> tuple[int, int]:
     That is the same trap :func:`_graph_nodes._donor_required` documents for the
     NULL count, one quantity over: the affordable question is the one the
     catalog or a small table answers, never the one that scans the candidates.
+
+    AND IT COUNTS ONE OF THE SIX FORMS, which is worth saying out loud because
+    the sentence built from it reads as though it covered them all. The test is
+    the SUBSTRATE's backend, so a set is counted when an ingested method
+    produced it and not when a classifier head or an InterPro graft did, even
+    though those write ``producer_sentinels.CLASSIFIER`` and
+    ``producer_sentinels.INTERPRO_GRAFT`` in the same column and are no more a
+    donor protein than a method name is.
+
+    That is affordable TODAY and only today: measured 2026-10-29 with a left
+    join against ``protein``, this deployment holds 18.415.500 method-name rows
+    and zero rows carrying either literal, so the count is exact. It stops
+    being exact the first time a graft or a classifier arm runs. The fix then is
+    a producer kind recorded ON THE PREDICTION SET, not a scan of its rows: the
+    9,0 s above is the measurement that rules the scan out, and a set-level
+    column keeps this function free.
     """
     backend_of = {
         str(row.get("id")): row.get("model_backend") for row in record.get("substrates") or []
