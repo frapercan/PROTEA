@@ -11,24 +11,53 @@
 /**
  * Whether the live predictor can answer a visitor.
  *
- * Measured false on 2026-10-07. The database behind protea.ngrok.app holds
- * zero rows in ``annotation_set``, ``go_term``, ``protein_go_annotation``
- * and ``embedding_config``, so ``POST /annotate`` returns
+ * TRUE since 2026-10-29. It was measured false on 2026-10-07, when the
+ * database behind protea.ngrok.app held zero rows in ``annotation_set``,
+ * ``go_term``, ``protein_go_annotation`` and ``embedding_config``, so
+ * ``POST /annotate`` answered
  *
  *     409 {"detail": "No annotation sets available. Load GO annotations first."}
  *
- * before it queues anything, and ``lib/api.ts`` surfaces that body
- * verbatim to the visitor. A dead button that prints an operator
- * instruction is worse than a button that explains itself.
+ * before queueing anything, and the visitor read an operator instruction.
  *
- * FLIP THIS in the same change that can show a ``PredictionSet`` WITH
- * ROWS. A green ``succeeded`` job is not enough evidence: with an empty
- * reference pool the predict operation short-circuits, logs
- * ``predict_go_terms.no_queries``, creates no prediction set at all, and
- * the form's ``resolvePredictionSet`` then retries eight times and lands
- * the visitor on an empty page. Verify rows, not job status.
+ * THE EVIDENCE THIS FLIP ASKED FOR, measured 2026-10-29, rows and not job
+ * status, because the old docstring was right that a green ``succeeded`` is
+ * not enough:
+ *
+ * | table                   | rows        |
+ * | ----------------------- | ----------- |
+ * | annotation_set          | 75          |
+ * | go_term                 | 3.118.456   |
+ * | protein_go_annotation   | 663.408.837 |
+ * | embedding_config        | 13          |
+ * | prediction_set          | 14, ALL with rows |
+ * | go_prediction           | 25.399.802  |
+ *
+ * AND WHAT THE ENDPOINT WOULD ACTUALLY SERVE, which is the part row counts
+ * do not answer. ``_newest_annotation_set`` resolves to GOA release 235 with
+ * 8.118.592 annotations, so the 409 cannot fire. ``_best_embedding_config``
+ * EXISTS-probes configs and returns the first with embeddings: run as the
+ * endpoint runs it, that is ``e7ba37da``, ankh-base with 684.048 vectors over
+ * 684.048 distinct sequences. A complete bank, not a partial one.
+ *
+ * ONE CAVEAT, AND IT IS NOT A BLOCKER TODAY. That pick is arbitrary rather
+ * than chosen: the preference is "smallest model that has embeddings", by
+ * ``param_count`` ascending with nulls last, and every ``param_count`` in this
+ * database is NULL. Four configs have vectors -- ``e7ba37da`` and the two
+ * learned codes at 684.048 each, and ``f3a7fe16`` mid-computation at 256.896
+ * -- so the order is whatever the query plan returns. It returns the right one
+ * now. To make that a decision instead of a coincidence, pin it with
+ * ``PROTEA_DEFAULT_EMBEDDING_CONFIG_ID``, which
+ * :func:`_pinned_embedding_config` honours only when the config exists AND has
+ * embeddings. Running ``count_backend_parameters`` would also make the stated
+ * preference work as written.
+ *
+ * Flipping this does NOT open the door while the shared GPU is busy. That is a
+ * separate, live check (``gpu.busy``) with its own banner, so a visitor
+ * arriving mid-run is told the queue is busy rather than the predictor is
+ * paused -- two different facts, which is why the form keeps two flags.
  */
-export const LIVE_ANNOTATION_AVAILABLE = false;
+export const LIVE_ANNOTATION_AVAILABLE = true;
 
 /**
  * Whether the surfaces that exist to display results have results.
@@ -60,10 +89,10 @@ export const LIVE_ANNOTATION_AVAILABLE = false;
  * | /instrument/functional-annotation | 1.084.104 predictions, 6 sets |
  * | /instrument/annotations           | 75 annotation sets, 66 snapshots |
  * | /instrument/query-sets            | 5.810 entries |
- * | /instrument/evaluation            | 125 evaluation sets |
+ * | /instrument/evaluation            | 130 evaluation sets (2026-10-29) |
  * | /feature-registry                 | 78 features, schema 1.7.0 |
  * | /instrument/graph                 | GET /v1/graph answers with 10 nodes |
- * | /instrument/benchmark             | 125 sets but **3** results |
+ * | /instrument/benchmark             | 130 sets, 14 results (2026-10-29) |
  * | /instrument/datasets              | 0 |
  * | /instrument/reranker              | 0 reranker models |
  * | /instrument/scoring               | 0 (/v1/scoring/rerankers is empty) |
@@ -86,9 +115,10 @@ export const SURFACE_HAS_ROWS: Record<string, boolean> = {
   "/instrument/graph": true,
   // Measured on this server 2026-10-28, and two of these had gone stale in the
   // direction the docstring below says is the expensive one: invisible and
-  // live. evaluation_result holds 8 rows, which is what the matrix reads, and
-  // scoring_config holds 1. Both were false and both were hidden from an
-  // anonymous visitor while they had something to show.
+  // live. evaluation_result holds 14 rows on 2026-10-29 (8 when this comment
+  // was written), which is what the matrix reads, and scoring_config holds 1.
+  // Both were false and both were hidden from an anonymous visitor while they
+  // had something to show.
   "/instrument/benchmark": true,
   "/instrument/scoring": true,
   // Still true, and checked rather than assumed: dataset holds 0 rows and
@@ -124,7 +154,7 @@ export function surfaceHasRows(href: string): boolean {
  * moves; never update a number without the date.
  */
 export const CAMPAIGN_STATUS = {
-  asOf: "2026-10-07",
+  asOf: "2026-10-29",
   /**
    * Releases READ so far, of the whole series.
    *
@@ -133,17 +163,30 @@ export const CAMPAIGN_STATUS = {
    * and 802.1 GB are the size of the SERIES and only 60 had been read.
    * An overstatement on the one page whose argument is that its claims
    * can be checked. Two fields now, and the copy says "X of Y".
+   *
+   * Now 75 of 75, measured 2026-10-29: annotation_set holds one row per GOA
+   * release from 156 to 235. The two fields stay even though they are equal,
+   * because the next series will not be, and collapsing them is how the
+   * overstatement happened.
    */
-  releasesRead: 60,
+  releasesRead: 75,
   /** GOA releases in the series (156 to 235; 206 to 210 were never published). */
   goaReleases: 75,
   /** Total size of the whole series, measured by reading all 75 headers. */
   gafGigabytes: 802.1,
   /**
    * Proteins admitted to the corpus so far, each carrying the release that
-   * admitted it. Still climbing while the universe pass runs.
+   * admitted it.
+   *
+   * 721.486 on 2026-10-29, and the universe pass is no longer running. It is
+   * LOWER than the 745.421 this said on 2026-10-07 and that is not a
+   * regression: the base was restarted on 2026-10-05 and the figure here was
+   * taken from the previous build-up. Counted as the field defines itself --
+   * ``first_admitted_release IS NOT NULL`` -- and not as every row of
+   * ``protein``, which is 792.535 and includes the 71.049 that came from
+   * UniProt rather than from a GAF.
    */
-  proteinsAdmitted: 745_421,
+  proteinsAdmitted: 721_486,
 } as const;
 
 /**
