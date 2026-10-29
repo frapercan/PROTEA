@@ -133,6 +133,23 @@ with the count, the lengths and the reason, rather than let a reader discover it
 by subtracting row counts. The refusal is emitted at warning level with the
 sequence ids, so the gap is a recorded decision instead of an absence.
 
+TWO DEFECTS OF THE FIRST VERSION, both found in production and both in the
+loader rather than in the arithmetic.
+
+It put every id of the run into one ``IN``. That is fine for the 64 ids of a
+batch and fatal for the population of a coordinator: job ``48c500ac`` died in
+two seconds on 2026-10-29 with ``number of parameters must be between 0 and
+65535`` over 399.952 ids, and left a 10,3 MB error message because the driver
+echoes its parameters back. The unit tests could not see it -- they pass lists
+of three -- so the query is now chunked at the size the annotation loaders
+already use, and there is one answer in this codebase to "how many ids fit in
+a query" rather than two.
+
+And it loaded the lengths only when ``isolate_above_residues`` was set, while
+:func:`refuse_over_ceiling` RAISES when handed a refusal ceiling and no
+lengths. A payload asking only to refuse therefore died on a message that
+blamed the caller for the loader's omission. The gate reads both fields now.
+
 WHY BOTH ARE PAYLOAD FIELDS AND NOT CONSTANTS. The coordinator runs on the host
 that owns the state, which has no card and cannot know the device's memory; the
 operator can, and the number also depends on the transformers version in the
@@ -148,7 +165,9 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import EmitFn
+from protea.core.utils import chunks
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 
@@ -302,16 +321,26 @@ def load_lengths_for_isolation(
 
     ``would_have_shared_a_batch_with`` is the number this module exists for:
     the sequences that a dead-lettered batch would have taken with it.
+
+    Reads in CHUNKS and gates on BOTH ceilings; the module docstring says why.
     """
     isolate_above = p.isolate_above_residues
-    if isolate_above is None:
+    refuse_above = getattr(p, "refuse_above_residues", None)
+    if isolate_above is None and refuse_above is None:
         return None
-    rows = session.execute(
-        select(Sequence.id, func.length(Sequence.sequence)).where(
-            Sequence.id.in_(sequence_ids)
-        )
-    ).all()
-    lengths = {int(sid): int(n or 0) for sid, n in rows}
+    chunk_size = get_tuning().operation.annotation_chunk_size
+    lengths: dict[int, int] = {}
+    for chunk in chunks(list(sequence_ids), chunk_size):
+        rows = session.execute(
+            select(Sequence.id, func.length(Sequence.sequence)).where(
+                Sequence.id.in_(list(chunk))
+            )
+        ).all()
+        lengths.update({int(sid): int(n or 0) for sid, n in rows})
+    if isolate_above is None:
+        # Nothing to say about isolation when none was asked for, and saying it
+        # with a ceiling of 0 would read as "every sequence was isolated".
+        return lengths
     isolated = sum(1 for n in lengths.values() if n > isolate_above)
     emit(
         "compute_embeddings.isolated_long_sequences",
@@ -321,6 +350,7 @@ def load_lengths_for_isolation(
             "isolated": isolated,
             "longest": max(lengths.values(), default=0),
             "sequences": len(lengths),
+            "chunks_read": max(1, -(-len(sequence_ids) // chunk_size)),
             "would_have_shared_a_batch_with": isolated * (p.sequences_per_job - 1),
         },
         "warning" if isolated else "info",
