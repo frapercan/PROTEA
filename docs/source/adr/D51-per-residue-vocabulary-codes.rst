@@ -1,0 +1,158 @@
+ADR-D51: The sparse code of every residue, from a frozen vocabulary, stored as shards
+=====================================================================================
+
+:Status: Proposed
+:Date: 2026-11-03
+:Author: Francisco Miguel Pérez Canales
+:Phase: platform consolidation (the lab's research enters the platform)
+
+Context: the platform keeps one vector per sequence
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Every embedding the platform stores is a ``SequenceEmbedding`` row, one vector per
+sequence and configuration. ``encode_residue_sparse`` computes a code per residue,
+but only to pool it, and nothing per residue survives the batch.
+
+The lab's sparse line (October 30 to November 2) froze a vocabulary that is worth
+keeping per residue:
+
+* **What it is.** A nested flat dictionary of 8192 features over the residue states
+  of five Ankh base layers (hidden state indices 2, 10, 22, 40 and 48), read at 128
+  active features per residue, each value quantised to one of 256 levels.
+* **What it measured.** A single feature localises a domain with a mean average
+  precision of 0.57 to 0.64, where the best dense layer reaches 0.01 to 0.08. The code
+  costs about 1331 bits per residue under a sequence context coder.
+* **Who reads it per residue.** The term generator (a reader that attends over residue
+  codes), the exact explanations (which residues and which named features carry a
+  term) and the feature atlas. None of them can work from a pooled vector.
+
+Three facts constrain how the platform can hold it.
+
+1. **The code must be the lab's code.** A reader trained on the lab's codes is valid
+   only on codes computed the same way. The lab pinned the vocabulary by sha256 and
+   wrote a reference encoder whose joint test reproduced the code of the lab's
+   evaluation path bit for bit on 64 proteins (37765 residues, 309 million entries,
+   zero differences on the GPU).
+2. **Ankh has to run at any length.** The corpus holds proteins of up to 35991
+   residues. The backend's eager attention builds a (heads, L, L) score tensor and
+   stops near 8300 residues on a 12 GB card. The lab computed its states with exact
+   attention through FlexAttention, whose memory is linear in L.
+3. **The volume is large but bounded.** The corpus is about 300 million residues.
+   Measured on 212446 residues of the lab's validation codes: 144.5 active features per
+   residue, 436 bytes per residue as int16 indices plus uint8 levels, and 286 to 304
+   bytes after zlib. That is about 87 GB for the corpus, against 2.3 TB for the five
+   dense layers in half precision.
+
+Decision
+~~~~~~~~
+
+1. A vocabulary artifact
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+The vocabulary enters as an artifact of kind ``residue-vocabulary``: the dictionary
+weights, the thresholds of the 128 active reading, the quantiser table and the
+standardisation statistics, each with its sha256, plus a manifest that names the
+layers, the reading and the quantiser. The artifact is refused when a hash does not
+match, and its manifest hash is part of the configuration identity.
+
+The vocabulary's population was chosen among proteins annotated at GOA 211, so its
+configuration declares that release as its cut (``trained_on_annotation_set_id``) and
+the temporal gate keeps it out of windows that start earlier.
+
+The code of one residue, which this record fixes:
+
+1. ``x``: the states of the five layers, each standardised per dimension with the
+   artifact's statistics, ``(state - mu) / sd``, rounded to half precision and
+   concatenated in layer order (3840 values).
+2. Pre-activation of feature ``j``: ``p_j = (x - bd) . We_j + be_j`` in single
+   precision, with ``We`` transposed and stored row major as ``(3840, 8192)``. The
+   layout is part of the recipe: the lab found that another layout changes the last
+   bit of some products.
+3. Reading: feature ``j`` is active when ``p_j > exp(logt_j)``, strictly.
+4. Level: ``clamp(floor(p_j / range_j * 256), 0, 255)``.
+5. The code: per residue, the active features in ascending order and their levels.
+6. Read back: ``cen[j, level + 1]``, the training mean of the level's bin. The layers'
+   reconstruction is the read back vector times ``Wd`` plus ``bd``.
+
+The lab's reference encoder (``compresion/scripts/codificador_referencia.py`` in the
+sf-jepa repository, commit 5e456de) is the specification, and the platform's
+implementation is tested against test vectors produced by it.
+
+2. Exact attention, layer by layer
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+protea-backends gains a per-layer residue path for Ankh: the selected hidden states
+returned separately rather than averaged, computed with exact attention through
+FlexAttention (the T5 relative bias enters as a score modifier read from a small
+table, so no L by L tensor exists). The precision is the one the vocabulary was
+trained on: bfloat16 weights, RMS norms and the feed forward output in single
+precision, scores accumulated in single precision, and batches of up to 16384 tokens
+sorted by length. The configuration records this policy. The node needs a C compiler
+and the Python headers, because Triton builds a small helper the first time.
+
+Layer indices keep the platform's convention (``[0]`` is the last hidden state). The
+vocabulary's hidden state indices 2, 10, 22, 40 and 48 are ``layer_indices`` 46, 38,
+26, 8 and 0.
+
+3. Shards in the artifact store, an index in the database
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A GPU batch writes one shard to the artifact store: the codes of its sequences as
+arrays (sequence ids, residue offsets, entry offsets, feature indices delta encoded
+within each residue, levels as uint8), compressed with zlib, with the vocabulary's
+manifest hash and the backend's precision policy in its header. A new table
+``residue_code`` holds one row per sequence and configuration: the shard key, the
+position of the sequence in the shard, its residue and entry counts, and the shard's
+sha256. A sequence is encoded once per configuration. A batch that fails leaves no
+row, and a retry encodes what has no row.
+
+Rows per residue in Postgres were rejected: 300 million residues times 144 entries
+is over 40 billion values, on a database the campaign already measured as disk bound.
+
+4. One operation, two queues
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``encode_residue_vocabulary`` follows ``encode_residue_sparse``. A coordinator on
+``protea.embeddings`` resolves the artifact, creates the configuration and fans out
+batches to ``protea.embeddings.batch``, where the card runs Ankh and the vocabulary,
+writes the shard and inserts the index rows. It trains nothing.
+
+5. A read path
+^^^^^^^^^^^^^^
+
+``load_residue_codes(session, store, embedding_config_id, sequence_ids)`` returns, per
+sequence, the active features and levels of every residue, and optionally the read
+back values. The generator and the explanations will consume it; their operations
+are later records.
+
+Validation gates
+~~~~~~~~~~~~~~~~
+
+1. **Unit parity.** The platform's encoder reproduces the reference encoder's test
+   vectors bit for bit.
+2. **Same states, same code.** On the lab's 64 proteins, the platform's encoder fed
+   with the lab's cached states gives the lab's code with zero differences.
+3. **Platform states.** On the same 64 proteins, the platform's backend recomputes the
+   states. The share of entries that differ is reported (expected rare, at thresholds
+   and level edges, from batch composition in bfloat16), and the mean number of active
+   features per residue must stay within the range the lab measured (126 to 145).
+
+Consequences
+~~~~~~~~~~~~
+
+* A full corpus pass takes about 9 to 10 hours on the RTX 3060 node, at the rate the
+  lab measured (25.6 million residues in 45 minutes), and about 87 GB of the artifact
+  store.
+* Retrieval, predictions and the evaluation do not change. Pooled codes for retrieval,
+  the generator as a method and the reader are out of scope here.
+* zlib is a placeholder. The sequence context coder the lab measured would bring a
+  residue near 166 bytes, and a later record may adopt it without changing the index.
+
+Alternatives considered
+~~~~~~~~~~~~~~~~~~~~~~~
+
+* **Store the dense states.** 2.3 TB for five layers in half precision.
+* **Pool only.** ``encode_residue_sparse`` already does it, and the readers need
+  residues.
+* **The eager backend.** It stops near 8300 residues, and it is not the computation
+  the vocabulary was trained on.
