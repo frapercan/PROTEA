@@ -1,7 +1,7 @@
 ADR-D52: Representations by granularity in one registry, sparse first
 =====================================================================
 
-:Status: Proposed (draft for the author's review)
+:Status: Accepted (2026-11-03, the author's answers below)
 :Date: 2026-11-03
 :Author: Francisco Miguel Pérez Canales
 :Phase: platform consolidation (the lab's research enters the platform)
@@ -130,6 +130,12 @@ Open questions for the author
 
 1. Settled on 2026-11-03 (section 2): no fixed summary; learned per-protein
    representations, with fixed pooling as a baseline.
-2. The population of the residue store: the whole corpus, or the annotated sequences and
-   the queries the readers need. The first corpus pass covers the whole bank.
-3. Whether ``learned-code`` migrates to ``sparsevec``.
+2. Settled on 2026-11-03, in the author's words: "Deberíamos guardar lo que necesitemos para
+   la inferencia, o bien para pivotar en el research". The deployed vocabulary covers the
+   whole corpus, because retrieval needs the codes of every reference protein. A research
+   vocabulary covers the proteins its frame uses (queries and references), not the corpus
+   by default.
+3. Parked on 2026-11-03. Moving ``learned-code`` to ``sparsevec`` would save memory and time
+   (the predictor rebuilds 22.41 GB dense in memory against 0.35 GB sparse) and allow nearest
+   neighbour search in the database, but ``learned-code`` is the earlier pool-then-select
+   code. It migrates only if it stays in inference.
