@@ -35,6 +35,7 @@ const PUBLIC_PATHS: ReadonlyArray<{
   { path: "/instrument/proteins", changeFrequency: "daily", priority: 0.8 },
   { path: "/instrument/annotations", changeFrequency: "daily", priority: 0.7 },
   { path: "/instrument/embeddings", changeFrequency: "weekly", priority: 0.7 },
+  { path: "/instrument/weights", changeFrequency: "weekly", priority: 0.6 },
   { path: "/instrument/datasets", changeFrequency: "weekly", priority: 0.7 },
   { path: "/instrument/query-sets", changeFrequency: "weekly", priority: 0.6 },
   { path: "/instrument/functional-annotation", changeFrequency: "weekly", priority: 0.7 },

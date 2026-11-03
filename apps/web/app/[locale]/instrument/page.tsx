@@ -48,6 +48,7 @@ const GROUPS: ToolGroup[] = [
     hintKey: "pipelineHint",
     tools: [
       { href: "/instrument/embeddings", labelKey: "embeddings", hint: "PLM embedding configs across the eight backbones", icon: Atom },
+      { href: "/instrument/weights", labelKey: "modelWeights", hint: "Residue vocabularies, learned encoders and other fitted weights, by hash", icon: Archive },
       { href: "/instrument/functional-annotation", labelKey: "functionalAnnotation", hint: "Embedding-similarity GO annotation, BPO / MFO / CCO", icon: Tags },
       { href: "/instrument/scoring", labelKey: "scoring", hint: "Combine distance, alignment, taxonomy, evidence", icon: Sliders },
       { href: "/instrument/reranker", labelKey: "reranker", hint: "LightGBM reranker over scored predictions", icon: ArrowUpDown },

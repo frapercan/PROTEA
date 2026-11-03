@@ -317,6 +317,9 @@ export type EmbeddingConfig = {
   chunk_size: number;
   chunk_overlap: number;
   description?: string | null;
+  /** The name the API reports for the configuration, when one was given. */
+  display_name?: string | null;
+  kind?: string;
   created_at: string;
   embedding_count?: number;
 };
@@ -601,6 +604,131 @@ export function createEmbeddingConfig(body: Omit<EmbeddingConfig, "id" | "create
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Model weights registry (ADR-D54)
+// ---------------------------------------------------------------------------
+
+export const WEIGHT_KINDS = [
+  "residue_vocabulary",
+  "learned_encoder",
+  "world_model",
+  "reader",
+  "generator",
+  "method_bundle",
+] as const;
+export type WeightKind = (typeof WEIGHT_KINDS)[number];
+
+/** One file of fitted weights in the artifact store, as GET /model-weights lists it. */
+export type ModelWeights = {
+  id: string;
+  kind: WeightKind;
+  name: string;
+  description: string | null;
+  format: string;
+  /** The artifact store key operations take in their payload. */
+  uri: string;
+  sha256: string;
+  size_bytes: number;
+  meta: Record<string, unknown>;
+  trained_on_annotation_set_id: string | null;
+  created_at: string | null;
+  created_by: string | null;
+  /** In the listing: how many configurations were made from it. */
+  configurations?: number;
+};
+
+export type ModelWeightsDetail = ModelWeights & {
+  used_by: {
+    configurations: { id: string; name: string; kind: string }[];
+    jobs: { id: string; operation: string; status: string; created_at: string | null }[];
+  };
+};
+
+export type WeightsInfoBody = {
+  kind: WeightKind;
+  name: string;
+  description?: string | null;
+  meta?: Record<string, unknown>;
+  trained_on_annotation_set_id?: string | null;
+};
+
+export function listModelWeights(kind?: WeightKind) {
+  const q = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+  return http<ModelWeights[]>(`/model-weights${q}`);
+}
+
+export function getModelWeights(id: string) {
+  return http<ModelWeightsDetail>(`/model-weights/${encodeURIComponent(id)}`);
+}
+
+export function registerModelWeightsByReference(body: WeightsInfoBody & { uri: string; sha256: string }) {
+  return http<ModelWeights>(`/model-weights/by-reference`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export type WeightsUpload = { upload_id: string; part_bytes: number; parts: number };
+
+export function createWeightsUpload(
+  body: WeightsInfoBody & { filename: string; size_bytes: number; sha256?: string | null },
+) {
+  return http<WeightsUpload>(`/model-weights/uploads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** One part as the raw body of a PUT; every part but the last has the part size. */
+export function putWeightsPart(uploadId: string, n: number, part: Blob) {
+  return http<{ received: number; parts: number }>(
+    `/model-weights/uploads/${encodeURIComponent(uploadId)}/parts/${n}`,
+    { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: part },
+  );
+}
+
+export function completeWeightsUpload(uploadId: string) {
+  return http<ModelWeights>(`/model-weights/uploads/${encodeURIComponent(uploadId)}/complete`, {
+    method: "POST",
+  });
+}
+
+export function abortWeightsUpload(uploadId: string) {
+  return http<{ aborted: boolean }>(`/model-weights/uploads/${encodeURIComponent(uploadId)}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Upload a file in parts: open, send each part in order, complete. `onProgress`
+ * gets the parts sent so far. On any failure the upload is abandoned on the server
+ * before the error is rethrown, so nothing is left half on disk.
+ */
+export async function uploadModelWeights(
+  file: Blob & { name?: string },
+  info: WeightsInfoBody,
+  onProgress?: (sent: number, parts: number) => void,
+): Promise<ModelWeights> {
+  const upload = await createWeightsUpload({
+    ...info,
+    filename: file.name ?? info.name,
+    size_bytes: file.size,
+  });
+  try {
+    for (let n = 0; n < upload.parts; n++) {
+      const start = n * upload.part_bytes;
+      await putWeightsPart(upload.upload_id, n, file.slice(start, start + upload.part_bytes));
+      onProgress?.(n + 1, upload.parts);
+    }
+    return await completeWeightsUpload(upload.upload_id);
+  } catch (e) {
+    await abortWeightsUpload(upload.upload_id).catch(() => undefined);
+    throw e;
+  }
 }
 
 export function deleteEmbeddingConfig(id: string) {

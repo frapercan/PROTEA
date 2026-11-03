@@ -333,6 +333,7 @@ export function Sidebar({
       icon: Workflow,
       items: [
         { href: "/instrument/embeddings", label: t("embeddings"), hint: "PLM embedding configs · ESM-2 · ESM3c · ProstT5 · Ankh", icon: Atom , needsData: true },
+        { href: "/instrument/weights", label: t("modelWeights"), hint: "Residue vocabularies, learned encoders and other fitted weights, by hash", icon: Archive },
         { href: "/instrument/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO", icon: Tags , needsData: true },
         { href: "/instrument/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB", icon: Sliders , needsData: true },
         { href: "/instrument/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB", icon: ArrowUpDown , needsData: true },

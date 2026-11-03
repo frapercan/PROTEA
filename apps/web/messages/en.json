@@ -78,7 +78,8 @@
     "apiKeys": "API keys",
     "apiKeysHint": "Mint, list and revoke programmatic access keys",
     "dlq": "Dead-letter queue",
-    "dlqHint": "Audit and drain failed messages from the DLQ"
+    "dlqHint": "Audit and drain failed messages from the DLQ",
+    "modelWeights": "Model weights"
   },
   "home": {
     "title": "Protein Function Prediction Pipeline",
@@ -958,7 +959,7 @@
       "loading": "Reading the index...",
       "emptyTitle": "No residue vocabulary yet",
       "emptyBody": "This tab shows how far the codes of each residue vocabulary reach over its source corpus, once an encode_residue_vocabulary pass has created its configuration. None exists yet.",
-      "footnote": "Coverage counts the sequences of the source corpus that have a code. The estimate divides what is left by the sequences written in the last hour, so it moves with the pace of the GPU node.",
+      "footnote": "Coverage counts the sequences of the source corpus that have a code. The estimate divides what is left by the sequences written in the last hour, so it moves with the pace of the GPU node. The counts include every pass made with this vocabulary, trial passes included; the counter of a job counts only its own batches.",
       "layers": "layers {layers}",
       "from": "from {source}",
       "sequencesNoTotal": "{done} sequences with a code",
@@ -2305,5 +2306,88 @@
     "eyebrow": "Operational dashboard",
     "title": "The instrument",
     "subtitle": "Every data, pipeline, results and operations surface behind the argument, grouped the way the pipeline runs. The book stays at the top level; this is the tab you open to operate it."
+  },
+  "weights": {
+    "title": "Model weights",
+    "loading": "Reading the registry...",
+    "close": "Close",
+    "cancel": "Cancel",
+    "intro": "Every file of fitted weights the platform can use, identified by its sha256: residue vocabularies, learned encoders, the world model, readers, generators and method bundles. A weight shows what it was fitted on, the configurations made from it and the jobs that read it. The re-ranker boosters have their own page:",
+    "rerankerLink": "re-ranker boosters",
+    "kindFilter": "Kind of weight",
+    "all": "All",
+    "emptyTitle": "No weights registered yet",
+    "emptyBody": "Register a file already in the artifact store, or upload one. The first candidate is vocabulary v1, at residue-vocabulary/vocabulary-v1-06fed75ca76d17be.npz.",
+    "configurationsCount": "{n} configurations",
+    "detail": {
+      "uri": "Store key",
+      "format": "Format",
+      "trainedOn": "Fitted on annotation set",
+      "noCut": "none (no cut)",
+      "registered": "Registered",
+      "configurations": "Configurations made from it",
+      "noConfigurations": "None yet.",
+      "jobs": "Jobs that name it",
+      "noJobs": "None yet."
+    },
+    "actions": {
+      "encode": "Encode a corpus"
+    },
+    "form": {
+      "kind": "Kind",
+      "name": "Name",
+      "nameHint": "Becomes part of the store key: letters, digits, dot, dash or underscore.",
+      "description": "Description",
+      "meta": "Metadata (JSON, optional)",
+      "metaHint": "Layers, width, actives, levels, recipe, provenance.",
+      "trainedOn": "Annotation set it was fitted on (optional)",
+      "trainedOnHint": "Leave empty for weights with no cut.",
+      "nameInvalid": "The name must be letters, digits, dot, dash or underscore, starting with a letter or digit.",
+      "metaInvalid": "The metadata must be a JSON object."
+    },
+    "upload": {
+      "open": "Upload weights",
+      "title": "Upload weights",
+      "subtitle": "The file is sent in parts, joined and hashed on the server, and stored under a key that carries its digest.",
+      "file": "File",
+      "noFile": "Choose a file first.",
+      "progressLabel": "Upload progress",
+      "sending": "Part {sent} of {parts} sent",
+      "submit": "Upload"
+    },
+    "register": {
+      "open": "Register by reference",
+      "title": "Register weights already in the store",
+      "subtitle": "The object is hashed in the artifact store and registered only if it matches the sha256 given.",
+      "uri": "Store key",
+      "sha256": "sha256",
+      "sha256Hint": "The digest its producer recorded, 64 hexadecimal characters.",
+      "shaInvalid": "The sha256 must be 64 hexadecimal characters.",
+      "submit": "Register"
+    },
+    "encode": {
+      "title": "Encode a corpus with {name}",
+      "subtitle": "Queues encode_residue_vocabulary: the code of every residue of the source corpus, stored as shards and indexed per sequence.",
+      "source": "Source corpus (embedding configuration)",
+      "sourceHint": "The backbone pass whose sequences are encoded; the vocabulary reads its states.",
+      "device": "Device",
+      "sequencesPerJob": "Sequences per batch",
+      "residuesPerCall": "Residues per call",
+      "warning": "A corpus pass occupies the GPU node for hours. Check the jobs page for a pass already running under this vocabulary first.",
+      "queued": "Job queued:",
+      "submit": "Queue the pass",
+      "noSource": "Choose a source corpus.",
+      "busyTitle": "The card is busy. A second pass would wait for it.",
+      "busyWriting": "{name} wrote codes in the last hour.",
+      "queueAnyway": "Queue it anyway: the job waits and starts when the card is free."
+    },
+    "kinds": {
+      "residue_vocabulary": "Residue vocabulary",
+      "learned_encoder": "Learned encoder",
+      "world_model": "World model",
+      "reader": "Reader",
+      "generator": "Generator",
+      "method_bundle": "Method bundle"
+    }
   }
 }
