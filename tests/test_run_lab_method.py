@@ -16,8 +16,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from protea.core.contracts.operation import RetryLaterError
+from protea.core.operations import _card_guard
 from protea.core.operations import run_lab_method as rlm
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import (
@@ -159,6 +161,25 @@ def test_a_tag_is_not_an_image_id() -> None:
         _model(image_id="localhost/lab:dev")
 
 
+@pytest.mark.parametrize("field", ["bundle_path", "bundle_mount"])
+@pytest.mark.parametrize(
+    ("value", "words"),
+    [
+        ("srv/bundle", "absolute, normalized"),
+        ("/srv/../home/user/.secrets", "absolute, normalized"),
+        ("/srv/bundle/", "absolute, normalized"),
+        ("//srv/bundle", "absolute, normalized"),
+        ("/", "root folder"),
+        ("/srv/bundle:/opt/other:rw", "colon"),
+    ],
+)
+def test_a_mount_path_is_absolute_normalized_and_has_no_colon(
+    field: str, value: str, words: str
+) -> None:
+    with pytest.raises(ValidationError, match=words):
+        _model(**{field: value})
+
+
 def test_store_keys_name_the_method_the_cut_and_the_content() -> None:
     key = rlm.content_key(_model(method_name="lab reader/211"), "predictions", "ab" * 32, ".tsv")
     assert key == "method-runs/lab-reader-211/cut211/predictions-abababababababab.tsv"
@@ -193,6 +214,65 @@ def test_the_arm_is_refused_before_the_card_is_spent(arm: dict[str, Any], words:
 def test_a_missing_configuration_is_refused() -> None:
     with pytest.raises(ValueError, match="not found"):
         rlm.check_arm(FakeSession({}), _model())
+
+
+def test_a_bundle_inside_the_root_is_mounted_as_resolved(tmp_path: Path) -> None:
+    root = tmp_path / "bundles"
+    (root / "reader-v3").mkdir(parents=True)
+    (root / "reader").symlink_to(root / "reader-v3")
+    assert rlm.checked_bundle(str(root / "reader-v3"), str(root)) == root / "reader-v3"
+    assert rlm.checked_bundle(str(root / "reader"), str(root)) == root / "reader-v3"
+
+
+@pytest.mark.parametrize(
+    ("layout", "words"),
+    [
+        ("outside", "outside the node's bundle root"),
+        ("a link out of the root", "outside the node's bundle root"),
+        ("a sibling sharing the root's prefix", "outside the node's bundle root"),
+        ("missing", "cannot be resolved"),
+    ],
+)
+def test_a_bundle_outside_the_root_is_refused(tmp_path: Path, layout: str, words: str) -> None:
+    root = tmp_path / "bundles"
+    root.mkdir()
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    bundle = {
+        "outside": secrets,
+        "a link out of the root": root / "reader",
+        "a sibling sharing the root's prefix": tmp_path / "bundles-old",
+        "missing": root / "reader",
+    }[layout]
+    if layout == "a link out of the root":
+        bundle.symlink_to(secrets)
+    if layout == "a sibling sharing the root's prefix":
+        bundle.mkdir()
+    with pytest.raises(ValueError, match=words):
+        rlm.checked_bundle(str(bundle), str(root))
+
+
+def test_no_bundle_is_mounted_on_a_node_without_a_root_or_with_the_root_folder(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "reader").mkdir()
+    with pytest.raises(ValueError, match="sets no operation.method_bundle_root"):
+        rlm.checked_bundle(str(tmp_path / "reader"), None)
+    with pytest.raises(ValueError, match="bounds nothing"):
+        rlm.checked_bundle(str(tmp_path / "reader"), "/")
+
+
+def test_the_bundle_root_comes_from_the_node_tuning(monkeypatch: pytest.MonkeyPatch) -> None:
+    from protea.config.tuning import get_tuning
+
+    monkeypatch.setenv("PROTEA_TUNING__operation__method_bundle_root", "/srv/protea-bundles")
+    get_tuning.cache_clear()
+    try:
+        assert rlm.bundle_root() == "/srv/protea-bundles"
+    finally:
+        monkeypatch.delenv("PROTEA_TUNING__operation__method_bundle_root")
+        get_tuning.cache_clear()
+    assert rlm.bundle_root() is None
 
 
 def test_the_query_file_is_refused_when_its_hash_is_not_the_pinned_one(tmp_path: Path) -> None:
@@ -313,15 +393,40 @@ def test_the_scratch_folder_comes_from_the_node_tuning(
 
 
 @pytest.fixture
-def node(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    """A node that holds the pinned image, a free card, and a store with the query file."""
-    state = SimpleNamespace(store=FakeStore({FASTA_KEY: FASTA}), cleared=[], free=20_000)
+def node(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
+    """A node that holds the pinned image, a bundle under its root, a card no other job holds
+    and that has free memory, and a store with the query file."""
+    root = tmp_path / "bundles"
+    (root / "reader").mkdir(parents=True)
+    state = SimpleNamespace(
+        store=FakeStore({FASTA_KEY: FASTA}),
+        cleared=[],
+        free=20_000,
+        holder=None,
+        card_read=0,
+        root=root,
+        bundle=root / "reader",
+    )
+
+    def free() -> int:
+        state.card_read += 1
+        return state.free
+
     monkeypatch.setattr(rlm, "_artifact_store", lambda: state.store)
     monkeypatch.setattr(rlm, "image_id_on_node", lambda image: IMAGE_ID)
-    monkeypatch.setattr(rlm, "free_card_mib", lambda: state.free)
+    monkeypatch.setattr(rlm, "free_card_mib", free)
     monkeypatch.setattr(rlm, "clear_previous_attempt", state.cleared.append)
     monkeypatch.setattr(rlm, "scratch_root", lambda: None)
+    monkeypatch.setattr(rlm, "bundle_root", lambda: str(state.root))
+    monkeypatch.setattr(_card_guard, "card_busy", lambda session, own: state.holder)
     return state
+
+
+def _job_payload(
+    node: SimpleNamespace, config_id: uuid.UUID, start_id: uuid.UUID, **over: Any
+) -> dict[str, Any]:
+    """A payload whose bundle is the node's."""
+    return _payload(config_id, start_id, **{"bundle_path": str(node.bundle), **over})
 
 
 def test_a_run_stores_its_outputs_and_enqueues_the_ingestion_as_a_child_job(
@@ -329,7 +434,7 @@ def test_a_run_stores_its_outputs_and_enqueues_the_ingestion_as_a_child_job(
 ) -> None:
     session, config_id, start_id = _arm()
     job_id = str(uuid.uuid4())
-    payload = {**_payload(config_id, start_id, query_set_id="qs"), "_job_id": job_id}
+    payload = {**_job_payload(node, config_id, start_id, query_set_id="qs"), "_job_id": job_id}
     _play(monkeypatch, METHOD, "lab-reader-cut211", "honest")
     events = Events()
 
@@ -353,6 +458,7 @@ def test_a_run_stores_its_outputs_and_enqueues_the_ingestion_as_a_child_job(
         FASTA_SHA,
         job_id,
     )
+    assert run["bundle_path"] == str(node.bundle)
     assert run["provenance_key"] in node.store.objects
     (created,) = [o for o in session.added if isinstance(o, JobEvent)]
     assert created.job_id == child.id and created.event == "job.created"
@@ -370,10 +476,55 @@ def test_a_busy_card_sends_the_job_back_without_running_anything(
     session, config_id, start_id = _arm()
     node.free = 2_000
     monkeypatch.setattr(rlm, "run_in_scratch", lambda *a: pytest.fail("the card was busy"))
+    payload = _job_payload(node, config_id, start_id)
     with pytest.raises(RetryLaterError) as busy:
-        rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=Events())  # type: ignore[arg-type]
+        rlm.RunLabMethodOperation().execute(session, payload, emit=Events())  # type: ignore[arg-type]
     assert busy.value.delay_seconds == rlm.CARD_BUSY_RETRY_SECONDS
     assert session.added == []
+
+
+def test_a_card_another_job_holds_sends_the_job_back_before_its_memory_is_read(
+    monkeypatch: pytest.MonkeyPatch, node: SimpleNamespace
+) -> None:
+    """A pass between two batches can leave the card's memory free; the job table still says it is held."""
+    session, config_id, start_id = _arm()
+    node.holder = "encode_residue_vocabulary job 15624da2 still holds the card"
+    monkeypatch.setattr(rlm, "run_in_scratch", lambda *a: pytest.fail("the card was held"))
+    payload = _job_payload(node, config_id, start_id)
+    with pytest.raises(RetryLaterError, match="15624da2 still holds the card") as busy:
+        rlm.RunLabMethodOperation().execute(session, payload, emit=Events())  # type: ignore[arg-type]
+    assert busy.value.delay_seconds == rlm.CARD_BUSY_RETRY_SECONDS
+    assert node.card_read == 0
+    assert session.added == []
+
+
+def test_a_bundle_outside_the_root_is_refused_before_anything_runs(
+    monkeypatch: pytest.MonkeyPatch, node: SimpleNamespace, tmp_path: Path
+) -> None:
+    session, config_id, start_id = _arm()
+    (tmp_path / "secrets").mkdir()
+    monkeypatch.setattr(rlm, "run_in_scratch", lambda *a: pytest.fail("the bundle was mounted"))
+    payload = _job_payload(node, config_id, start_id, bundle_path=str(tmp_path / "secrets"))
+    with pytest.raises(ValueError, match="outside the node's bundle root"):
+        rlm.RunLabMethodOperation().execute(session, payload, emit=Events())  # type: ignore[arg-type]
+    assert (node.cleared, node.card_read, session.added) == ([], 0, [])
+
+
+def test_the_resolved_bundle_is_the_one_mounted(
+    monkeypatch: pytest.MonkeyPatch, node: SimpleNamespace
+) -> None:
+    session, config_id, start_id = _arm()
+    (node.root / "current").symlink_to(node.bundle)
+    mounted: list[str] = []
+
+    def command(p: rlm.RunLabMethodPayload, work: Path, name: str) -> list[str]:
+        mounted.append(p.bundle_path)
+        return [sys.executable, "-c", METHOD, str(work), "lab-reader-cut211", "honest"]
+
+    monkeypatch.setattr(rlm, "container_command", command)
+    payload = _job_payload(node, config_id, start_id, bundle_path=str(node.root / "current"))
+    rlm.RunLabMethodOperation().execute(session, payload, emit=Events())  # type: ignore[arg-type]
+    assert mounted == [str(node.bundle)]
 
 
 def test_a_tag_that_moved_is_refused(
@@ -381,8 +532,9 @@ def test_a_tag_that_moved_is_refused(
 ) -> None:
     session, config_id, start_id = _arm()
     monkeypatch.setattr(rlm, "image_id_on_node", lambda image: "e" * 64)
+    payload = _job_payload(node, config_id, start_id)
     with pytest.raises(ValueError, match="the payload pins"):
-        rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=Events())  # type: ignore[arg-type]
+        rlm.RunLabMethodOperation().execute(session, payload, emit=Events())  # type: ignore[arg-type]
 
 
 def test_a_record_that_lies_about_its_output_enqueues_nothing(
@@ -390,8 +542,9 @@ def test_a_record_that_lies_about_its_output_enqueues_nothing(
 ) -> None:
     session, config_id, start_id = _arm()
     _play(monkeypatch, METHOD, "lab-reader-cut211", "lies")
+    payload = _job_payload(node, config_id, start_id)
     with pytest.raises(ValueError, match="predictions sha256"):
-        rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=Events())  # type: ignore[arg-type]
+        rlm.RunLabMethodOperation().execute(session, payload, emit=Events())  # type: ignore[arg-type]
     assert session.added == []
 
 
@@ -400,8 +553,9 @@ def test_a_run_that_leaves_no_record_enqueues_nothing(
 ) -> None:
     session, config_id, start_id = _arm()
     _play(monkeypatch, METHOD, "lab-reader-cut211", "silent")
+    payload = _job_payload(node, config_id, start_id)
     with pytest.raises(RuntimeError, match="no predictions.json"):
-        rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=Events())  # type: ignore[arg-type]
+        rlm.RunLabMethodOperation().execute(session, payload, emit=Events())  # type: ignore[arg-type]
     assert session.added == []
     assert not any(
         key.startswith("method-runs/") and key.endswith(".tsv") for key in node.store.objects
@@ -412,8 +566,9 @@ def test_a_failed_run_keeps_its_log(monkeypatch: pytest.MonkeyPatch, node: Simpl
     session, config_id, start_id = _arm()
     _play(monkeypatch, "import sys; print('out of memory in the world model'); sys.exit(1)")
     events = Events()
+    payload = _job_payload(node, config_id, start_id)
     with pytest.raises(RuntimeError, match="exited 1"):
-        rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=events)  # type: ignore[arg-type]
+        rlm.RunLabMethodOperation().execute(session, payload, emit=events)  # type: ignore[arg-type]
     (kept,) = events.named("run_lab_method.container_log")
     assert b"out of memory in the world model" in node.store.objects[kept["key"]]
     assert session.added == []

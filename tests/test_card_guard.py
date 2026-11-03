@@ -9,6 +9,11 @@ So the card is busy when another coordinator of the three still has batches in f
 RUNNING, or FAILED by the reaper with its count still short of its total. A busy card makes
 the coordinator wait (``RetryLaterError``), never fail.
 
+``run_lab_method`` joined them on 2026-11-03. It runs a method's container on the same card
+for hours, and it was invisible to the coordinators while it read only the card's free
+memory: a residue pass could be dispatched on top of a method run, and a method run could
+start between two batches of a pass. Each now waits for the other.
+
 WHAT AN EARLIER VERSION GOT WRONG. It also asked the broker how many batches were queued,
 discovering the broker from the project's settings. In a fresh checkout those fall back to
 localhost, and on the host that runs PROTEA localhost is the live broker: a unit test read
@@ -65,8 +70,27 @@ def test_the_guard_never_reaches_a_broker() -> None:
         assert guard.card_busy(_session(None), uuid.uuid4()) is None
 
 
+def test_the_four_operations_that_hold_the_card_are_the_guarded_ones() -> None:
+    assert set(guard.CARD_HOLDING_OPERATIONS) == {
+        "compute_embeddings",
+        "encode_residue_vocabulary",
+        "encode_residue_sparse",
+        "run_lab_method",
+    }
+
+
+def test_outside_a_job_every_holder_counts() -> None:
+    other = MagicMock(operation="run_lab_method", id=uuid.uuid4())
+    reason = guard.card_busy(_session(other), None)
+    assert reason == f"run_lab_method job {other.id} still holds the card"
+
+
 def test_every_coordinator_that_feeds_the_card_asks_the_guard() -> None:
-    """compute_embeddings and both residue coordinators wait on a busy card, before any work."""
+    """compute_embeddings and both residue coordinators wait on a busy card, before any work.
+
+    ``run_lab_method`` asks the same guard; its test lives with the operation's, because it
+    needs a node (``test_run_lab_method.py``).
+    """
     from protea.core.operations.compute_embeddings import ComputeEmbeddingsOperation
     from protea.core.operations.encode_residue_sparse import EncodeResidueSparseOperation
     from protea.core.operations.encode_residue_vocabulary import EncodeResidueVocabularyOperation
@@ -200,3 +224,35 @@ def test_a_running_pass_of_another_operation_holds_it(postgres_url: str) -> None
         other = _job(session, "compute_embeddings", JobStatus.RUNNING)
         reason = guard.card_busy(session, me)
         assert reason is not None and str(other) in reason
+
+
+def test_a_method_run_and_a_pass_wait_for_each_other(postgres_url: str) -> None:
+    engine = _fresh(postgres_url)
+    with Session(engine) as session:
+        method = _job(session, "run_lab_method", JobStatus.RUNNING)
+        coordinator = _job(session, "encode_residue_vocabulary", JobStatus.QUEUED)
+        reason = guard.card_busy(session, coordinator)
+        assert reason is not None and str(method) in reason, "a pass waits for a running method"
+        session.query(Job).filter(Job.id == method).update({"status": JobStatus.QUEUED})
+        session.query(Job).filter(Job.id == coordinator).update({"status": JobStatus.RUNNING})
+        reason = guard.card_busy(session, method)
+        assert reason is not None and str(coordinator) in reason, "a method waits for a pass"
+
+
+def test_a_reaped_method_run_holds_nothing_in_the_job_table(postgres_url: str) -> None:
+    """A method run has no total, so once the reaper fails it the job table holds no claim.
+
+    A container its dead worker left running is seen by the free-memory reading, and the
+    job's retry removes it by name before it starts again.
+    """
+    engine = _fresh(postgres_url)
+    with Session(engine) as session:
+        me = _job(session, "compute_embeddings", JobStatus.RUNNING)
+        _job(
+            session,
+            "run_lab_method",
+            JobStatus.FAILED,
+            error_code=REAPED,
+            event_age=timedelta(minutes=5),
+        )
+        assert guard.card_busy(session, me) is None

@@ -338,6 +338,16 @@ class OperationTuning(BaseModel):
             "temporary folder. Override: PROTEA_TUNING__operation__method_scratch_dir."
         ),
     )
+    method_bundle_root: str | None = Field(
+        default=None,
+        description=(
+            "Folder that holds the data bundles run_lab_method may mount into a method's "
+            "container. A payload's bundle_path must lie inside it once its symlinks are "
+            "resolved, and the resolved path is what is mounted. While it is None no run "
+            "starts, because the payload could otherwise name any folder of the node. "
+            "Override: PROTEA_TUNING__operation__method_bundle_root."
+        ),
+    )
     gpu_busy_retry_seconds: int = Field(
         default=8,
         ge=1,
