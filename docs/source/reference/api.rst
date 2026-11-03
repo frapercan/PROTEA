@@ -737,6 +737,11 @@ Endpoints summary
    * - ``DELETE``
      - ``/embeddings/configs/{id}``
      - Delete an embedding configuration.
+   * - ``GET``
+     - ``/embeddings/residue-codes``
+     - How far each residue vocabulary's per-residue codes reach over its source corpus: sequences, residues,
+       entries and shards indexed, first and last write, the last hour's pace, coverage, what is left and the
+       hours it takes at that pace, and the job that wrote them (ADR-D51). Cached 30 seconds.
    * - ``POST``
      - ``/embeddings/predict``
      - Queue a ``predict_go_terms`` job.

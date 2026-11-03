@@ -6770,6 +6770,33 @@
         ]
       }
     },
+    "/v1/embeddings/residue-codes": {
+      "get": {
+        "description": "How far each residue vocabulary's codes reach over its source corpus (ADR-D51).\n\nOne entry per ``residue-vocabulary`` configuration, newest first: sequences,\nresidues and entries indexed in ``residue_code``, shards written, the first and\nthe last write, the last hour's pace, the coverage of the source corpus, what is\nleft of it and the hours that takes at that pace, and the job that wrote them.\n\nEvery number is a count over rows. The answer is cached 30 seconds, so a page\nthat polls it while a pass runs does not scan the index on every request, and\nthe last value is served when a recompute fails.",
+        "operationId": "list_residue_codes_v1_embeddings_residue_codes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Residue Codes V1 Embeddings Residue Codes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Per-residue codes by residue vocabulary",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
     "/v1/experiment-runs": {
       "get": {
         "description": "Return runs newest-first, optionally filtered by status.\n\nPagination is cursor-based: pass ``after=<created_at>`` to get the\nnext page. Microsecond resolution on ``created_at`` keeps tie\ncollisions astronomically rare.",

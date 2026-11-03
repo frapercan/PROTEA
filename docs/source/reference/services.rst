@@ -30,6 +30,12 @@ importing FastAPI.
    :show-inheritance:
    :noindex:
 
+.. automodule:: protea.services.residue_codes_service
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
 .. automodule:: protea.services.scoring_service
    :members:
    :undoc-members:

@@ -38,6 +38,7 @@ from protea.services.embeddings_service import (
     validate_predict_request,
 )
 from protea.services.jobs_service import enqueue_job
+from protea.services.residue_codes_service import residue_code_summaries
 
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
@@ -47,6 +48,8 @@ PREDICTION_SETS_CACHE_KEY = "embeddings:prediction-sets"
 PREDICTION_SETS_TTL_SECONDS = 300.0
 EMBEDDING_CONFIGS_CACHE_KEY = "embeddings:configs"
 EMBEDDING_CONFIGS_TTL_SECONDS = 300.0
+RESIDUE_CODES_CACHE_KEY = "embeddings:residue-codes"
+RESIDUE_CODES_TTL_SECONDS = 30.0
 
 
 def _validate_embedding_config_body(body: dict[str, Any]) -> dict[str, Any]:
@@ -123,6 +126,38 @@ def prewarm_embedding_configs(
         EMBEDDING_CONFIGS_CACHE_KEY,
         EMBEDDING_CONFIGS_TTL_SECONDS,
         lambda: _compute_embedding_configs(factory),
+    )
+
+
+# ── Per-residue codes ─────────────────────────────────────────────────────────
+
+
+def _compute_residue_codes(factory: sessionmaker[Session]) -> list[dict[str, Any]]:
+    """Read the per-vocabulary summaries in one session; module scope so tests can patch it."""
+    with session_scope(factory) as session:
+        return residue_code_summaries(session)
+
+
+@router.get("/residue-codes", summary="Per-residue codes by residue vocabulary")
+def list_residue_codes(
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> list[dict[str, Any]]:
+    """How far each residue vocabulary's codes reach over its source corpus (ADR-D51).
+
+    One entry per ``residue-vocabulary`` configuration, newest first: sequences,
+    residues and entries indexed in ``residue_code``, shards written, the first and
+    the last write, the last hour's pace, the coverage of the source corpus, what is
+    left of it and the hours that takes at that pace, and the job that wrote them.
+
+    Every number is a count over rows. The answer is cached 30 seconds, so a page
+    that polls it while a pass runs does not scan the index on every request, and
+    the last value is served when a recompute fails.
+    """
+    return cached(
+        RESIDUE_CODES_CACHE_KEY,
+        RESIDUE_CODES_TTL_SECONDS,
+        lambda: _compute_residue_codes(factory),
+        serve_stale_on_error=True,
     )
 
 

@@ -547,6 +547,49 @@ export function listEmbeddingConfigs() {
   return http<EmbeddingConfig[]>(`/embeddings/configs/`, { cacheable: true });
 }
 
+/** What the index holds for one residue vocabulary (ADR-D51): counts over `residue_code` rows. */
+export type ResidueCodeIndex = {
+  sequences: number;
+  residues: number;
+  entries: number;
+  shards: number;
+  first_written_at: string | null;
+  last_written_at: string | null;
+  sequences_last_hour: number;
+};
+
+/** One residue vocabulary's reach over its source corpus, from GET /embeddings/residue-codes. */
+export type ResidueCodeSummary = {
+  embedding_config_id: string;
+  name: string;
+  description: string | null;
+  layer_indices: number[];
+  created_at: string | null;
+  source: { embedding_config_id: string; name: string | null; sequences: number | null } | null;
+  index: ResidueCodeIndex;
+  /** Sequences with a code over the source corpus's sequences; null when the source size is unknown. */
+  coverage: number | null;
+  remaining: number | null;
+  /** Hours left at the last hour's pace; null when nothing landed in the last hour or nothing is left. */
+  eta_hours: number | null;
+  job: {
+    id: string;
+    status: string;
+    progress_current: number | null;
+    progress_total: number | null;
+    created_at: string | null;
+    finished_at: string | null;
+  } | null;
+};
+
+/**
+ * Live, so never cached by the client: the server already caches it 30 seconds,
+ * and a page that polls during a pass must see each new count.
+ */
+export function listResidueCodes() {
+  return http<ResidueCodeSummary[]>(`/embeddings/residue-codes`);
+}
+
 export function createEmbeddingConfig(body: Omit<EmbeddingConfig, "id" | "created_at" | "embedding_count" | "use_chunking" | "chunk_size" | "chunk_overlap" | "normalize_residues"> & {
   normalize_residues?: boolean;
   use_chunking?: boolean;

@@ -849,7 +849,8 @@
     "title": "Embeddings",
     "tabs": {
       "configs": "Konfigurationen",
-      "compute": "Berechnen"
+      "compute": "Berechnen",
+      "residue": "Codes pro Residuum"
     },
     "configsTab": {
       "configs": "{count} Konfigurationen",
@@ -951,6 +952,35 @@
       "errors": {
         "configRequired": "Bitte eine Embedding-Konfiguration auswählen."
       }
+    },
+    "residueTab": {
+      "title": "Codes pro Residuum, nach Vokabular",
+      "intro": "Jedes Residuen-Vokabular verwandelt die Zustände eines Basismodells in einen dünnbesetzten Code für jedes Residuum jedes Proteins. Die Codes liegen als komprimierte Shards im Artefaktspeicher, einer pro GPU-Batch; die Datenbank hält pro Sequenz und Vokabular eine Indexzeile, die auf sie zeigt. Pro Protein wird nichts zusammengefasst: Eine Repräsentation pro Protein entsteht, wenn nötig, durch einen gelernten Aggregator über diese Codes. Die Zahlen stammen aus dem Index und werden alle 30 Sekunden aktualisiert.",
+      "loading": "Index wird gelesen...",
+      "emptyTitle": "Noch kein Residuen-Vokabular",
+      "emptyBody": "Dieser Reiter zeigt, wie weit die Codes jedes Vokabulars über seinen Quellkorpus reichen, sobald ein Lauf von encode_residue_vocabulary seine Konfiguration angelegt hat. Noch gibt es keine.",
+      "footnote": "Die Abdeckung zählt die Sequenzen des Quellkorpus mit Code. Die Schätzung teilt den Rest durch die in der letzten Stunde geschriebenen Sequenzen und folgt daher dem Tempo des GPU-Knotens.",
+      "layers": "Schichten {layers}",
+      "from": "aus {source}",
+      "sequencesNoTotal": "{done} Sequenzen mit Code",
+      "sequencesOfTotal": "{done} von {total} Sequenzen mit Code",
+      "coverageLabel": "Abdeckung von {name}",
+      "residues": "Residuen",
+      "entries": "Aktive Einträge",
+      "entriesHint": "Gespeicherte Merkmalsaktivierungen über alle Residuen",
+      "shards": "Shards",
+      "shardsHint": "Komprimierte Shards im Artefaktspeicher, einer pro GPU-Batch",
+      "lastWrite": "Letzter Schreibvorgang",
+      "firstWrite": "Erster Schreibvorgang",
+      "pace": "Letzte Stunde",
+      "paceValue": "{n} Sequenzen",
+      "paceHint": "In der letzten Stunde indizierte Sequenzen",
+      "remaining": "Verbleibende Sequenzen",
+      "eta": "Restzeit",
+      "etaHint": "Der Rest, im Tempo der letzten Stunde",
+      "done": "fertig",
+      "job": "Geschrieben von Job",
+      "batches": "{done} von {total} Batches"
     }
   },
   "functionalAnnotation": {
