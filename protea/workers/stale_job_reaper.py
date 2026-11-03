@@ -269,40 +269,9 @@ class StaleJobReaper:
         last_event_ts = (
             session.query(func.max(JobEvent.ts)).filter(JobEvent.job_id == job.id).scalar()
         )
-        # A DEFERRED COORDINATOR IS NOT A LEGACY ROW, and until this branch
-        # existed both were judged by ``stall_seconds``. ``leased_until IS NULL``
-        # names two different things: a row written before the leasing column,
-        # and a coordinator that cleared its lease on purpose because its own
-        # work is done and its children carry the rest on another queue
-        # (``base_worker``: ``job.leased_until = None`` once ``result.deferred``,
-        # with the comment that the event path is what should keep it alive).
-        #
-        # For the second one, silence measures ANOTHER machine's pause. Measured:
-        # ``b185a6d0`` started 2026-10-30 11:26 and was failed here at 17:26,
-        # six hours to the minute, with ``error_code = lease_expired``; seven of
-        # its batches were then discarded on 10-31 as ``parent_not_running``. The
-        # compute node cedes its card for two and three hours at a time, which is
-        # four times the 1800s a coordinator doing its own work is allowed, so
-        # the window was never the right size for this shape of job.
         if job.leased_until is None and self._is_deferred_coordinator(session, job.id):
-            if last_event_ts is not None and last_event_ts > now - self._deferred_stall:
-                logger.debug(
-                    "Reaper skipped deferred coordinator inside its own window. "
-                    "job_id=%s operation=%s last_event=%s window=%ss",
-                    job.id,
-                    job.operation,
-                    last_event_ts,
-                    self._deferred_stall.total_seconds(),
-                )
+            if self._deferred_is_waiting(job, now, last_event_ts):
                 return 0
-            logger.warning(
-                "Deferred coordinator silent past its window; falling through to the "
-                "requeue ladder. job_id=%s operation=%s last_event=%s window=%ss",
-                job.id,
-                job.operation,
-                last_event_ts,
-                self._deferred_stall.total_seconds(),
-            )
         # Legacy ``stall_seconds`` grace: only honoured when the row has
         # no lease (pre-F-OPS-JOBS.1). A legacy row that has not emitted any
         # event inside the stall window is stalled.
@@ -475,6 +444,51 @@ class StaleJobReaper:
                 "Re-publish of orphaned QUEUED job failed. job_id=%s error=%s", job.id, exc
             )
             return 0
+
+    def _deferred_is_waiting(
+        self, job: Job, now: datetime, last_event_ts: datetime | None
+    ) -> bool:
+        """Whether a deferred coordinator is inside its own, much longer window.
+
+        A DEFERRED COORDINATOR IS NOT A LEGACY ROW, and until this method existed
+        both were judged by ``stall_seconds``. ``leased_until IS NULL`` names two
+        different things: a row written before the leasing column, and a
+        coordinator that cleared its lease on purpose because its own work is
+        done and its children carry the rest on another queue (``base_worker``
+        sets ``job.leased_until = None`` once ``result.deferred``, with a comment
+        saying the event path is what should keep it alive).
+
+        For the second one, silence measures ANOTHER machine's pause. Measured:
+        ``b185a6d0`` started 2026-10-30 at 11:26 and was failed here at 17:26,
+        six hours to the minute, with ``error_code = lease_expired``; seven of
+        its batches were then discarded on 10-31 as ``parent_not_running``. The
+        compute node cedes its card for two and three hours at a time, four
+        times the 1800s a coordinator doing its own work is allowed, so that
+        window was never the right size for this shape of job.
+
+        Returning False does not fail anything: the caller falls through to the
+        same ladder as any other candidate, so this is a window and not an
+        exemption.
+        """
+        if last_event_ts is not None and last_event_ts > now - self._deferred_stall:
+            logger.debug(
+                "Reaper skipped deferred coordinator inside its own window. "
+                "job_id=%s operation=%s last_event=%s window=%ss",
+                job.id,
+                job.operation,
+                last_event_ts,
+                self._deferred_stall.total_seconds(),
+            )
+            return True
+        logger.warning(
+            "Deferred coordinator silent past its window; falling through to the "
+            "requeue ladder. job_id=%s operation=%s last_event=%s window=%ss",
+            job.id,
+            job.operation,
+            last_event_ts,
+            self._deferred_stall.total_seconds(),
+        )
+        return False
 
     def _is_deferred_coordinator(self, session: Session, job_id) -> bool:
         """Whether this job ever deferred, which is the only record that it did.
