@@ -723,6 +723,32 @@ Endpoints summary
      - Delete an evaluation result.
 
    * -
+     - **Model weights** (ADR-D54)
+     -
+   * - ``GET``
+     - ``/model-weights``
+     - List registered model weights, newest first, optionally of one kind, with how many
+       configurations were made from each.
+   * - ``GET``
+     - ``/model-weights/{id}``
+     - One weight with the configurations made from it and the jobs whose payload names its key.
+   * - ``POST``
+     - ``/model-weights/by-reference``
+     - Register a file already in the artifact store; it is hashed there and must match the
+       sha256 given (operator).
+   * - ``POST``
+     - ``/model-weights/uploads``
+     - Open an upload in parts; returns its id, the part size and the number of parts (operator).
+   * - ``PUT``
+     - ``/model-weights/uploads/{id}/parts/{n}``
+     - Send part ``n`` as the raw body; every part but the last has the part size (operator).
+   * - ``POST``
+     - ``/model-weights/uploads/{id}/complete``
+     - Join the parts, hash, store under a content-addressed key and register (operator).
+   * - ``DELETE``
+     - ``/model-weights/uploads/{id}``
+     - Abandon an upload (operator).
+   * -
      - **Embeddings**
      -
    * - ``GET``

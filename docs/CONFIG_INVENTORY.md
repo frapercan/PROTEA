@@ -69,6 +69,9 @@ Cada parámetro identificado abajo:
 | `_MAX_COMMENT_LENGTH` | `api/routers/support.py:14` | 500 | Max chars comentario soporte. | 200-2000 | no |
 | `_RECENT_LIMIT` | `api/routers/support.py:15` | 20 | Items en /support/recent. | 10-100 | no |
 | `_PAGE_LIMIT` | `api/routers/support.py:16` | 100 | Page size hard cap. | 50-500 | no |
+| `max_weights_bytes` | `config/tuning.py` (`APILimits`) | 8 GiB | Largest file a weights upload assembles (ADR-D54). | 1-16 GiB | no |
+| `weights_part_bytes` | `config/tuning.py` (`APILimits`) | 32 MiB | Part size of a weights upload; below the 100 MB web proxy cap. | 8-90 MiB | no |
+| `weights_upload_dir` | `config/tuning.py` (`APILimits`) | `~/.cache/protea/weights-uploads` | Folder for the parts and the joined file while an upload lasts; on disk, never a tmpfs. | a disk with room for the largest file plus 1 GB | no |
 
 ### E. ResearchKnobs (modelado, no infraestructura)
 
