@@ -112,6 +112,14 @@ from protea.core.operations.verify_window_against_reference import (
 )
 
 
+def _register_residue_encoders(registry: OperationRegistry) -> None:
+    """The operations that run the language model per residue, coordinator and card batch."""
+    registry.register(EncodeResidueSparseOperation())
+    registry.register(EncodeResidueSparseBatchOperation())
+    registry.register(EncodeResidueVocabularyOperation())
+    registry.register(EncodeResidueVocabularyBatchOperation())
+
+
 def build_operation_registry() -> OperationRegistry:
     registry = OperationRegistry()
     registry.register(PingOperation())
@@ -154,10 +162,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(ExportEvaluationTargetsOperation())
     registry.register(IngestMethodPredictionsOperation())
     registry.register(LoadOntologyAliasesOperation())
-    registry.register(EncodeResidueSparseOperation())
-    registry.register(EncodeResidueSparseBatchOperation())
-    registry.register(EncodeResidueVocabularyOperation())
-    registry.register(EncodeResidueVocabularyBatchOperation())
+    _register_residue_encoders(registry)
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
     # publicly registered: all re-ranker training moves to
     # protea-reranker-lab. They remain importable as internal helpers —

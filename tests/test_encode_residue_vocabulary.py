@@ -21,6 +21,7 @@ from protea.core._evaluation_leakage import FITTED_BACKENDS  # noqa: E402
 from protea.core.operations.encode_residue_vocabulary import (  # noqa: E402
     TARGET_BACKEND,
     EncodeResidueVocabularyPayload,
+    ModelPass,
     build_messages,
     calls_by_residues,
     encode_sequences,
@@ -64,7 +65,7 @@ class _Backend:
 
     def __init__(self, by_sequence: dict[str, np.ndarray]):
         self.by_sequence = by_sequence
-        self.calls: list[tuple[list[str], list[int], int]] = []
+        self.calls: list[tuple[list[str], list[int]]] = []
 
     def embed_batch_per_layer(
         self,
@@ -74,9 +75,8 @@ class _Backend:
         *,
         emit: Any,
         hidden_state_indices: list[int],
-        token_budget: int,
     ) -> list[np.ndarray]:
-        self.calls.append((list(sequences), list(hidden_state_indices), token_budget))
+        self.calls.append((list(sequences), list(hidden_state_indices)))
         return [self.by_sequence[s] for s in sequences]
 
 
@@ -144,13 +144,10 @@ def test_the_codes_are_the_reference_codes(vectors: dict[str, np.ndarray]) -> No
     backend = _Backend({s: st for _i, s, st, _a in seqs})
     voc = _vocabulary(vectors)
     codes = encode_sequences(
-        backend,
-        None,
-        None,
+        ModelPass(backend, None, None),
         voc,
         [(i, s) for i, s, _st, _a in seqs],
         emit=lambda *a, **k: None,
-        token_budget=16384,
         residues_per_call=40,
     )
     assert [i for i, _c in codes] == [i for i, _s, _st, _a in seqs]
@@ -166,13 +163,10 @@ def test_a_shard_and_its_index_read_back_every_code(vectors: dict[str, np.ndarra
     seqs = _sequences(vectors)
     voc = _vocabulary(vectors)
     codes = encode_sequences(
-        _Backend({s: st for _i, s, st, _a in seqs}),
-        None,
-        None,
+        ModelPass(_Backend({s: st for _i, s, st, _a in seqs}), None, None),
         voc,
         [(i, s) for i, s, _st, _a in seqs],
         emit=lambda *a, **k: None,
-        token_budget=16384,
         residues_per_call=1000,
     )
     blob, sha = pack_shard(codes, {"vocabulary": "toy"})

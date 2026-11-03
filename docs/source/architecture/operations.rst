@@ -1928,8 +1928,6 @@ Payload fields
      - Exactly one: the ``residue-vocabulary`` artifact (an ``.npz`` with ``meta_json``).
    * - ``sequences_per_job``
      - Sequences per batch message (default 256).
-   * - ``token_budget``
-     - Rows times padded length per forward batch (default 16384).
    * - ``residues_per_call``
      - Residues per backend call, which bounds the host copy of the states (default 32768).
    * - ``sequence_id_limit``

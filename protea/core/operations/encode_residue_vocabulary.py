@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -88,7 +89,6 @@ class EncodeResidueVocabularyPayload(ProteaPayload, frozen=True):
     vocabulary_artifact_path: str | None = None
     device: str = "cuda"
     sequences_per_job: PositiveInt = 256
-    token_budget: PositiveInt = 16384
     residues_per_call: PositiveInt = 32768
     sequence_id_limit: int | None = None
 
@@ -115,7 +115,6 @@ class EncodeResidueVocabularyBatchPayload(ProteaPayload, frozen=True):
     sequence_ids: list[int] = Field(default_factory=list)
     parent_job_id: str = ""
     device: str = "cuda"
-    token_budget: PositiveInt = 16384
     residues_per_call: PositiveInt = 32768
 
     @model_validator(mode="after")
@@ -179,28 +178,33 @@ def calls_by_residues(
     return calls
 
 
+@dataclass(frozen=True)
+class ModelPass:
+    """What runs the language model: the backend plugin, the loaded model and its tokenizer."""
+
+    backend: Any
+    model: Any
+    tokenizer: Any
+
+
 def encode_sequences(
-    backend: Any,
-    model: Any,
-    tokenizer: Any,
+    model_pass: ModelPass,
     vocabulary: ResidueVocabulary,
     pending: list[tuple[int, str]],
     *,
     emit: EmitFn,
-    token_budget: int,
     residues_per_call: int,
 ) -> list[tuple[int, ResidueCode]]:
     """The code of every pending sequence, in the order given."""
     layers = [int(li) for li in vocabulary.meta["hidden_state_indices"]]
     codes: list[tuple[int, ResidueCode]] = []
     for call in calls_by_residues(pending, residues_per_call):
-        states = backend.embed_batch_per_layer(
-            model,
-            tokenizer,
+        states = model_pass.backend.embed_batch_per_layer(
+            model_pass.model,
+            model_pass.tokenizer,
             [s for _i, s in call],
             emit=emit,
             hidden_state_indices=layers,
-            token_budget=token_budget,
         )
         for (sequence_id, seq), st in zip(call, states, strict=True):
             if st.shape[0] != len(seq):
@@ -260,7 +264,6 @@ def build_messages(
                     "sequence_ids": sequence_ids[i : i + p.sequences_per_job],
                     "parent_job_id": parent,
                     "device": p.device,
-                    "token_budget": p.token_budget,
                     "residues_per_call": p.residues_per_call,
                 },
             },
@@ -416,6 +419,50 @@ class EncodeResidueVocabularyOperation(Operation):
         )
 
 
+def _pending_in_batch(
+    session: Session, p: EncodeResidueVocabularyBatchPayload, target_id: uuid.UUID
+) -> list[tuple[int, str]]:
+    """The batch's sequences that still have no code, refusing a batch that lost any."""
+    rows = session.execute(
+        select(Sequence.id, Sequence.sequence).where(Sequence.id.in_(p.sequence_ids))
+    ).all()
+    found = {int(i): s for i, s in rows}
+    missing = [i for i in p.sequence_ids if i not in found]
+    if missing:
+        raise ValueError(
+            f"{len(missing)} of {len(p.sequence_ids)} sequences in this batch no longer "
+            f"exist, for example {missing[:3]}"
+        )
+    done = {
+        int(i)
+        for (i,) in session.execute(
+            select(ResidueCodeRow.sequence_id).where(
+                ResidueCodeRow.embedding_config_id == target_id,
+                ResidueCodeRow.sequence_id.in_(p.sequence_ids),
+            )
+        )
+    }
+    return [(i, found[i]) for i in p.sequence_ids if i not in done]
+
+
+def _write_shard(
+    session: Session,
+    target_id: uuid.UUID,
+    codes: list[tuple[int, ResidueCode]],
+    header: dict[str, Any],
+) -> tuple[str, str, int]:
+    """Put the shard in the store, then its index rows: a row never points at nothing."""
+    blob, sha = pack_shard(codes, header)
+    key = shard_key(target_id, codes, sha)
+    _artifact_store().put(key, blob)
+    session.execute(
+        pg_insert(ResidueCodeRow).on_conflict_do_nothing(),
+        index_rows(target_id, key, sha, codes),
+    )
+    session.commit()
+    return key, sha, len(blob)
+
+
 class EncodeResidueVocabularyBatchOperation(Operation):
     """One batch of sequences, encoded where the card is."""
 
@@ -434,35 +481,13 @@ class EncodeResidueVocabularyBatchOperation(Operation):
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")
         target_id = uuid.UUID(p.target_embedding_config_id)
-        rows = session.execute(
-            select(Sequence.id, Sequence.sequence).where(Sequence.id.in_(p.sequence_ids))
-        ).all()
-        found = {int(i): s for i, s in rows}
-        missing = [i for i in p.sequence_ids if i not in found]
-        if missing:
-            raise ValueError(
-                f"{len(missing)} of {len(p.sequence_ids)} sequences in this batch no longer "
-                f"exist, for example {missing[:3]}"
-            )
-        done = {
-            int(i)
-            for (i,) in session.execute(
-                select(ResidueCodeRow.sequence_id).where(
-                    ResidueCodeRow.embedding_config_id == target_id,
-                    ResidueCodeRow.sequence_id.in_(p.sequence_ids),
-                )
-            )
-        }
-        pending = [(i, found[i]) for i in p.sequence_ids if i not in done]
+        pending = _pending_in_batch(session, p, target_id)
         if not pending:
             return OperationResult(
                 result={"encoded": 0, "note": "every sequence already had a code"}
             )
 
-        from protea.core.operations.compute_embeddings import (
-            _get_or_load_model,
-            _resolve_backend,
-        )
+        from protea.core.operations.compute_embeddings import _get_or_load_model, _resolve_backend
 
         backend = _resolve_backend(source.model_backend)
         refuse_backend_without_layers(backend, source.model_backend)
@@ -470,13 +495,10 @@ class EncodeResidueVocabularyBatchOperation(Operation):
         vocabulary = _vocabulary(local, p.device)
         model, tokenizer = _get_or_load_model(source, p.device, emit)
         codes = encode_sequences(
-            backend,
-            model,
-            tokenizer,
+            ModelPass(backend, model, tokenizer),
             vocabulary,
             pending,
             emit=emit,
-            token_budget=p.token_budget,
             residues_per_call=p.residues_per_call,
         )
         header = {
@@ -488,38 +510,13 @@ class EncodeResidueVocabularyBatchOperation(Operation):
             "target_embedding_config_id": str(target_id),
             "parent_job_id": p.parent_job_id,
         }
-        blob, sha = pack_shard(codes, header)
-        key = shard_key(target_id, codes, sha)
-        _artifact_store().put(key, blob)
-        session.execute(
-            pg_insert(ResidueCodeRow).on_conflict_do_nothing(),
-            index_rows(target_id, key, sha, codes),
-        )
-        session.commit()
+        key, sha, nbytes = _write_shard(session, target_id, codes, header)
         residues = sum(c.residues for _i, c in codes)
         entries = sum(c.entries for _i, c in codes)
-        emit(
-            "encode.done",
-            f"{len(codes)} sequences, {residues} residues, {entries / max(1, residues):.1f} "
-            f"active features per residue, shard of {len(blob)} bytes",
-            {
-                "encoded": len(codes),
-                "residues": residues,
-                "entries": entries,
-                "shard_key": key,
-                "shard_bytes": len(blob),
-            },
-            "info",
-        )
+        stats = {"encoded": len(codes), "residues": residues, "entries": entries, "shard_key": key}
+        emit("encode.done", f"{len(codes)} sequences, shard of {nbytes} bytes", stats, "info")
         return OperationResult(
-            result={
-                "encoded": len(codes),
-                "residues": residues,
-                "entries": entries,
-                "shard_key": key,
-                "shard_sha256": sha,
-                "embedding_config_id": str(target_id),
-            }
+            result={**stats, "shard_sha256": sha, "embedding_config_id": str(target_id)}
         )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:

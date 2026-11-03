@@ -659,7 +659,7 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         (),
     ),
     (
-        # A token budget of zero would send no sequence to the model and report success.
+        # A call of zero residues would send no sequence to the model and report success.
         "encode_residue_vocabulary_batch",
         EncodeResidueVocabularyBatchPayload,
         {
@@ -667,9 +667,9 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "target_embedding_config_id": "tgt",
             "vocabulary_artifact_path": "v.npz",
             "sequence_ids": [1],
-            "token_budget": 0,
+            "residues_per_call": 0,
         },
-        ("token_budget",),
+        ("residues_per_call",),
     ),
     (
         # A batch of zero is an infinite loop that reports success.
