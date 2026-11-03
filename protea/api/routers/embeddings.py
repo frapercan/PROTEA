@@ -38,7 +38,7 @@ from protea.services.embeddings_service import (
     validate_predict_request,
 )
 from protea.services.jobs_service import enqueue_job
-from protea.services.residue_codes_service import residue_code_summaries
+from protea.services.residue_codes_service import residue_code_summaries, residue_source_sizes
 
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
@@ -50,6 +50,8 @@ EMBEDDING_CONFIGS_CACHE_KEY = "embeddings:configs"
 EMBEDDING_CONFIGS_TTL_SECONDS = 300.0
 RESIDUE_CODES_CACHE_KEY = "embeddings:residue-codes"
 RESIDUE_CODES_TTL_SECONDS = 30.0
+RESIDUE_SOURCES_CACHE_KEY = "embeddings:residue-codes:source-sizes"
+RESIDUE_SOURCES_TTL_SECONDS = 3600.0
 
 
 def _validate_embedding_config_body(body: dict[str, Any]) -> dict[str, Any]:
@@ -132,10 +134,25 @@ def prewarm_embedding_configs(
 # ── Per-residue codes ─────────────────────────────────────────────────────────
 
 
-def _compute_residue_codes(factory: sessionmaker[Session]) -> list[dict[str, Any]]:
-    """Read the per-vocabulary summaries in one session; module scope so tests can patch it."""
+def _compute_residue_source_sizes(factory: sessionmaker[Session]) -> dict[Any, int]:
+    """The source corpus sizes: most of the cost, and a constant while a pass reads a frozen bank."""
     with session_scope(factory) as session:
-        return residue_code_summaries(session)
+        return residue_source_sizes(session)
+
+
+def _compute_residue_codes(factory: sessionmaker[Session]) -> list[dict[str, Any]]:
+    """Read the per-vocabulary summaries in one session; module scope so tests can patch it.
+
+    The source sizes come from their own cache entry, kept an hour.
+    """
+    sizes = cached(
+        RESIDUE_SOURCES_CACHE_KEY,
+        RESIDUE_SOURCES_TTL_SECONDS,
+        lambda: _compute_residue_source_sizes(factory),
+        serve_stale_on_error=True,
+    )
+    with session_scope(factory) as session:
+        return residue_code_summaries(session, sizes=sizes)
 
 
 @router.get("/residue-codes", summary="Per-residue codes by residue vocabulary")
@@ -151,7 +168,8 @@ def list_residue_codes(
 
     Every number is a count over rows. The answer is cached 30 seconds, so a page
     that polls it while a pass runs does not scan the index on every request, and
-    the last value is served when a recompute fails.
+    the last value is served when a recompute fails. The source corpus sizes, most of
+    the cost and constant while a pass reads a frozen bank, are cached an hour.
     """
     return cached(
         RESIDUE_CODES_CACHE_KEY,

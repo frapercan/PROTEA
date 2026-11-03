@@ -115,12 +115,14 @@ def _scene(session: Session) -> dict[str, Any]:
                 entry_count=36_000,
                 created_at=NOW - timedelta(hours=2),
             ),
+            # the same shard as the first, second in it: shards are counted as the
+            # rows at position 0, so this one adds a sequence and no shard
             ResidueCode(
                 sequence_id=seqs[1].id,
                 embedding_config_id=target.id,
-                shard_key="residue-codes/t/128-255-b.bin",
-                shard_sha256="b" * 64,
-                position=0,
+                shard_key="residue-codes/t/0-127-a.bin",
+                shard_sha256="a" * 64,
+                position=1,
                 residue_count=120,
                 entry_count=14_000,
                 created_at=NOW - timedelta(minutes=10),
@@ -147,7 +149,7 @@ def test_the_summary_counts_the_index_against_the_source_corpus(postgres_url: st
     assert index["sequences"] == 2
     assert index["residues"] == 420
     assert index["entries"] == 50_000
-    assert index["shards"] == 2
+    assert index["shards"] == 1, "two sequences in one shard"
     assert index["sequences_last_hour"] == 1, (
         "the row written two hours ago is outside the pace window"
     )

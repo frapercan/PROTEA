@@ -54,7 +54,10 @@ def index_counts(session: Session, since: datetime) -> dict[uuid.UUID, dict[str,
     """Per configuration: rows, residues, entries, shards, first and last write, rows since ``since``.
 
     One row of ``residue_code`` is one sequence under one configuration, so the row
-    count is the number of sequences that have a code.
+    count is the number of sequences that have a code. Shards are counted as the rows
+    at position 0, one per shard, because ``count(DISTINCT shard_key)`` forces a
+    sorted aggregate over every row: measured on the live index at 168,912 rows, 168 ms
+    against 20 ms for the parallel hash aggregate this keeps.
     """
     rows = session.execute(
         select(
@@ -62,7 +65,7 @@ def index_counts(session: Session, since: datetime) -> dict[uuid.UUID, dict[str,
             func.count(ResidueCode.id),
             func.coalesce(func.sum(ResidueCode.residue_count), 0),
             func.coalesce(func.sum(ResidueCode.entry_count), 0),
-            func.count(distinct(ResidueCode.shard_key)),
+            func.count(ResidueCode.id).filter(ResidueCode.position == 0),
             func.min(ResidueCode.created_at),
             func.max(ResidueCode.created_at),
             func.count(ResidueCode.id).filter(ResidueCode.created_at >= since),
@@ -196,28 +199,56 @@ def _summary(
     }
 
 
-def residue_code_summaries(session: Session, now: datetime | None = None) -> list[dict[str, Any]]:
-    """One summary per residue vocabulary configuration, newest configuration first."""
-    configs = list(
+def residue_configs(session: Session) -> list[EmbeddingConfig]:
+    """The residue-vocabulary configurations, newest first."""
+    return list(
         session.scalars(
             select(EmbeddingConfig)
             .where(EmbeddingConfig.model_backend == RESIDUE_BACKEND)
             .order_by(EmbeddingConfig.created_at.desc())
         )
     )
-    if not configs:
-        return []
-    now = now or datetime.now(UTC)
-    source_ids = {
+
+
+def source_ids_of(configs: list[EmbeddingConfig]) -> set[uuid.UUID]:
+    return {
         c.derived_from_embedding_config_id
         for c in configs
         if c.derived_from_embedding_config_id is not None
     }
+
+
+def residue_source_sizes(session: Session) -> dict[uuid.UUID, int]:
+    """The source corpus size of every residue-vocabulary configuration.
+
+    Separate because it is most of the cost (an index-only scan over the whole bank,
+    752 ms of about 920 measured live) and a constant: a pass reads a frozen bank, so
+    the caller can cache it far longer than the counts that move.
+    """
+    return source_sizes(session, source_ids_of(residue_configs(session)))
+
+
+def residue_code_summaries(
+    session: Session,
+    now: datetime | None = None,
+    sizes: dict[uuid.UUID, int] | None = None,
+) -> list[dict[str, Any]]:
+    """One summary per residue vocabulary configuration, newest configuration first.
+
+    ``sizes`` is the source corpus size per source configuration; when it is not
+    given it is counted here.
+    """
+    configs = residue_configs(session)
+    if not configs:
+        return []
+    now = now or datetime.now(UTC)
+    source_ids = source_ids_of(configs)
     sources = {
         s.id: s
         for s in session.scalars(select(EmbeddingConfig).where(EmbeddingConfig.id.in_(source_ids)))
     }
     counts = index_counts(session, now - PACE_WINDOW)
-    sizes = source_sizes(session, source_ids)
+    if sizes is None:
+        sizes = source_sizes(session, source_ids)
     jobs = writing_jobs(session, [c.id for c in configs])
     return [_summary(c, counts.get(c.id), sources, sizes, jobs.get(c.id)) for c in configs]

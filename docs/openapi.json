@@ -6772,7 +6772,7 @@
     },
     "/v1/embeddings/residue-codes": {
       "get": {
-        "description": "How far each residue vocabulary's codes reach over its source corpus (ADR-D51).\n\nOne entry per ``residue-vocabulary`` configuration, newest first: sequences,\nresidues and entries indexed in ``residue_code``, shards written, the first and\nthe last write, the last hour's pace, the coverage of the source corpus, what is\nleft of it and the hours that takes at that pace, and the job that wrote them.\n\nEvery number is a count over rows. The answer is cached 30 seconds, so a page\nthat polls it while a pass runs does not scan the index on every request, and\nthe last value is served when a recompute fails.",
+        "description": "How far each residue vocabulary's codes reach over its source corpus (ADR-D51).\n\nOne entry per ``residue-vocabulary`` configuration, newest first: sequences,\nresidues and entries indexed in ``residue_code``, shards written, the first and\nthe last write, the last hour's pace, the coverage of the source corpus, what is\nleft of it and the hours that takes at that pace, and the job that wrote them.\n\nEvery number is a count over rows. The answer is cached 30 seconds, so a page\nthat polls it while a pass runs does not scan the index on every request, and\nthe last value is served when a recompute fails. The source corpus sizes, most of\nthe cost and constant while a pass reads a frozen bank, are cached an hour.",
         "operationId": "list_residue_codes_v1_embeddings_residue_codes_get",
         "responses": {
           "200": {

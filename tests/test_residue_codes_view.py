@@ -74,6 +74,25 @@ def test_a_page_that_polls_does_not_scan_the_index_on_every_request() -> None:
     assert compute.call_count == 1
 
 
+def test_the_source_sizes_are_counted_once_while_the_counts_refresh() -> None:
+    """The source size is most of the cost and a constant during a pass: an hour's cache,
+    while the counts that move keep their 30 seconds."""
+    from protea.api.cache import invalidate
+
+    with (
+        patch.object(embeddings_router, "_compute_residue_source_sizes", return_value={}) as sizes,
+        patch.object(
+            embeddings_router, "residue_code_summaries", return_value=SUMMARIES
+        ) as summaries,
+    ):
+        client = _client()
+        assert client.get("/embeddings/residue-codes").status_code == 200
+        invalidate(embeddings_router.RESIDUE_CODES_CACHE_KEY)
+        assert client.get("/embeddings/residue-codes").status_code == 200
+    assert summaries.call_count == 2
+    assert sizes.call_count == 1
+
+
 def test_no_residue_vocabulary_is_an_empty_list_not_an_error() -> None:
     with patch.object(embeddings_router, "_compute_residue_codes", return_value=[]):
         response = _client().get("/embeddings/residue-codes")
