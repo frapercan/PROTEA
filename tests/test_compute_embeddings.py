@@ -767,17 +767,25 @@ class TestComputeEmbeddingsBatchExecute:
 
         fake_vec = np.array([0.1, 0.2, 0.3], dtype=np.float32)
 
-        # One chunk list per sequence in the batch, which is what the real
-        # ``_embed_batch`` returns. A fixed-length return would hand a
+        # One chunk list per sequence per config, which is what the real
+        # ``_embed_batch_group`` returns. A fixed-length return would hand a
         # single-sequence batch two chunk lists, and the serializer now refuses
         # that rather than silently keeping the first.
+        #
+        # THE SEAM IS THE GROUP METHOD AND NOT ``_embed_batch``. This test does
+        # not care how a batch is embedded, only what gets published, so it has
+        # to stay out of the backend whichever route the installed plugin takes:
+        # ``_embed_batch_group`` picks ``embed_chunks_multi`` when the pinned
+        # protea-backends offers it, and a patch on ``_embed_batch`` is bypassed
+        # there. That made this test's isolation a property of the dependency
+        # pin rather than of the test.
         with (
             patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())),
             patch.object(
                 op,
-                "_embed_batch",
-                side_effect=lambda _m, _t, seq_strs, _c, _d: [
-                    self._fake_chunks(fake_vec) for _ in seq_strs
+                "_embed_batch_group",
+                side_effect=lambda _m, _t, seq_strs, cfgs, _d: [
+                    [self._fake_chunks(fake_vec) for _ in seq_strs] for _ in cfgs
                 ],
             ),
         ):
@@ -805,9 +813,12 @@ class TestComputeEmbeddingsBatchExecute:
             ChunkEmbedding(8, 10, fake_vec),
         ]
 
+        # ``_embed_batch_group`` and not ``_embed_batch``, for the reason given
+        # in ``test_inference_publishes_write_operation``: one element per
+        # config, each holding one chunk list per sequence.
         with (
             patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())),
-            patch.object(op, "_embed_batch", return_value=[three_chunks]),
+            patch.object(op, "_embed_batch_group", return_value=[[three_chunks]]),
         ):
             result = op.execute(session, self._base_payload(cfg), emit=_noop_emit)
 

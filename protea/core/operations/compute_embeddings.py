@@ -587,8 +587,24 @@ class ComputeEmbeddingsBatchOperation:
         ``embed_chunks_multi`` when the backend offers it (the route the saved
         hours live on); one ``self._embed_batch`` per config otherwise, correct
         and N passes. See ``shared_pass_emitter`` and ``warn_if_pass_not_shared``.
-        Routing through ``self._embed_batch`` keeps the documented
-        ``patch.object(op, "_embed_batch")`` seam covering the group path too.
+
+        THE SEAM THAT COVERS BOTH ROUTES IS THIS METHOD, and not
+        ``_embed_batch``. An earlier version of this docstring promised that
+        ``patch.object(op, "_embed_batch")`` kept the group path covered, and
+        that holds only on the fallback: when the installed plugin offers
+        ``embed_chunks_multi`` the patch is bypassed and the real backend runs
+        on whatever doubles the test handed to ``_load_model``. So a test that
+        patched ``_embed_batch`` in order NOT to reach a backend passed or
+        failed according to which commit of a separately pinned dependency was
+        installed, which is not a property a test is allowed to have: it was
+        green for a year because the pin happened to lack the method, and it
+        went red on the bump without anything about the test or the operation
+        changing.
+
+        A test that does not care how a batch is embedded patches
+        ``_embed_batch_group``; one that cares which route ran asserts the
+        route. ``tests/test_embedding_pass_group.py`` now does both, so this
+        branch is covered rather than inferred from the pin.
         """
         shared = shared_pass_emitter(configs[0])
         if shared is not None:

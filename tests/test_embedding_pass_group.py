@@ -12,6 +12,12 @@ fallen into twice.
   SUCCEEDED, and the eleven configs end up at coverages that differ irregularly
   and look plausible, which is worse than the single visible gap this change
   exists to close.
+* Tested only on the route the pinned plugin happens to offer, the fan-out is
+  verified on one of two branches and the other is reached for the first time by
+  a dependency bump. That is the hole the 2026-11-03 bump found: nothing in the
+  suite named ``embed_chunks_multi``, and three tests kept out of the backend by
+  a patch the shared route bypasses. So the group tests now run ONCE PER ROUTE
+  and one of them asserts which route ran.
 
 The fixtures are deliberately HETEROGENEOUS. A group built from three copies of
 one config passes against the very defect the guard is for, because every field
@@ -194,14 +200,56 @@ def _batch_session(configs, sequences):
     return session
 
 
+def _marker_of(config):
+    """The vector a config's own reduction would produce, and no other's."""
+    return np.array([float(config.layer_indices[0]), 0.2, 0.3], dtype=np.float32)
+
+
+def _plugin(shares_the_pass: bool):
+    """A protea-backends double that either offers a shared pass or does not.
+
+    ``spec`` is the discriminator and not a tidiness: ``shared_pass_emitter``
+    asks with ``getattr(backend, "embed_chunks_multi", None)``, and a plain
+    ``MagicMock`` answers every name, so the fallback route would be
+    unreachable from a test and only one of the two branches could ever run.
+    """
+    names = ["embed_chunks"] + (["embed_chunks_multi"] if shares_the_pass else [])
+    plugin = MagicMock(spec=names)
+    if shares_the_pass:
+        plugin.embed_chunks_multi.side_effect = lambda _m, _t, seq_strs, cfgs, _d: [
+            [[ChunkEmbedding(0, None, _marker_of(cfg))] for _ in seq_strs] for cfg in cfgs
+        ]
+    return plugin
+
+
+def _group_payload(configs, sequence_ids):
+    return {
+        "embedding_config_ids": [str(cfg.id) for cfg in configs],
+        "sequence_ids": list(sequence_ids),
+        "parent_job_id": str(uuid.uuid4()),
+        "_job_id": str(uuid.uuid4()),
+    }
+
+
 class TestGroupWritesEveryConfig:
-    def test_one_pass_publishes_rows_for_every_config_in_the_group(self) -> None:
+    @pytest.mark.parametrize("plugin_shares_the_pass", [False, True])
+    def test_one_pass_publishes_rows_for_every_config_in_the_group(
+        self, plugin_shares_the_pass: bool
+    ) -> None:
         """The batch worker fans one pass out to N configs' worth of rows.
 
         The vectors differ per config, because identical vectors would pass
         equally well if the group path quietly wrote the first config's output N
         times under N ids: the fan-out has to be shown carrying each config's own
         reduction, not just N labels.
+
+        RUN ONCE PER ROUTE, because ``_embed_batch_group`` chooses between them
+        from the installed plugin and the fan-out has to be right either way.
+        Patching ``_embed_batch`` alone reaches only the N-pass branch, so this
+        test used to be green or red according to which commit of a separately
+        pinned protea-backends was installed: it passed for as long as the pin
+        lacked ``embed_chunks_multi`` and went red on the bump with nothing
+        about the operation or the assertions having changed.
         """
         op = ComputeEmbeddingsBatchOperation()
         configs = _layer_grid()
@@ -209,20 +257,15 @@ class TestGroupWritesEveryConfig:
         session = _batch_session(configs, sequences)
 
         def fake_embed(_model, _tok, seq_strs, config, _device):
-            marker = float(config.layer_indices[0])
-            return [
-                [ChunkEmbedding(0, None, np.array([marker, 0.2, 0.3], dtype=np.float32))]
-                for _ in seq_strs
-            ]
+            return [[ChunkEmbedding(0, None, _marker_of(config))] for _ in seq_strs]
 
-        payload = {
-            "embedding_config_ids": [str(cfg.id) for cfg in configs],
-            "sequence_ids": [1, 2],
-            "parent_job_id": str(uuid.uuid4()),
-            "_job_id": str(uuid.uuid4()),
-        }
+        payload = _group_payload(configs, [1, 2])
         with (
             patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())),
+            patch(
+                "protea.core.operations.compute_embeddings._resolve_backend",
+                return_value=_plugin(plugin_shares_the_pass),
+            ),
             patch.object(op, "_embed_batch", side_effect=fake_embed),
         ):
             result = op.execute(session, payload, emit=_noop_emit)
@@ -236,6 +279,57 @@ class TestGroupWritesEveryConfig:
             assert len(group["sequences"]) == 2
             for seq in group["sequences"]:
                 assert seq["chunks"][0]["vector"][0] == pytest.approx(float(cfg.layer_indices[0]))
+
+    @pytest.mark.parametrize("plugin_shares_the_pass", [False, True])
+    def test_exactly_one_route_runs_and_the_plugin_decides_which(
+        self, plugin_shares_the_pass: bool
+    ) -> None:
+        """The two routes are exclusive, and nothing else was asserting it.
+
+        ``_embed_batch_group`` runs ``embed_chunks_multi`` when the installed
+        plugin has it and one ``_embed_batch`` per config when it does not. Both
+        branches are correct and they are not interchangeable: the shared one is
+        where the saved GPU hours are, and the fallback is N forward passes over
+        the same sequences. Until this test existed nothing exercised the shared
+        branch at all -- no test in the suite named ``embed_chunks_multi`` -- so
+        the route production would take once the pin moved was reached for the
+        first time by the bump itself.
+
+        The assertion is EXCLUSIVITY rather than a call count, because the
+        number of calls follows the batch size and that is not what is being
+        pinned down here. What matters is that the route not chosen does not
+        also run: a group that paid for the shared pass and then embedded every
+        config again would produce exactly the same rows, and the only evidence
+        would be the clock.
+        """
+        op = ComputeEmbeddingsBatchOperation()
+        configs = _layer_grid()
+        sequences = [_sequence(1, "ACDEF"), _sequence(2, "GHIKL")]
+        session = _batch_session(configs, sequences)
+        plugin = _plugin(plugin_shares_the_pass)
+
+        def fake_embed(_model, _tok, seq_strs, config, _device):
+            return [[ChunkEmbedding(0, None, _marker_of(config))] for _ in seq_strs]
+
+        with (
+            patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())),
+            patch(
+                "protea.core.operations.compute_embeddings._resolve_backend",
+                return_value=plugin,
+            ),
+            patch.object(op, "_embed_batch", side_effect=fake_embed) as per_config,
+        ):
+            op.execute(session, _group_payload(configs, [1, 2]), emit=_noop_emit)
+
+        if plugin_shares_the_pass:
+            assert plugin.embed_chunks_multi.call_count >= 1
+            assert per_config.call_count == 0, (
+                "the shared pass ran AND every config was embedded again, which "
+                "writes the right rows and silently spends the hours this route saves"
+            )
+        else:
+            assert per_config.call_count >= 1
+            assert not hasattr(plugin, "embed_chunks_multi")
 
     def test_batch_worker_refuses_a_group_handed_to_it_on_the_queue(self) -> None:
         """The guard runs in the worker too, not only in the coordinator.
