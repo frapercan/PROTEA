@@ -1,7 +1,7 @@
 ADR-D51: The sparse code of every residue, from a frozen vocabulary, stored as shards
 =====================================================================================
 
-:Status: Proposed
+:Status: Accepted (2026-11-03, the author: merge and deploy)
 :Date: 2026-11-03
 :Author: Francisco Miguel Pérez Canales
 :Phase: platform consolidation (the lab's research enters the platform)
@@ -153,6 +153,25 @@ Measured on 2026-11-03 on the desktop node (RTX 3060):
   exact-attention backend (protea-backends PR 46) are identical to the lab's cached
   states after standardisation, and zero entries differ. Both give 126.44 active
   features per residue.
+* **Gate 3, long proteins.** The 64 proteins reach 2237 residues, so the platform's
+  path was also compared with the lab's code of the 211 to 227 frame's queries (computed
+  by the lab's step39 in its own batches): all 1058 queries longer than 2237 residues
+  and 300 shorter ones as a control. The share of active decisions that differ is
+  0.050 % up to 2237 residues, 0.036 % from 2238 to 7999 and 0 above 8000 (32 proteins,
+  up to 34350 residues). Levels differ in 1.0 % to 1.8 % of the common actives, partly
+  because the lab's table keeps pre-activations in half precision. The reconstruction
+  does not degrade with length (R2 0.706, 0.747, 0.764 by band), and the longest protein
+  encoded twice gives the same code.
+* **What the differences are.** Not the library: gate 3 run with the platform's
+  transformers 4.48.1 is still exact. Not the length. They come from batch composition:
+  in bfloat16 the same protein in another batch gets slightly different states, which
+  also separates the lab's own two computations. So the code is exact for a given
+  batching and deterministic, and between batchings about 0.04 % of active decisions
+  move, concentrated in a few proteins.
+* **Other checks.** Protea-backends' tokenizer change (#45) gives the same ids on
+  138530 sequences under transformers 4.48.1, and the exact path encodes 35213 residues
+  in 22 s with a 2.27 GB peak on the RTX 3060. The vocabulary's elementwise steps run in
+  chunks of residues (one product per sequence), so the longest proteins fit the card.
 
 Consequences
 ~~~~~~~~~~~~
