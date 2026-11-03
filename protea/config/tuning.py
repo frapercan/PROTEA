@@ -152,11 +152,12 @@ class WorkerTuning(BaseModel):
         default=21600,
         ge=60,
         description=(
-            "Lo mismo, pero para un coordinador DIFERIDO, que se reconoce por haber "
-            "emitido job.dispatched. Su trabajo lo hacen sus hijos en otra cola, asi "
-            "que su silencio mide la pausa de OTRA maquina y no la suya: un nodo que "
-            "cede la tarjeta durante horas lo deja sin eventos sin estar muerto. "
-            "Default 6h, el mismo orden que reaper_main_timeout_seconds."
+            "The same, for a DEFERRED coordinator, which is recognised by having "
+            "emitted job.dispatched. Its children do the work on another queue, so "
+            "its silence measures ANOTHER machine's pause and not its own: a node "
+            "that cedes its card for hours leaves it without events while nothing "
+            "is wrong with it. Defaults to 6h, the same order as "
+            "reaper_main_timeout_seconds."
         ),
     )
     reaper_event_grace_seconds: int = Field(
