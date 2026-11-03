@@ -25,6 +25,7 @@ from protea.core.operations.encode_residue_vocabulary import (  # noqa: E402
     build_messages,
     build_store_message,
     calls_by_residues,
+    dispatched_result,
     encode_sequences,
     put_with_retries,
     read_vocabulary_meta,
@@ -276,3 +277,14 @@ def test_a_shard_put_is_retried_until_the_store_takes_it() -> None:
     assert store.kept == {"k": b"x"}
     with pytest.raises(ConnectionError):
         put_with_retries(Flaky(5), "k", b"x", waits=(0.0, 0.0))
+
+
+def test_the_coordinator_stays_running_until_the_last_write() -> None:
+    p = EncodeResidueVocabularyPayload.model_validate(
+        {"source_embedding_config_id": "s", "vocabulary_artifact_uri": "v-0123456789ab.npz"}
+    )
+    msgs = build_messages(p, uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), list(range(300)))
+    res = dispatched_result(msgs, 300, uuid.uuid4(), "0" * 64)
+    assert res.deferred is True
+    assert res.progress_total == len(msgs) == 2
+    assert res.publish_operations == msgs
