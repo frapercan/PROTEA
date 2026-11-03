@@ -137,6 +137,17 @@ Validation gates
    and level edges, from batch composition in bfloat16), and the mean number of active
    features per residue must stay within the range the lab measured (126 to 145).
 
+Measured on 2026-11-03 on the desktop node (RTX 3060):
+
+* **Gate 1.** The platform's encoder reproduces the reference encoder's test vectors bit
+  for bit (``tests/test_residue_vocabulary.py``).
+* **Gate 2.** On the 64 proteins (37765 residues, 309370880 entries), zero entries
+  differ, and the read back equals the lab's values bit for bit.
+* **Gate 3.** On the same proteins, the states the platform computed with the
+  exact-attention backend (protea-backends PR 46) are identical to the lab's cached
+  states after standardisation, and zero entries differ. Both give 126.44 active
+  features per residue.
+
 Consequences
 ~~~~~~~~~~~~
 

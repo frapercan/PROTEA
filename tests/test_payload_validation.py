@@ -79,6 +79,10 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
 )
+from protea.core.operations.encode_residue_vocabulary import (
+    EncodeResidueVocabularyBatchPayload,
+    EncodeResidueVocabularyPayload,
+)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsPayload,
 )
@@ -641,6 +645,31 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "encoder_artifact_uri": "encoders/e.npz",
         },
         (),
+    ),
+    (
+        # A vocabulary with two addresses can disagree, and one with none names nothing to
+        # encode with; both are model-level because the rule is between two fields.
+        "encode_residue_vocabulary",
+        EncodeResidueVocabularyPayload,
+        {
+            "source_embedding_config_id": "cfg",
+            "vocabulary_artifact_path": "v.npz",
+            "vocabulary_artifact_uri": "residue-vocabulary/v-0123456789ab.npz",
+        },
+        (),
+    ),
+    (
+        # A token budget of zero would send no sequence to the model and report success.
+        "encode_residue_vocabulary_batch",
+        EncodeResidueVocabularyBatchPayload,
+        {
+            "source_embedding_config_id": "src",
+            "target_embedding_config_id": "tgt",
+            "vocabulary_artifact_path": "v.npz",
+            "sequence_ids": [1],
+            "token_budget": 0,
+        },
+        ("token_budget",),
     ),
     (
         # A batch of zero is an infinite loop that reports success.

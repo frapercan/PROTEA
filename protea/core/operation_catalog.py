@@ -44,6 +44,10 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchOperation,
     EncodeResidueSparseOperation,
 )
+from protea.core.operations.encode_residue_vocabulary import (
+    EncodeResidueVocabularyBatchOperation,
+    EncodeResidueVocabularyOperation,
+)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsOperation,
 )
@@ -152,6 +156,8 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(LoadOntologyAliasesOperation())
     registry.register(EncodeResidueSparseOperation())
     registry.register(EncodeResidueSparseBatchOperation())
+    registry.register(EncodeResidueVocabularyOperation())
+    registry.register(EncodeResidueVocabularyBatchOperation())
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
     # publicly registered: all re-ranker training moves to
     # protea-reranker-lab. They remain importable as internal helpers —
