@@ -1949,6 +1949,63 @@ Payload fields
      - Optional cap on the sequences encoded, for trials.
 
 
+run_lab_method
+--------------
+
+Runs a laboratory method's container on the node with the card and hands its predictions to
+``ingest_method_predictions`` (ADR-D53). It is a job on ``protea.methods``, not an operation
+message: a run takes hours, and ``QueueConsumer`` keeps the connection and the job's lease
+alive while it works, where ``OperationConsumer`` would lose the connection and run it again.
+
+Before the card is spent it checks the arm as the evaluator will (an ``ingested-method``
+configuration that declares the cut the payload asks for, and a window that starts at or
+after it), that the tag the payload names resolves on the node to the image id it pins, and
+that the card has the free memory the payload asks for (otherwise ``RetryLaterError``, and
+the job comes back ten minutes later). It then fetches the query FASTA by key and sha256,
+removes any container an interrupted attempt of the same job left running, and runs the
+image by id with no network, the bundle read only and a memory ceiling, emitting
+``run_lab_method.running`` every ten minutes, and keeps the container's log in the store
+whatever the outcome. The JSON beside the TSV is required: it must state the method's name,
+the cut, the hash of the query file and the hash of the TSV, each equal to what the platform
+gave or measured. The TSV and the JSON are stored under keys that carry their hash, with an
+event every ten minutes while that lasts. The run writes in the node's
+``operation.method_scratch_dir`` (a folder on disk where the temporary folder is a tmpfs).
+Last, it creates an
+``ingest_method_predictions`` child job on ``protea.methods.write`` whose ``method`` block
+is the method's record plus ``platform_run`` (job, node, image, image id, query file and
+its hash, seconds).
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``method_name``
+     - The arm's name, written on every row; the method's record must carry the same name.
+   * - ``image`` and ``image_id``
+     - The tag, for the record, and the 64 hex content id the node must hold under it.
+   * - ``bundle_path`` and ``bundle_mount``
+     - The node's data bundle and where the image expects it, mounted read only.
+   * - ``cut``
+     - The release the method was fitted at; the configuration must declare it.
+   * - ``queries_fasta_uri`` and ``queries_fasta_sha256``
+     - The query FASTA in the store (what ``export_evaluation_targets`` publishes).
+   * - ``embedding_config_id``, ``annotation_set_id``, ``ontology_snapshot_id``
+     - Passed to the ingestion: the arm, the window's first release, the snapshot.
+   * - ``query_set_id``, ``limit_per_entry``
+     - Optional, passed to the ingestion.
+   * - ``timeout_hours``
+     - Wall-clock limit of the container (default 12, at most 72).
+   * - ``memory_gb``
+     - Memory ceiling of the container (default 40; null for none).
+   * - ``min_free_card_mib``
+     - Free card memory the run needs before it starts (default 10000).
+
+
 Registering a new operation
 ----------------------------
 

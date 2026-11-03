@@ -89,6 +89,9 @@ logs/frontend.log               ← Next.js dev server
 - `protea.methods.write` → ingest_method_predictions (a method's own predictions, read from a
   TSV it produced elsewhere, written as a PredictionSet whose score column is `method_score`;
   the write stage stays on the server, like the other `.write` queues)
+- `protea.methods` → run_lab_method (a laboratory method's container, run on the node with the card from an
+  image pinned by id, on a query FASTA taken from the store by hash; its predictions are enqueued as an
+  `ingest_method_predictions` child job on `protea.methods.write`; ADR-D53)
 - `protea.evaluations` → run_cafa_evaluation (Fmax / AuPRC / coverage; isolated so long evals don't block the general jobs queue)
 - `protea.training` → export_research_dataset (serialized; GPU/RAM-intensive KNN + feature generation + artifact-store upload). Re-ranker *training* itself no longer runs in PROTEA: see "Re-ranker training decoupling" below.
 

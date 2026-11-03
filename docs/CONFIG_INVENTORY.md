@@ -59,6 +59,7 @@ Cada parámetro identificado abajo:
 | `backoff_base_seconds` | `core/operations/{insert,fetch}_uniprot*.py` | 0.8 | Backoff inicial UniProt. | 0.5-2 | no |
 | `backoff_max_seconds` | `core/operations/{insert,fetch}_uniprot*.py` | 20.0 | Cap backoff UniProt. | 10-60 | no |
 | `jitter_seconds` | `core/operations/{insert,fetch}_uniprot*.py` | 0.4 | Jitter agregado al sleep. | 0-1 | no |
+| `method_scratch_dir` | `core/operations/run_lab_method.py` (`scratch_root`) | None (the system's temporary folder) | Folder where run_lab_method writes the queries, the container's output and its log; a method's TSV can be several GB. | a folder on disk on any node whose temporary folder is a tmpfs | no |
 
 ### D. APILimits (HTTP boundaries)
 
