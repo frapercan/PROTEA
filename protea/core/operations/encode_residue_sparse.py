@@ -55,6 +55,7 @@ from protea.core.contracts.operation import (
     OperationResult,
     ProteaPayload,
 )
+from protea.core.contracts.parent_progress import update_parent_progress
 from protea.core.operations._compute_embeddings_helpers import (
     scale_and_clip_embedding,
 )
@@ -63,6 +64,7 @@ from protea.core.operations._encoder_artifact import (
     REQUIRED_META,
     resolve_training_cut,
 )
+from protea.core.operations._parent_guard import parent_cancelled
 from protea.core.operations._residue_count_guard import assert_one_row_per_residue
 from protea.core.operations._residue_pass_group import (
     ResidueHead,
@@ -193,7 +195,7 @@ class EncodeResidueSparseBatchPayload(ProteaPayload, frozen=True):
     #: The pass is run once and every head reads its residues.
     heads: list[dict[str, str]] = Field(default_factory=list)
     sequence_ids: list[int] = Field(default_factory=list)
-    parent_job_id: str = ""
+    parent_job_id: str
     encoder_artifact_path: str | None = None
     encoder_artifact_uri: str | None = None
     device: str = "cuda"
@@ -304,6 +306,12 @@ def _dispatch_result(
 
     One entry per head, because a group that reported a single config id would
     leave the other heads' codes addressable only by guessing their names.
+
+    Deferred, so the job stays RUNNING until the last batch has written. Without it the
+    worker marked the coordinator SUCCEEDED the moment the batches were published, and
+    since ``progress_total`` is declared here while nothing advanced
+    ``progress_current``, the job announced a total it never counted toward: the surface
+    read 100 % the instant the fan-out left, whatever the card went on to do.
     """
     return OperationResult(
         result={
@@ -325,6 +333,7 @@ def _dispatch_result(
         },
         progress_total=len(operations),
         publish_operations=operations,
+        deferred=True,
     )
 
 
@@ -651,14 +660,17 @@ class EncodeResidueSparseBatchOperation(Operation):
     name = "encode_residue_sparse_batch"
     description = (
         "GPU child job: run the language model over one batch of sequences, select "
-        "atoms per residue, reduce, and store one sparse code per sequence under the "
-        "target embedding config the coordinator created."
+        "atoms per residue, reduce, store one sparse code per sequence under the "
+        "target embedding config the coordinator created, and advance the parent job."
     )
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = EncodeResidueSparseBatchPayload.model_validate(contract_payload(payload))
+        parent_job_id = uuid.UUID(p.parent_job_id)
+        if parent_cancelled(session, p.parent_job_id, emit, "encode_residue_sparse_batch"):
+            return OperationResult(result={"skipped": True})
         source = session.get(EmbeddingConfig, uuid.UUID(p.source_embedding_config_id))
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")
@@ -688,13 +700,7 @@ class EncodeResidueSparseBatchOperation(Operation):
         # heads that hold it skip it at write time.
         pending = drop_encoded_by_every_head(session, heads, pending, emit)
         if not pending:
-            return OperationResult(
-                result={
-                    "encoded": 0,
-                    "embedding_config_ids": [str(h.target_id) for h in heads],
-                    "note": "every sequence in this batch already had a code for every head",
-                }
-            )
+            return self._close_already_encoded(session, parent_job_id, heads, emit)
         model, tokenizer = _get_or_load_model(source, p.device, emit)
         run = _Run(
             backend=backend,
@@ -704,7 +710,40 @@ class EncodeResidueSparseBatchOperation(Operation):
             batch_size=p.batch_size,
             residue_budget=p.residue_budget,
         )
-        return self._encode(session, run, pending, emit)
+        result = self._encode(session, run, pending, emit)
+        update_parent_progress(
+            session,
+            parent_job_id,
+            emit,
+            event_name="encode_residue_sparse_batch.parent_succeeded",
+        )
+        return result
+
+    def _close_already_encoded(
+        self, session: Session, parent_job_id: uuid.UUID, heads: list[Any], emit: EmitFn
+    ) -> OperationResult:
+        """Finish a batch every head already holds, counter included.
+
+        THE COUNTER IS THE POINT. This batch publishes nothing and runs no forward
+        pass, so if it did not advance the parent the coordinator would stop one short
+        for every duplicate message and sit at ``progress_current < progress_total``
+        for ever. A re-enqueued coordinator dispatches a second message for work
+        already done, which is how the reaper's requeue works, so the correct response
+        to one is to cost nothing and still count.
+        """
+        update_parent_progress(
+            session,
+            parent_job_id,
+            emit,
+            event_name="encode_residue_sparse_batch.parent_succeeded",
+        )
+        return OperationResult(
+            result={
+                "encoded": 0,
+                "embedding_config_ids": [str(h.target_id) for h in heads],
+                "note": "every sequence in this batch already had a code for every head",
+            }
+        )
 
     def _encode(
         self,
