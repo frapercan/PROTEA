@@ -15,13 +15,17 @@ router so the static ``/jobs/gpu-availability`` path resolves ahead of the
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
+from protea.core.contracts.parent_progress import in_flight
 from protea.core.utils import utcnow
-from protea.infrastructure.orm.models.job import Job, JobStatus
+from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.session import session_scope
 
 # Operations that occupy the shared GPU pipeline. Only these gate the
@@ -37,6 +41,12 @@ _GPU_OPERATIONS: frozenset[str] = frozenset(
         "predict_go_terms",
         "predict_go_terms_batch",
         "export_research_dataset",
+        # 2026-11-03: the residue passes use the same card and were missing, so the
+        # banner said "free" through a whole corpus pass.
+        "encode_residue_vocabulary",
+        "encode_residue_vocabulary_batch",
+        "encode_residue_sparse",
+        "encode_residue_sparse_batch",
     }
 )
 
@@ -84,16 +94,26 @@ class GpuAvailability(BaseModel):
     running_stale: int = Field(
         ...,
         description=(
-            "Count of RUNNING GPU jobs whose lease has expired "
-            "(zombie rows; ignored for the busy signal)."
+            "Count of RUNNING GPU jobs whose lease has expired and that are not "
+            "waiting for dispatched batches (zombie rows; ignored for the busy signal)."
+        ),
+    )
+    running_dispatched: int = Field(
+        default=0,
+        description=(
+            "Count of coordinators waiting for batches they dispatched: RUNNING with no "
+            "live lease after a job.dispatched event (a waiting coordinator clears its "
+            "lease on purpose), or failed by the reaper while their batches still arrive "
+            "(an event within the reaper's liveness window). "
+            "They set busy."
         ),
     )
     gpu_present: bool = Field(
         default=True,
         description=(
-            "Whether a CUDA GPU is available to the embedding workers. When "
-            "false, embedding novel sequences falls back to CPU and is "
-            "noticeably slower; the UI surfaces this so users understand why."
+            "Whether the API host's torch sees a CUDA GPU. It says nothing about the GPU "
+            "node's card, which runs the embedding batches and is not visible from the "
+            "API host."
         ),
     )
     active_operation: str | None = Field(
@@ -108,34 +128,43 @@ class GpuAvailability(BaseModel):
     )
 
 
-def _classify(active: list[Job]) -> GpuAvailability:
-    """Bucket active GPU jobs into fresh/queued/stale and pick a representative."""
+def _classify(active: list[Job], dispatched: set[Any]) -> GpuAvailability:
+    """Bucket active GPU jobs into fresh, waiting, queued and stale; pick a representative.
+
+    A coordinator that waits for its batches clears its lease on purpose (``deferred``) and
+    emits ``job.dispatched``; it is in flight until its last batch is stored, so it counts
+    as busy even with no lease, as does one the reaper failed while its batches still
+    arrive. A RUNNING row with an expired lease and no such event is a zombie.
+    """
     now = utcnow()
-    queued = 0
-    running_fresh = 0
-    running_stale = 0
+    queued = running_fresh = running_dispatched = running_stale = 0
+    rank = {"fresh": 3, "dispatched": 2, "queued": 1}
     representative: Job | None = None
+    best = 0
     for j in active:
         if j.status == JobStatus.QUEUED:
+            kind = "queued"
             queued += 1
-            if representative is None:
-                representative = j
-        elif j.leased_until is not None and j.leased_until > now:
+        elif j.status == JobStatus.RUNNING and j.leased_until is not None and j.leased_until > now:
+            kind = "fresh"
             running_fresh += 1
-            # A live RUNNING job is the most informative representative;
-            # prefer it over a queued one.
-            if representative is None or representative.status == JobStatus.QUEUED:
-                representative = j
+        elif j.status == JobStatus.FAILED or j.id in dispatched:
+            kind = "dispatched"
+            running_dispatched += 1
         else:
             running_stale += 1
+            continue
+        if rank[kind] > best:
+            representative, best = j, rank[kind]
 
-    busy = running_fresh > 0 or queued > 0
+    busy = running_fresh > 0 or queued > 0 or running_dispatched > 0
     rep = representative if busy else None
     return GpuAvailability(
         busy=busy,
         running_fresh=running_fresh,
         queued=queued,
         running_stale=running_stale,
+        running_dispatched=running_dispatched,
         gpu_present=_gpu_present(),
         active_operation=rep.operation if rep else None,
         progress_current=rep.progress_current if rep else None,
@@ -158,15 +187,28 @@ def gpu_availability(
     RUNNING job only counts when its ``leased_until`` is still in the
     future (a live worker renews the lease every heartbeat). Expired-lease
     RUNNING rows are zombies (dead worker) and are excluded from ``busy``
-    so the form is not blocked by stale state.
+    so the form is not blocked by stale state. A coordinator waiting for the
+    batches it dispatched has no lease on purpose and still counts: it holds
+    the card until its last batch is stored.
     """
     with session_scope(factory) as session:
         active = (
             session.query(Job)
             .filter(
                 Job.operation.in_(_GPU_OPERATIONS),
-                Job.status.in_((JobStatus.QUEUED, JobStatus.RUNNING)),
+                or_(Job.status == JobStatus.QUEUED, in_flight(utcnow())),
             )
             .all()
         )
-        return _classify(active)
+        ids = [j.id for j in active]
+        dispatched = (
+            {
+                job_id
+                for (job_id,) in session.query(JobEvent.job_id)
+                .filter(JobEvent.job_id.in_(ids), JobEvent.event == "job.dispatched")
+                .distinct()
+            }
+            if ids
+            else set()
+        )
+        return _classify(active, dispatched)

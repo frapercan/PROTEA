@@ -727,7 +727,7 @@
           },
           "gpu_present": {
             "default": true,
-            "description": "Whether a CUDA GPU is available to the embedding workers. When false, embedding novel sequences falls back to CPU and is noticeably slower; the UI surfaces this so users understand why.",
+            "description": "Whether the API host's torch sees a CUDA GPU. It says nothing about the GPU node's card, which runs the embedding batches and is not visible from the API host.",
             "title": "Gpu Present",
             "type": "boolean"
           },
@@ -760,13 +760,19 @@
             "title": "Queued",
             "type": "integer"
           },
+          "running_dispatched": {
+            "default": 0,
+            "description": "Count of coordinators waiting for batches they dispatched: RUNNING with no live lease after a job.dispatched event (a waiting coordinator clears its lease on purpose), or failed by the reaper while their batches still arrive (an event within the reaper's liveness window). They set busy.",
+            "title": "Running Dispatched",
+            "type": "integer"
+          },
           "running_fresh": {
             "description": "Count of RUNNING GPU jobs with a live (future) lease.",
             "title": "Running Fresh",
             "type": "integer"
           },
           "running_stale": {
-            "description": "Count of RUNNING GPU jobs whose lease has expired (zombie rows; ignored for the busy signal).",
+            "description": "Count of RUNNING GPU jobs whose lease has expired and that are not waiting for dispatched batches (zombie rows; ignored for the busy signal).",
             "title": "Running Stale",
             "type": "integer"
           }
@@ -7521,7 +7527,7 @@
     },
     "/v1/jobs/gpu-availability": {
       "get": {
-        "description": "Report whether the shared GPU pipeline is genuinely busy.\n\nPowers the annotation form's \"GPU busy\" banner. Unlike a raw\n``GET /jobs?status=running`` scan, this gates on real liveness: a\nRUNNING job only counts when its ``leased_until`` is still in the\nfuture (a live worker renews the lease every heartbeat). Expired-lease\nRUNNING rows are zombies (dead worker) and are excluded from ``busy``\nso the form is not blocked by stale state.",
+        "description": "Report whether the shared GPU pipeline is genuinely busy.\n\nPowers the annotation form's \"GPU busy\" banner. Unlike a raw\n``GET /jobs?status=running`` scan, this gates on real liveness: a\nRUNNING job only counts when its ``leased_until`` is still in the\nfuture (a live worker renews the lease every heartbeat). Expired-lease\nRUNNING rows are zombies (dead worker) and are excluded from ``busy``\nso the form is not blocked by stale state. A coordinator waiting for the\nbatches it dispatched has no lease on purpose and still counts: it holds\nthe card until its last batch is stored.",
         "operationId": "gpu_availability_v1_jobs_gpu_availability_get",
         "responses": {
           "200": {
