@@ -329,6 +329,15 @@ class OperationTuning(BaseModel):
             "por lo que la ganancia es real. 1 desactiva la paralelización."
         ),
     )
+    method_scratch_dir: str | None = Field(
+        default=None,
+        description=(
+            "Folder where run_lab_method writes the query file, the container's output and "
+            "its log while a run lasts. A method's TSV can be several GB, so on a node whose "
+            "temporary folder is a tmpfs this must be a folder on disk. None uses the system's "
+            "temporary folder. Override: PROTEA_TUNING__operation__method_scratch_dir."
+        ),
+    )
     gpu_busy_retry_seconds: int = Field(
         default=8,
         ge=1,

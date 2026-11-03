@@ -1953,9 +1953,13 @@ that the card has the free memory the payload asks for (otherwise ``RetryLaterEr
 the job comes back ten minutes later). It then fetches the query FASTA by key and sha256,
 removes any container an interrupted attempt of the same job left running, and runs the
 image by id with no network, the bundle read only and a memory ceiling, emitting
-``run_lab_method.running`` every ten minutes. The TSV and the JSON beside it are stored
-under keys that carry their hash; the JSON's own record of the query file, of the TSV and
-of the method's name must match what the platform gave it and measured. Last, it creates an
+``run_lab_method.running`` every ten minutes, and keeps the container's log in the store
+whatever the outcome. The JSON beside the TSV is required: it must state the method's name,
+the cut, the hash of the query file and the hash of the TSV, each equal to what the platform
+gave or measured. The TSV and the JSON are stored under keys that carry their hash, with an
+event every ten minutes while that lasts. The run writes in the node's
+``operation.method_scratch_dir`` (a folder on disk where the temporary folder is a tmpfs).
+Last, it creates an
 ``ingest_method_predictions`` child job on ``protea.methods.write`` whose ``method`` block
 is the method's record plus ``platform_run`` (job, node, image, image id, query file and
 its hash, seconds).

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import sys
+import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,11 +38,13 @@ work, name, mode = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 query = (work / "in" / "queries.fasta").read_bytes()
 tsv = b"protein\tgo_id\taspect\tscore\nP1\tGO:0005515\tF\t0.5\n"
 (work / "out" / "predictions.tsv").write_bytes(tsv)
-record = {"name": name, "query_file": ["/app/data/queries.fasta", hashlib.sha256(query).hexdigest()],
+record = {"name": name, "cut": 211, "query_file": ["/app/data/queries.fasta", hashlib.sha256(query).hexdigest()],
           "predictions": {"sha256": hashlib.sha256(tsv).hexdigest()}}
 if mode == "lies":
     record["predictions"]["sha256"] = "0" * 64
-(work / "out" / "predictions.json").write_text(json.dumps(record))
+if mode != "silent":
+    (work / "out" / "predictions.json").write_text(json.dumps(record))
+print("the method ran on", len(query), "bytes of queries")
 """
 
 
@@ -236,22 +239,74 @@ def test_a_run_past_its_limit_is_stopped(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert stopped == ["protea-method-x"]
 
 
-def test_the_record_must_name_what_the_platform_gave_and_measured() -> None:
+def test_the_record_must_state_what_the_platform_gave_and_measured() -> None:
     p = _model()
     honest = {
         "name": p.method_name,
+        "cut": 211,
         "query_file": ["q", FASTA_SHA],
         "predictions": {"sha256": "a" * 64},
     }
     rlm.check_provenance(p, rlm.RunOutputs("k", "a" * 64, "j", honest))
-    rlm.check_provenance(p, rlm.RunOutputs("k", "a" * 64, None, {}))
     for lie, words in [
-        ({"query_file": ["q", "b" * 64]}, "query file"),
+        ({"query_file": ["q", "b" * 64]}, "query file sha256"),
         ({"predictions": {"sha256": "b" * 64}}, "predictions sha256"),
-        ({"name": "another-arm"}, "calls itself"),
+        ({"name": "another-arm"}, "name 'another-arm'"),
+        ({"cut": 230}, "cut 230"),
     ]:
         with pytest.raises(ValueError, match=words):
             rlm.check_provenance(p, rlm.RunOutputs("k", "a" * 64, "j", {**honest, **lie}))
+
+
+def test_a_record_that_leaves_a_fact_out_is_refused() -> None:
+    p = _model()
+    with pytest.raises(ValueError, match="does not state its name, cut, query file sha256"):
+        rlm.check_provenance(p, rlm.RunOutputs("k", "a" * 64, "j", {}))
+    partial = {"name": p.method_name, "cut": 211, "query_file": ["q", FASTA_SHA]}
+    with pytest.raises(ValueError, match="does not state its predictions sha256"):
+        rlm.check_provenance(p, rlm.RunOutputs("k", "a" * 64, "j", partial))
+
+
+def test_a_long_step_beats_until_it_ends() -> None:
+    events = Events()
+    with rlm.beating(events, "run_lab_method.storing", 0.05):
+        time.sleep(0.3)
+    beats = len(events.named("run_lab_method.storing"))
+    assert beats >= 3
+    time.sleep(0.15)
+    assert len(events.named("run_lab_method.storing")) == beats  # the thread stopped with the block
+
+
+def test_the_least_free_card_decides_and_a_node_without_nvidia_smi_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        rlm.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout="9000\n3000\n")
+    )
+    assert rlm.free_card_mib() == 3000
+
+    def missing(*a: Any, **k: Any) -> Any:
+        raise FileNotFoundError("nvidia-smi")
+
+    monkeypatch.setattr(rlm.subprocess, "run", missing)
+    with pytest.raises(ValueError, match="nvidia-smi"):
+        rlm.free_card_mib()
+
+
+def test_the_scratch_folder_comes_from_the_node_tuning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from protea.config.tuning import get_tuning
+
+    folder = tmp_path / "disk" / "method-scratch"
+    monkeypatch.setenv("PROTEA_TUNING__operation__method_scratch_dir", str(folder))
+    get_tuning.cache_clear()
+    try:
+        assert rlm.scratch_root() == str(folder)
+        assert folder.is_dir()
+    finally:
+        monkeypatch.delenv("PROTEA_TUNING__operation__method_scratch_dir")
+        get_tuning.cache_clear()
 
 
 # The whole job ----------------------------------------------------------------------------
@@ -265,6 +320,7 @@ def node(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(rlm, "image_id_on_node", lambda image: IMAGE_ID)
     monkeypatch.setattr(rlm, "free_card_mib", lambda: state.free)
     monkeypatch.setattr(rlm, "clear_previous_attempt", state.cleared.append)
+    monkeypatch.setattr(rlm, "scratch_root", lambda: None)
     return state
 
 
@@ -300,7 +356,12 @@ def test_a_run_stores_its_outputs_and_enqueues_the_ingestion_as_a_child_job(
     assert run["provenance_key"] in node.store.objects
     (created,) = [o for o in session.added if isinstance(o, JobEvent)]
     assert created.job_id == child.id and created.event == "job.created"
-    assert events.named("run_lab_method.queries") == [{"queries": 2}]
+    assert [e["queries"] for e in events.named("run_lab_method.queries")] == [2]
+    (storing,) = events.named("run_lab_method.storing")
+    assert storing["tsv_bytes"] == len(stored)
+    assert events.named("run_lab_method.stored")
+    log = node.store.objects[run["container_log_key"]]
+    assert b"the method ran on" in log
 
 
 def test_a_busy_card_sends_the_job_back_without_running_anything(
@@ -331,4 +392,28 @@ def test_a_record_that_lies_about_its_output_enqueues_nothing(
     _play(monkeypatch, METHOD, "lab-reader-cut211", "lies")
     with pytest.raises(ValueError, match="predictions sha256"):
         rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=Events())  # type: ignore[arg-type]
+    assert session.added == []
+
+
+def test_a_run_that_leaves_no_record_enqueues_nothing(
+    monkeypatch: pytest.MonkeyPatch, node: SimpleNamespace
+) -> None:
+    session, config_id, start_id = _arm()
+    _play(monkeypatch, METHOD, "lab-reader-cut211", "silent")
+    with pytest.raises(RuntimeError, match="no predictions.json"):
+        rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=Events())  # type: ignore[arg-type]
+    assert session.added == []
+    assert not any(
+        key.startswith("method-runs/") and key.endswith(".tsv") for key in node.store.objects
+    )
+
+
+def test_a_failed_run_keeps_its_log(monkeypatch: pytest.MonkeyPatch, node: SimpleNamespace) -> None:
+    session, config_id, start_id = _arm()
+    _play(monkeypatch, "import sys; print('out of memory in the world model'); sys.exit(1)")
+    events = Events()
+    with pytest.raises(RuntimeError, match="exited 1"):
+        rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=events)  # type: ignore[arg-type]
+    (kept,) = events.named("run_lab_method.container_log")
+    assert b"out of memory in the world model" in node.store.objects[kept["key"]]
     assert session.added == []

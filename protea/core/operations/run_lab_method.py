@@ -18,9 +18,12 @@ makes the run a platform job instead:
 * the container runs with no network, the bundle mounted read only, a memory ceiling, and a
   wall-clock limit, under a name derived from the job, so a retried job first removes what an
   interrupted attempt left running instead of putting a second run on the card;
-* the TSV and its JSON are stored under keys that carry their own hash, and what the JSON says
-  about the query file, the TSV and the method's name must agree with what the platform gave
-  it and measured;
+* the TSV and its JSON are stored under keys that carry their own hash. The JSON is required:
+  it must state the method's name, the cut, the hash of the query file and the hash of the TSV,
+  and each must equal what the platform gave it or measured. A run that leaves no record is
+  not evidence of what ran, so it does not reach the ingestion;
+* the container's log is stored as well, on success and on failure, because when a run dies
+  after hours it is the only account of why;
 * the predictions enter through ``ingest_method_predictions``, enqueued as a child job on
   ``protea.methods.write``, so every gate that operation has still applies.
 
@@ -29,8 +32,12 @@ on 40,531 targets). ``OperationConsumer`` executes on the AMQP thread and acknow
 end, so a message that runs for hours starves the connection's heartbeat, the broker drops the
 connection, and the redelivery runs the container again. A job runs through ``QueueConsumer``,
 which pumps the connection while the operation works and keeps the job's lease alive; the
-operation also emits an event every ten minutes while the container runs, so the job's log says
-it is alive.
+operation also emits an event every ten minutes while the container runs and while its output
+is hashed and uploaded, so the job's log says it is alive and the reaper's stall rule (30 minutes
+without an event once the job is past its hard limit) never reads a long upload as death.
+
+The scratch folder is the node's ``operation.method_scratch_dir`` tuning, because a TSV of
+several GB in a tmpfs sits in memory beside the database.
 
 WHY THE CARD IS CHECKED, NOT LOCKED. The node has one card, and another consumer (the embedding
 batches) uses it. The operation will not start while the card has less free memory than the
@@ -47,13 +54,17 @@ in the payload and mounted read only where the image expects it.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -117,8 +128,9 @@ class RunOutputs:
 
     predictions_key: str
     predictions_sha256: str
-    provenance_key: str | None
+    provenance_key: str
     provenance: dict[str, Any]
+    container_log_key: str | None = None
 
 
 def container_command(p: RunLabMethodPayload, work: Path, name: str) -> list[str]:
@@ -196,15 +208,52 @@ def image_id_on_node(image: str) -> str:
 
 
 def free_card_mib() -> int:
-    """Free memory on the node's card in MiB, as the driver reports it."""
-    proc = subprocess.run(
-        ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=True,
-    )
-    return int(proc.stdout.split()[0])
+    """The least free memory over the node's cards, in MiB: the container is given all of them."""
+    try:
+        proc = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        raise ValueError(f"this node cannot read a card with nvidia-smi: {exc}") from exc
+    return min(int(line) for line in proc.stdout.split())
+
+
+def scratch_root() -> str | None:
+    """The folder runs work in: the node's tuning, else the system's temporary folder.
+
+    A method's TSV can be several GB, and on a node whose temporary folder is a tmpfs it
+    would sit in memory beside the database, so a node sets
+    ``PROTEA_TUNING__operation__method_scratch_dir`` to a folder on disk.
+    """
+    from protea.config.tuning import get_tuning
+
+    root = get_tuning().operation.method_scratch_dir
+    if root:
+        Path(root).mkdir(parents=True, exist_ok=True)
+    return root
+
+
+@contextmanager
+def beating(emit: EmitFn, event: str, every: float) -> Iterator[None]:
+    """Emit ``event`` every ``every`` seconds while the block runs, so a long step shows it is alive."""
+    stop = threading.Event()
+    started = time.monotonic()
+
+    def beat() -> None:
+        while not stop.wait(every):
+            emit(event, None, {"elapsed_seconds": round(time.monotonic() - started)}, "info")
+
+    thread = threading.Thread(target=beat, name=f"beat-{event}", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
 
 
 def clear_previous_attempt(name: str) -> None:
@@ -266,37 +315,66 @@ def store_outputs(store: Any, p: RunLabMethodPayload, work: Path) -> RunOutputs:
         raise RuntimeError("the container exited 0 and wrote no predictions.tsv")
     sha = sha256_of(tsv)
     key = content_key(p, "predictions", sha, ".tsv")
-    store.put(key, tsv)
     side = work / "out" / "predictions.json"
     if not side.is_file():
-        return RunOutputs(key, sha, None, {})
+        raise RuntimeError(
+            "the container wrote no predictions.json beside its TSV: the record of what ran is "
+            "part of the contract, and a run without it is not evidence"
+        )
     record = json.loads(side.read_text())
+    if not isinstance(record, dict):
+        raise RuntimeError("predictions.json is not a JSON object")
+    store.put(key, tsv)
     side_key = content_key(p, "provenance", sha256_of(side), ".json")
     store.put(side_key, side)
-    return RunOutputs(key, sha, side_key, record if isinstance(record, dict) else {})
+    return RunOutputs(key, sha, side_key, record)
+
+
+def keep_log(store: Any, p: RunLabMethodPayload, log: Path, emit: EmitFn) -> str | None:
+    """Store the container's log, the only evidence of why a long run died. Never raises."""
+    if not log.is_file():
+        return None
+    try:
+        key = content_key(p, "container-log", sha256_of(log), ".txt")
+        store.put(key, log)
+    except Exception as exc:  # a lost log must not hide the run's own error
+        emit("run_lab_method.container_log_lost", str(exc)[-300:], {}, "warning")
+        return None
+    emit("run_lab_method.container_log", None, {"key": key, "bytes": log.stat().st_size}, "info")
+    return key
+
+
+def stated(record: dict[str, Any]) -> dict[str, Any]:
+    """The four facts a method's record must state, read from the lab's contract layout."""
+    query = record.get("query_file")
+    written = record.get("predictions")
+    return {
+        "name": record.get("name"),
+        "cut": record.get("cut"),
+        "query file sha256": query[1] if isinstance(query, list) and len(query) == 2 else None,
+        "predictions sha256": written.get("sha256") if isinstance(written, dict) else None,
+    }
 
 
 def check_provenance(p: RunLabMethodPayload, out: RunOutputs) -> None:
-    """What the method recorded about its run must be what the platform gave it and measured."""
-    record = out.provenance
-    query = record.get("query_file")
-    if isinstance(query, list) and len(query) == 2 and query[1] != p.queries_fasta_sha256:
+    """The method's record must state what it ran on and wrote, and agree with the platform."""
+    facts = stated(out.provenance)
+    missing = [fact for fact, value in facts.items() if value is None]
+    if missing:
         raise ValueError(
-            f"the method records query file sha256 {query[1]}; the platform gave it "
-            f"{p.queries_fasta_sha256}"
+            f"the method's record does not state its {', '.join(missing)}, and the record is "
+            "the evidence of what ran"
         )
-    written = record.get("predictions")
-    declared = written.get("sha256") if isinstance(written, dict) else None
-    if declared is not None and declared != out.predictions_sha256:
-        raise ValueError(
-            f"the method records predictions sha256 {declared}; the file stored is "
-            f"{out.predictions_sha256}"
-        )
-    name = record.get("name")
-    if name is not None and name != p.method_name:
-        raise ValueError(
-            f"the method calls itself {name!r}; the payload names the arm {p.method_name!r}"
-        )
+    measured = {
+        "name": p.method_name,
+        "cut": p.cut,
+        "query file sha256": p.queries_fasta_sha256,
+        "predictions sha256": out.predictions_sha256,
+    }
+    wrong = [f"{fact} {facts[fact]!r}, the platform has {want!r}"
+             for fact, want in measured.items() if facts[fact] != want]  # fmt: skip
+    if wrong:
+        raise ValueError(f"the method's record disagrees with the platform: {'; '.join(wrong)}")
 
 
 def ingest_payload(p: RunLabMethodPayload, out: RunOutputs, run: dict[str, Any]) -> dict[str, Any]:
@@ -346,12 +424,22 @@ def _artifact_store() -> Any:
 def run_in_scratch(p: RunLabMethodPayload, name: str, emit: EmitFn) -> tuple[RunOutputs, int]:
     """Fetch, run and store inside a scratch folder that is gone when this returns."""
     store = _artifact_store()
-    with tempfile.TemporaryDirectory(prefix="protea-method-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="protea-method-", dir=scratch_root()) as scratch:
         work = Path(scratch)
         queries = fetch_queries(store, p, work)
-        emit("run_lab_method.queries", f"{queries} queries", {"queries": queries}, "info")
-        run_container(p, work, name, emit)
-        return store_outputs(store, p, work), queries
+        fields = {"queries": queries, "scratch": scratch}
+        emit("run_lab_method.queries", f"{queries} queries", fields, "info")
+        try:
+            run_container(p, work, name, emit)
+        finally:
+            log_key = keep_log(store, p, work / "container.log", emit)
+        tsv = work / "out" / "predictions.tsv"
+        size = tsv.stat().st_size if tsv.is_file() else 0
+        emit("run_lab_method.storing", None, {"tsv_bytes": size}, "info")
+        with beating(emit, "run_lab_method.storing", HEARTBEAT_SECONDS):
+            out = store_outputs(store, p, work)
+        emit("run_lab_method.stored", None, {"predictions_uri": out.predictions_key}, "info")
+        return dataclasses.replace(out, container_log_key=log_key), queries
 
 
 class RunLabMethodOperation:
@@ -394,6 +482,7 @@ class RunLabMethodOperation:
             "queries_fasta_uri": p.queries_fasta_uri,
             "queries_fasta_sha256": p.queries_fasta_sha256,
             "provenance_key": out.provenance_key,
+            "container_log_key": out.container_log_key,
             "seconds": round(time.monotonic() - started),
         }
         parent = uuid.UUID(job_id) if job_id else None

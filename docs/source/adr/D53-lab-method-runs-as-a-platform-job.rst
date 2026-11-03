@@ -31,8 +31,12 @@ ingestion.
 1. **It is a job on a new queue, ``protea.methods``, consumed by the node with the card.**
    Not an operation message: ``OperationConsumer`` executes on the AMQP thread and
    acknowledges at the end, so a run of hours would lose its connection and be delivered
-   again. ``QueueConsumer`` pumps the connection and renews the job's lease while the
-   operation works, and the operation emits ``run_lab_method.running`` every ten minutes.
+   again: the broker closes it after two missed heartbeats of 600 s, so an operation message
+   has 1,200 s. ``QueueConsumer`` pumps the connection every 5 s and renews the job's lease
+   while the operation works, and the operation emits an event every ten minutes while the
+   container runs and while its output is hashed and uploaded. Past the reaper's hard limit
+   a job stays alive while it has emitted within 1,800 s, so a 12 h run keeps a margin of
+   three.
 2. **The queries come from the store by key and sha256.** The FASTA is the one
    ``export_evaluation_targets`` publishes for an evaluation set, so the method and the
    evaluator score one population by construction.
@@ -47,10 +51,15 @@ ingestion.
    payload asks for, the job raises ``RetryLaterError`` and comes back ten minutes later.
    The operation does not stop or pause other consumers.
 6. **The outputs are stored by content.** The TSV and the JSON go to the store under keys
-   that carry their hash (``method-runs/<name>/cut<C>/predictions-<hash16>.tsv``).
-7. **The method's record is checked against what the platform measured.** When the JSON
-   names a query file hash, a TSV hash or a method name, each must equal the one the
-   platform gave or measured.
+   that carry their hash (``method-runs/<name>/cut<C>/predictions-<hash16>.tsv``), and so
+   does the container's log, on success and on failure: when a run dies after hours it is
+   the only account of why.
+7. **The method's record is required and checked.** The JSON must state the method's name,
+   the cut, the hash of the query file and the hash of the TSV, and each must equal what
+   the platform gave or measured. A run that leaves no record, or a record that leaves one
+   of the four out, is refused before anything is stored for the ingestion: the record is
+   the evidence of what ran. (In the ingestion the record stays what it was, a block of
+   provenance, not a gate.)
 8. **The ingestion is a child job.** ``ingest_method_predictions`` is enqueued on
    ``protea.methods.write`` with ``parent_job_id`` set. Its ``method`` block is the
    method's record plus ``platform_run`` (job, node, image, image id, query file and its
@@ -73,6 +82,10 @@ What this does not decide
   the start does not stop an embedding batch from starting during the run. Until a shared
   lock exists, a method run and a corpus pass are not scheduled on the same node at the
   same time.
+
+The scratch folder where a run writes its queries, its output and its log is the node's
+``operation.method_scratch_dir`` tuning. A method's TSV can be several GB, and in a tmpfs it
+would sit in memory beside the database.
 
 Consequences
 ~~~~~~~~~~~~
