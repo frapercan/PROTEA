@@ -83,6 +83,8 @@ def main() -> None:
     _OPERATION_QUEUES = {
         "protea.embeddings.batch",
         "protea.embeddings.write",
+        # The node's own upload stage: shards a card batch spooled on this disk (ADR-D51).
+        "protea.embeddings.upload",
         "protea.predictions.batch",
         "protea.predictions.write",
         # Export minijob pipeline sub-queues (PROTEA_EXPORT_MINIJOBS=1).

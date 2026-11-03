@@ -1918,6 +1918,16 @@ sequence and advances the parent job, as ``store_embeddings`` does for
 ``compute_embeddings``. :func:`protea.core.residue_codes.load_residue_codes` reads the
 codes back.
 
+**Where the shard goes first.** A node that sets ``operation.residue_shard_spool_dir``
+does not put the shard in the store from the card's loop: the batch writes it to that
+folder on the node's disk (whole, flushed, renamed into place) and publishes its message to
+``upload_residue_shard`` on ``protea.embeddings.upload`` instead, so the card encodes the
+next batch while the shard goes out. On 2026-11-03 the inline put took 35 % of every batch
+of the corpus pass, with the card idle throughout. A batch that finds less than
+``operation.residue_shard_spool_min_free_gib`` free on the spool's file system fails before
+it spends the card, because the spool only grows when nothing uploads it. A node that sets
+no spool keeps the inline put.
+
 **The card is one resource.** ``compute_embeddings``, ``encode_residue_vocabulary`` and
 ``encode_residue_sparse`` all send their batches to ``protea.embeddings.batch``, which the
 same card consumes, and each coordinator checks the card before it dispatches
@@ -1947,6 +1957,42 @@ Payload fields
      - Residues per backend call, which bounds the host copy of the states (default 32768).
    * - ``sequence_id_limit``
      - Optional cap on the sequences encoded, for trials.
+
+
+upload_residue_shard
+--------------------
+
+The upload stage of a node that spools its residue-code shards (ADR-D51, amended on
+2026-11-03). A second worker of the node with the card, on ``protea.embeddings.upload``
+and with no card, reads a shard that ``encode_residue_vocabulary_batch`` wrote to the
+node's ``operation.residue_shard_spool_dir``, checks its sha256, puts it in the artifact
+store, removes the file, and only then publishes the message to ``store_residue_codes``
+that the batch built and carried inside its own. The server therefore never indexes a shard
+the store does not hold, as with the inline put.
+
+A delivery that finds no file belongs to an earlier one that put the shard and died before
+its acknowledgement: when the store holds bytes with the shard's sha256 under its key, the
+message to the server is published again; otherwise the shard is lost, the delivery fails,
+and the batch's sequences stay pending for the next run of the pass. A key that could name
+a file outside the spool is refused, and the message to the server must name the same shard
+and validate against ``store_residue_codes``'s own payload model before anything is put.
+
+Both workers of the node must see the same spool folder. A node whose upload worker does
+not set it refuses every upload.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``shard_key`` and ``shard_sha256``
+     - The shard's key in the store (under ``residue-codes/``) and the sha256 of its bytes.
+   * - ``store``
+     - The ``store_residue_codes`` payload, published unchanged once the shard is in the store.
 
 
 run_lab_method

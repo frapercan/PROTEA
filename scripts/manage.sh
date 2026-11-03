@@ -167,6 +167,8 @@ cmd_start() {
             poetry run python scripts/worker.py --queue protea.embeddings.batch
     done
     _start_bg worker-embeddings-write  poetry run python scripts/worker.py --queue protea.embeddings.write
+    # Idle unless operation.residue_shard_spool_dir is set: then the batches spool their shards here.
+    _start_bg worker-embeddings-upload poetry run python scripts/worker.py --queue protea.embeddings.upload
 
     # Predictions pipeline
     printf "\n${BOLD}[6] Predictions pipeline${RESET}\n"

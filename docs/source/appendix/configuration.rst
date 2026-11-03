@@ -222,6 +222,10 @@ credentials ``guest`` / ``guest``). The ten PROTEA queues are:
    * - ``protea.embeddings.write``
      - OperationConsumer
      - ``store_embeddings``: bulk pgvector insert (ephemeral)
+   * - ``protea.embeddings.upload``
+     - OperationConsumer
+     - ``upload_residue_shard``: on the node with the card, puts spooled residue-code shards
+       in the artifact store (ephemeral)
    * - ``protea.predictions``
      - QueueConsumer
      - ``predict_go_terms`` coordinator

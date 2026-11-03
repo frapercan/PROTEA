@@ -83,6 +83,9 @@ logs/frontend.log               ← Next.js dev server
 - `protea.embeddings` → compute_embeddings coordinator (serialized: one at a time, retries with 60s delay if GPU busy)
 - `protea.embeddings.batch` → compute_embeddings_batch (GPU inference; OperationConsumer, no DB Job row)
 - `protea.embeddings.write` → store_embeddings (bulk pgvector insert; OperationConsumer)
+- `protea.embeddings.upload` → upload_residue_shard (on the node with the card: puts the residue-code
+  shards its batches spooled in `operation.residue_shard_spool_dir` in the artifact store, then hands
+  each to `store_residue_codes`; OperationConsumer; ADR-D51)
 - `protea.predictions` → predict_go_terms coordinator (partitions queries into batches and dispatches them to `protea.predictions.batch`)
 - `protea.predictions.batch` → predict_go_terms_batch (KNN + GO transfer; OperationConsumer, no DB Job row)
 - `protea.predictions.write` → store_predictions (bulk GOPrediction insert; OperationConsumer)
