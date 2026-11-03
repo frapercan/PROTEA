@@ -30,10 +30,10 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.contracts.parent_progress import update_parent_progress
+from protea.core.operations._parent_guard import parent_cancelled
 from protea.core.residue_code_shards import Shard, unpack_shard
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.residue_code import ResidueCode as ResidueCodeRow
-from protea.infrastructure.orm.models.job import Job, JobStatus
 
 #: The queue the server's writer consumes, shared with ``store_embeddings``.
 WRITE_QUEUE = "protea.embeddings.write"
@@ -131,14 +131,7 @@ class StoreResidueCodesOperation:
     ) -> OperationResult:
         p = StoreResidueCodesPayload.model_validate(contract_payload(payload))
         parent_job_id = uuid.UUID(p.parent_job_id)
-        parent = session.get(Job, parent_job_id)
-        if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit(
-                "store_residue_codes.skipped",
-                None,
-                {"reason": "parent_not_running", "parent_status": parent.status.value},
-                "warning",
-            )
+        if parent_cancelled(session, p.parent_job_id, emit, "store_residue_codes"):
             return OperationResult(result={"skipped": True})
         shard = unpack_shard(_artifact_store().get(p.shard_key), p.shard_sha256)
         check_shard(shard, p)

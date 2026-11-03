@@ -50,6 +50,7 @@ from protea.core.operations._encoder_artifact import (
     resolve_encoder_artifact,
     resolve_training_cut,
 )
+from protea.core.operations._parent_guard import parent_cancelled
 from protea.core.operations.store_residue_codes import WRITE_QUEUE
 from protea.core.residue_code_shards import pack_shard
 from protea.core.residue_vocabulary import (
@@ -62,7 +63,6 @@ from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.residue_code import ResidueCode as ResidueCodeRow
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
-from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 #: Backend tag on the produced config: the producer, not an architecture.
@@ -509,20 +509,6 @@ def build_store_message(
     )
 
 
-def _parent_stopped(session: Session, parent_job_id: str, emit: EmitFn) -> bool:
-    """Whether the coordinator was cancelled or failed, in which case the batch does nothing."""
-    parent = session.get(Job, uuid.UUID(parent_job_id)) if parent_job_id else None
-    if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-        emit(
-            "encode.skipped",
-            None,
-            {"reason": "parent_not_running", "parent_status": parent.status.value},
-            "warning",
-        )
-        return True
-    return False
-
-
 class EncodeResidueVocabularyBatchOperation(Operation):
     """One batch of sequences, encoded where the card is."""
 
@@ -541,7 +527,7 @@ class EncodeResidueVocabularyBatchOperation(Operation):
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")
         target_id = uuid.UUID(p.target_embedding_config_id)
-        if _parent_stopped(session, p.parent_job_id, emit):
+        if parent_cancelled(session, p.parent_job_id, emit, "encode"):
             return OperationResult(result={"skipped": True})
         pending = _pending_in_batch(session, p, target_id)
         if not pending:
