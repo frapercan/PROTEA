@@ -172,3 +172,23 @@ def test_the_dense_symbols_of_an_empty_code_are_empty():
     )
     assert code.residues == 2 and code.entries == 0
     assert not code.symbols(5).any()
+
+
+def test_chunking_the_elementwise_steps_changes_no_code(vectors, monkeypatch):
+    import protea.core.residue_vocabulary as rv
+
+    voc = _vocabulary(vectors)
+    x = torch.from_numpy(vectors["x"])
+    whole = voc.encode(x)
+    monkeypatch.setattr(rv, "CHUNK_ROWS", 7)
+    chunked = voc.encode(x)
+    assert np.array_equal(whole.features, chunked.features)
+    assert np.array_equal(whole.levels, chunked.levels)
+    assert np.array_equal(whole.offsets, chunked.offsets)
+    assert torch.equal(voc.symbols(x), torch.from_numpy(vectors["symbols"]))
+
+
+def test_a_sequence_without_residues_has_an_empty_code(vectors):
+    voc = _vocabulary(vectors)
+    code = voc.encode(torch.zeros(0, voc.in_dim))
+    assert code.residues == 0 and code.entries == 0

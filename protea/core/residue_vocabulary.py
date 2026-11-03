@@ -59,6 +59,10 @@ REQUIRED_META = (
     "training_release",
 )
 
+#: Residues per chunk of the elementwise steps that follow the product. Bounds their memory
+#: at CHUNK_ROWS x dict_dim, and chunking an elementwise step changes no value.
+CHUNK_ROWS = 2048
+
 #: The arrays the artifact must carry, with their shapes in terms of the meta.
 REQUIRED_ARRAYS = (
     "encoder_weight_t",
@@ -233,27 +237,48 @@ class ResidueVocabulary:
         return (x - self._bd) @ self._we_t + self._be
 
     def symbols_of(self, p: Any) -> Any:
-        """Level symbols ``(residues, dict_dim)`` from pre-activations: 0 inactive, 1..levels active."""
+        """Level symbols ``(residues, dict_dim)`` as int16: 0 inactive, 1..levels active.
+
+        Elementwise, in chunks of :data:`CHUNK_ROWS` residues: a 36000-residue protein has
+        295 million entries, and holding them as int64 with their temporaries does not fit a
+        12 GB card. Chunking an elementwise step changes no value.
+        """
         import torch
 
-        s = torch.floor(p / self._range * self.n_levels).clamp(0, self.n_levels - 1).long() + 1
-        return torch.where(p > self._threshold, s, torch.zeros_like(s))
+        out = torch.empty(tuple(p.shape), dtype=torch.int16, device=p.device)
+        for a in range(0, p.shape[0], CHUNK_ROWS):
+            pc = p[a : a + CHUNK_ROWS]
+            s = torch.floor(pc / self._range * self.n_levels).clamp(0, self.n_levels - 1) + 1
+            out[a : a + CHUNK_ROWS] = torch.where(pc > self._threshold, s, 0.0).to(torch.int16)
+        return out
 
     def symbols(self, x: Any) -> Any:
         """Level symbols of a standardised input."""
         return self.symbols_of(self.preactivation(x))
 
     def encode(self, x: Any) -> ResidueCode:
-        """The code of a standardised input ``(residues, in_dim)``."""
+        """The code of a standardised input ``(residues, in_dim)``.
+
+        The product runs ONCE for the whole sequence, as the lab computed it, because the
+        card may choose another reduction order for another number of rows and so change
+        a last bit. What follows it is elementwise and runs in chunks of residues.
+        """
         import torch
 
-        s = self.symbols(x)
-        r, c = torch.nonzero(s, as_tuple=True)
-        counts = torch.bincount(r, minlength=s.shape[0]).cpu().numpy()
+        p = self.preactivation(x)
+        feats, levels, counts = [], [], []
+        for a in range(0, p.shape[0], CHUNK_ROWS):
+            s = self.symbols_of(p[a : a + CHUNK_ROWS])
+            r, c = torch.nonzero(s, as_tuple=True)
+            counts.append(torch.bincount(r, minlength=s.shape[0]).cpu().numpy())
+            feats.append(c.to(torch.int16).cpu().numpy())
+            levels.append((s[r, c] - 1).to(torch.uint8).cpu().numpy())
+        if not counts:
+            return ResidueCode(np.zeros(0, np.int16), np.zeros(0, np.uint8), np.zeros(1, np.int64))
         return ResidueCode(
-            features=c.to(torch.int16).cpu().numpy(),
-            levels=(s[r, c] - 1).to(torch.uint8).cpu().numpy(),
-            offsets=np.concatenate([[0], np.cumsum(counts)]).astype(np.int64),
+            features=np.concatenate(feats),
+            levels=np.concatenate(levels),
+            offsets=np.concatenate([[0], np.cumsum(np.concatenate(counts))]).astype(np.int64),
         )
 
     def encode_states(self, layer_states: Sequence[Any]) -> ResidueCode:
