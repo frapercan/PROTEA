@@ -191,6 +191,46 @@ The two cheap measurements that come first are the agreement between the code of
 whole protein and the code of overlapping windows of it, and the feature usage by length
 band (active features per residue and which features appear).
 
+Measured on 2026-11-03 on the 211 label set's sequences, with the vocabulary this record deploys: the code of
+the whole protein against the code of overlapping windows of 1021 residues (stride 511,
+each residue from the window where it is most central).
+
+.. list-table::
+   :header-rows: 1
+
+   * - Length band
+     - Proteins
+     - Active features per residue, whole / windows
+     - Active decisions that differ
+     - Mean per-residue Jaccard
+   * - 1000 to 1999 (control)
+     - 150
+     - 117.8 / 119.2
+     - 11.3 %
+     - 0.894
+   * - 3000 to 4999
+     - 150
+     - 109.5 / 116.8
+     - 35.7 %
+     - 0.708
+   * - 5000 to 7999
+     - 150
+     - 105.5 / 114.8
+     - 40.4 %
+     - 0.679
+   * - 8000 or more
+     - 63
+     - 102.3 / 113.5
+     - 50.7 %
+     - 0.619
+
+Part of the gap is expected, since windows remove more context from longer proteins.
+The falling activation of the whole-protein code is the warning: it says the states of
+very long proteins drift away from the regime the vocabulary was fitted in, while the
+window code stays where ordinary proteins are. Whether whole or windowed codes carry
+function better for long proteins is decided on the frame. Until then the long band is
+reported apart and nothing is claimed for it.
+
 Consequences
 ~~~~~~~~~~~~
 
