@@ -81,6 +81,15 @@ class StaleJobReaperConfig:
     #: requeue budget (``max_lease_requeues``) remains the real backstop
     #: for genuinely dead jobs that stop emitting entirely.
     event_grace_seconds: int = 2700
+    #: ``stall_seconds`` for a DEFERRED coordinator, recognised by its
+    #: ``job.dispatched`` event. Its own work is finished when it defers -- the
+    #: children do the rest on another queue -- so the silence this measures is
+    #: not the coordinator failing to make progress, it is somebody else's pause.
+    #: A compute node that cedes its card for two hours leaves the coordinator
+    #: without events while nothing is wrong with it. Defaults to 21600s (6h),
+    #: the same order as ``timeout_seconds``, rather than the 1800s a job that
+    #: is doing its own work gets.
+    deferred_stall_seconds: int = 21600
 
     def to_timedeltas(self) -> tuple[timedelta, timedelta, timedelta, timedelta]:
         """Return (timeout, stall, queued_stall, event_grace) as timedeltas."""
@@ -91,6 +100,13 @@ class StaleJobReaperConfig:
             timedelta(seconds=self.event_grace_seconds),
         )
 
+
+#: What ``base_worker`` writes when an operation returns ``deferred``: the one
+#: place that event is emitted, so its presence is the only honest way to tell a
+#: coordinator waiting on its own children from a row that predates leasing.
+#: Both have ``leased_until IS NULL``, and until this constant was read here the
+#: reaper judged them by the same 1800s window.
+DISPATCHED_EVENT = "job.dispatched"
 
 #: Event name written every time the reaper re-enqueues a lease-expired job.
 #: Counted by :meth:`StaleJobReaper._lease_requeue_attempts` to honour the
@@ -176,6 +192,7 @@ class StaleJobReaper:
             self._queued_stall,
             self._event_grace,
         ) = cfg.to_timedeltas()
+        self._deferred_stall = timedelta(seconds=cfg.deferred_stall_seconds)
         self._max_lease_requeues = max(0, int(cfg.max_lease_requeues))
         self._max_queue_requeues = max(0, int(cfg.max_queue_requeues))
         self._stop = False
@@ -252,10 +269,44 @@ class StaleJobReaper:
         last_event_ts = (
             session.query(func.max(JobEvent.ts)).filter(JobEvent.job_id == job.id).scalar()
         )
+        # A DEFERRED COORDINATOR IS NOT A LEGACY ROW, and until this branch
+        # existed both were judged by ``stall_seconds``. ``leased_until IS NULL``
+        # names two different things: a row written before the leasing column,
+        # and a coordinator that cleared its lease on purpose because its own
+        # work is done and its children carry the rest on another queue
+        # (``base_worker``: ``job.leased_until = None`` once ``result.deferred``,
+        # with the comment that the event path is what should keep it alive).
+        #
+        # For the second one, silence measures ANOTHER machine's pause. Measured:
+        # ``b185a6d0`` started 2026-10-30 11:26 and was failed here at 17:26,
+        # six hours to the minute, with ``error_code = lease_expired``; seven of
+        # its batches were then discarded on 10-31 as ``parent_not_running``. The
+        # compute node cedes its card for two and three hours at a time, which is
+        # four times the 1800s a coordinator doing its own work is allowed, so
+        # the window was never the right size for this shape of job.
+        if job.leased_until is None and self._is_deferred_coordinator(session, job.id):
+            if last_event_ts is not None and last_event_ts > now - self._deferred_stall:
+                logger.debug(
+                    "Reaper skipped deferred coordinator inside its own window. "
+                    "job_id=%s operation=%s last_event=%s window=%ss",
+                    job.id,
+                    job.operation,
+                    last_event_ts,
+                    self._deferred_stall.total_seconds(),
+                )
+                return 0
+            logger.warning(
+                "Deferred coordinator silent past its window; falling through to the "
+                "requeue ladder. job_id=%s operation=%s last_event=%s window=%ss",
+                job.id,
+                job.operation,
+                last_event_ts,
+                self._deferred_stall.total_seconds(),
+            )
         # Legacy ``stall_seconds`` grace: only honoured when the row has
         # no lease (pre-F-OPS-JOBS.1). A legacy row that has not emitted any
         # event inside the stall window is stalled.
-        if job.leased_until is None and last_event_ts is not None and last_event_ts > stall_cutoff:
+        elif job.leased_until is None and last_event_ts is not None and last_event_ts > stall_cutoff:
             logger.debug(
                 "Reaper skipped live legacy job. job_id=%s operation=%s last_event=%s",
                 job.id,
@@ -424,6 +475,20 @@ class StaleJobReaper:
                 "Re-publish of orphaned QUEUED job failed. job_id=%s error=%s", job.id, exc
             )
             return 0
+
+    def _is_deferred_coordinator(self, session: Session, job_id) -> bool:
+        """Whether this job ever deferred, which is the only record that it did.
+
+        One ``EXISTS`` against ``ix_job_event_job_id_event``, which covers
+        ``(job_id, event)``, so this costs an index probe per candidate and
+        candidates are rare by construction.
+        """
+        return (
+            session.query(JobEvent.id)
+            .filter(JobEvent.job_id == job_id, JobEvent.event == DISPATCHED_EVENT)
+            .first()
+            is not None
+        )
 
     def _lease_requeue_attempts(self, session: Session, job_id) -> int:
         """Count prior lease-expiry re-enqueues for ``job_id``."""

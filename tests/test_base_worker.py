@@ -311,6 +311,13 @@ class TestStaleJobReaper:
         session.query.return_value.filter.return_value.all.return_value = [stale_job]
         # No recent events → scalar() returns None → job qualifies for reaping.
         session.query.return_value.filter.return_value.scalar.return_value = None
+        # LEGACY AND NOT DEFERRED, which the double now has to be able to say.
+        # The reaper asks whether the job ever emitted ``job.dispatched``, and a
+        # bare MagicMock answers every call, so without this line ``first()``
+        # returns a mock, the row reads as a coordinator waiting on its children
+        # and gets the six-hour window instead of the thirty-minute one these
+        # three tests are about.
+        session.query.return_value.filter.return_value.first.return_value = None
         factory = MagicMock(return_value=session)
 
         # No amqp_url → reaper has no re-enqueue path, falls straight to FAILED.
@@ -341,6 +348,13 @@ class TestStaleJobReaper:
         session.query.return_value.filter.return_value.scalar.return_value = datetime.now(
             UTC
         ) - timedelta(minutes=5)
+        # LEGACY AND NOT DEFERRED, which the double now has to be able to say.
+        # The reaper asks whether the job ever emitted ``job.dispatched``, and a
+        # bare MagicMock answers every call, so without this line ``first()``
+        # returns a mock, the row reads as a coordinator waiting on its children
+        # and gets the six-hour window instead of the thirty-minute one these
+        # three tests are about.
+        session.query.return_value.filter.return_value.first.return_value = None
         factory = MagicMock(return_value=session)
 
         reaper = StaleJobReaper(
@@ -372,6 +386,13 @@ class TestStaleJobReaper:
             datetime.now(UTC) - timedelta(hours=2),
             0,
         ]
+        # LEGACY AND NOT DEFERRED, which the double now has to be able to say.
+        # The reaper asks whether the job ever emitted ``job.dispatched``, and a
+        # bare MagicMock answers every call, so without this line ``first()``
+        # returns a mock, the row reads as a coordinator waiting on its children
+        # and gets the six-hour window instead of the thirty-minute one these
+        # three tests are about.
+        session.query.return_value.filter.return_value.first.return_value = None
         factory = MagicMock(return_value=session)
 
         reaper = StaleJobReaper(
