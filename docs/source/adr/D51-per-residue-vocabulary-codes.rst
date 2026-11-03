@@ -191,7 +191,7 @@ The two cheap measurements that come first are the agreement between the code of
 whole protein and the code of overlapping windows of it, and the feature usage by length
 band (active features per residue and which features appear).
 
-Measured on 2026-11-03 on the 211 label set's sequences, with vocabulary v1: the code of
+Measured on 2026-11-03 on the 211 label set's sequences, with the vocabulary this record deploys: the code of
 the whole protein against the code of overlapping windows of 1021 residues (stride 511,
 each residue from the window where it is most central).
 
