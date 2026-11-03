@@ -258,6 +258,29 @@ def build_messages(
     ]
 
 
+def dispatched_result(
+    messages: list[tuple[str, dict[str, Any]]], sequences: int, target_id: uuid.UUID, digest: str
+) -> OperationResult:
+    """The coordinator's result: deferred, so the job stays RUNNING until the last write.
+
+    ``store_residue_codes`` advances the parent once per batch and closes it on the last
+    one, as ``store_embeddings`` does for ``compute_embeddings``. Without ``deferred`` the
+    worker marked the job SUCCEEDED the moment the batches were published, so the job's
+    state said nothing about whether any code had been written.
+    """
+    return OperationResult(
+        result={
+            "batches": len(messages),
+            "sequences": sequences,
+            "embedding_config_id": str(target_id),
+            "vocabulary_sha256": digest,
+        },
+        progress_total=len(messages),
+        publish_operations=messages,
+        deferred=True,
+    )
+
+
 def _ensure_target_config(
     session: Session, meta: dict[str, Any], source: EmbeddingConfig, digest: str
 ) -> uuid.UUID:
@@ -387,16 +410,7 @@ class EncodeResidueVocabularyOperation(Operation):
                 }
             )
         messages = build_messages(p, parent_job_id, source.id, target_id, pending)
-        return OperationResult(
-            result={
-                "batches": len(messages),
-                "sequences": len(pending),
-                "embedding_config_id": str(target_id),
-                "vocabulary_sha256": digest,
-            },
-            progress_total=len(messages),
-            publish_operations=messages,
-        )
+        return dispatched_result(messages, len(pending), target_id, digest)
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         return (
