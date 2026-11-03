@@ -38,13 +38,15 @@ def _scope(_factory):
 def client():
     app = FastAPI()
     app.state.session_factory = MagicMock()
+    app.state.settings = MagicMock()
     app.include_router(router_module.router)
     with (
         patch.object(router_module, "session_scope", side_effect=_scope),
-        patch.object(router_module, "get_artifact_store", return_value=MagicMock()),
-        patch.object(router_module, "load_settings", return_value=MagicMock()),
+        patch.object(router_module, "get_artifact_store", return_value=MagicMock()) as store,
     ):
-        yield TestClient(app)
+        client = TestClient(app)
+        client.store_factory = store  # type: ignore[attr-defined]
+        yield client
 
 
 def test_the_listing_passes_the_kind_through(client) -> None:
@@ -122,6 +124,17 @@ def test_a_part_of_the_wrong_size_is_422(client) -> None:
     with patch.object(svc, "put_part", side_effect=svc.WeightsError("part 3 has 3 bytes")):
         response = client.put("/model-weights/uploads/x/parts/3", content=b"abc")
     assert response.status_code == 422
+
+
+def test_the_store_comes_from_the_application_settings(client) -> None:
+    """Not from a settings load without a project root, which raises: the store is built
+    from the settings the application was started with."""
+    with (
+        patch.object(svc, "complete_upload", return_value=MagicMock()),
+        patch.object(svc, "weights_dict", return_value=ROW),
+    ):
+        client.post("/model-weights/uploads/6b1f0c9e-1d3a-4c55-9a0e-6e0c5d7f2a11/complete")
+    assert client.store_factory.call_args.args[0] is client.app.state.settings
 
 
 def test_completing_an_upload_registers_it(client) -> None:

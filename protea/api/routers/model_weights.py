@@ -23,10 +23,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.deps import get_session_factory
+from protea.api.deps import get_session_factory, get_settings
 from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.infrastructure.session import session_scope
-from protea.infrastructure.settings import load_settings
+from protea.infrastructure.settings import Settings
 from protea.infrastructure.storage import get_artifact_store
 from protea.services import model_weights_service as svc
 
@@ -142,10 +142,11 @@ def get_model_weights(
 def register_model_weights_by_reference(
     body: RegisterByReferenceRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
+    settings: Settings = Depends(get_settings),
     principal: Any = Depends(require_role(ROLE_OPERATOR)),
 ) -> dict[str, Any]:
     """Hash the object in the store and register it if it matches the sha256 given."""
-    store = get_artifact_store(load_settings())
+    store = get_artifact_store(settings)
     try:
         with session_scope(factory) as session:
             row = svc.register_by_reference(
@@ -193,9 +194,10 @@ async def put_model_weights_part(upload_id: str, n: int, request: Request) -> di
 def complete_model_weights_upload(
     upload_id: str,
     factory: sessionmaker[Session] = Depends(get_session_factory),
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     """The registered weight; the upload is removed whether this succeeds or fails."""
-    store = get_artifact_store(load_settings())
+    store = get_artifact_store(settings)
     try:
         with session_scope(factory) as session:
             row = svc.complete_upload(session, store, upload_id)
