@@ -26,7 +26,6 @@ import json
 import math
 import re
 import shutil
-import tempfile
 import time
 import uuid
 from collections.abc import Iterable
@@ -290,13 +289,35 @@ def register_by_reference(
 # ── Uploads in parts ──────────────────────────────────────────────────────────
 
 
+#: Where uploads go when ``api.weights_upload_dir`` is unset: the API user's cache
+#: folder, on disk. Not the system temporary folder, which on the API host is a tmpfs:
+#: an upload there takes RAM from the machine that runs Postgres, RabbitMQ and MinIO.
+DEFAULT_UPLOAD_ROOT = Path.home() / ".cache" / "protea" / "weights-uploads"
+
+#: Room kept free beyond the file itself while an upload is open.
+UPLOAD_HEADROOM_BYTES = 1 << 30
+
+
 def upload_root() -> Path:
     configured = get_tuning().api.weights_upload_dir
-    root = (
-        Path(configured) if configured else Path(tempfile.gettempdir()) / "protea-weights-uploads"
-    )
+    root = Path(configured) if configured else DEFAULT_UPLOAD_ROOT
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _refuse_without_room(root: Path, size_bytes: int) -> None:
+    """Refuse an upload the disk cannot hold, before any byte is sent.
+
+    The parts and the joined file never coexist whole (``_join`` drops each part once
+    copied), so an upload needs the file's size plus one part; this asks for the file
+    plus a gigabyte rather than fill the disk midway.
+    """
+    free = shutil.disk_usage(root).free
+    if free < size_bytes + UPLOAD_HEADROOM_BYTES:
+        raise WeightsError(
+            f"{root} has {free} bytes free; an upload of {size_bytes} bytes needs "
+            f"{size_bytes + UPLOAD_HEADROOM_BYTES}. Point api.weights_upload_dir at a larger disk"
+        )
 
 
 def _upload_dir(upload_id: str) -> Path:
@@ -310,9 +331,20 @@ def _upload_dir(upload_id: str) -> Path:
     return path
 
 
+def _is_upload(path: Path) -> bool:
+    """A folder this module made: named by a UUID and holding a manifest."""
+    try:
+        uuid.UUID(path.name)
+    except ValueError:
+        return False
+    return path.is_dir() and (path / "manifest.json").exists()
+
+
 def _purge_stale(now: float) -> None:
+    """Remove unfinished uploads older than a day and nothing else under the root, since
+    ``api.weights_upload_dir`` may point at a folder that holds other things."""
     for path in upload_root().iterdir():
-        if path.is_dir() and now - path.stat().st_mtime > STALE_UPLOAD_SECONDS:
+        if _is_upload(path) and now - path.stat().st_mtime > STALE_UPLOAD_SECONDS:
             shutil.rmtree(path, ignore_errors=True)
 
 
@@ -326,6 +358,7 @@ def create_upload(
         raise WeightsError(f"size must be between 1 byte and {limits.max_weights_bytes} bytes")
     expected = validate_sha256(sha256) if sha256 else None
     _purge_stale(time.time())
+    _refuse_without_room(upload_root(), size_bytes)
     upload_id = str(uuid.uuid4())
     folder = upload_root() / upload_id
     folder.mkdir()
@@ -379,17 +412,23 @@ def put_part(upload_id: str, n: int, data: bytes) -> dict[str, Any]:
 
 
 def _join(folder: Path, parts: int) -> tuple[Path, str, int]:
-    """Concatenate the parts into one file, hashing while writing."""
+    """Concatenate the parts into one file, hashing while writing.
+
+    Each part is deleted once copied, so the folder holds the file's size plus at most
+    one part, never twice the file.
+    """
     joined = folder / "joined"
     h = hashlib.sha256()
     size = 0
     with joined.open("wb") as out:
         for n in range(parts):
-            with (folder / f"part-{n:06d}").open("rb") as part:
+            path = folder / f"part-{n:06d}"
+            with path.open("rb") as part:
                 while chunk := part.read(_CHUNK):
                     h.update(chunk)
                     size += len(chunk)
                     out.write(chunk)
+            path.unlink()
     return joined, h.hexdigest(), size
 
 

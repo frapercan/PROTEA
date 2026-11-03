@@ -468,6 +468,7 @@
         "type": "object"
       },
       "CreateUploadRequest": {
+        "description": "An upload in parts: what the file is and how large; the server answers the part size.",
         "properties": {
           "description": {
             "anyOf": [
@@ -478,6 +479,7 @@
                 "type": "null"
               }
             ],
+            "description": "What the weight is, in a sentence.",
             "title": "Description"
           },
           "filename": {
@@ -486,15 +488,18 @@
             "type": "string"
           },
           "kind": {
+            "description": "One of the registry's kinds, e.g. residue_vocabulary.",
             "title": "Kind",
             "type": "string"
           },
           "meta": {
             "additionalProperties": true,
+            "description": "Free metadata: layers, width, actives, levels, recipe, provenance.",
             "title": "Meta",
             "type": "object"
           },
           "name": {
+            "description": "A file-name stem: letters, digits, dot, dash, underscore.",
             "title": "Name",
             "type": "string"
           },
@@ -511,6 +516,7 @@
             "title": "Sha256"
           },
           "size_bytes": {
+            "description": "The size of the whole file, in bytes.",
             "exclusiveMinimum": 0.0,
             "title": "Size Bytes",
             "type": "integer"
@@ -525,6 +531,7 @@
                 "type": "null"
               }
             ],
+            "description": "The annotation set it was fitted on; none for a weight without a cut.",
             "title": "Trained On Annotation Set Id"
           }
         },
@@ -1512,6 +1519,7 @@
         "type": "object"
       },
       "RegisterByReferenceRequest": {
+        "description": "A file already in the artifact store, to be hashed there and registered.",
         "properties": {
           "description": {
             "anyOf": [
@@ -1522,6 +1530,7 @@
                 "type": "null"
               }
             ],
+            "description": "What the weight is, in a sentence.",
             "title": "Description"
           },
           "kind": {
@@ -1531,11 +1540,12 @@
           },
           "meta": {
             "additionalProperties": true,
+            "description": "Free metadata: layers, width, actives, levels, recipe, provenance.",
             "title": "Meta",
             "type": "object"
           },
           "name": {
-            "description": "A file-name stem; letters, digits, dot, dash, underscore.",
+            "description": "A file-name stem: letters, digits, dot, dash, underscore.",
             "title": "Name",
             "type": "string"
           },
@@ -1554,6 +1564,7 @@
                 "type": "null"
               }
             ],
+            "description": "The annotation set it was fitted on; none for a weight without a cut.",
             "title": "Trained On Annotation Set Id"
           },
           "uri": {
@@ -8631,6 +8642,7 @@
     },
     "/v1/model-weights/uploads/{upload_id}": {
       "delete": {
+        "description": "Remove the upload's folder and every part in it; nothing was registered.",
         "operationId": "abort_model_weights_upload_v1_model_weights_uploads__upload_id__delete",
         "parameters": [
           {

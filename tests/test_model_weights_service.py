@@ -145,6 +145,53 @@ def test_an_upload_larger_than_the_limit_is_refused_before_any_byte(uploads: Pat
         svc.create_upload(svc.WeightsInfo("reader", "r"), "r.pt", too_big)
 
 
+def test_an_upload_the_disk_cannot_hold_is_refused_before_any_byte(
+    uploads: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On the API host the system temporary folder is a tmpfs: RAM. Whatever the folder,
+    an upload that would leave less than a gigabyte free is refused up front."""
+    import shutil
+    from collections import namedtuple
+
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(shutil, "disk_usage", lambda _p: usage(16 << 30, 15 << 30, 1 << 30))
+    with pytest.raises(svc.WeightsError, match="bytes free"):
+        svc.create_upload(svc.WeightsInfo("residue_vocabulary", "v"), "v.npz", 260_233_730)
+
+
+def test_the_default_upload_folder_is_not_the_system_temporary_folder() -> None:
+    import tempfile
+
+    assert not str(svc.DEFAULT_UPLOAD_ROOT).startswith(tempfile.gettempdir())
+
+
+def test_the_purge_only_removes_old_uploads(uploads: Path) -> None:
+    import os
+    import time
+
+    uploads.mkdir(parents=True, exist_ok=True)
+    old = time.time() - 2 * svc.STALE_UPLOAD_SECONDS
+    keep = uploads / "someone-elses-folder"
+    keep.mkdir()
+    os.utime(keep, (old, old))
+    stale = svc.create_upload(svc.WeightsInfo("reader", "r"), "r.pt", 10)
+    os.utime(uploads / stale["upload_id"], (old, old))
+    svc.create_upload(svc.WeightsInfo("reader", "r"), "r.pt", 10)
+    assert keep.exists(), "a folder the module did not make is never removed"
+    assert not (uploads / stale["upload_id"]).exists(), "an abandoned upload older than a day is"
+
+
+def test_joining_drops_each_part_once_copied(uploads: Path) -> None:
+    data = b"q" * 3000
+    upload = svc.create_upload(svc.WeightsInfo("reader", "r"), "r.pt", len(data))
+    _send(upload, data)
+    folder = uploads / upload["upload_id"]
+    joined, digest, size = svc._join(folder, upload["parts"])
+    assert (size, digest) == (len(data), hashlib.sha256(data).hexdigest())
+    assert joined.read_bytes() == data
+    assert not list(folder.glob("part-*")), "the folder holds the file, not the file twice"
+
+
 def test_an_unknown_or_malformed_upload_id_is_refused(uploads: Path) -> None:
     with pytest.raises(svc.WeightsError):
         svc.put_part("../../etc", 0, b"x")

@@ -89,6 +89,10 @@ Consequences
 * **Nothing existing moves.** Payloads keep their addresses, so an operation does not need
   the registry to run. The registry is how an operator finds the address and checks the
   bytes behind it.
-* **Disk on the API host** while a file is uploaded: the parts and the joined file, in the
-  directory ``api.weights_upload_dir`` names. Both are deleted when the upload completes or
-  fails.
+* **Disk on the API host** while a file is uploaded, in ``api.weights_upload_dir``
+  (``~/.cache/protea/weights-uploads`` by default). Never the system temporary folder: on the
+  API host it is a tmpfs, and an upload there takes RAM from the machine that runs Postgres,
+  RabbitMQ and MinIO. Each part is deleted once joined, so the folder holds the file plus one
+  part; an upload that would leave less than a gigabyte free is refused before any byte is
+  sent. The folder is deleted when the upload completes or fails, and the purge of abandoned
+  uploads, run when an upload is opened, only touches folders it made.

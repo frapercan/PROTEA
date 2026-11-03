@@ -71,7 +71,7 @@ Cada parámetro identificado abajo:
 | `_PAGE_LIMIT` | `api/routers/support.py:16` | 100 | Page size hard cap. | 50-500 | no |
 | `max_weights_bytes` | `config/tuning.py` (`APILimits`) | 8 GiB | Largest file a weights upload assembles (ADR-D54). | 1-16 GiB | no |
 | `weights_part_bytes` | `config/tuning.py` (`APILimits`) | 32 MiB | Part size of a weights upload; below the 100 MB web proxy cap. | 8-90 MiB | no |
-| `weights_upload_dir` | `config/tuning.py` (`APILimits`) | system temp | Folder for the parts and the joined file while an upload lasts. | a disk with room for the largest file twice | no |
+| `weights_upload_dir` | `config/tuning.py` (`APILimits`) | `~/.cache/protea/weights-uploads` | Folder for the parts and the joined file while an upload lasts; on disk, never a tmpfs. | a disk with room for the largest file plus 1 GB | no |
 
 ### E. ResearchKnobs (modelado, no infraestructura)
 

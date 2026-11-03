@@ -405,8 +405,9 @@ class APILimits(BaseModel):
         default=None,
         description=(
             "Folder on the API host where the parts of a weights upload and the joined file "
-            "live until the upload completes or is aborted; the system temporary folder when "
-            "unset. Override: PROTEA_TUNING__api__weights_upload_dir."
+            "live until the upload completes or is aborted; ~/.cache/protea/weights-uploads "
+            "when unset, on disk, never the system temporary folder (a tmpfs on the API host). "
+            "Override: PROTEA_TUNING__api__weights_upload_dir."
         ),
     )
 

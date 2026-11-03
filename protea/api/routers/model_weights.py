@@ -34,30 +34,46 @@ router = APIRouter(prefix="/model-weights", tags=["model-weights"])
 
 
 class RegisterByReferenceRequest(BaseModel):
+    """A file already in the artifact store, to be hashed there and registered."""
+
     kind: str = Field(description="One of the registry's kinds, e.g. residue_vocabulary.")
-    name: str = Field(description="A file-name stem; letters, digits, dot, dash, underscore.")
+    name: str = Field(description="A file-name stem: letters, digits, dot, dash, underscore.")
     uri: str = Field(
         description="The artifact store key, e.g. residue-vocabulary/vocabulary-v1-06fed75ca76d17be.npz."
     )
     sha256: str = Field(
         description="The digest its producer recorded; the object is hashed and must match."
     )
-    description: str | None = None
-    meta: dict[str, Any] = Field(default_factory=dict)
-    trained_on_annotation_set_id: uuid.UUID | None = None
+    description: str | None = Field(default=None, description="What the weight is, in a sentence.")
+    meta: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Free metadata: layers, width, actives, levels, recipe, provenance.",
+    )
+    trained_on_annotation_set_id: uuid.UUID | None = Field(
+        default=None,
+        description="The annotation set it was fitted on; none for a weight without a cut.",
+    )
 
 
 class CreateUploadRequest(BaseModel):
-    kind: str
-    name: str
+    """An upload in parts: what the file is and how large; the server answers the part size."""
+
+    kind: str = Field(description="One of the registry's kinds, e.g. residue_vocabulary.")
+    name: str = Field(description="A file-name stem: letters, digits, dot, dash, underscore.")
     filename: str = Field(description="The original file name; its extension gives the format.")
-    size_bytes: int = Field(gt=0)
+    size_bytes: int = Field(gt=0, description="The size of the whole file, in bytes.")
     sha256: str | None = Field(
         default=None, description="When given, the joined file must hash to it."
     )
-    description: str | None = None
-    meta: dict[str, Any] = Field(default_factory=dict)
-    trained_on_annotation_set_id: uuid.UUID | None = None
+    description: str | None = Field(default=None, description="What the weight is, in a sentence.")
+    meta: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Free metadata: layers, width, actives, levels, recipe, provenance.",
+    )
+    trained_on_annotation_set_id: uuid.UUID | None = Field(
+        default=None,
+        description="The annotation set it was fitted on; none for a weight without a cut.",
+    )
 
 
 def _who(principal: Any) -> str | None:
@@ -194,6 +210,7 @@ def complete_model_weights_upload(
     dependencies=[Depends(require_role(ROLE_OPERATOR))],
 )
 def abort_model_weights_upload(upload_id: str) -> dict[str, Any]:
+    """Remove the upload's folder and every part in it; nothing was registered."""
     try:
         svc.abort_upload(upload_id)
     except (svc.WeightsError, svc.WeightsNotFound) as exc:
