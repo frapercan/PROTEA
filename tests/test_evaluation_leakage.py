@@ -27,9 +27,7 @@ from protea.core.operations import batch_rescore_evaluation, run_cafa_evaluation
 
 
 def test_the_evaluation_path_calls_the_guard():
-    src = inspect.getsource(
-        run_cafa_evaluation.RunCafaEvaluationOperation._load_evaluation_inputs
-    )
+    src = inspect.getsource(run_cafa_evaluation.RunCafaEvaluationOperation._load_evaluation_inputs)
     assert "refuse_uncertifiable_encoding" in src
 
 
@@ -135,7 +133,15 @@ def test_fitted_is_decided_by_the_backend_tag():
     #                     annotations. That operation refuses a config carrying
     #                     any other tag, which is what keeps the tag evidence
     #                     rather than a label.
-    assert FITTED_BACKENDS == {"residue-sparse", "learned-code", "ingested-method"}
+    #   residue-vocabulary  written only by encode_residue_vocabulary (ADR-D51). The
+    #                     vocabulary's population was chosen among proteins
+    #                     annotated at a release, so its codes carry that cut.
+    assert FITTED_BACKENDS == {
+        "residue-sparse",
+        "learned-code",
+        "residue-vocabulary",
+        "ingested-method",
+    }
 
 
 def test_the_boundary_is_where_the_guard_says_it_is():

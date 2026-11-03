@@ -148,6 +148,11 @@ _DEPENDENTS = (
     ("reranker_model", "embedding_config_id"),
     ("dataset", "embedding_config_id"),
     ("embedding_config", "derived_from_embedding_config_id"),
+    # Added with ADR-D51 (revision e3c9a7f15b20), which comes later in the chain: on a
+    # fresh database the table does not exist yet when this guard runs, and
+    # _refuse_if_referenced skips a table that does not exist, since nothing in it can
+    # reference anything.
+    ("residue_code", "embedding_config_id"),
 )
 
 
@@ -164,7 +169,10 @@ def _derive_id(base: dict, model_name: str, model_backend: str) -> str:
 
 
 def _refuse_if_referenced(bind, config_id: str, key: str) -> None:
+    present = set(sa.inspect(bind).get_table_names())
     for table, column in _DEPENDENTS:
+        if table not in present:
+            continue
         n = bind.execute(sa.text(
             f"SELECT count(*) FROM {table}"  # noqa: S608 - fixed literals
             f" WHERE {column} = CAST(:id AS uuid)"

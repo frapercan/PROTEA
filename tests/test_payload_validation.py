@@ -79,6 +79,10 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
 )
+from protea.core.operations.encode_residue_vocabulary import (
+    EncodeResidueVocabularyBatchPayload,
+    EncodeResidueVocabularyPayload,
+)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsPayload,
 )
@@ -147,6 +151,7 @@ from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
 )
 from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
+from protea.core.operations.store_residue_codes import StoreResidueCodesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
 from protea.core.operations.verify_window_against_reference import (
     VerifyWindowAgainstReferencePayload,
@@ -641,6 +646,44 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "encoder_artifact_uri": "encoders/e.npz",
         },
         (),
+    ),
+    (
+        # A vocabulary with two addresses can disagree, and one with none names nothing to
+        # encode with; both are model-level because the rule is between two fields.
+        "encode_residue_vocabulary",
+        EncodeResidueVocabularyPayload,
+        {
+            "source_embedding_config_id": "cfg",
+            "vocabulary_artifact_path": "v.npz",
+            "vocabulary_artifact_uri": "residue-vocabulary/v-0123456789ab.npz",
+        },
+        (),
+    ),
+    (
+        # A call of zero residues would send no sequence to the model and report success.
+        "encode_residue_vocabulary_batch",
+        EncodeResidueVocabularyBatchPayload,
+        {
+            "source_embedding_config_id": "src",
+            "target_embedding_config_id": "tgt",
+            "vocabulary_artifact_path": "v.npz",
+            "sequence_ids": [1],
+            "residues_per_call": 0,
+        },
+        ("residues_per_call",),
+    ),
+    (
+        # A write with no sequences would advance the parent for a shard that indexes nothing.
+        "store_residue_codes",
+        StoreResidueCodesPayload,
+        {
+            "parent_job_id": "job",
+            "target_embedding_config_id": "tgt",
+            "shard_key": "residue-codes/t/1-2-0123456789abcdef.bin",
+            "shard_sha256": "0" * 64,
+            "sequences": [],
+        },
+        ("sequences",),
     ),
     (
         # A batch of zero is an infinite loop that reports success.

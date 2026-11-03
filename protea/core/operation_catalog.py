@@ -44,6 +44,10 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchOperation,
     EncodeResidueSparseOperation,
 )
+from protea.core.operations.encode_residue_vocabulary import (
+    EncodeResidueVocabularyBatchOperation,
+    EncodeResidueVocabularyOperation,
+)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsOperation,
 )
@@ -102,10 +106,20 @@ from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOp
 from protea.core.operations.seal_evaluation_frames import (
     SealEvaluationFramesOperation,
 )
+from protea.core.operations.store_residue_codes import StoreResidueCodesOperation
 from protea.core.operations.stratify_evaluation import StratifyEvaluationOperation
 from protea.core.operations.verify_window_against_reference import (
     VerifyWindowAgainstReferenceOperation,
 )
+
+
+def _register_residue_encoders(registry: OperationRegistry) -> None:
+    """The operations that run the language model per residue, coordinator and card batch."""
+    registry.register(EncodeResidueSparseOperation())
+    registry.register(EncodeResidueSparseBatchOperation())
+    registry.register(EncodeResidueVocabularyOperation())
+    registry.register(EncodeResidueVocabularyBatchOperation())
+    registry.register(StoreResidueCodesOperation())
 
 
 def build_operation_registry() -> OperationRegistry:
@@ -150,8 +164,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(ExportEvaluationTargetsOperation())
     registry.register(IngestMethodPredictionsOperation())
     registry.register(LoadOntologyAliasesOperation())
-    registry.register(EncodeResidueSparseOperation())
-    registry.register(EncodeResidueSparseBatchOperation())
+    _register_residue_encoders(registry)
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
     # publicly registered: all re-ranker training moves to
     # protea-reranker-lab. They remain importable as internal helpers —

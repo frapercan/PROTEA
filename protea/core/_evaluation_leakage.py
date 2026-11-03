@@ -49,7 +49,7 @@ from protea.infrastructure.orm.models.embedding.prediction_set import Prediction
 #: arms it was written for, because an ingested set reaches its cut the same
 #: way a learned code does, through ``trained_on_annotation_set_id``.
 FITTED_BACKENDS: frozenset[str] = frozenset(
-    {"residue-sparse", "learned-code", "ingested-method"}
+    {"residue-sparse", "learned-code", "residue-vocabulary", "ingested-method"}
 )
 
 

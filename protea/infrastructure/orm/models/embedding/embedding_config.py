@@ -76,6 +76,8 @@ VALID_BACKENDS: frozenset[str] = frozenset(
         # producers: what computed the representation, not what it descends from
         "residue-sparse",
         "learned-code",
+        # written only by encode_residue_vocabulary (ADR-D51): per-residue codes in shards
+        "residue-vocabulary",
         INGESTED_METHOD_BACKEND,
     }
 )
