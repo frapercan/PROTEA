@@ -2376,7 +2376,10 @@
       "warning": "A corpus pass occupies the GPU node for hours. Check the jobs page for a pass already running under this vocabulary first.",
       "queued": "Job queued:",
       "submit": "Queue the pass",
-      "noSource": "Choose a source corpus."
+      "noSource": "Choose a source corpus.",
+      "busyTitle": "The card is busy. A second pass would wait for it.",
+      "busyWriting": "{name} wrote codes in the last hour.",
+      "queueAnyway": "Queue it anyway: the job waits and starts when the card is free."
     },
     "kinds": {
       "residue_vocabulary": "Residue vocabulary",

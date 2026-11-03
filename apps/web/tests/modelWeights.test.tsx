@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   getModelWeights: vi.fn(),
   listEmbeddingConfigs: vi.fn(),
   createJob: vi.fn(),
+  listJobs: vi.fn(),
+  listResidueCodes: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -110,7 +112,13 @@ describe("EncodeCorpusDialog", () => {
     Object.values(mocks).forEach((m) => m.mockReset());
   });
 
+  function freeCard() {
+    mocks.listJobs.mockResolvedValue([]);
+    mocks.listResidueCodes.mockResolvedValue([]);
+  }
+
   it("queues encode_residue_vocabulary with this vocabulary's key over an Ankh source", async () => {
+    freeCard();
     mocks.listEmbeddingConfigs.mockResolvedValue([
       { id: "e5e5e5e5-0000-0000-0000-000000000000", model_name: "facebook/esm2", model_backend: "esm" },
       { id: "f3a7fe16-eaf5-5083-b459-7c5fa7a9a9e0", model_name: "ElnaggarLab/ankh-base", model_backend: "ankh" },
@@ -118,9 +126,11 @@ describe("EncodeCorpusDialog", () => {
     ]);
     mocks.createJob.mockResolvedValue({ id: "9a9a9a9a-0000-0000-0000-000000000000", status: "queued" });
     render(<EncodeCorpusDialog weights={VOCABULARY} onClose={() => undefined} />);
-    await waitFor(() => expect(screen.getAllByRole("option").length).toBe(2), {
-      timeout: 2000,
-    });
+    await waitFor(() =>
+      expect((screen.getByLabelText("encode.source") as HTMLSelectElement).value).toBe(
+        "f3a7fe16-eaf5-5083-b459-7c5fa7a9a9e0",
+      ),
+    );
     fireEvent.click(screen.getByRole("button", { name: "encode.submit" }));
     await waitFor(() => expect(mocks.createJob).toHaveBeenCalled());
     expect(mocks.createJob.mock.calls[0][0]).toEqual({
@@ -135,6 +145,46 @@ describe("EncodeCorpusDialog", () => {
       },
     });
     expect(await screen.findByText("9a9a9a9a")).toBeTruthy();
+  });
+});
+
+describe("EncodeCorpusDialog on a busy card", () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach((m) => m.mockReset());
+  });
+
+  it("says what holds the card and queues only once the operator confirms", async () => {
+    mocks.listEmbeddingConfigs.mockResolvedValue([
+      { id: "f3a7fe16-eaf5-5083-b459-7c5fa7a9a9e0", model_name: "ElnaggarLab/ankh-base", model_backend: "ankh" },
+    ]);
+    mocks.listJobs.mockImplementation(async ({ operation }: { operation: string }) =>
+      operation === "encode_residue_vocabulary"
+        ? [{ id: "83039cad-0000-0000-0000-000000000000", operation, status: "RUNNING", queue_name: "protea.embeddings" }]
+        : [],
+    );
+    mocks.listResidueCodes.mockResolvedValue([
+      { name: "residue-vocabulary:06fed75ca76d17be:f3a7fe16", index: { sequences_last_hour: 36000 } },
+    ]);
+    mocks.createJob.mockResolvedValue({ id: "9a9a9a9a-0000-0000-0000-000000000000", status: "queued" });
+    render(<EncodeCorpusDialog weights={VOCABULARY} onClose={() => undefined} />);
+    expect(await screen.findByText("encode.busyTitle")).toBeTruthy();
+    expect(screen.getByText("83039cad").closest("a")?.getAttribute("href")).toBe(
+      "/en/instrument/jobs/83039cad-0000-0000-0000-000000000000",
+    );
+    expect(
+      screen.getByText('encode.busyWriting:{"name":"residue-vocabulary:06fed75ca76d17be:f3a7fe16"}'),
+    ).toBeTruthy();
+    const submit = screen.getByRole("button", { name: "encode.submit" }) as HTMLButtonElement;
+    await waitFor(() =>
+      expect((screen.getByLabelText("encode.source") as HTMLSelectElement).value).toBe(
+        "f3a7fe16-eaf5-5083-b459-7c5fa7a9a9e0",
+      ),
+    );
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    await waitFor(() => expect(mocks.createJob).toHaveBeenCalled());
   });
 });
 

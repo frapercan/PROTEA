@@ -8,10 +8,13 @@ import {
   createJob,
   errorText,
   listEmbeddingConfigs,
+  listJobs,
+  listResidueCodes,
   registerModelWeightsByReference,
   uploadModelWeights,
   WEIGHT_KINDS,
   type EmbeddingConfig,
+  type Job,
   type ModelWeights,
   type WeightKind,
 } from "@/lib/api";
@@ -23,6 +26,28 @@ import {
  */
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+
+/** The coordinators whose batches run on the card (protea.core.operations._card_guard). */
+const CARD_OPERATIONS = ["compute_embeddings", "encode_residue_vocabulary", "encode_residue_sparse"];
+
+/**
+ * What holds the card now: coordinators of a card operation in RUNNING, and residue
+ * vocabularies that wrote codes in the last hour (a pass whose coordinator closed when it
+ * dispatched is SUCCEEDED while its batches still run, and only the index shows it).
+ */
+function useCardBusy() {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [writing, setWriting] = useState<string[]>([]);
+  useEffect(() => {
+    Promise.all(CARD_OPERATIONS.map((operation) => listJobs({ status: "RUNNING", operation, limit: 5 })))
+      .then((lists) => setJobs(lists.flat()))
+      .catch(() => setJobs([]));
+    listResidueCodes()
+      .then((rows) => setWriting(rows.filter((r) => r.index.sequences_last_hour > 0).map((r) => r.name)))
+      .catch(() => setWriting([]));
+  }, []);
+  return { jobs, writing, busy: jobs.length > 0 || writing.length > 0 };
+}
 const SHA256 = /^[0-9a-f]{64}$/;
 
 const input =
@@ -378,6 +403,8 @@ export function EncodeCorpusDialog({ weights, onClose }: { weights: ModelWeights
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [queued, setQueued] = useState<string | null>(null);
+  const card = useCardBusy();
+  const [anyway, setAnyway] = useState(false);
 
   useEffect(() => {
     listEmbeddingConfigs()
@@ -476,6 +503,30 @@ export function EncodeCorpusDialog({ weights, onClose }: { weights: ModelWeights
         <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs leading-relaxed text-amber-800">
           {t("encode.warning")}
         </p>
+        {card.busy && !queued && (
+          <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+            <p className="font-semibold">{t("encode.busyTitle")}</p>
+            {card.jobs.length > 0 && (
+              <ul className="space-y-0.5">
+                {card.jobs.map((j) => (
+                  <li key={j.id}>
+                    <Link href={`/${locale}/instrument/jobs/${j.id}`} className="font-mono underline">
+                      {j.id.slice(0, 8)}
+                    </Link>{" "}
+                    {j.operation}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {card.writing.map((name) => (
+              <p key={name}>{t("encode.busyWriting", { name })}</p>
+            ))}
+            <label className="flex items-start gap-2">
+              <input type="checkbox" checked={anyway} onChange={(e) => setAnyway(e.target.checked)} />
+              <span>{t("encode.queueAnyway")}</span>
+            </label>
+          </div>
+        )}
         {error && <p className="rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">{error}</p>}
         {queued && (
           <p className="rounded-md border border-green-200 bg-green-50 p-2 text-sm text-green-700">
@@ -492,7 +543,7 @@ export function EncodeCorpusDialog({ weights, onClose }: { weights: ModelWeights
           {!queued && (
             <button
               type="submit"
-              disabled={busy || !source}
+              disabled={busy || !source || (card.busy && !anyway)}
               className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {t("encode.submit")}

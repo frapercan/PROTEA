@@ -2377,7 +2377,10 @@
       "warning": "Uma passagem do corpus ocupa o nó de GPU durante horas. Verifica primeiro na página de trabalhos se já há uma passagem a correr com este vocabulário.",
       "queued": "Trabalho em fila:",
       "submit": "Pôr a passagem em fila",
-      "noSource": "Escolhe um corpus de origem."
+      "noSource": "Escolhe um corpus de origem.",
+      "busyTitle": "A placa está ocupada. Uma segunda passagem esperaria por ela.",
+      "busyWriting": "{name} escreveu códigos na última hora.",
+      "queueAnyway": "Pôr em fila mesmo assim: o trabalho espera e começa quando a placa ficar livre."
     },
     "kinds": {
       "residue_vocabulary": "Vocabulário por resíduo",

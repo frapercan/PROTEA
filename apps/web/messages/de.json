@@ -2377,7 +2377,10 @@
       "warning": "Ein Korpuslauf belegt den GPU-Knoten für Stunden. Prüfe zuerst auf der Job-Seite, ob schon ein Lauf mit diesem Vokabular läuft.",
       "queued": "Job eingereiht:",
       "submit": "Lauf einreihen",
-      "noSource": "Einen Quellkorpus wählen."
+      "noSource": "Einen Quellkorpus wählen.",
+      "busyTitle": "Die Karte ist belegt. Ein zweiter Lauf würde auf sie warten.",
+      "busyWriting": "{name} hat in der letzten Stunde Codes geschrieben.",
+      "queueAnyway": "Trotzdem einreihen: der Job wartet und startet, wenn die Karte frei ist."
     },
     "kinds": {
       "residue_vocabulary": "Residuen-Vokabular",

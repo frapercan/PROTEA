@@ -2376,7 +2376,10 @@
       "warning": "Una pasada del corpus ocupa el nodo de GPU durante horas. Mira antes en la página de trabajos si ya hay una pasada en marcha con este vocabulario.",
       "queued": "Trabajo en cola:",
       "submit": "Poner la pasada en cola",
-      "noSource": "Elige un corpus de origen."
+      "noSource": "Elige un corpus de origen.",
+      "busyTitle": "La tarjeta está ocupada. Una segunda pasada esperaría a que quede libre.",
+      "busyWriting": "{name} ha escrito códigos en la última hora.",
+      "queueAnyway": "Ponerla en cola igualmente: el trabajo espera y empieza cuando la tarjeta quede libre."
     },
     "kinds": {
       "residue_vocabulary": "Vocabulario por residuo",

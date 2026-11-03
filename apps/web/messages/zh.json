@@ -2377,7 +2377,10 @@
       "warning": "一次语料运行会占用 GPU 节点数小时。请先在任务页面检查是否已有使用此词表的运行。",
       "queued": "任务已入队：",
       "submit": "将运行加入队列",
-      "noSource": "请选择一个来源语料。"
+      "noSource": "请选择一个来源语料。",
+      "busyTitle": "显卡正忙。第二次运行将等待显卡空闲。",
+      "busyWriting": "{name} 在最近一小时内写入了编码。",
+      "queueAnyway": "仍然加入队列：任务会等待，显卡空闲时开始。"
     },
     "kinds": {
       "residue_vocabulary": "残基词表",
