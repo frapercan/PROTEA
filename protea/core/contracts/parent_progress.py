@@ -7,9 +7,10 @@ the last batch, transitions the parent from RUNNING to SUCCEEDED.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
@@ -32,6 +33,44 @@ _STILL_COUNTS = or_(
     Job.status == JobStatus.RUNNING,
     and_(Job.status == JobStatus.FAILED, Job.error_code == REAPED),
 )
+
+#: The same predicate under a public name, for the modules outside this contract that
+#: need it.
+STILL_COUNTS = _STILL_COUNTS
+
+
+def in_flight(now: datetime) -> ColumnElement[bool]:
+    """A coordinator whose children are still in flight, as of ``now``.
+
+    RUNNING, whatever its count: a waiting coordinator stays RUNNING until its last child
+    is stored, and the reaper is what decides a RUNNING row is dead.
+
+    Or failed by the reaper while its children STILL ARRIVE: its count short of its total
+    AND a job event within the reaper's own liveness window
+    (``worker.reaper_event_grace_seconds``), the signal #1096 judges a waiting
+    coordinator by. Without the time bound a reaped coordinator whose children were
+    discarded stays incomplete forever: ``b185a6d0`` (compute_embeddings, reaped on
+    2026-10-30 at 0 of 7, its seven batches skipped the next day) matched, and would have
+    held the card for good.
+
+    ``coalesce`` because a count never advanced is NULL, and NULL < total reads as false.
+    Built from ``STILL_COUNTS``, so a change in what the reaper's FAILED means reaches every
+    reader: the card guard (``protea.core.operations._card_guard``) and the GPU
+    availability endpoint.
+    """
+    from protea.config.tuning import get_tuning
+
+    grace = timedelta(seconds=get_tuning().worker.reaper_event_grace_seconds)
+    recent = (
+        select(JobEvent.id).where(JobEvent.job_id == Job.id, JobEvent.ts >= now - grace).exists()
+    )
+    return and_(
+        _STILL_COUNTS,
+        or_(
+            Job.status == JobStatus.RUNNING,
+            and_(func.coalesce(Job.progress_current, 0) < Job.progress_total, recent),
+        ),
+    )
 
 
 def update_parent_progress(
