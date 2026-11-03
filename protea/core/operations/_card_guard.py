@@ -35,30 +35,18 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import RetryLaterError
-from protea.core.contracts.parent_progress import REAPED
-from protea.infrastructure.orm.models.job import Job, JobStatus
+from protea.core.contracts.parent_progress import IN_FLIGHT
+from protea.infrastructure.orm.models.job import Job
 
 #: The coordinators whose batches go to ``protea.embeddings.batch``, the card's queue.
 BATCH_QUEUE_COORDINATORS: tuple[str, ...] = (
     "compute_embeddings",
     "encode_residue_vocabulary",
     "encode_residue_sparse",
-)
-
-#: A coordinator whose batches are still in flight: running, or reaped while its
-#: count is still short of its total.
-_IN_FLIGHT = or_(
-    Job.status == JobStatus.RUNNING,
-    and_(
-        Job.status == JobStatus.FAILED,
-        Job.error_code == REAPED,
-        func.coalesce(Job.progress_current, 0) < Job.progress_total,
-    ),
 )
 
 
@@ -69,7 +57,7 @@ def card_busy(session: Session, own_job_id: UUID) -> str | None:
         .filter(
             Job.operation.in_(BATCH_QUEUE_COORDINATORS),
             Job.id != own_job_id,
-            _IN_FLIGHT,
+            IN_FLIGHT,
         )
         .first()
     )

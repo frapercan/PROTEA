@@ -33,6 +33,24 @@ _STILL_COUNTS = or_(
     and_(Job.status == JobStatus.FAILED, Job.error_code == REAPED),
 )
 
+#: The same predicate under a public name, for the modules outside this contract that
+#: need it.
+STILL_COUNTS = _STILL_COUNTS
+
+#: A coordinator whose children are still in flight: its progress still counts and it has
+#: not received all of them. A RUNNING coordinator is in flight whatever its count; a
+#: reaped one only while its count is short of its total (``coalesce``, because a count
+#: never advanced is NULL, and NULL < total would read as "not in flight"). Derived from
+#: ``STILL_COUNTS`` so a change in what the reaper's FAILED means reaches every reader:
+#: the card guard (``protea.core.operations._card_guard``) is one.
+IN_FLIGHT = and_(
+    _STILL_COUNTS,
+    or_(
+        Job.status == JobStatus.RUNNING,
+        func.coalesce(Job.progress_current, 0) < Job.progress_total,
+    ),
+)
+
 
 def update_parent_progress(
     session: Session,
