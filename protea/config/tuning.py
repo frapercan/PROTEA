@@ -148,6 +148,18 @@ class WorkerTuning(BaseModel):
         ge=60,
         description=("Tiempo sin JobEvent antes de considerar un job stalled candidato a reapear."),
     )
+    reaper_deferred_stall_seconds: int = Field(
+        default=21600,
+        ge=60,
+        description=(
+            "The same, for a DEFERRED coordinator, which is recognised by having "
+            "emitted job.dispatched. Its children do the work on another queue, so "
+            "its silence measures ANOTHER machine's pause and not its own: a node "
+            "that cedes its card for hours leaves it without events while nothing "
+            "is wrong with it. Defaults to 6h, the same order as "
+            "reaper_main_timeout_seconds."
+        ),
+    )
     reaper_event_grace_seconds: int = Field(
         default=2700,
         ge=60,
