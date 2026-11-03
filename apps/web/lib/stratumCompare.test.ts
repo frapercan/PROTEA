@@ -18,7 +18,7 @@ function row(over: Partial<StratumRow> = {}): StratumRow {
     display_name: "M",
     k: 1,
     n_proteins: 100,
-    f_micro_w: 0.3,
+    f_micro: 0.3,
     reportable: true,
     homology: "<=30",
     ...over,
@@ -27,28 +27,28 @@ function row(over: Partial<StratumRow> = {}): StratumRow {
 
 describe("rankArms", () => {
   it("ranks best first", () => {
-    const out = rankArms([row({ f_micro_w: 0.1 }), row({ f_micro_w: 0.9 })]);
-    expect(out.map((r) => r.f_micro_w)).toEqual([0.9, 0.1]);
+    const out = rankArms([row({ f_micro: 0.1 }), row({ f_micro: 0.9 })]);
+    expect(out.map((r) => r.f_micro)).toEqual([0.9, 0.1]);
   });
 
   it("drops withheld cells rather than ranking them", () => {
     // A cell below the population floor has a number and not a
     // measurement. Ranking it is how it ends up quoted.
     const out = rankArms([
-      row({ f_micro_w: 0.99, reportable: false }),
-      row({ f_micro_w: 0.3 }),
+      row({ f_micro: 0.99, reportable: false }),
+      row({ f_micro: 0.3 }),
     ]);
     expect(out).toHaveLength(1);
-    expect(out[0].f_micro_w).toBe(0.3);
+    expect(out[0].f_micro).toBe(0.3);
   });
 });
 
 describe("spreadOf", () => {
   it("is best minus worst over the arms present", () => {
     const s = spreadOf([
-      row({ f_micro_w: 0.2 }),
-      row({ f_micro_w: 0.5 }),
-      row({ f_micro_w: 0.35 }),
+      row({ f_micro: 0.2 }),
+      row({ f_micro: 0.5 }),
+      row({ f_micro: 0.35 }),
     ]);
     expect(s?.value).toBeCloseTo(0.3);
     expect(s?.arms).toBe(3);
@@ -103,9 +103,9 @@ describe("bandsPresent", () => {
 describe("spreadSentence", () => {
   it("states the spread and the population, and no verdict", () => {
     const s = spreadOf([
-      row({ f_micro_w: 0.2893, n_proteins: 550 }),
-      row({ f_micro_w: 0.2045, n_proteins: 550 }),
-      row({ f_micro_w: 0.25, n_proteins: 550 }),
+      row({ f_micro: 0.2893, n_proteins: 550 }),
+      row({ f_micro: 0.2045, n_proteins: 550 }),
+      row({ f_micro: 0.25, n_proteins: 550 }),
     ]);
     const line = spreadSentence("twilight", s);
     expect(line).toContain("0.0848");

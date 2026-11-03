@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from protea.core.operations._long_sequence_isolation import partition_sequence_ids
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 
@@ -196,6 +197,7 @@ def build_batch_dispatch_messages(
     p: ComputeEmbeddingsPayload,
     parent_job_id: uuid.UUID,
     sequence_ids: list[int],
+    lengths: dict[int, int] | None = None,
 ) -> list[tuple[str, dict]]:
     """Partition sequences into per-job batches and build their queue messages.
 
@@ -206,11 +208,13 @@ def build_batch_dispatch_messages(
     carry every payload field that the child workers need (no DB
     lookups happen between coordinator and worker), including the whole
     config group: one message runs one forward pass and serves all of them.
+
+    ``lengths`` is only read when the payload asks for isolation; see
+    :func:`partition_sequence_ids`, which is where the partition is decided.
     """
-    batches = [
-        sequence_ids[i : i + p.sequences_per_job]
-        for i in range(0, len(sequence_ids), p.sequences_per_job)
-    ]
+    batches = partition_sequence_ids(
+        sequence_ids, p.sequences_per_job, p.isolate_above_residues, lengths
+    )
     parent_job_str = str(parent_job_id)
     return [
         (

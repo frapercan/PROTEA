@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import date
 from typing import Any
 
+from protea.api.routers._graph_dates import (
+    _RETRIEVER_FIELDS,
+    _bank_level,
+    _level_by_set,
+    _levels_scored,
+    _policy_is_empty,
+    _retriever_level,
+    bank_dates,
+    comparison_dated,
+    frame_dates,
+    retriever_dates,
+    scoring_dated,
+    substrate_dates,
+)
 from protea.api.routers._graph_edges import (
     REFUSED,
     UNDECLARED,
@@ -21,6 +35,10 @@ from protea.api.routers._graph_panels import (
     CrossedFrames,
     reading_against_floor,
     separated_from_floor,
+)
+from protea.api.routers._graph_producer_column import (
+    NO_DONORLESS_ROW,
+    sentinel_sentence,
 )
 
 #
@@ -44,7 +62,11 @@ def _window_span(head: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _floor_for(
-    key: str, record: dict[str, list[dict[str, Any]]], floors: dict[str, DeclaredFloor]
+    key: str,
+    record: dict[str, list[dict[str, Any]]],
+    floors: dict[str, DeclaredFloor],
+    levels: Iterable[str | None] = (),
+    power: str | None = None,
 ) -> dict[str, Any]:
     """The floor declared for this node, whether it was cleared, and why it was not asked.
 
@@ -70,6 +92,14 @@ def _floor_for(
     word as a comparison that ran with power and lost. No reader could tell the
     two apart and nothing in the response said a refusal had happened at all.
 
+    THE DATES RIDE ALONG for the same pairing argument. Two of the five rungs of
+    the ladder are this comparison -- the floor was declared on a day and the
+    reading could not predate its last input -- and the other three are the
+    builder's own rows, which is why ``levels`` and ``power`` are passed in
+    rather than found here. Assembled in one place because an axis built half
+    here and half in ten builders is ten chances for a node to report a rung it
+    cannot date as one it never climbed.
+
     The READING arrives already answered, in ``floors``, rather than being
     computed here beside the verdict. It is the one half of the comparison this
     helper cannot work out from what it is handed: deciding whether the panels
@@ -84,6 +114,7 @@ def _floor_for(
         "separated": separated,
         "refusal": refusal,
         "reading": declared.reading,
+        "dated": comparison_dated(declared, levels, power, record["results"] if separated else []),
     }
 
 
@@ -115,7 +146,7 @@ def _frame_node(
         scored=len(used) if results else 0,
         results=len(results),
         forced=len(eligible) == 1 and bool(used) and used[0]["id"] == eligible[0]["id"],
-        **_floor_for("frame", record, floors),
+        **_floor_for("frame", record, floors, **frame_dates(used)),
     )
     if head is None:
         reason = "No evaluation set exists, so there is no window for a number to be read in."
@@ -190,7 +221,7 @@ def _substrate_node(
         # single instantiated level here is a value nobody chose rather than one
         # the frame fixed.
         forced=False,
-        **_floor_for("substrate", record, floors),
+        **_floor_for("substrate", record, floors, **substrate_dates(used, results)),
     )
     if not used:
         reason = "No prediction set names a representation, so nothing has been retrieved against."
@@ -216,20 +247,6 @@ def _substrate_node(
         ),
         "a representation to retrieve in",
         "an embedding configuration with stored embeddings",
-    )
-
-
-def _policy_is_empty(row: dict[str, Any]) -> bool:
-    """Whether the donor policy in force is the one a field holds unset.
-
-    No reviewed-only restriction, no evidence filter, no excluded reference
-    prefixes. That is not a permissive policy somebody chose, it is the absence
-    of a policy, and the difference is the whole of this node's verdict.
-    """
-    return (
-        (row.get("donor_reviewed_only") or "false") == "false"
-        and row.get("donor_evidence_codes") is None
-        and (row.get("donor_exclusions") or "[]") == "[]"
     )
 
 
@@ -259,7 +276,7 @@ def _bank_node(
     sets = record["prediction_sets"]
     lower = head["bank_annotation_set_id"] if head else None
     eligible = [b for b in record["banks"] if lower and b["id"] == lower]
-    levels = {(p["annotation_set_id"], _policy_is_empty(p)) for p in sets}
+    levels = {_bank_level(p) for p in sets}
     used_ids = {p["annotation_set_id"] for p in sets}
     pinned = bool(eligible) and used_ids <= {b["id"] for b in eligible}
     policy_set = bool(sets) and not all(_policy_is_empty(p) for p in sets)
@@ -267,10 +284,10 @@ def _bank_node(
         produced=bool(record["banks"]),
         instantiated=len(levels),
         available=len(eligible or record["banks"]),
-        scored=len({r["annotation_set_id"] for r in record["results"]}),
+        scored=_levels_scored(record["results"], _level_by_set(sets, _bank_level)),
         results=len(record["results"]),
         forced=pinned and policy_set,
-        **_floor_for("bank", record, floors),
+        **_floor_for("bank", record, floors, **bank_dates(sets, record["results"])),
     )
     if not sets:
         reason = "No prediction set names a corpus, so no bank has been drawn from."
@@ -304,21 +321,6 @@ def _bank_node(
     )
 
 
-_RETRIEVER_FIELDS: tuple[str, ...] = (
-    "depth",
-    "distance_threshold",
-    "metric",
-    "search_backend",
-    "aspect_separated",
-    "expand_to_ancestors",
-    # Who may be a neighbour, which is this node and not the bank: the donor
-    # policy decides which annotations may donate, this decides who is retrieved
-    # at all. Left out, two runs differing only in whether a protein could
-    # retrieve itself rendered as one level.
-    "exclude_self_neighbour",
-)
-
-
 def _donor_required(record: dict[str, list[dict[str, Any]]]) -> bool:
     """Whether the candidate table can hold a term that arrived without a donor.
 
@@ -334,14 +336,9 @@ def _donor_required(record: dict[str, list[dict[str, Any]]]) -> bool:
     return any(row.get("is_nullable") == "NO" for row in record["donor_column"])
 
 
-#: Why three nodes have nowhere to write their artifact while every candidate
-#: must name a donor. Written once: they argue it off one catalog row, and a
-#: second copy is the one that goes stale.
-_NO_DONORLESS_ROW = (
-    "The candidate column naming the donor is NOT NULL, so a term that arrived without one has "
-    "nowhere to be written, and neither has an answer carrying two flows. That is the shape of "
-    "the record rather than its contents: no run moves it, only a migration."
-)
+#: Re-exported under its old name so the three nodes that argue off it read
+#: unchanged. The string and the reasoning live in :mod:`_graph_producer_column`.
+_NO_DONORLESS_ROW = NO_DONORLESS_ROW
 
 #: What a node the record cannot express is waiting for. A column and never a
 #: table: a reader sent to load one would be producing rows that could not show
@@ -363,17 +360,18 @@ def _retriever_node(
     the setting, and nothing could have decided it against.
     """
     sets = record["prediction_sets"]
-    levels = {tuple(repr(p.get(f)) for f in _RETRIEVER_FIELDS) for p in sets}
+    levels = {_retriever_level(p) for p in sets}
+    setting_of = _level_by_set(sets, _retriever_level)
     candidates = sum(int(c["candidates"]) for c in record["candidates"])
     depths = sorted({p["depth"] for p in sets if p["depth"]})
     edge = Edge(
         produced=bool(sets),
         instantiated=len(levels),
         available=len(levels),
-        scored=len({r["prediction_set_id"] for r in record["results"]}),
+        scored=_levels_scored(record["results"], setting_of),
         results=len(record["results"]),
         forced=False,
-        **_floor_for("retriever", record, floors),
+        **_floor_for("retriever", record, floors, **retriever_dates(sets, record["results"])),
     )
     if not sets:
         reason = "No prediction set exists, so nothing has been retrieved."
@@ -446,15 +444,16 @@ def _generator_node(
     )
     counts = (
         f"interpro_annotation holds {interpro} rows, interpro_go_mapping {mappings}, "
-        f"reranker_model {models}."
+        f"reranker_model {models}." + sentinel_sentence(record)
     )
     reason = (
-        "No candidate arrives without a donor. The candidate column naming the donor is "
-        f"nullable, so one could be stored, and the artifacts a second source would draw on "
-        f"are absent. {counts}"
+        "No candidate arrives with no producer at all. The column naming it is nullable, so "
+        f"one without could be stored, and the artifacts a second source would draw on are "
+        f"absent. {counts}"
         if expressible
-        else f"No candidate CAN arrive without a donor. {_NO_DONORLESS_ROW} The artifacts a "
-        f"second source would draw on would not move it if every one of them were full. {counts}"
+        else f"No candidate CAN arrive with no producer at all. {_NO_DONORLESS_ROW} The "
+        f"artifacts a second source would draw on would not move it if every one of them were "
+        f"full. {counts}"
     )
     return (
         _node("generator", edge, reason, ([], [])),
@@ -468,9 +467,7 @@ def _generator_node(
 _SCORING_FIELDS: tuple[str, ...] = ("formula", "weights", "evidence_weights", "params")
 
 
-def _separation(
-    panels: list[dict[str, Any]], floor: str | None
-) -> tuple[bool | None, str | None]:
+def _separation(panels: list[dict[str, Any]], floor: str | None) -> tuple[bool | None, str | None]:
     """Whether the declared floor was cleared, or why it could not be asked.
 
     A refusal is caught rather than allowed to escape, and it is caught on this
@@ -515,12 +512,13 @@ def declared_floors(
     refused must not fall through to a word that says it was read.
     """
     out: dict[str, DeclaredFloor] = {}
-    for key, floor in ((r["node"], r["floor"]) for r in rows if r["node"] and r["floor"]):
+    for row in (r for r in rows if r["node"] and r["floor"]):
+        key, floor = row["node"], row["floor"]
         try:
             reading = reading_against_floor(panels, floor, units)
         except (CrossedDepthAxes, CrossedFrames):
             reading = REFUSED
-        out[key] = DeclaredFloor(floor=floor, reading=reading)
+        out[key] = DeclaredFloor(floor=floor, reading=reading, declared_on=row.get("declared_on"))
     return out
 
 
@@ -591,6 +589,7 @@ def _scoring_node(
         separated=separated,
         refusal=crossed,
         reading=declared.reading,
+        dated=scoring_dated(used, declared, record["results"] if separated else []),
     )
     return (
         _node(

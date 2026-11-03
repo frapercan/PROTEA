@@ -22,9 +22,70 @@ from sqlalchemy.orm import Mapped, mapped_column
 from protea.core.embedding_identity import derive_embedding_config_id
 from protea.infrastructure.orm.base import Base
 
-_VALID_LAYER_AGG = {"mean", "last", "concat"}
-_VALID_POOLING = {"mean", "max", "cls", "mean_max"}
-_VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "protst", "auto"}
+#: The closed vocabularies of this table's three recipe columns, here because
+#: this is where the columns are. There were two copies: these, which nothing
+#: read, and the ones the HTTP validator enforces, which by then were two
+#: entries ahead (``residue-sparse`` and ``learned-code``). A dead second list
+#: that disagrees with the live one is how the next entry lands in only one of
+#: them, so the validator now imports these.
+#:
+#: ``model_backend`` is NOT only an architecture. Four of its values name the
+#: PRODUCER of a representation rather than a model family, and that is what
+#: makes the tag usable as evidence elsewhere: ``residue-sparse`` is written
+#: only by ``encode_residue_sparse``, ``learned-code`` only by
+#: ``apply_learned_encoder``, and ``ingested-method`` only by
+#: ``ingest_method_predictions``, whose rows carry a score the platform did
+#: not compute. ``protea.core._evaluation_leakage`` reads exactly that: a
+#: backend in its ``FITTED_BACKENDS`` was produced by fitting against
+#: annotations and therefore has a cut to declare.
+#: The backend tag ``ingest_method_predictions`` requires of the config a
+#: method's prediction set points at. Named rather than spelled twice: the
+#: operation refuses any other tag, which is what makes the tag evidence
+#: about how the rows were produced instead of a label.
+INGESTED_METHOD_BACKEND = "ingested-method"
+
+#: Backends whose stored vectors are k-WTA codes: a fixed, small number of
+#: non-zero entries in a wide space, which makes a dense copy of the bank the
+#: wrong shape rather than merely a large one.
+#:
+#: Measured on this deployment 2026-10-28 over the whole store of 684.048
+#: sequences: the ``learned-code`` bank is 8192 dimensions with exactly 64
+#: non-zeros per row, so a dense float32 copy is 22,41 GB and the CSR of the
+#: same rows is 0,35 GB, a factor of 64. The machine has 30 GiB and
+#: ``_derive_reference_views`` used to hold f16 plus two f32 copies at once,
+#: a transient 56,0 GB, so the dense route could not run at all.
+#:
+#: A property of the PRODUCER and not of the dimension: a wide dense bank is
+#: expensive and still dense, and a narrow k-WTA code is cheap and still
+#: sparse. ``apply_learned_encoder`` is the only writer of ``learned-code``
+#: and it applies ``topk_real``, so the tag is evidence about the shape of the
+#: rows rather than a hint about their size.
+SPARSE_CODE_BACKENDS: frozenset[str] = frozenset({"learned-code"})
+
+VALID_LAYER_AGG: frozenset[str] = frozenset({"mean", "last", "concat", "none"})
+VALID_POOLING: frozenset[str] = frozenset({"mean", "max", "cls", "mean_max", "reader"})
+VALID_BACKENDS: frozenset[str] = frozenset(
+    {
+        # pretrained backbones, used as they ship
+        "esm",
+        "esm3c",
+        "t5",
+        "ankh",
+        "protst",
+        "auto",
+        # producers: what computed the representation, not what it descends from
+        "residue-sparse",
+        "learned-code",
+        # written only by encode_residue_vocabulary (ADR-D51): per-residue codes in shards
+        "residue-vocabulary",
+        INGESTED_METHOD_BACKEND,
+    }
+)
+
+#: ``kind``: the coarse split ``family`` used to carry as a second, unmarked
+#: meaning. ``learned`` is anything fitted against our annotations, which is
+#: the half that owes a training cut.
+VALID_KINDS: frozenset[str] = frozenset({"pretrained", "learned"})
 
 
 class EmbeddingConfig(Base):
@@ -108,7 +169,16 @@ class EmbeddingConfig(Base):
     #: Residues the model sees. NULL means full length: no truncation was
     #: applied. A sentinel integer would make the recipe a function of the
     #: corpus, and max_length is an identity field.
-    max_length: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1022)
+    #: Where the sequence is truncated, or NULL for no truncation at all
+    #: (migration ``b4e82f17c9a3``). NO python-side default any more, and the
+    #: reason is :func:`_derive_id_from_recipe`: this is an identity field,
+    #: the id is derived in ``before_insert``, and a default applied AFTER
+    #: that produced a row whose id described a recipe the row did not hold.
+    #: Measured: a config created with ``max_length: null`` got the id
+    #: derived from NULL, ``f3a7fe16-...``, and stored 1022, whose own recipe
+    #: derives ``556c8ebc-...``. The listener fills the default now, before
+    #: it hashes.
+    max_length: Mapped[int | None] = mapped_column(Integer, nullable=True)
     use_chunking: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=512)
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -164,6 +234,24 @@ class EmbeddingConfig(Base):
         )
 
 
+#: What an omitted ``max_length`` means. Not a column default: see
+#: :func:`_derive_id_from_recipe`.
+_DEFAULT_MAX_LENGTH = 1022
+
+
+def _was_not_set(target: EmbeddingConfig, field: str) -> bool:
+    """Whether ``field`` was never assigned, as opposed to assigned ``None``.
+
+    ``None`` cannot answer this on its own, and that is exactly how the
+    defect got in: a column default treats "absent" and "explicitly null" as
+    the same thing, and for an identity field they are opposite statements.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    history = sa_inspect(target).attrs[field].history
+    return not history.added and not history.unchanged
+
+
 @event.listens_for(EmbeddingConfig, "before_insert")
 def _derive_id_from_recipe(_mapper, _connection, target: EmbeddingConfig) -> None:
     """Give every new config the id its own recipe derives.
@@ -181,6 +269,21 @@ def _derive_id_from_recipe(_mapper, _connection, target: EmbeddingConfig) -> Non
 
     An explicitly supplied id is honoured, so a migration or a repair script can
     still place a row deliberately.
+
+    IT ALSO FILLS ``max_length``, AND THAT IS NOT A SIDE ERRAND. The column
+    used to carry ``default=1022``, which SQLAlchemy applies at INSERT, i.e.
+    AFTER this listener has hashed the recipe. While NULL was impossible that
+    was harmless. Migration ``b4e82f17c9a3`` made NULL mean "no truncation",
+    and the first configuration created that way got an id derived from NULL
+    and a row holding 1022: an id that does not describe its own recipe,
+    which is the one property this derivation exists to provide.
+
+    Resolved here instead, before the hash, by asking whether the attribute
+    was SET rather than whether it is None -- the two are different and the
+    default could not tell them apart. An omitted ``max_length`` still means
+    1022, so every id minted so far stays valid; an explicit NULL survives.
     """
+    if _was_not_set(target, "max_length"):
+        target.max_length = _DEFAULT_MAX_LENGTH
     if target.id is None:
         target.id = derive_embedding_config_id(target)

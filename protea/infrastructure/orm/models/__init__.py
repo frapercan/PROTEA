@@ -3,12 +3,14 @@ from .annotation.annotation_set import AnnotationSet  # noqa: F401
 from .annotation.evaluation_result import EvaluationResult  # noqa: F401
 from .annotation.evaluation_set import EvaluationSet  # noqa: F401
 from .annotation.go_term import GOTerm  # noqa: F401
+from .annotation.go_term_alias import GOTermAlias  # noqa: F401
 from .annotation.go_term_relationship import GOTermRelationship  # noqa: F401
 from .annotation.information_accretion_set import InformationAccretionSet  # noqa: F401
 from .annotation.interpro_annotation import InterProAnnotation  # noqa: F401
 from .annotation.interpro_go_mapping import InterProGoMapping  # noqa: F401
 from .annotation.ontology_snapshot import OntologySnapshot  # noqa: F401
 from .annotation.protein_go_annotation import ProteinGOAnnotation  # noqa: F401
+from .annotation.reference_reproduction import ReferenceReproduction  # noqa: F401
 from .annotation.term_cooccurrence import TermCooccurrence, TermFrequency  # noqa: F401
 from .anon_quota import AnonQuota  # noqa: F401
 from .api_key import ApiKey  # noqa: F401
@@ -18,6 +20,7 @@ from .embedding.embedding_config import EmbeddingConfig  # noqa: F401
 from .embedding.go_prediction import GOPrediction  # noqa: F401
 from .embedding.prediction_set import PredictionSet  # noqa: F401
 from .embedding.reranker_model import RerankerModel  # noqa: F401
+from .embedding.residue_code import ResidueCode  # noqa: F401
 from .embedding.scoring_config import ScoringConfig  # noqa: F401
 from .embedding.sequence_embedding import SequenceEmbedding  # noqa: F401
 from .experiment_run import ExperimentRun, ExperimentRunStatus  # noqa: F401

@@ -27,9 +27,7 @@ from protea.core.operations import batch_rescore_evaluation, run_cafa_evaluation
 
 
 def test_the_evaluation_path_calls_the_guard():
-    src = inspect.getsource(
-        run_cafa_evaluation.RunCafaEvaluationOperation._load_evaluation_inputs
-    )
+    src = inspect.getsource(run_cafa_evaluation.RunCafaEvaluationOperation._load_evaluation_inputs)
     assert "refuse_uncertifiable_encoding" in src
 
 
@@ -93,8 +91,16 @@ def test_a_fitted_encoding_that_declares_nothing_is_refused():
 
 
 def test_a_cut_inside_the_frame_is_refused():
-    with pytest.raises(LeakageRefusal, match="lies inside"):
+    with pytest.raises(LeakageRefusal, match="later than the 220"):
         _call(_session(backend="residue-sparse", cut_release="227"))
+
+
+def test_a_cut_past_the_frame_end_is_refused_through_this_caller_too():
+    # The guard stopped calling a late cut clean on 2026-10-28, and this is
+    # the path that reaches it from a real prediction set. 240 is past the
+    # 230 end of the frame, so the encoder read every term it scores.
+    with pytest.raises(LeakageRefusal, match="later than the 220"):
+        _call(_session(backend="learned-code", cut_release="240"))
 
 
 def test_a_cut_at_the_frame_start_is_allowed():
@@ -114,7 +120,28 @@ def test_fitted_is_decided_by_the_backend_tag():
     # Not by the cut column: an artifact fitted and undeclared has NULL
     # there, and reading NULL as "not fitted" waves through exactly the
     # case this exists to catch.
-    assert FITTED_BACKENDS == {"residue-sparse", "learned-code"}
+    #
+    # Pinned by equality on purpose. Adding a tag here decides that an arm
+    # owes a training cut, which is a decision and not a detail, so it has to
+    # arrive with a reason written down:
+    #
+    #   residue-sparse    written only by encode_residue_sparse
+    #   learned-code      written only by apply_learned_encoder
+    #   ingested-method   written only by ingest_method_predictions, for a
+    #                     method the platform did not score itself, which is a
+    #                     model fitted elsewhere against some release of our
+    #                     annotations. That operation refuses a config carrying
+    #                     any other tag, which is what keeps the tag evidence
+    #                     rather than a label.
+    #   residue-vocabulary  written only by encode_residue_vocabulary (ADR-D51). The
+    #                     vocabulary's population was chosen among proteins
+    #                     annotated at a release, so its codes carry that cut.
+    assert FITTED_BACKENDS == {
+        "residue-sparse",
+        "learned-code",
+        "residue-vocabulary",
+        "ingested-method",
+    }
 
 
 def test_the_boundary_is_where_the_guard_says_it_is():

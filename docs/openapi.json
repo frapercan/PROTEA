@@ -10743,45 +10743,6 @@
             }
           },
           {
-            "description": "One of: f_asc, f_desc, identity_asc, identity_desc, accession.",
-            "in": "query",
-            "name": "sort",
-            "required": false,
-            "schema": {
-              "default": "f_asc",
-              "description": "One of: f_asc, f_desc, identity_asc, identity_desc, accession.",
-              "title": "Sort",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Rows on this page.",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "description": "Rows on this page.",
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Rows to skip.",
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "description": "Rows to skip.",
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
             "description": "Knowledge setting, which is both the artefact directory and the category axis. One at a time: the three are different populations.",
             "in": "query",
             "name": "setting",
@@ -10838,6 +10799,45 @@
               ],
               "description": "Identity band to the nearest non-self donor, or unset for the whole panel. A property of THIS arm's retrieval: K changes which donors come back, so the same protein can sit in different bands under two arms.",
               "title": "Homology"
+            }
+          },
+          {
+            "description": "One of: f_asc, f_desc, identity_asc, identity_desc, accession.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "f_asc",
+              "description": "One of: f_asc, f_desc, identity_asc, identity_desc, accession.",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows on this page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Rows on this page.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip.",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
             }
           }
         ],

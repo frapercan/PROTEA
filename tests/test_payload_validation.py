@@ -79,6 +79,10 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
 )
+from protea.core.operations.encode_residue_vocabulary import (
+    EncodeResidueVocabularyBatchPayload,
+    EncodeResidueVocabularyPayload,
+)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsPayload,
 )
@@ -105,12 +109,18 @@ from protea.core.operations.fetch_uniprot_metadata import (
 from protea.core.operations.generate_evaluation_set import (
     GenerateEvaluationSetPayload,
 )
+from protea.core.operations.ingest_method_predictions import (
+    IngestMethodPredictionsPayload,
+)
 from protea.core.operations.insert_proteins import InsertProteinsPayload
 from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsPayload,
 )
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingPayload,
+)
+from protea.core.operations.load_ontology_aliases import (
+    LoadOntologyAliasesPayload,
 )
 from protea.core.operations.load_ontology_snapshot import (
     LoadOntologySnapshotPayload,
@@ -130,6 +140,9 @@ from protea.core.operations.predict_go_terms_from_interpro import (
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesPayload,
 )
+from protea.core.operations.register_ingested_method import (
+    RegisterIngestedMethodPayload,
+)
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesPayload,
 )
@@ -138,7 +151,11 @@ from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
 )
 from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
+from protea.core.operations.store_residue_codes import StoreResidueCodesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
+from protea.core.operations.verify_window_against_reference import (
+    VerifyWindowAgainstReferencePayload,
+)
 
 # (op_name, payload_class, bad_payload, expected_error_field)
 #
@@ -569,6 +586,31 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         {"evaluation_set_id": "e", "categories": ["removed"]},
         ("categories",),
     ),
+    # invariant: a method's prediction set has to say what produced it. The
+    # name identifies the arm and is written on every row, and prediction_set
+    # has no column for a method, so a set ingested without it is one nothing
+    # downstream can tell apart from another method's.
+    # invariant: an alias map is only as trustworthy as the bytes it was read
+    # from, so the snapshot has to be named and the operation refuses one with
+    # no archive. An empty id would read the aliases of nothing.
+    (
+        "load_ontology_aliases",
+        LoadOntologyAliasesPayload,
+        {"ontology_snapshot_id": "   "},
+        ("ontology_snapshot_id",),
+    ),
+    (
+        "ingest_method_predictions",
+        IngestMethodPredictionsPayload,
+        {
+            "predictions_path": "/tmp/preds.tsv",
+            "embedding_config_id": "cfg",
+            "annotation_set_id": "ann",
+            "ontology_snapshot_id": "snap",
+            "method": {"band": "v211"},
+        },
+        ("method",),
+    ),
     (
         # An unnamed encoder would silently pick nothing to project through.
         # The error is model-level rather than field-level because the rule is
@@ -606,6 +648,44 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         (),
     ),
     (
+        # A vocabulary with two addresses can disagree, and one with none names nothing to
+        # encode with; both are model-level because the rule is between two fields.
+        "encode_residue_vocabulary",
+        EncodeResidueVocabularyPayload,
+        {
+            "source_embedding_config_id": "cfg",
+            "vocabulary_artifact_path": "v.npz",
+            "vocabulary_artifact_uri": "residue-vocabulary/v-0123456789ab.npz",
+        },
+        (),
+    ),
+    (
+        # A call of zero residues would send no sequence to the model and report success.
+        "encode_residue_vocabulary_batch",
+        EncodeResidueVocabularyBatchPayload,
+        {
+            "source_embedding_config_id": "src",
+            "target_embedding_config_id": "tgt",
+            "vocabulary_artifact_path": "v.npz",
+            "sequence_ids": [1],
+            "residues_per_call": 0,
+        },
+        ("residues_per_call",),
+    ),
+    (
+        # A write with no sequences would advance the parent for a shard that indexes nothing.
+        "store_residue_codes",
+        StoreResidueCodesPayload,
+        {
+            "parent_job_id": "job",
+            "target_embedding_config_id": "tgt",
+            "shard_key": "residue-codes/t/1-2-0123456789abcdef.bin",
+            "shard_sha256": "0" * 64,
+            "sequences": [],
+        },
+        ("sequences",),
+    ),
+    (
         # A batch of zero is an infinite loop that reports success.
         "encode_residue_sparse",
         EncodeResidueSparsePayload,
@@ -615,6 +695,62 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "batch_size": 0,
         },
         ("batch_size",),
+    ),
+    (
+        # invariant: the name is written on every candidate row and read back as
+        # a key, so whitespace inside it makes one arm come back as two. This is
+        # not cosmetic: the arm is what a published number is attributed to.
+        "register_ingested_method",
+        RegisterIngestedMethodPayload,
+        {
+            "method_name": "sfjepa recipe cut230",
+            "display_name": "d",
+            "description": "x",
+            "trained_on_annotation_set_id": "set",
+        },
+        ("method_name",),
+    ),
+    (
+        # A method that cannot say which release it was fitted against cannot be
+        # placed on the window it is scored on, and a null there would read as
+        # "pretrained, owes no cut" for an arm that owes one.
+        "register_ingested_method",
+        RegisterIngestedMethodPayload,
+        {
+            "method_name": "sfjepa-recipe-cut230",
+            "display_name": "d",
+            "description": "x",
+            "trained_on_annotation_set_id": "   ",
+        },
+        ("trained_on_annotation_set_id",),
+    ),
+    (
+        # invariant: the whole worth of the claim this operation writes is that
+        # it names the bytes it was made against. A digest that is not 64 hex
+        # characters names no file, so the comparison would be published
+        # against an unidentified contract -- which is the state the row exists
+        # to replace.
+        "verify_window_against_reference",
+        VerifyWindowAgainstReferencePayload,
+        {
+            "evaluation_set_id": "set",
+            "contract_path": "contract.json",
+            "expected_sha256": "deadbeef",
+        },
+        ("expected_sha256",),
+    ),
+    (
+        # A blank path reads as "the contract that happens to be at the
+        # working directory", and a claim is not allowed to be about whatever
+        # was lying there.
+        "verify_window_against_reference",
+        VerifyWindowAgainstReferencePayload,
+        {
+            "evaluation_set_id": "set",
+            "contract_path": "   ",
+            "expected_sha256": "0" * 64,
+        },
+        ("contract_path",),
     ),
 ]
 

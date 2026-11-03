@@ -175,7 +175,7 @@
     "welcomeBody": "Você fornece uma sequência de aminoácidos e ela devolve as funções que provavelmente desempenha, tiradas da Gene Ontology. É uma plataforma em funcionamento, não um artigo, e tudo o que está abaixo roda na máquina que serve esta página.",
     "welcomeResult": "Ficou em {rank, number}º de {teams, number} equipes no <cafa>{competition}</cafa>, uma competição aberta pontuada pelos seus organizadores, não por nós.",
     "welcomeValidation": "O método é submetido ao <lafa>benchmark LAFA</lafa> como um contêiner em execução, e não como um arquivo de predições. Antes de afirmar qualquer coisa aqui, reproduzimos a pontuação nós mesmos, com o <evaluator>avaliador do CAFA implantado nesta máquina</evaluator>, um fork <upstream>do publicado</upstream> com a pontuação inalterada, de modo que um terceiro pode regerar qualquer número deste site.",
-    "welcomeCampaign": "Uma nova campanha de dados está reconstruindo o corpus de anotações do zero. Em {asOf} ela já leu {read, number} das {releases, number} versões do banco de anotações da Gene Ontology que compõem a série, {gigabytes, number} GB de arquivos no total, e carregou {proteins, number} entradas de proteína (canônicas mais isoformas), cada uma marcada com a versão de que provém. As ferramentas abaixo estão construídas e funcionando; seus números voltam quando a reconstrução terminar.",
+    "welcomeCampaign": "Uma campanha de dados reconstruiu o corpus de anotações do zero. Em {asOf} ela já leu {read, number} das {releases, number} versões do banco de anotações da Gene Ontology que compõem a série, {gigabytes, number} GB de arquivos no total, e carregou {proteins, number} entradas de proteína (canônicas mais isoformas), cada uma marcada com a versão de que provém. As ferramentas abaixo estão construídas, funcionando e com seus números disponíveis.",
     "argumentRecord": "O argumento está publicado abaixo por inteiro, tal como foi medido diante do painel LAFA de {frame}.",
     "headlineSentence": "Com o seu enquadramento, o resultado selado é <value></value> em <metric></metric>, primeiro em sete de nove células<note>.</note>",
     "headlineSentenceWithheld": "Dito com o seu enquadramento, o resultado selado em <metric></metric> está sendo recalculado; primeiros em sete de nove células<note>.</note>",
@@ -319,14 +319,15 @@
     "panelPopulation": "painel",
     "panelPopulationHint": "Todas as proteínas que a execução PONTUOU nesta célula, lidas do artefacto por proteína. Não é a mesma contagem que a da verdade de referência: o grafo conta as proteínas que ganharam um termo deste aspeto neste balde, e nesta campanha as duas coincidem em oito dos nove painéis e diferem em uma no PK x BPO, porque uma consulta que o núcleo de avaliação não conseguiu indexar é descartada ao escrever o artefacto.",
     "placed": "situadas",
-    "placedHint": "Quantas do painel puderam ser colocadas nos eixos de comprimento e homologia. Uma consulta cuja execução não recuperou nenhum dador além de si mesma não pode ser colocada em nenhum deles.",
+    "placedHint": "Quantas do painel puderam ser colocadas nos eixos. Para isso basta o seu proprio comprimento, por isso nao recuperar nenhum dador nao impede a colocacao: apenas deixa sem ler os quatro eixos do dador.",
     "matched": "coincidentes",
     "matchedHint": "Quantas sobrevivem às bandas fixadas acima. Igual à contagem de situadas quando nenhuma banda está fixada.",
     "scoredZero": "sem pontuação",
     "scoredZeroHint": "Quantas das proteínas coincidentes receberam exatamente zero. É uma contagem e não uma taxa: uma célula que marca 0,09 sobre 375 proteínas diz uma coisa quando a massa está repartida e outra quando quase toda ela é exatamente zero, e o número agrupado não distingue as duas.",
     "tau": "tau",
     "tauHint": "O limiar de decisão que a execução reportou para este aspeto. Todas as pontuações da tabela são tiradas nele.",
-    "unplacedWhy": "{count} do painel não levam banda: {noDonor} não recuperaram nenhum dador além da consulta, {noLength} não têm comprimento registado e {offScale} levam uma identidade que não é uma percentagem. Ficam na tabela com as bandas vazias em vez de serem removidas, porque fazem parte da população que o painel conta.",
+    "unplacedWhy": "{count} do painel nao levam banda: {noLength} nao tem comprimento registado e {offScale} levam uma identidade que nao e uma percentagem. Ficam na tabela com as bandas vazias em vez de serem removidas, porque fazem parte da populacao que o painel conta.",
+    "withoutDonorWhy": "{count} do painel levam a sua banda de comprimento mas nao tem nenhum dador alinhado, por isso os quatro eixos do dador ficam sem ler. Estao contadas entre as colocadas: nao recuperar um dador custa esses quatro eixos e nenhum mais.",
     "sortLabel": "ordem",
     "sort": {
       "f_asc": "piores primeiro",
@@ -1065,20 +1066,8 @@
     }
   },
   "evaluation": {
-    "title": "Avaliação CAFA",
-    "generateSection": {
-      "heading": "Novo conjunto de avaliação",
-      "description": "Computa o delta entre duas releases GOA. Aplica filtragem de evidência experimental e propagação do qualificador NOT pelo DAG GO.",
-      "oldSetLabel": "Conjunto GOA antigo (referência)",
-      "selectSet": "— selecionar —",
-      "newSetLabel": "Conjunto GOA novo (ground truth)",
-      "errorSameSets": "Os conjuntos antigo e novo devem ser diferentes.",
-      "generateEvaluationSet": "Gerar conjunto de avaliação",
-      "generating": "Enfileirando…"
-    },
-    "evaluationSetsSection": {
-      "heading": "Conjuntos de avaliação"
-    },
+    "backToList": "Voltar aos conjuntos de avaliação",
+    "detailTitle": "Detalhe do conjunto de avaliação",
     "evaluationSetCard": {
       "deleteConfirm": "Excluir este conjunto de avaliação e todos os resultados?",
       "delete": "Excluir",
@@ -1115,6 +1104,30 @@
       "resultDelete": "Excluir",
       "deleteResultConfirm": "Excluir este resultado de avaliação?"
     },
+    "evaluationSetsSection": {
+      "heading": "Conjuntos de avaliação"
+    },
+    "generateSection": {
+      "heading": "Novo conjunto de avaliação",
+      "description": "Computa o delta entre duas releases GOA. Aplica filtragem de evidência experimental e propagação do qualificador NOT pelo DAG GO.",
+      "oldSetLabel": "Conjunto GOA antigo (referência)",
+      "selectSet": "— selecionar —",
+      "newSetLabel": "Conjunto GOA novo (ground truth)",
+      "errorSameSets": "Os conjuntos antigo e novo devem ser diferentes.",
+      "generateEvaluationSet": "Gerar conjunto de avaliação",
+      "generating": "Enfileirando…"
+    },
+    "jumpToContext": "Ir para o contexto",
+    "loading": "A carregar o conjunto de avaliação...",
+    "manualEvaluatorSection": {
+      "heading": "Comando do avaliador manual"
+    },
+    "modelUsed": "Modelo de reordenação usado",
+    "noResults": "Este conjunto ainda não tem resultados de avaliação.",
+    "openPredictionSet": "Abrir o conjunto de previsões",
+    "openReranker": "Abrir o modelo de reordenação",
+    "proteinExamples": "Exemplos de proteínas (conjunto de previsões)",
+    "provenanceLabel": "procedência",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -1128,9 +1141,9 @@
       "coverage": "Cobertura",
       "tau": "τ"
     },
-    "manualEvaluatorSection": {
-      "heading": "Comando do avaliador manual"
-    }
+    "statDelta": "proteínas do delta",
+    "statsTitle": "Estatísticas do conjunto",
+    "title": "Avaliação CAFA"
   },
   "scoring": {
     "title": "Scoring",

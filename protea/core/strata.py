@@ -382,6 +382,18 @@ NEIGHBOURHOOD_AXES = frozenset(
 #: ``Stratum._fields`` rather than trusted.
 SEQUENCE_AXES = frozenset({"category", "aspect", "length"})
 
+#: The neighbourhood of a query whose donors were never aligned, as opposed to
+#: one whose donors were aligned and turned out to be distant. Every field is
+#: ``None``, which :func:`stratum_for` reads as ``HomologyBand.NONE`` plus
+#: ``DonorEvidence.NONE``: the donor axes say "not read", and the three
+#: sequence axes still place.
+#:
+#: It lives here, beside the split it depends on, because two callers need the
+#: same sentinel and a second copy of it is the defect this campaign exists to
+#: avoid: one name, two quantities. ``stratify_evaluation`` places artefact
+#: rows with it, and the stratum endpoint places the rows it serves.
+UNREAD_NEIGHBOURHOOD = Neighbourhood(best_identity=None, donor_is_experimental=None)
+
 
 def stratum_for(
     *,

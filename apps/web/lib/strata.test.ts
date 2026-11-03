@@ -32,9 +32,9 @@ function cell(
     aspect,
     homology,
     n_proteins: n,
-    precision_w: f,
-    recall_w: f,
-    f_micro_w: f,
+    precision: f,
+    recall: f,
+    f_micro: f,
     reportable,
   };
 }

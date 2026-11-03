@@ -32,13 +32,23 @@ from protea.core.operations._run_cafa_helpers import (
     _patch_query_known_features,
     _record_from_pred,
 )
+from protea.core.operations._run_cafa_signal_arrays import (
+    _anc2vec_array,
+    _coverage_array,
+    _evidence_weight_array,
+    _ia_prior_array,
+    _method_score_array,
+    _ref_density_array,
+)
 from protea.core.row_alignment import assert_unique_key
-from protea.core.scoring import compute_score, evidence_weight
+from protea.core.scoring import (
+    compute_score,
+)
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     FORMULA_EVIDENCE_WEIGHTED,
-    IA_PRIOR_SOURCE_IA,
+    FORMULA_METHOD_SCORE,
     ScoringConfig,
 )
 
@@ -69,6 +79,10 @@ _BASE_SCORE_COLS: tuple[str, ...] = (
     "anc2vec_neighbor_cos",
     "anc2vec_neighbor_maxcos",
     "go_term_frequency",
+    # The method's own score, for the formula that returns it unchanged.
+    # Selected always, like donor_count, so the frame's schema does not
+    # depend on which formula will read it.
+    "method_score",
 )
 
 _LOG = logging.getLogger(__name__)
@@ -235,6 +249,9 @@ def _score_unranked_pred(
         "anc2vec_neighbor_cos": getattr(pred, "anc2vec_neighbor_cos", None),
         "anc2vec_neighbor_maxcos": getattr(pred, "anc2vec_neighbor_maxcos", None),
         "go_term_frequency": getattr(pred, "go_term_frequency", None),
+        # Named in the dict so the raise can say which row had none.
+        "method_score": getattr(pred, "method_score", None),
+        "protein_accession": getattr(pred, "protein_accession", None),
     }
     return compute_score(pred_dict, scoring_config)
 
@@ -340,6 +357,7 @@ def _base_select(ctx: WritePredictionsContext, *, with_ledger: bool = False) -> 
             GOPrediction.anc2vec_neighbor_cos,
             GOPrediction.anc2vec_neighbor_maxcos,
             GOPrediction.go_term_frequency,
+            GOPrediction.method_score,
             *ledger_columns(with_ledger),
         )
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
@@ -371,71 +389,6 @@ def _count_base_rows(session: Session, ctx: WritePredictionsContext) -> int:
     if ctx.max_sequence_rank is not None:
         stmt = stmt.where(GOPrediction.sequence_rank <= ctx.max_sequence_rank)
     return int(session.execute(stmt).scalar_one())
-
-
-def _evidence_weight_array(codes: Any, overrides: dict[str, float] | None) -> np.ndarray:
-    """Vectorise :func:`evidence_weight` over the (object) evidence-code column."""
-    raw = list(codes)
-    uniq = {c if isinstance(c, str) else None for c in raw}
-    wmap = {c: evidence_weight(c, overrides=overrides) for c in uniq}
-    return np.array([wmap[c if isinstance(c, str) else None] for c in raw], dtype=np.float64)
-
-
-def _float_col(df: Any, name: str) -> np.ndarray:
-    """Column ``name`` as a float64 array (``None`` → ``nan``); all-``nan`` if absent."""
-    if name in df.columns:
-        return df[name].to_numpy(dtype=np.float64)
-    return np.full(len(df), np.nan, dtype=np.float64)
-
-
-def _coverage_array(df: Any) -> np.ndarray:
-    """Vectorised mirror of :func:`protea.core.scoring.coverage_signal` (axis A3)."""
-    lq = _float_col(df, "length_query")
-    aln_sw = _float_col(df, "alignment_length_sw")
-    gap_sw = _float_col(df, "gaps_pct_sw")
-    aln_nw = _float_col(df, "alignment_length_nw")
-    gap_nw = _float_col(df, "gaps_pct_nw")
-    use_sw = ~np.isnan(aln_sw)
-    aln = np.where(use_sw, aln_sw, aln_nw)
-    gap = np.where(use_sw, gap_sw, gap_nw)
-    gap_frac = np.where(np.isnan(gap), 0.0, np.clip(gap, 0.0, 1.0))
-    valid = (lq > 0.0) & ~np.isnan(aln)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        cov = np.clip(aln * (1.0 - gap_frac) / lq, 0.0, 1.0)
-    return np.where(valid, cov, np.nan)
-
-
-def _ref_density_array(df: Any) -> np.ndarray:
-    """Vectorised mirror of :func:`protea.core.scoring.ref_density_signal` (axis F)."""
-    dens = _float_col(df, "ref_annotation_density")
-    return np.where(np.isnan(dens), np.nan, 1.0 / (1.0 + np.maximum(0.0, dens)))
-
-
-def _anc2vec_array(df: Any, name: str) -> np.ndarray:
-    """Vectorised mirror of :func:`protea.core.scoring.anc2vec_unit_signal` (axis G)."""
-    x = _float_col(df, name)
-    return np.where(np.isnan(x), np.nan, (x + 1.0) / 2.0)
-
-
-def _ia_prior_array(df: Any, params: dict[str, Any]) -> np.ndarray | None:
-    """Vectorised mirror of :func:`protea.core.scoring.ia_prior_multiplier` (axis E).
-
-    Returns ``None`` when the prior is disabled (caller skips the multiply),
-    otherwise a per-row multiplier array.
-    """
-    block = (params or {}).get("ia_prior") or {}
-    if not block.get("enabled"):
-        return None
-    gamma = float(block.get("gamma", 1.0))
-    source = block.get("source", "frequency")
-    if source == IA_PRIOR_SOURCE_IA:
-        ia = _float_col(df, "term_ia")
-        prior = np.where(np.isnan(ia), 1.0, np.clip(ia, 0.0, 1.0))
-    else:
-        freq = _float_col(df, "go_term_frequency")
-        prior = np.where(np.isnan(freq), 1.0, 1.0 / (1.0 + np.log1p(np.maximum(0.0, freq))))
-    prior = np.where(prior <= 0.0, 0.0, prior)
-    return np.power(prior, gamma)
 
 
 def load_ia_map(ia_path: str) -> dict[str, float]:
@@ -499,6 +452,9 @@ def _vectorized_scores(df: Any, scoring_config: ScoringConfig | None) -> np.ndar
     distance = df["distance"].to_numpy(dtype=np.float64)
     if scoring_config is None:
         return np.maximum(0.0, 1.0 - np.where(np.isnan(distance), 0.0, distance) / 2.0)
+
+    if scoring_config.formula == FORMULA_METHOD_SCORE:
+        return _method_score_array(df)
 
     params = getattr(scoring_config, "params", None)
     if not isinstance(params, dict):

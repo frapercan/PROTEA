@@ -23,6 +23,9 @@ from protea.core.operations.predict_go_terms._batch_op_reference import (
 from protea.core.operations.predict_go_terms._common import (
     PredictGOTermsBatchPayload,
 )
+from protea.core.operations.predict_go_terms._missing_query_vectors import (
+    report_queries_without_vector,
+)
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -164,7 +167,9 @@ class _FeatureLoadingMixin:
         """Load embeddings for this batch's query accessions.
 
         Returns (embeddings, valid_accessions); only accessions that actually
-        have an embedding are included.
+        have an embedding are included. What that leaves out is reported rather
+        than left to be inferred from a row count: see
+        :mod:`._missing_query_vectors`, which carries the measurement.
         """
         if p.query_set_id:
             query_set_id = uuid.UUID(p.query_set_id)
@@ -195,9 +200,16 @@ class _FeatureLoadingMixin:
             )
 
         if not rows:
+            report_queries_without_vector(
+                query_accessions, (), embedding_config_id=embedding_config_id, emit=emit
+            )
             return np.empty((0,)), []
 
         valid_accessions = [r[0] for r in rows]
+        report_queries_without_vector(
+            query_accessions, valid_accessions,
+            embedding_config_id=embedding_config_id, emit=emit,
+        )
         # Rows return pgvector HalfVector instances (halfvec column since 2026-04-11).
         embeddings = np.array([r[1].to_list() for r in rows], dtype=np.float32)
         return embeddings, valid_accessions

@@ -68,12 +68,22 @@ class EvaluationSet(Base):
         # the DAG each side's ancestors are closed under, so all five are the
         # key. Enforced at the DB level via alembic revision
         # ``d4b8c2f10a37_evaluation_set_identity_includes_graphs``.
+        # ``truth_profile`` joined them for the same reason the two natives
+        # did: it decides what the delta IS. Under ``projected`` a t1 term
+        # with no node at t0 is replaced by its first live ancestors instead
+        # of being dropped by the closure, which on the 211 -> 227 window is
+        # 646 proteins and 2,610 entries of difference. Without it in the key
+        # the two truths could not coexist: the five ids are the same, so the
+        # second one would be refused as a duplicate of the first.
         UniqueConstraint(
             "old_annotation_set_id",
             "new_annotation_set_id",
             "pivot_snapshot_id",
             "old_native_snapshot_id",
             "new_native_snapshot_id",
+            "truth_profile",
+            "toi_rule",
+            "not_codes",
             name="uq_evaluation_set_identity",
         ),
         # ADR D40: keep the protocol-window vocabulary closed at the DB
@@ -81,6 +91,22 @@ class EvaluationSet(Base):
         CheckConstraint(
             "window_role IS NULL OR window_role IN ('valid', 'test')",
             name="ck_evaluation_set_window_role",
+        ),
+        # Same reasoning, and NOT NULL rather than nullable: a NULL would be
+        # distinct from every other NULL in the unique constraint above, so
+        # two windows with no profile declared would both be accepted and the
+        # key would stop being one.
+        CheckConstraint(
+            "truth_profile IN ('as_closed', 'projected')",
+            name="ck_evaluation_set_truth_profile",
+        ),
+        CheckConstraint(
+            "toi_rule IN ('pivot_terms', 'live_in_both_ends')",
+            name="ck_evaluation_set_toi_rule",
+        ),
+        CheckConstraint(
+            "not_codes IN ('any', 'experimental')",
+            name="ck_evaluation_set_not_codes",
         ),
     )
 
@@ -131,6 +157,48 @@ class EvaluationSet(Base):
     # rows and ad-hoc episodes carry no role; a CHECK constraint keeps
     # the value set closed without a native enum (cheaper to evolve).
     window_role: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    #: How this window's t1 truth was built. ``as_closed`` is what every row
+    #: written before this column existed did: a term the pivot cannot name
+    #: is dropped by the closure intersection and the gain goes with it.
+    #: ``projected`` replaces such a term by its first live ancestors at t0
+    #: (see :mod:`protea.core._truth_projection`) before the binding rule and
+    #: the closure.
+    #:
+    #: It is part of the identity above, not metadata: unlike
+    #: ``window_role``, this one changes the delta. The counters of what the
+    #: projection did land in ``stats``, because they are a property of the
+    #: build and not of the truth.
+    truth_profile: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="as_closed"
+    )
+    #: Which terms the GAIN may contain. ``pivot_terms`` is what every row
+    #: written before this column did: the gain is whatever the pivot can
+    #: name, and the restriction to the terms of interest happens later, when
+    #: cafaeval is told what to score. ``live_in_both_ends`` restricts it
+    #: BEFORE the delta is classified, which is what the lab's frame does: a
+    #: protein whose only gain is a term obsolete by t1 is not a target at
+    #: all.
+    #:
+    #: In the identity for the same reason as ``truth_profile``, and
+    #: SEPARATE from it for a different one: the projection decides what a
+    #: gain CAN be and this decides which gains COUNT. Four combinations, not
+    #: two, and folding them into one field would be the single-field
+    #: comparison this project keeps paying for.
+    toi_rule: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="pivot_terms"
+    )
+    #: Which NOT annotations may take truth away. ``any`` is what every row
+    #: written before this column did: every NOT row whatever its evidence,
+    #: so a ``NOT|IBA`` removes a term from a truth whose positives are
+    #: experimental only. ``experimental`` restricts the negation to the
+    #: thirteen experimental codes, which is the lab's frame and what
+    #: Francisco declared for the long validation window on 2026-10-27.
+    #:
+    #: In the identity for the same reason as the other two: it changes the
+    #: delta. Measured on 211 -> 227 it is three proteins of the delta, two
+    #: of them LK, and nine projected entries: small, and exactly the
+    #: difference between reproducing the lab's truth and missing it.
+    not_codes: Mapped[str] = mapped_column(String(16), nullable=False, server_default="any")
 
     old_annotation_set: Mapped[AnnotationSet] = relationship(
         "AnnotationSet", foreign_keys=[old_annotation_set_id]

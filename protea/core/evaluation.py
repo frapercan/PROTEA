@@ -35,17 +35,23 @@ Output format (matching CAFA evaluator): 2-column TSV, no header.
 
 from __future__ import annotations
 
-import io
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core._binding_rule import PROTEIN_BINDING, drop_binding_only_mfo
+from protea.core._evaluation_graph import (
+    _bfs_closure,
+    _get_descendants,
+    _load_children_by_go_id,
+    _load_children_map,
+    _load_parents_by_go_id,
+    _load_pivot_term_universe,
+)
 
 # Re-exported so callers keep importing these from here. The routing branch
 # lives in its own module to keep this file inside the section 3 file-LOC
@@ -55,6 +61,22 @@ from protea.core._evaluation_snapshot_routing import (
 )
 from protea.core._evaluation_snapshot_routing import (
     compute_evaluation_data_for_sets as compute_evaluation_data_for_sets,
+)
+from protea.core._truth_projection import (
+    Projection,
+    project_direct_annotations,
+)
+from protea.core._truth_remap import Applied, apply_remap
+from protea.core._truth_rules import (
+    GAIN_RULES,
+    NOT_CODE_RULES,
+    TRUTH_PROFILES,
+    ProjectionRequest,
+    ReconciledWindow,
+    _keep_within_toi,
+    _projection_request,
+    _terms_of_interest,
+    refuse_unknown_rules,
 )
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
 
@@ -69,6 +91,7 @@ _EXP_CODES: list[str] = list(
 )
 
 _NAMESPACES = ("F", "P", "C")
+
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +113,8 @@ class EvalContext(NamedTuple):
     ontology_snapshot_id: uuid.UUID
 
 
+
+
 @dataclass
 class EvaluationData:
     """Computed ground-truth delta between two annotation sets."""
@@ -105,6 +130,11 @@ class EvaluationData:
     # removed: terms present at the window start and absent at its end.
     # Reported, never scored. See _classify_protein_deltas.
     removed: dict[str, set[str]] = field(default_factory=dict)
+    #: What the projection did while this delta was built, or None under the
+    #: default profile. BUILD TIME ONLY: the parquet holds the six buckets and
+    #: nothing else, so a round trip returns None here. The operation stamps
+    #: it on the ``evaluation_set`` row, which is where it has to survive.
+    projection: dict[str, int] | None = None
 
     @property
     def nk_proteins(self) -> int:
@@ -158,47 +188,13 @@ class EvaluationData:
             "known_terms_count": self.known_terms_count,
             "removed_proteins": self.removed_proteins,
             "removed_annotations": self.removed_annotations,
+            **(self.projection or {}),
         }
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _load_children_map(session: Session, snapshot_id: uuid.UUID) -> dict[int, set[int]]:
-    """Load GO DAG as {parent_go_term_id: {child_go_term_id}} for a snapshot.
-
-    Only is_a and part_of relationships are used for NOT-propagation, matching
-    the CAFA evaluation protocol.
-    """
-    rows = session.execute(
-        text("""
-        SELECT parent_go_term_id, child_go_term_id
-        FROM go_term_relationship
-        WHERE ontology_snapshot_id = :snap_id
-          AND relation_type IN ('is_a', 'part_of')
-    """),
-        {"snap_id": snapshot_id},
-    ).fetchall()
-
-    children: dict[int, set[int]] = defaultdict(set)
-    for parent_id, child_id in rows:
-        children[parent_id].add(child_id)
-    return dict(children)
-
-
-def _get_descendants(term_id: int, children_map: dict[int, set[int]]) -> set[int]:
-    """BFS to collect all descendant term IDs (exclusive of start term)."""
-    visited: set[int] = set()
-    queue = list(children_map.get(term_id, set()))
-    while queue:
-        current = queue.pop()
-        if current in visited:
-            continue
-        visited.add(current)
-        queue.extend(children_map.get(current, set()) - visited)
-    return visited
 
 
 def _load_go_maps(
@@ -400,80 +396,6 @@ def compute_evaluation_data(
 # ---------------------------------------------------------------------------
 
 
-def _load_parents_by_go_id(session: Session, snapshot_id: uuid.UUID) -> dict[str, set[str]]:
-    """Return ``{child_go_id: {parent_go_id}}`` in string space (is_a + part_of)."""
-    rows = session.execute(
-        text("""
-        SELECT child.go_id, parent.go_id
-        FROM go_term_relationship rel
-        JOIN go_term child ON child.id = rel.child_go_term_id
-        JOIN go_term parent ON parent.id = rel.parent_go_term_id
-        WHERE rel.ontology_snapshot_id = :snap_id
-          AND rel.relation_type IN ('is_a', 'part_of')
-    """),
-        {"snap_id": snapshot_id},
-    ).fetchall()
-    parents: dict[str, set[str]] = defaultdict(set)
-    for child_go, parent_go in rows:
-        parents[child_go].add(parent_go)
-    return dict(parents)
-
-
-def _load_children_by_go_id(session: Session, snapshot_id: uuid.UUID) -> dict[str, set[str]]:
-    """Return ``{parent_go_id: {child_go_id}}`` in string space (is_a + part_of)."""
-    rows = session.execute(
-        text("""
-        SELECT parent.go_id, child.go_id
-        FROM go_term_relationship rel
-        JOIN go_term parent ON parent.id = rel.parent_go_term_id
-        JOIN go_term child ON child.id = rel.child_go_term_id
-        WHERE rel.ontology_snapshot_id = :snap_id
-          AND rel.relation_type IN ('is_a', 'part_of')
-    """),
-        {"snap_id": snapshot_id},
-    ).fetchall()
-    children: dict[str, set[str]] = defaultdict(set)
-    for parent_go, child_go in rows:
-        children[parent_go].add(child_go)
-    return dict(children)
-
-
-def _bfs_closure(seeds: set[str], edges: dict[str, set[str]]) -> set[str]:
-    """BFS over ``edges`` from ``seeds``, returning the inclusive closure."""
-    closure: set[str] = set(seeds)
-    queue: list[str] = list(seeds)
-    while queue:
-        cur = queue.pop()
-        for nxt in edges.get(cur, ()):
-            if nxt not in closure:
-                closure.add(nxt)
-                queue.append(nxt)
-    return closure
-
-
-def _load_pivot_term_universe(
-    session: Session, pivot_snapshot_id: uuid.UUID
-) -> tuple[set[str], dict[str, str]]:
-    """Return ``(set of pivot go_ids with aspect, {go_id: aspect})``.
-
-    Terms without an aspect are excluded — they cannot participate in CAFA
-    namespace bucketing and would otherwise leak through the intersect step.
-    """
-    rows = session.execute(
-        text("""
-        SELECT go_id, aspect FROM go_term
-        WHERE ontology_snapshot_id = :snap_id AND aspect IS NOT NULL
-    """),
-        {"snap_id": pivot_snapshot_id},
-    ).fetchall()
-    go_ids: set[str] = set()
-    aspect_by_go_id: dict[str, str] = {}
-    for go_id, aspect in rows:
-        go_ids.add(go_id)
-        aspect_by_go_id[go_id] = aspect
-    return go_ids, aspect_by_go_id
-
-
 def _load_experimental_raw_go_ids(
     session: Session, annotation_set_id: uuid.UUID
 ) -> dict[str, set[str]]:
@@ -495,17 +417,35 @@ def _load_experimental_raw_go_ids(
     return dict(out)
 
 
-def _load_not_raw_go_ids(session: Session, annotation_set_id: uuid.UUID) -> dict[str, set[str]]:
-    """Return ``{protein: {native_go_id}}`` for NOT-qualified rows."""
+def _load_not_raw_go_ids(
+    session: Session, annotation_set_id: uuid.UUID, experimental_only: bool = False
+) -> dict[str, set[str]]:
+    """Return ``{protein: {native_go_id}}`` for NOT-qualified rows.
+
+    ``experimental_only`` restricts the negation to the thirteen experimental
+    codes. It is False by default, which is what this function has always
+    done: every NOT row whatever its evidence, so a ``NOT|IBA`` takes a term
+    away from a truth whose positives are experimental only. On the 211 -> 227
+    window 9.262 of the 17.178 NOT rows across the two ends carry
+    non-experimental evidence, and they move three proteins of the delta and
+    nine projected entries. Which answer is right is a frame decision and
+    lives on the window, not here; see ``_truth_rules.NOT_CODE_RULES`` for
+    the measured table.
+    """
+    evidence = "AND pga.evidence_code = ANY(:exp_codes)" if experimental_only else ""
+    params: dict[str, Any] = {"set_id": annotation_set_id}
+    if experimental_only:
+        params["exp_codes"] = _EXP_CODES
     rows = session.execute(
-        text("""
+        text(f"""
         SELECT DISTINCT pga.protein_accession, gt.go_id
         FROM protein_go_annotation pga
         JOIN go_term gt ON gt.id = pga.go_term_id
         WHERE pga.annotation_set_id = :set_id
           AND pga.qualifier LIKE '%NOT%'
+          {evidence}
     """),
-        {"set_id": annotation_set_id},
+        params,
     ).fetchall()
     out: dict[str, set[str]] = defaultdict(set)
     for prot, go_id in rows:
@@ -535,7 +475,8 @@ def _reconcile_experimental_side(
     native_snapshot_id: uuid.UUID,
     pivot_go_ids: set[str],
     pivot_aspect: dict[str, str],
-) -> dict[str, dict[str, set[str]]]:
+    project: ProjectionRequest | None = None,
+) -> tuple[dict[str, dict[str, set[str]]], tuple[Projection | None, Applied | None]]:
     """CAFA steps 1–2 for experimental positives on one side.
 
     Per protein: propagate ancestors under the *native* DAG (True Path Rule),
@@ -545,6 +486,22 @@ def _reconcile_experimental_side(
     """
     native_parents = _load_parents_by_go_id(session, native_snapshot_id)
     raw = _load_experimental_raw_go_ids(session, annotation_set_id)
+    projection = None
+    remapped = None
+    if project is not None:
+        # Before the binding rule and before any propagation: both rules are
+        # about DIRECT annotations, and after either step the substitution
+        # would mean something else.
+        #
+        # AND IN THIS ORDER. The remapping runs first and WINS: a term the
+        # ontology itself renamed is not a term to be generalised. ``spare``
+        # hands the rest to the projection instead of dropping it, and what
+        # neither rule can place is dropped and counted.
+        if project.remap is not None:
+            remapped = apply_remap(
+                raw, project.remap, project.target, spare=project.graph.live
+            )
+        projection = project_direct_annotations(raw, project.graph, project.target)
     _drop_binding_only(session, native_snapshot_id, raw)
 
     out: dict[str, dict[str, set[str]]] = {}
@@ -560,16 +517,29 @@ def _reconcile_experimental_side(
                 ns_map[aspect].add(go_id)
         if ns_map:
             out[protein] = {ns: terms for ns, terms in ns_map.items()}
-    return out
+    return out, (projection, remapped)
+
+
+class _Side(NamedTuple):
+    """One end of the window: its corpus and the graph that closes it.
+
+    The two travel together through both reconcile steps, and bundling them
+    is what leaves room for the window's rules without passing seven
+    arguments.
+    """
+
+    annotation_set_id: uuid.UUID
+    native_snapshot_id: uuid.UUID
 
 
 def _reconcile_not_side(
     session: Session,
-    annotation_set_id: uuid.UUID,
-    native_snapshot_id: uuid.UUID,
+    side: _Side,
     pivot_go_ids: set[str],
     pivot_children: dict[str, set[str]],
-) -> dict[str, set[str]]:
+    project: ProjectionRequest | None = None,
+    experimental_only: bool = False,
+) -> tuple[dict[str, set[str]], Applied | None]:
     """Reconcile NOT-qualified terms to pivot via True Path Rule contrapositive.
 
     Per protein: propagate descendants under the native DAG (matching the
@@ -580,8 +550,15 @@ def _reconcile_not_side(
     This preserves PROTEA's NOT propagation semantics — democafa just drops
     NOT rows — while still producing a pivot-consistent exclusion set.
     """
-    native_children = _load_children_by_go_id(session, native_snapshot_id)
-    raw = _load_not_raw_go_ids(session, annotation_set_id)
+    native_children = _load_children_by_go_id(session, side.native_snapshot_id)
+    raw = _load_not_raw_go_ids(session, side.annotation_set_id, experimental_only)
+    # The same remapping as the experimental side, and NEVER a projection: a
+    # NOT denies the term and everything under it, so climbing to an ancestor
+    # would assert the protein lacks something it may well have. No ``spare``
+    # for the same reason -- what has no map at t0 is dropped and counted.
+    remapped = None
+    if project is not None and project.remap is not None:
+        remapped = apply_remap(raw, project.remap, project.target)
 
     out: dict[str, set[str]] = {}
     for protein, go_ids in raw.items():
@@ -591,7 +568,7 @@ def _reconcile_not_side(
             continue
         closure_pivot = _bfs_closure(in_pivot, pivot_children)
         out[protein] = closure_pivot & pivot_go_ids
-    return out
+    return out, remapped
 
 
 def _apply_negatives(
@@ -612,13 +589,139 @@ def _apply_negatives(
     return cleaned
 
 
-def compute_evaluation_data_reconciled(
+
+
+
+
+
+
+
+
+def _union_of_negatives(
     session: Session,
-    old_annotation_set_id: uuid.UUID,
-    new_annotation_set_id: uuid.UUID,
-    old_native_snapshot_id: uuid.UUID,
-    new_native_snapshot_id: uuid.UUID,
-    pivot_snapshot_id: uuid.UUID,
+    window: ReconciledWindow,
+    pivot_go_ids: set[str],
+    pivot_children: dict[str, set[str]],
+    project: ProjectionRequest | None,
+) -> tuple[dict[str, set[str]], list[Applied | None]]:
+    """The NOT terms of both ends, unioned, with each side's remap report.
+
+    Unioned and applied to both sides, which is what the same-snapshot path
+    does: a term a protein is known NOT to have at either end is not a gain
+    at the other. The two reports stay separate because the lab publishes
+    them separately, and ``new_not_unmapped`` is 19 on the long window --
+    NOT terms of 227 with no map at 211 at all.
+    """
+    merged: dict[str, set[str]] = defaultdict(set)
+    reports: list[Applied | None] = []
+    experimental_only = window.not_codes == "experimental"
+    for side in (
+        _Side(window.old_annotation_set_id, window.old_native_snapshot_id),
+        _Side(window.new_annotation_set_id, window.new_native_snapshot_id),
+    ):
+        negatives, applied = _reconcile_not_side(
+            session, side, pivot_go_ids, pivot_children, project, experimental_only
+        )
+        reports.append(applied)
+        for protein, terms in negatives.items():
+            merged[protein] |= terms
+    return merged, reports
+
+
+class _BothSides(NamedTuple):
+    """What reconciling both ends produced, named.
+
+    It was a four-tuple and the fifth value would have made the call site
+    unreadable. ``remapped`` is keyed by side and kind (``old_exp`` /
+    ``new_exp`` / ``old_not`` / ``new_not``) because the lab publishes one
+    counter per side and kind, and those four numbers are what says whether
+    our rule is theirs.
+    """
+
+    old_exp: dict[str, dict[str, set[str]]]
+    new_exp: dict[str, dict[str, set[str]]]
+    negatives: dict[str, set[str]]
+    projection: Projection | None
+    remapped: dict[str, Applied | None]
+
+
+def _reconcile_both_sides(
+    session: Session,
+    window: ReconciledWindow,
+    pivot_go_ids: set[str],
+    pivot_aspect: dict[str, str],
+    pivot_children: dict[str, set[str]],
+) -> _BothSides:
+    """Both sides reconciled, and the NOT terms unioned across them.
+
+    ONLY THE t1 SIDE PROJECTS, and only onto what is LIVE at t0. The target is
+    the old side's own graph rather than the pivot's: the pivot keeps obsolete
+    terms, and landing the truth on one would put it on a node cafaeval's
+    graph does not have.
+
+    The NOT union is applied to both sides, which is the same thing the
+    same-snapshot path does: a term a protein is known NOT to have at either
+    end is not a gain at the other.
+    """
+    project = (
+        _projection_request(session, window) if window.truth_profile == "projected" else None
+    )
+
+    old_exp, (_, old_remapped) = _reconcile_experimental_side(
+        session,
+        window.old_annotation_set_id,
+        window.old_native_snapshot_id,
+        pivot_go_ids,
+        pivot_aspect,
+        # The t0 side remaps too and never projects: its own terms are
+        # already in its own space, so in practice nothing moves, and the
+        # counters say so instead of the code assuming it (the lab's three
+        # ``old_exp_*`` are zero and that is a measurement, not a given).
+        project._replace(graph=project.graph._replace(live=set())) if project else None,
+    )
+    new_exp, (projection, new_remapped) = _reconcile_experimental_side(
+        session,
+        window.new_annotation_set_id,
+        window.new_native_snapshot_id,
+        pivot_go_ids,
+        pivot_aspect,
+        project,
+    )
+    merged_neg, not_remapped = _union_of_negatives(
+        session, window, pivot_go_ids, pivot_children, project
+    )
+    return _BothSides(
+        old_exp=old_exp,
+        new_exp=new_exp,
+        negatives=merged_neg,
+        projection=projection,
+        remapped={
+            "old_exp": old_remapped,
+            "new_exp": new_remapped,
+            "old_not": not_remapped[0],
+            "new_not": not_remapped[1],
+        },
+    )
+
+
+def _build_report(sides: _BothSides) -> dict[str, int] | None:
+    """The build-time counters, named the way the lab names them.
+
+    One dict, because they are read together or not at all: the projection's
+    numbers only mean something next to the remapping's. ``None`` when
+    neither rule ran, which is the default profile and every stored window.
+    """
+    report: dict[str, int] = {}
+    if sides.projection is not None:
+        report.update(sides.projection.as_dict())
+    for side, applied in sorted(sides.remapped.items()):
+        if applied is not None:
+            report.update(applied.as_dict(side))
+    return report or None
+
+
+def compute_evaluation_data_reconciled(
+    session: Session, window: ReconciledWindow
 ) -> EvaluationData:
     """CAFA-compliant evaluation delta across mismatched ontology snapshots.
 
@@ -637,162 +740,58 @@ def compute_evaluation_data_reconciled(
     both annotation sets is applied to both sides, matching same-snapshot
     behaviour.
     """
-    pivot_go_ids, pivot_aspect = _load_pivot_term_universe(session, pivot_snapshot_id)
-    pivot_children = _load_children_by_go_id(session, pivot_snapshot_id)
+    refuse_unknown_rules(window)
+    pivot_go_ids, pivot_aspect = _load_pivot_term_universe(session, window.pivot_snapshot_id)
+    pivot_children = _load_children_by_go_id(session, window.pivot_snapshot_id)
 
-    old_exp = _reconcile_experimental_side(
-        session, old_annotation_set_id, old_native_snapshot_id, pivot_go_ids, pivot_aspect
-    )
-    new_exp = _reconcile_experimental_side(
-        session, new_annotation_set_id, new_native_snapshot_id, pivot_go_ids, pivot_aspect
-    )
+    # Only the t1 side projects, and only onto what is LIVE at t0. The target
+    # is the old side's own graph rather than the pivot's: the pivot keeps
+    # obsolete terms, and landing on one would put the truth on a node
+    # cafaeval's graph does not have.
+    sides = _reconcile_both_sides(session, window, pivot_go_ids, pivot_aspect, pivot_children)
 
-    old_neg = _reconcile_not_side(
-        session, old_annotation_set_id, old_native_snapshot_id, pivot_go_ids, pivot_children
-    )
-    new_neg = _reconcile_not_side(
-        session, new_annotation_set_id, new_native_snapshot_id, pivot_go_ids, pivot_children
-    )
-    merged_neg: dict[str, set[str]] = defaultdict(set)
-    for src in (old_neg, new_neg):
-        for protein, terms in src.items():
-            merged_neg[protein] |= terms
-
-    old_by_ns = _apply_negatives(old_exp, merged_neg)
-    new_by_ns = _apply_negatives(new_exp, merged_neg)
+    old_by_ns = _apply_negatives(sides.old_exp, sides.negatives)
+    new_by_ns = _apply_negatives(sides.new_exp, sides.negatives)
+    if window.toi_rule == "live_in_both_ends":
+        new_by_ns = _keep_within_toi(
+            new_by_ns, old_by_ns, _terms_of_interest(session, window)
+        )
     nk, lk, pk, pk_known, removed = _classify_protein_deltas(old_by_ns, new_by_ns)
     known = {
         p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()
     }
-    return EvaluationData(nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known, removed=removed)
-
-
-def _eval_data_to_dataframe(data: EvaluationData):
-    """Flatten EvaluationData's five buckets into a long DataFrame.
-
-    Columns: ``protein_accession`` (str), ``go_id`` (str), ``bucket`` (categorical
-    one of nk/lk/pk/known/pk_known). One row per (protein, go_id, bucket) triple.
-    """
-    import pandas as pd
-
-    rows: list[tuple[str, str, str]] = []
-    for bucket_name, bucket_dict in (
-        ("nk", data.nk),
-        ("lk", data.lk),
-        ("pk", data.pk),
-        ("known", data.known),
-        ("pk_known", data.pk_known),
-        ("removed", data.removed),
-    ):
-        for protein, go_ids in bucket_dict.items():
-            for go_id in go_ids:
-                rows.append((protein, go_id, bucket_name))
-    df = pd.DataFrame(rows, columns=["protein_accession", "go_id", "bucket"])
-    df["bucket"] = df["bucket"].astype(pd.CategoricalDtype(categories=list(_GROUNDTRUTH_BUCKETS)))
-    return df
-
-
-def _dataframe_to_eval_data(df) -> EvaluationData:
-    """Inverse of ``_eval_data_to_dataframe``."""
-    nk: dict[str, set[str]] = defaultdict(set)
-    lk: dict[str, set[str]] = defaultdict(set)
-    pk: dict[str, set[str]] = defaultdict(set)
-    known: dict[str, set[str]] = defaultdict(set)
-    pk_known: dict[str, set[str]] = defaultdict(set)
-    removed: dict[str, set[str]] = defaultdict(set)
-    # Files written before the removed bucket existed simply carry no such
-    # rows, so an older artifact deserializes with removed empty rather than
-    # failing.
-    bucket_to_dict = {
-        "nk": nk,
-        "lk": lk,
-        "pk": pk,
-        "known": known,
-        "pk_known": pk_known,
-        "removed": removed,
-    }
-    for protein, go_id, bucket in df[["protein_accession", "go_id", "bucket"]].itertuples(
-        index=False, name=None
-    ):
-        bucket_to_dict[str(bucket)][str(protein)].add(str(go_id))
     return EvaluationData(
-        nk=dict(nk),
-        lk=dict(lk),
-        pk=dict(pk),
-        known=dict(known),
-        pk_known=dict(pk_known),
-        removed=dict(removed),
+        nk=nk,
+        lk=lk,
+        pk=pk,
+        pk_known=pk_known,
+        known=known,
+        removed=removed,
+        projection=_build_report(sides),
     )
 
 
-def serialize_evaluation_data_to_parquet(data: EvaluationData, dest: Path) -> Path:
-    """Write ``data`` to a parquet file at ``dest`` (creates parent dirs).
+# The parquet round trip and the artifact-store reuse rule live in a sibling,
+# and are re-exported here because the names are the public surface and every
+# caller imports them from this module.
+from protea.core._evaluation_groundtruth import (  # noqa: E402
+    deserialize_evaluation_data_from_bytes,
+    groundtruth_key_for,
+    load_evaluation_data_for_set,
+    serialize_evaluation_data_to_parquet,
+)
 
-    Returns ``dest`` for convenience. Uses snappy compression and the long
-    layout produced by ``_eval_data_to_dataframe`` — kept stable since
-    consumers parse it back with ``deserialize_evaluation_data_from_bytes``.
-    """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    df = _eval_data_to_dataframe(data)
-    df.to_parquet(dest, index=False, compression="snappy")
-    return dest
-
-
-def deserialize_evaluation_data_from_bytes(blob: bytes) -> EvaluationData:
-    """Parse parquet bytes (as returned by ``ArtifactStore.get``) into EvaluationData."""
-    import pandas as pd
-
-    df = pd.read_parquet(io.BytesIO(blob))
-    return _dataframe_to_eval_data(df)
-
-
-def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[EvaluationData, uuid.UUID]:
-    """Load ground-truth for an EvaluationSet row.
-
-    Strict reuse path: if ``eval_set.groundtruth_uri`` is set, deserializes the
-    persisted parquet via the configured ArtifactStore and returns it. If not
-    set, raises — recomputation on-the-fly is intentionally not allowed (see
-    the project's "no on-the-fly reuse" rule). Use
-    ``scripts/backfill_evaluation_groundtruth.py`` to materialize artifacts for
-    legacy EvaluationSet rows that predate this column.
-
-    Returns the EvaluationData plus the pivot OntologySnapshot ID — the caller
-    should use the pivot snapshot (not the old set's) when loading the OBO for
-    cafaeval, since propagated go_ids live in pivot term space.
-    """
-    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-    from protea.infrastructure.settings import load_settings
-    from protea.infrastructure.storage import get_artifact_store
-
-    ann_old = session.get(AnnotationSet, eval_set.old_annotation_set_id)
-    ann_new = session.get(AnnotationSet, eval_set.new_annotation_set_id)
-
-    stats = eval_set.stats or {}
-    pivot_raw = stats.get("pivot_ontology_snapshot_id")
-    if pivot_raw:
-        pivot_id = uuid.UUID(str(pivot_raw))
-    else:
-        # Both ann_new and ann_old are validated non-None by the caller
-        # (run_cafa_evaluation); the ternary short-circuits before
-        # dereferencing ann_old when ann_new is set.
-        pivot_id = ann_new.ontology_snapshot_id if ann_new else ann_old.ontology_snapshot_id  # type: ignore[union-attr]
-
-    if not eval_set.groundtruth_uri:
-        raise RuntimeError(
-            f"EvaluationSet {eval_set.id} has no groundtruth_uri. "
-            "Run scripts/backfill_evaluation_groundtruth.py to materialize "
-            "the parquet artifact, or regenerate via /annotations/evaluation-sets/generate."
-        )
-
-    project_root = Path(__file__).resolve().parents[2]
-    settings = load_settings(project_root)
-    store = get_artifact_store(settings)
-    key = groundtruth_key_for(eval_set.id)
-    blob = store.get(key)
-    data = deserialize_evaluation_data_from_bytes(blob)
-    return data, pivot_id
-
-
-def groundtruth_key_for(eval_set_id) -> str:
-    """Storage key under which an EvaluationSet's ground-truth parquet lives."""
-    return f"eval_groundtruth/{eval_set_id}/groundtruth.parquet"
+__all__ = [
+    "EvalContext",
+    "EvaluationData",
+    "compute_evaluation_data",
+    "GAIN_RULES",
+    "NOT_CODE_RULES",
+    "ReconciledWindow",
+    "TRUTH_PROFILES",
+    "compute_evaluation_data_reconciled",
+    "deserialize_evaluation_data_from_bytes",
+    "groundtruth_key_for",
+    "load_evaluation_data_for_set",
+    "serialize_evaluation_data_to_parquet",
+]

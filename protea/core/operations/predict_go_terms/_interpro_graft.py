@@ -60,6 +60,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn
+from protea.core.producer_sentinels import INTERPRO_GRAFT
 
 #: GO aspect code for biological_process (``GOTerm.aspect`` wire format).
 BP_CODE = "P"
@@ -151,7 +152,7 @@ def _new_interpro_record(
         "go_term_id": go_term_id,
         "go_id": go_id,
         "aspect": BP_CODE,
-        "ref_protein_accession": "interpro",
+        "ref_protein_accession": INTERPRO_GRAFT,
         "distance": float("nan"),
         "qualifier": "",
         "evidence_code": "IEA",

@@ -26,7 +26,7 @@ function row(over: Partial<StratumRow> = {}): StratumRow {
     donor_policy: "permissive",
     metric: "cosine",
     n_proteins: 314,
-    f_micro_w: 0.28,
+    f_micro: 0.28,
     reportable: true,
     category: "NK",
     aspect: "P",
@@ -69,8 +69,8 @@ describe("soleCell", () => {
   });
 
   it("is the cell when the coordinates name exactly one", () => {
-    const arms = groupArms([row({ homology: "<=30", f_micro_w: 0.07 })]);
-    expect(soleCell(arms[0])?.f_micro_w).toBe(0.07);
+    const arms = groupArms([row({ homology: "<=30", f_micro: 0.07 })]);
+    expect(soleCell(arms[0])?.f_micro).toBe(0.07);
   });
 });
 

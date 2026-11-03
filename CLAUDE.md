@@ -86,6 +86,9 @@ logs/frontend.log               ← Next.js dev server
 - `protea.predictions` → predict_go_terms coordinator (partitions queries into batches and dispatches them to `protea.predictions.batch`)
 - `protea.predictions.batch` → predict_go_terms_batch (KNN + GO transfer; OperationConsumer, no DB Job row)
 - `protea.predictions.write` → store_predictions (bulk GOPrediction insert; OperationConsumer)
+- `protea.methods.write` → ingest_method_predictions (a method's own predictions, read from a
+  TSV it produced elsewhere, written as a PredictionSet whose score column is `method_score`;
+  the write stage stays on the server, like the other `.write` queues)
 - `protea.evaluations` → run_cafa_evaluation (Fmax / AuPRC / coverage; isolated so long evals don't block the general jobs queue)
 - `protea.training` → export_research_dataset (serialized; GPU/RAM-intensive KNN + feature generation + artifact-store upload). Re-ranker *training* itself no longer runs in PROTEA: see "Re-ranker training decoupling" below.
 

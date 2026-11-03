@@ -16,9 +16,13 @@ import uuid
 import numpy as np
 import pytest
 
-from protea.core.operations.encode_residue_sparse import (
+from protea.core.operations._encoder_artifact import (
     AGGREGATES,
     REQUIRED_META,
+    load_frozen_encoder,
+    resolve_encoder_artifact,
+)
+from protea.core.operations.encode_residue_sparse import (
     TARGET_BACKEND,
     EncodeResidueSparseBatchOperation,
     EncodeResidueSparseBatchPayload,
@@ -27,10 +31,8 @@ from protea.core.operations.encode_residue_sparse import (
     _drop_already_encoded,
     code_density,
     encode_one,
-    load_frozen_encoder,
     reduce_residues,
     refuse_backend_without_residues,
-    resolve_encoder_artifact,
     topk_real,
 )
 
@@ -234,11 +236,16 @@ def test_an_empty_code_has_no_density_rather_than_dividing_by_zero():
 def test_the_payload_refuses_an_empty_artifact_path():
     """An empty path is no address at all, so it is refused as one.
 
-    It used to be refused for being blank. Now that a URI is an alternative address,
-    a blank path means neither was given, and the message says which two things to
-    choose between rather than complaining about whitespace.
+    It used to be refused for being blank, then for being neither of two
+    addresses. Now that a GROUP of artifacts is legal the count is no longer
+    one, so the message asks for at least one and names the three fields that
+    can carry it. The refusal is the same; only what it can ask for changed.
+
+    Whitespace is still an empty path: the validator filters on the stripped
+    value, because "   " is truthy and a filter on the raw value admitted a
+    whitespace address.
     """
-    with pytest.raises(ValueError, match="exactly one"):
+    with pytest.raises(ValueError, match="at least one"):
         EncodeResidueSparsePayload(source_embedding_config_id="c", encoder_artifact_path="  ")
 
 

@@ -38,7 +38,15 @@ class ArtifactStore(Protocol):
         ...
 
     def get(self, key: str) -> bytes:
-        """Fetch raw bytes stored at ``key``."""
+        """Fetch raw bytes stored at ``key``.
+
+        Takes a key OR a URI this store returned from :meth:`put` / :meth:`url`,
+        so the docstring's promise above -- that a persisted URI resolves
+        without knowing the backend -- is true of the call and not only of the
+        sentence. A URI from a DIFFERENT backend or bucket is refused rather
+        than read as a key. The same holds for :meth:`exists` and
+        :meth:`delete`.
+        """
         ...
 
     def url(self, key: str) -> str:

@@ -46,18 +46,29 @@ from protea.api.routers._graph_edges import (
     BLOCK_WORDS,
     BLOCKED,
     CHOSEN,
+    CONTRAST,
+    COUNTED_THRESHOLDS,
+    FIRST_LEVEL,
+    FLOOR,
     INDISTINGUISHABLE,
     INEXPRESSIBLE,
     INHERITED,
     MEASURED,
     NULL_UNREAD,
     NULL_WITH_POWER,
+    POWER,
     RESOLVED,
+    SEPARATION,
     SPECS,
     STRENGTH_OF_READING,
+    THRESHOLDS,
     UNPOWERED,
+    DateForUnclimbedThreshold,
     Edge,
     StaleStructuralBlock,
+    climbed,
+    crossings_of,
+    dates,
     refuse_unstateable_readings,
     strength_of,
 )
@@ -228,9 +239,18 @@ def populated_record(levels: dict[str, float]) -> dict[str, list[dict[str, Any]]
             "regime": "lafa",
             "sha256": "abc",
             "in_use": True,
+            "first_used_on": "2026-10-20",
         }
     ]
-    record["query_sets"] = [{"id": "qs-1", "name": "targets", "entries": 14032, "in_use": True}]
+    record["query_sets"] = [
+        {
+            "id": "qs-1",
+            "name": "targets",
+            "entries": 14032,
+            "in_use": True,
+            "first_used_on": "2026-10-11",
+        }
+    ]
     record["substrates"] = [
         {
             "id": "ec-1",
@@ -238,19 +258,34 @@ def populated_record(levels: dict[str, float]) -> dict[str, list[dict[str, Any]]
             "label": "esm2_650m",
             "in_use": True,
             "producible": True,
+            "first_used_on": "2026-10-11",
         },
         {
             "id": "ec-2",
             "model_name": "ankh",
             "label": "ankh_base",
             "in_use": False,
+            # Built and never retrieved against, so it has no date: the column
+            # is the first prediction set naming it, and there is none. A level
+            # dated by ``embedding_config.created_at`` instead would put every
+            # unbuilt alternative on the campaign's axis.
             "producible": True,
+            "first_used_on": None,
         },
     ]
-    record["banks"] = [{"id": "bank-1", "source": "goa", "source_version": "220", "in_use": True}]
+    record["banks"] = [
+        {
+            "id": "bank-1",
+            "source": "goa",
+            "source_version": "220",
+            "in_use": True,
+            "first_used_on": "2026-10-11",
+        }
+    ]
     record["prediction_sets"] = [
         {
             "id": "ps-1",
+            "created_on": "2026-10-11",
             "embedding_config_id": "ec-1",
             "annotation_set_id": "bank-1",
             "bank_source": "goa",
@@ -276,8 +311,12 @@ def populated_record(levels: dict[str, float]) -> dict[str, list[dict[str, Any]]
             "evidence_weights": "{}",
             "params": "{}",
             "results": 1,
+            # Staggered so a contrast has a date of its own. A scoring
+            # configuration becomes a level the day it scores something, and
+            # these scored on consecutive days.
+            "first_used_on": f"2026-10-{21 + index:02d}",
         }
-        for name, value in levels.items()
+        for index, (name, value) in enumerate(levels.items())
     ]
     record["results"] = [
         {
@@ -286,11 +325,20 @@ def populated_record(levels: dict[str, float]) -> dict[str, list[dict[str, Any]]
             "prediction_set_id": "ps-1",
             "scoring_config_id": f"sc-{name}",
             "reranker_model_id": None,
-            "frame": None,
+            # The seal, under its own name. It used to arrive as ``frame``,
+            # which is the harness label's key at another endpoint.
+            "frame_digest": None,
             "embedding_config_id": "ec-1",
             "annotation_set_id": "bank-1",
+            "created_on": f"2026-10-{21 + index:02d}",
+            # Which query set and which accretion table THIS result was read
+            # over. The frame block used to answer both from the oldest in-use
+            # row in the whole record, so a window whose own results resolved
+            # neither was described by another window's.
+            "query_set_id": "qs-1",
+            "accretion_id": "ia-1",
         }
-        for name in levels
+        for index, name in enumerate(levels)
     ]
     record["panels"] = _panel_rows(levels)
     record["candidates"] = [{"prediction_set_id": "ps-1", "candidates": 752786}]
@@ -562,7 +610,10 @@ def test_the_frame_is_undeclared_while_any_published_result_is_unsealed() -> Non
     assert body["frame"]["declared"] is False
 
     for row in record["results"]:
-        row["frame"] = "lafa"
+        # A digest, not the harness label. Under the old alias this read
+        # ``row["frame"] = "lafa"``, which is a value the seal column can never
+        # hold and the label column always can: the key carried both meanings.
+        row["frame_digest"] = "f-c353408429d4871b759c1072"
     sealed = build_graph(record)
     assert sealed["frame"]["sealed_rows"] == 2
     assert sealed["frame"]["declared"] is True
@@ -699,6 +750,7 @@ def test_a_crossed_ladder_reaches_the_reader_as_a_reason_and_not_a_500() -> None
             "evidence_weights": "{}",
             "params": "{}",
             "results": 1,
+            "first_used_on": "2026-10-21",
         },
         {
             "id": "sc-other",
@@ -708,6 +760,7 @@ def test_a_crossed_ladder_reaches_the_reader_as_a_reason_and_not_a_500() -> None
             "evidence_weights": "{}",
             "params": "{}",
             "results": 1,
+            "first_used_on": "2026-10-22",
         },
     ]
     record["floors"] = [
@@ -724,7 +777,6 @@ def test_a_crossed_ladder_reaches_the_reader_as_a_reason_and_not_a_500() -> None
     assert node["strength"] != MEASURED
     assert "evaluation cut" in node["blocked_reason"]
     assert "truncat" in node["blocked_reason"]
-
 
 
 class TestEveryNodeCanReachAMeasurement:
@@ -754,10 +806,7 @@ class TestEveryNodeCanReachAMeasurement:
         from protea.api.routers import _graph_nodes
         from protea.api.routers._graph_edges import SPECS
 
-        builders = [
-            getattr(_graph_nodes, f"_{spec.key.replace('-', '_')}_node")
-            for spec in SPECS
-        ]
+        builders = [getattr(_graph_nodes, f"_{spec.key.replace('-', '_')}_node") for spec in SPECS]
         assert len(builders) == 10
         for builder in builders:
             params = inspect.signature(builder).parameters
@@ -972,6 +1021,8 @@ class TestAWithdrawnDeclarationGovernsNothing:
         clause = "er.status IN (" + ", ".join(f"'{state}'" for state in standing) + ")"
         assert clause in str(_Q_FLOORS)
         assert str(ExperimentRunStatus.ABANDONED) not in str(_Q_FLOORS)
+
+
 class TestTheComparisonBehindTheStrengthIsPublished:
     """`chosen` is a sink, and until now the response held nothing that drained it.
 
@@ -1288,9 +1339,7 @@ class TestTheScaleCanReceiveEveryWordTheInstrumentEmits:
         with pytest.raises(ValueError, match="two reports of one comparison"):
             Edge(instantiated=2, scored=2, floor="a-floor", separated=False, reading=RESOLVED)
         with pytest.raises(ValueError, match="two reports of one comparison"):
-            Edge(
-                instantiated=2, scored=2, floor="a-floor", separated=True, reading=NULL_WITH_POWER
-            )
+            Edge(instantiated=2, scored=2, floor="a-floor", separated=True, reading=NULL_WITH_POWER)
         with pytest.raises(ValueError, match="two reports of one comparison"):
             Edge(instantiated=2, scored=2, separated=False, reading=NULL_WITH_POWER)
         # And the shapes the builders actually hand it are still accepted, so the
@@ -1477,7 +1526,13 @@ def a_record_that_can_hold_every_artifact() -> dict[str, list[dict[str, Any]]]:
         {"schema_sha": None},
     ]
     record["banks"].append(
-        {"id": "bank-2", "source": "goa_uniprot", "source_version": "221", "in_use": True}
+        {
+            "id": "bank-2",
+            "source": "goa_uniprot",
+            "source_version": "221",
+            "in_use": True,
+            "first_used_on": "2026-10-12",
+        }
     )
     record["prediction_sets"].append(
         {
@@ -1733,7 +1788,9 @@ class TestTheSurfaceCanDrawEveryWordTheEndpointSends:
                 ),
             )
         )
-        assert declared == words, f"the surface names {sorted(declared)}, the endpoint sends {sorted(words)}"
+        assert declared == words, (
+            f"the surface names {sorted(declared)}, the endpoint sends {sorted(words)}"
+        )
 
         page = _GRAPH_PAGE.read_text(encoding="utf-8")
         drawn = set(
@@ -1772,3 +1829,416 @@ class TestTheSurfaceCanDrawEveryWordTheEndpointSends:
             r"/\*\* A strength the endpoint sent that this build does not know how to draw\. \*/(.*?)\n\}",
         )
         assert not _published_words() & set(re.findall(r"[a-z]+", fallback))
+
+
+class TestTheAxisCannotDisagreeWithTheWord:
+    """The temporal axis is derived from the fields the strength is derived from.
+
+    A strength is present tense and a campaign is not. ``crossings`` is the one
+    key of a node that reports anything else, and the whole risk it carries is
+    that it comes to say something the word does not: a reader looking at a dated
+    rung has no way to tell that the node's own count denies it. So WHICH rungs
+    are reported is derived in one place from the same fields, in the same order,
+    stopping at the same place, and these tests pin that identity rather than a
+    list of dates.
+    """
+
+    #: Every word the scale can emit, with the edge that reaches it and the rungs
+    #: it must leave behind. Walked rather than asserted one by one so a word
+    #: added to the scale with no entry here fails the last test in this class.
+    LADDER: tuple[tuple[str, Edge, tuple[str, ...]], ...] = (
+        (INEXPRESSIBLE, Edge(expressible=False), ()),
+        (BLOCKED, Edge(produced=False), ()),
+        (BLOCKED, Edge(instantiated=0), ()),
+        (INHERITED, Edge(instantiated=1), (FIRST_LEVEL,)),
+        (CHOSEN, Edge(instantiated=1, forced=True), (FIRST_LEVEL,)),
+        (UNPOWERED, Edge(instantiated=2, scored=1), (FIRST_LEVEL, CONTRAST)),
+        (
+            MEASURED,
+            Edge(instantiated=2, scored=2, floor="f", separated=True, reading=RESOLVED),
+            THRESHOLDS,
+        ),
+        (
+            INDISTINGUISHABLE,
+            Edge(instantiated=2, scored=2, floor="f", separated=False, reading=NULL_WITH_POWER),
+            (FIRST_LEVEL, CONTRAST, POWER, FLOOR),
+        ),
+        # THE ONE ROW WHERE THE AXIS SAYS MORE THAN THE WORD, and it is not a
+        # disagreement. ``strength_of`` returns CHOSEN on a compound test --
+        # no floor declared, OR a floor whose comparison was refused -- so the
+        # word cannot tell the two apart. The axis can: a floor was declared
+        # here, on a day, and that is as true of a refused comparison as of an
+        # answered one. The reader gets the refusal from ``floor_refusal``,
+        # which exists for exactly this reason, and gets the date from here.
+        # Reporting three rungs instead would have hidden the declaration.
+        (
+            CHOSEN,
+            Edge(instantiated=2, scored=2, floor="f", refusal="crossed"),
+            (FIRST_LEVEL, CONTRAST, POWER, FLOOR),
+        ),
+        # And the other half of that compound: nothing declared, three rungs.
+        (CHOSEN, Edge(instantiated=2, scored=2), (FIRST_LEVEL, CONTRAST, POWER)),
+    )
+
+    def test_the_ladder_stops_exactly_where_the_strength_stops(self) -> None:
+        """One table, both readings, every word the scale emits.
+
+        The property, not a sample of it: for each edge the word and the rungs
+        are read from the same fields, so a rung reported is a rung that word
+        used. A test per word would have let the two drift one word at a time.
+        """
+        for word, edge, expected in self.LADDER:
+            assert strength_of(edge) == word, edge
+            assert climbed(edge) == expected, edge
+
+    def test_the_rungs_are_prefix_closed_in_the_ladder_s_own_order(self) -> None:
+        """A rung is never reported with a lower one missing.
+
+        That is what makes the axis readable as a history: the rungs are the
+        order the record was built in, so a gap would say a node acquired power
+        before it acquired a second level.
+        """
+        for _, edge, _ in self.LADDER:
+            reached = climbed(edge)
+            assert reached == THRESHOLDS[: len(reached)], reached
+
+    def test_a_climbed_rung_the_record_cannot_date_is_reported_undated(self) -> None:
+        """Climbed-and-undated is a third state, not a missing one.
+
+        The record saying this happened and not saying when is a different fact
+        from its not having happened, and a surface that dropped the rung would
+        publish the second while holding the first.
+        """
+        edge = Edge(instantiated=2, scored=2, dated=dates(first_level="2026-10-11"))
+        crossings = crossings_of(edge)
+        assert [c.threshold for c in crossings] == [FIRST_LEVEL, CONTRAST, POWER]
+        assert [c.on for c in crossings] == ["2026-10-11", None, None]
+
+    def test_a_date_for_a_rung_the_count_denies_is_refused(self) -> None:
+        """The one direction of drift that means two different sets of rows.
+
+        ``contrast`` and ``instantiated`` are two readings of one set of rows, so
+        a date for the second level under a count of one means the builder dated
+        rows it did not count or counted rows it did not date, and either number
+        may be the wrong one. This fired on the first run of the real builders
+        and found a real defect in the frame node.
+        """
+        edge = Edge(instantiated=1, dated=dates(contrast="2026-10-27"))
+        with pytest.raises(DateForUnclimbedThreshold) as refusal:
+            crossings_of(edge)
+        assert "contrast" in str(refusal.value)
+        assert "count denies" in str(refusal.value)
+
+    def test_the_comparison_s_own_dates_truncate_instead_of_refusing(self) -> None:
+        """A floor is declared once and reaches all ten nodes, like its own field.
+
+        ``Edge.floor`` and ``Edge.separated`` are set on every node by
+        ``_floor_for`` whether or not that node's word ever reads them, because
+        ``strength_of`` returns at the single-level test. A date must be treated
+        as the field it dates, so these two truncate. Refusing them instead was
+        the first version of the guard and it fired on nine nodes that had simply
+        never reached the rung.
+        """
+        edge = Edge(
+            instantiated=1,
+            floor="f",
+            separated=True,
+            reading=RESOLVED,
+            dated=dates(first_level="2026-10-11", floor="2026-10-20", separation="2026-10-27"),
+        )
+        assert [c.threshold for c in crossings_of(edge)] == [FIRST_LEVEL]
+        assert set(COUNTED_THRESHOLDS) == {FIRST_LEVEL, CONTRAST, POWER}
+        assert FLOOR not in COUNTED_THRESHOLDS and SEPARATION not in COUNTED_THRESHOLDS
+
+    def test_a_misspelled_threshold_is_refused_where_it_is_written(self) -> None:
+        """Keyword arguments, so a typo cannot become a date filed under no rung.
+
+        A dict literal would have taken ``contarst`` silently and the axis would
+        have come out one rung short with nothing saying so.
+        """
+        with pytest.raises(ValueError, match="name no threshold"):
+            dates(contarst="2026-10-27")
+
+    def test_every_word_the_scale_emits_has_an_entry_in_the_table(self) -> None:
+        """The table above is swept over the whole scale, not over a sample.
+
+        A seventh word added to ``STRENGTH_OF_READING`` with no row here would
+        otherwise reach the surface with its rungs untested.
+        """
+        covered = {word for word, _, _ in self.LADDER}
+        emitted = set(STRENGTH_OF_READING.values()) | {BLOCKED, INEXPRESSIBLE, INHERITED}
+        assert emitted - covered == set()
+
+
+class TestTheAxisReadsTheRowsTheCountReads:
+    """A node cannot date rows it did not count, nor count rows it cannot name.
+
+    These are the properties over the real builders rather than over synthetic
+    edges, and the first of them is the one that found the defect: two of these
+    nodes named a level by ONE of its fields while instantiating it from several,
+    so they could report the power to compare two levels with one level scored
+    several times.
+    """
+
+    def _nodes(self, record: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        client, _ = _client(record)
+        response = client.get("/v1/graph")
+        assert response.status_code == 200
+        return response.json()["nodes"]
+
+    def _one_setting_scored_three_times(self) -> dict[str, list[dict[str, Any]]]:
+        """Two retrieval settings; one of them holds three rows and only it scored.
+
+        The shape that exposes the defect, and it has to be this shape. Three
+        rows of ONE setting with nothing else instantiated does not expose it:
+        ``strength_of`` returns at the single-level test and never reads
+        ``scored`` at all, so a count of three looks exactly like a count of one.
+        What exposes it is a SECOND level standing unscored beside the first,
+        because then the overcount is the difference between a node that could
+        compare two levels and a node that scored one of them three times.
+
+        The live record holds the first half of this: three prediction sets of
+        2026-10-11 and 2026-10-12 carry identical retrieval settings, and
+        ``retriever`` reported five scored levels with three instantiated.
+        """
+        record = populated_record({"composite": 0.1})
+        base = record["prediction_sets"][0]
+        record["prediction_sets"] = [
+            {**base, "id": f"ps-{n}", "created_on": f"2026-10-{11 + n:02d}"} for n in range(3)
+        ] + [
+            {
+                **base,
+                "id": "ps-other",
+                "created_on": "2026-10-20",
+                # One field of the eight, which is all it takes to be a level.
+                "aspect_separated": "false",
+            }
+        ]
+        record["results"] = [
+            {**record["results"][0], "id": f"r-{n}", "prediction_set_id": f"ps-{n}"}
+            for n in range(3)
+        ]
+        record["panels"] = _panel_rows({"composite": 0.1})
+        record["candidates"] = [
+            {"prediction_set_id": f"ps-{n}", "candidates": 1000} for n in range(3)
+        ]
+        return record
+
+    def test_a_level_scored_three_times_is_not_the_power_to_compare_two(self) -> None:
+        """One level scored, a second standing beside it: that is ``unpowered``.
+
+        With ``scored`` counting distinct prediction sets this node reported
+        three scored levels, cleared the power test and published ``chosen`` --
+        the word for a powered contrast with no floor declared. Nothing had been
+        contrasted: one setting had been measured three times. The axis follows
+        the word, so it stopped at the contrast rung as it must.
+        """
+        node = next(
+            n
+            for n in self._nodes(self._one_setting_scored_three_times())
+            if n["key"] == "retriever"
+        )
+        assert node["levels_instantiated"] == 2
+        assert node["strength"] == UNPOWERED
+        assert [c["threshold"] for c in node["crossings"]] == [FIRST_LEVEL, CONTRAST]
+
+    def test_a_level_held_by_three_rows_is_dated_by_the_earliest_of_them(self) -> None:
+        """One setting, three rows, one date, and it is the first one.
+
+        A level is held by as many rows as happened to instantiate it, and the
+        day it came into existence is the earliest of those rather than any one
+        of them. Keyed by any one row's identifier instead, this node would hand
+        three dates to a count of two levels and the axis would date a rung the
+        count denies -- which is a refusal, not a wrong date.
+        """
+        node = next(
+            n
+            for n in self._nodes(self._one_setting_scored_three_times())
+            if n["key"] == "retriever"
+        )
+        assert [c["on"] for c in node["crossings"]] == ["2026-10-11", "2026-10-20"]
+
+    def test_no_node_serves_more_rungs_than_the_ladder_has(self) -> None:
+        """And a node with no artifact serves none, over all ten.
+
+        The ``blocked`` half is the one a reader depends on: five of these ten
+        nodes have nothing instantiated, and an axis that gave them a rung would
+        put a date on a decision nobody has taken.
+        """
+        for node in self._nodes(self._one_setting_scored_three_times()):
+            assert len(node["crossings"]) <= len(THRESHOLDS)
+            if node["strength"] in BLOCK_WORDS:
+                assert node["crossings"] == []
+
+    def test_a_configuration_nobody_retrieved_against_contributes_no_date(self) -> None:
+        """An unbuilt alternative must not land on the campaign's axis.
+
+        The nine representations registered on 2026-10-11 and never retrieved
+        against would, dated by ``embedding_config.created_at``, all read as
+        levels this campaign acquired that day. The column is the first
+        prediction set naming the configuration, and for them there is none.
+        """
+        record = populated_record({"a": 0.1, "b": 0.2})
+        unused = next(r for r in record["substrates"] if not r["in_use"])
+        assert unused["first_used_on"] is None
+        node = next(n for n in self._nodes(record) if n["key"] == "substrate")
+        assert node["levels_instantiated"] == 1
+        assert [c["on"] for c in node["crossings"]] == ["2026-10-11"]
+
+    def test_every_crossing_the_endpoint_serves_is_a_date_or_an_absence(self) -> None:
+        """The key's shape is a contract, over all ten nodes.
+
+        A surface renders this, and a rung carrying something other than an ISO
+        date or null is a cell that breaks the page rather than one that reads
+        oddly.
+        """
+        for node in self._nodes(populated_record({"a": 0.1, "b": 0.2})):
+            for crossing in node["crossings"]:
+                assert crossing["threshold"] in THRESHOLDS
+                assert crossing["on"] is None or re.fullmatch(r"\d{4}-\d{2}-\d{2}", crossing["on"])
+
+
+class TestTheFrameDescribesItsOwnWindow:
+    """What the panels were drawn from is a fact about THIS window.
+
+    Both of these were read as the first catalogue row carrying ``in_use``: the
+    oldest thing in the whole record that anything had ever used, with nothing
+    in the expression mentioning the window. On the live record that made the
+    frame for the titular 211->227 window publish ``delta-219-220-t0-c787b26a94ac``,
+    a query set of 5.810 entries belonging to the 219->220 window. A reader
+    concluded the headline number had been measured over 5.810 targets named
+    for a different pair of releases.
+    """
+
+    def _two_windows(self) -> dict[str, list[dict[str, Any]]]:
+        """Two windows, each with its own query set, the other's set older.
+
+        The shape that exposes it, and it has to be this shape: with one query
+        set in the record the wrong expression and the right one agree, so a
+        single-window fixture proves nothing about either.
+        """
+        record = populated_record({"a": 0.1, "b": 0.2})
+        # ``eval-1`` FIRST, because the graph reads its window from the head of
+        # this list and the head is what the frame block describes. Putting the
+        # other window first tests the other window.
+        record["evaluation_sets"] = [
+            record["evaluation_sets"][0],
+            {**record["evaluation_sets"][0], "id": "eval-2", "window_from": "219"},
+        ]
+        record["query_sets"] = [
+            # First in the list, as the query's ``ORDER BY created_at`` puts the
+            # oldest, and in use by the OTHER window.
+            {
+                "id": "qs-old",
+                "name": "delta-219-220",
+                "entries": 5810,
+                "in_use": True,
+                "first_used_on": "2026-10-11",
+            },
+            {
+                "id": "qs-1",
+                "name": "dianas-valid",
+                "entries": 63734,
+                "in_use": True,
+                "first_used_on": "2026-10-27",
+            },
+        ]
+        record["results"] = [
+            {
+                **record["results"][0],
+                "id": "r-old",
+                "evaluation_set_id": "eval-2",
+                "query_set_id": "qs-old",
+                "accretion_id": "ia-1",
+            },
+            {
+                **record["results"][0],
+                "id": "r-mine",
+                "query_set_id": "qs-1",
+                "accretion_id": "ia-1",
+            },
+        ]
+        return record
+
+    def test_the_frame_names_the_query_set_its_own_results_used(self) -> None:
+        """Not the oldest in the record, and not the other window's."""
+        frame = build_graph(self._two_windows())["frame"]
+        assert frame["query_set"]["name"] == "dianas-valid"
+        assert frame["query_set"]["entries"] == 63734
+        assert frame["query_set_absent"] is None
+
+    def test_a_window_whose_results_name_none_says_so_and_does_not_borrow(self) -> None:
+        """The titular window's state, and the whole reason null needs a reason.
+
+        Its results come from an ingested method, which carries no query set at
+        all. Null alone cannot be told from nobody having looked, so the block
+        carries the account beside it, as a blocked node carries its reason.
+        """
+        record = self._two_windows()
+        for row in record["results"]:
+            if row["evaluation_set_id"] != "eval-2":
+                row["query_set_id"] = None
+        frame = build_graph(record)["frame"]
+        assert frame["query_set"] is None
+        assert "ingested method" in frame["query_set_absent"]
+        assert "no query set" in frame["query_set_absent"]
+
+    def test_two_query_sets_under_one_window_is_refused_not_resolved(self) -> None:
+        """Two populations under one block, and printing one describes half of it."""
+        record = self._two_windows()
+        record["results"] = [
+            {**record["results"][1], "id": "r-a", "query_set_id": "qs-1"},
+            {**record["results"][1], "id": "r-b", "query_set_id": "qs-old"},
+        ]
+        frame = build_graph(record)["frame"]
+        assert frame["query_set"] is None
+        assert "2 different query sets" in frame["query_set_absent"]
+
+    def test_some_naming_one_and_some_naming_none_is_not_a_window_with_one(self) -> None:
+        """The live record's accretion state on the titular window, exactly.
+
+        One of its two results names an accretion table and the other does not,
+        so no single row describes them together. Printing the one that is there
+        would attribute both numbers to a weighting only one of them had.
+        """
+        record = self._two_windows()
+        record["results"] = [
+            {**record["results"][1], "id": "r-a", "accretion_id": "ia-1"},
+            {**record["results"][1], "id": "r-b", "accretion_id": None},
+        ]
+        frame = build_graph(record)["frame"]
+        assert frame["information_accretion_set"] is None
+        assert (
+            "1 of this window's 2 results name no accretion table"
+            in (frame["information_accretion_absent"])
+        )
+
+    def test_a_named_row_absent_from_the_record_is_named_as_missing(self) -> None:
+        """A result pointing at a query set this page did not read.
+
+        Falling back to any row in the catalogue would describe the panels with
+        a population that was never theirs, which is the whole defect.
+        """
+        record = self._two_windows()
+        for row in record["results"]:
+            row["query_set_id"] = "qs-gone"
+        frame = build_graph(record)["frame"]
+        assert frame["query_set"] is None
+        assert "not in the record" in frame["query_set_absent"]
+
+    def test_declared_cannot_be_true_while_this_window_resolves_neither(self) -> None:
+        """``declared`` says a reader has nothing to guess, so it has to get stricter.
+
+        With the old expression almost any populated record resolved both, so
+        the flag could report a frame fully recoverable while the window's own
+        query set was unrecoverable, which is the exact state it exists to
+        report.
+        """
+        record = self._two_windows()
+        for row in record["results"]:
+            row["frame_digest"] = "f-c353408429d4871b759c1072"
+            row["query_set_id"] = None
+        frame = build_graph(record)["frame"]
+        assert frame["sealed_rows"] == 2
+        assert frame["declared"] is False
+        assert frame["query_set_absent"] is not None

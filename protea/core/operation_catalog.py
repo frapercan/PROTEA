@@ -44,6 +44,10 @@ from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchOperation,
     EncodeResidueSparseOperation,
 )
+from protea.core.operations.encode_residue_vocabulary import (
+    EncodeResidueVocabularyBatchOperation,
+    EncodeResidueVocabularyOperation,
+)
 from protea.core.operations.export_evaluation_targets import (
     ExportEvaluationTargetsOperation,
 )
@@ -60,10 +64,16 @@ from protea.core.operations.export_research_dataset import (
 from protea.core.operations.extract_goa_universe import ExtractGoaUniverseOperation
 from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOperation
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetOperation
+from protea.core.operations.ingest_method_predictions import (
+    IngestMethodPredictionsOperation,
+)
 from protea.core.operations.insert_proteins import InsertProteinsOperation
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingOperation,
+)
+from protea.core.operations.load_ontology_aliases import (
+    LoadOntologyAliasesOperation,
 )
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
@@ -85,6 +95,9 @@ from protea.core.operations.predict_go_terms_from_interpro import (
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesOperation,
 )
+from protea.core.operations.register_ingested_method import (
+    RegisterIngestedMethodOperation,
+)
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesOperation,
 )
@@ -93,7 +106,20 @@ from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOp
 from protea.core.operations.seal_evaluation_frames import (
     SealEvaluationFramesOperation,
 )
+from protea.core.operations.store_residue_codes import StoreResidueCodesOperation
 from protea.core.operations.stratify_evaluation import StratifyEvaluationOperation
+from protea.core.operations.verify_window_against_reference import (
+    VerifyWindowAgainstReferenceOperation,
+)
+
+
+def _register_residue_encoders(registry: OperationRegistry) -> None:
+    """The operations that run the language model per residue, coordinator and card batch."""
+    registry.register(EncodeResidueSparseOperation())
+    registry.register(EncodeResidueSparseBatchOperation())
+    registry.register(EncodeResidueVocabularyOperation())
+    registry.register(EncodeResidueVocabularyBatchOperation())
+    registry.register(StoreResidueCodesOperation())
 
 
 def build_operation_registry() -> OperationRegistry:
@@ -116,6 +142,8 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(LoadInterProGoMappingOperation())
     registry.register(RunInterProScanBatchOperation())
     registry.register(GenerateEvaluationSetOperation())
+    registry.register(RegisterIngestedMethodOperation())
+    registry.register(VerifyWindowAgainstReferenceOperation())
     registry.register(RunCafaEvaluationOperation())
     registry.register(BatchRescoreEvaluationOperation())
     registry.register(ComputeEmbeddingsOperation())
@@ -134,8 +162,9 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(ArchiveOntologySnapshotOperation())
     registry.register(CountBackendParametersOperation())
     registry.register(ExportEvaluationTargetsOperation())
-    registry.register(EncodeResidueSparseOperation())
-    registry.register(EncodeResidueSparseBatchOperation())
+    registry.register(IngestMethodPredictionsOperation())
+    registry.register(LoadOntologyAliasesOperation())
+    _register_residue_encoders(registry)
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
     # publicly registered: all re-ranker training moves to
     # protea-reranker-lab. They remain importable as internal helpers —

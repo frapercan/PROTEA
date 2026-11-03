@@ -177,7 +177,10 @@ def _prediction_row_to_dict(pred: GOPrediction, gt: GOTerm) -> dict[str, Any]:
         "go_id": gt.go_id,
         "name": gt.name,
         "aspect": gt.aspect,
-        "distance": round(pred.distance, 4),
+        # None, not 0.0: a method that scores its own candidates has no
+        # neighbour to be a distance from, and a zero here would read on the
+        # wire as the query being its own closest match.
+        "distance": None if pred.distance is None else round(pred.distance, 4),
         "ref_protein_accession": pred.ref_protein_accession,
         "qualifier": pred.qualifier,
         "evidence_code": pred.evidence_code,

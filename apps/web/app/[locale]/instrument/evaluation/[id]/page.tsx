@@ -16,9 +16,9 @@ type NsMetrics = {
    * in this cell comparable to the LAFA / CAFA leaderboards. Optional because
    * the ``_w`` keys are written only when a real IA table reached cafaeval.
    */
-  f_micro_w?: number;
-  precision_w?: number;
-  recall_w?: number;
+  f_micro?: number;
+  precision?: number;
+  recall?: number;
   coverage_w?: number;
   /**
    * Unweighted, kept for history and NOT LAFA-comparable -- the
@@ -47,6 +47,7 @@ type EvaluationResult = {
   // null on rows written before the columns existed; the badge strip then
   // renders an explicit "unknown" state.
   frame: string | null;
+  frame_digest: string | null;
   temporal_window: string | null;
   arms_enabled: Record<string, boolean> | null;
   leakage_role: string | null;
@@ -391,6 +392,7 @@ export default function EvaluationDetailPage() {
                               <EvalProvenanceBadges
                                 provenance={{
                                   frame: r.frame,
+                                  frame_digest: r.frame_digest,
                                   temporal_window: r.temporal_window,
                                   arms_enabled: r.arms_enabled,
                                   leakage_role: r.leakage_role,

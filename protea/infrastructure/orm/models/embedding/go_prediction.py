@@ -53,7 +53,14 @@ class GOPrediction(Base):
         index=True,
     )
     ref_protein_accession: Mapped[str] = mapped_column(String, nullable=False)
-    distance: Mapped[float] = mapped_column(Float, nullable=False)
+    #: Cosine distance to the donor, in [0, 2]. NULL when the method has no
+    #: donor to measure one to: it was NOT NULL while every writer was a
+    #: retrieval, and the one writer that is not
+    #: (``predict_go_terms_from_interpro``) had to invent ``1 / vote_count``
+    #: to satisfy it. NULL is not a large distance and not a zero one; the
+    #: scorer drops the ``embedding_similarity`` signal out of the weighted
+    #: average rather than reading a value into it.
+    distance: Mapped[float | None] = mapped_column(Float, nullable=True)
     qualifier: Mapped[str | None] = mapped_column(String, nullable=True)
     evidence_code: Mapped[str | None] = mapped_column(String, nullable=True)
 
@@ -193,6 +200,24 @@ class GOPrediction(Base):
     # feature (absent from ``feature_schema.NUMERIC_FEATURES``), so it does not
     # enter ``feature_schema_sha``.
     ia: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # --- The score the method itself produced.
+    #: Every other score in the system is derived at evaluation time from the
+    #: columns above, by a ``ScoringConfig``'s weighted average or by a
+    #: re-ranker booster. A method that emits its own probability per
+    #: (protein, term) -- the lab's readers, a classifier, anything that is
+    #: not neighbour transfer -- has nothing for those signals to weight, and
+    #: writing its number into ``distance`` as ``2 * (1 - p)`` would make it
+    #: come back out of ``embedding_similarity`` exactly while recording a
+    #: distance to a neighbour that does not exist.
+    #:
+    #: Read ONLY by ``ScoringConfig`` formula ``method_score``, which returns
+    #: it unchanged. NULL means this row's score is derived, which is every
+    #: row written before this column existed, so no stored result moves.
+    #: A row that the ``method_score`` formula finds NULL raises rather than
+    #: scoring 0.0: a prediction set that declares its own scores and has
+    #: none is a provenance error, not a zero.
+    method_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # --- Legacy JSONB feature mirror (pre signal-store code-switch).
     # This blob used to mirror every typed feature column plus the LAFA/IA

@@ -35,6 +35,7 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHT_FALLBACK,
     DEFAULT_EVIDENCE_WEIGHTS,
     FORMULA_EVIDENCE_WEIGHTED,
+    FORMULA_METHOD_SCORE,
     IA_PRIOR_SOURCE_IA,
     ScoringConfig,
 )
@@ -43,6 +44,8 @@ __all__ = [
     "DEFAULT_EVIDENCE_WEIGHT_FALLBACK",
     "DEFAULT_EVIDENCE_WEIGHTS",
     "FORMULA_EVIDENCE_WEIGHTED",
+    "FORMULA_METHOD_SCORE",
+    "MethodScoreMissing",
     "evidence_weight",
     "compute_score",
     "coverage_signal",
@@ -275,13 +278,37 @@ def _resolve_signal_values(
     ]
 
 
+class MethodScoreMissing(ValueError):
+    """A ``method_score`` config met a row that carries no method score.
+
+    Raised rather than scoring 0.0. A prediction set declaring that its
+    scores are its method's own, with rows that have none, is a provenance
+    error: the alternative is a cell full of zeros that looks like a method
+    performing badly.
+    """
+
+
+def method_score_of(pred: dict[str, Any]) -> float:
+    """The score the method produced, or raise naming the row."""
+    value = pred.get("method_score")
+    if value is None:
+        raise MethodScoreMissing(
+            "scoring config asks for the method's own score and "
+            f"{pred.get('protein_accession', '?')} / {pred.get('go_id', '?')} "
+            "has none"
+        )
+    return float(value)
+
+
 def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
     """Compute a [0, 1] confidence score for a single GOPrediction dict.
 
     Signals are normalised to [0, 1] then weighted-averaged. Signals
     whose value is ``None`` (feature-engineering flag off at predict
     time) drop from both numerator and denominator. Returns
-    ``round(base_score, 6)``; ``FORMULA_EVIDENCE_WEIGHTED`` multiplies
+    ``round(base_score, 6)``; ``FORMULA_METHOD_SCORE`` short-circuits the
+    whole average and returns the method's own number;
+    ``FORMULA_EVIDENCE_WEIGHTED`` multiplies
     the average by the resolved evidence weight even when the
     evidence_weight signal carries weight 0 — so IEA / ND annotations
     get down-ranked regardless of feature configuration.
@@ -291,6 +318,11 @@ def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
     weighted average, then ``x evidence_weight`` for the evidence_weighted
     formula, then ``x ia_prior_multiplier`` (axis E), then ``apply_calibration``.
     """
+    if config.formula == FORMULA_METHOD_SCORE:
+        # No signals, no weights, no multipliers: the method already decided.
+        # Rounded like every other path so the two cannot differ in the sixth
+        # decimal, which is upstream of the four the TSV is written at.
+        return round(method_score_of(pred), 6)
     params = getattr(config, "params", None)
     if not isinstance(params, dict):
         params = {}

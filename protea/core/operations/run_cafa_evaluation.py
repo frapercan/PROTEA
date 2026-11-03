@@ -11,17 +11,13 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from protea.core._evaluation_leakage import refuse_uncertifiable_encoding
-from protea.core.band_registry import (
-    assert_band_consistency,
-    assert_release_not_after_cutoff,
-    ia_token,
-)
 from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.ia import PROPAGATE_RELATIONS, strongly_connected_components
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
 from protea.core.operations import _run_cafa_summary as _summary
+from protea.core.operations._band_guard import refuse_if_the_band_is_foreign
 from protea.core.operations._depth_unit_guard import (
     assert_depth_unit_is_available,
 )
@@ -29,7 +25,7 @@ from protea.core.operations._evaluation_artifacts import (
     resolve_ia_file,
     resolve_obo,
 )
-from protea.core.operations._holdout_guard import refuse_if_it_reads_the_holdout
+from protea.core.operations._holdout_guard import Claim, refuse_if_it_reads_the_holdout
 from protea.core.operations._run_cafa_eval_driver import (
     CafaEvalRunContext,
     evaluate_all_settings,
@@ -60,6 +56,7 @@ from protea.core.operations._run_cafa_setup import (  # noqa: F401
     _PipelineCtx,
     bundle_run_context,
 )
+from protea.core.operations.compute_information_accretion import ia_key_for
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -97,8 +94,12 @@ def _refuse_a_cyclic_snapshot(session: Session, snapshot: Any, emit: EmitFn) -> 
     emit(
         "run_cafa_evaluation.cyclic_snapshot",
         None,
-        {"snapshot_id": str(snapshot.id), "obo_version": snapshot.obo_version,
-         "components": len(components), "terms": terms},
+        {
+            "snapshot_id": str(snapshot.id),
+            "obo_version": snapshot.obo_version,
+            "components": len(components),
+            "terms": terms,
+        },
         "error",
     )
     raise ValueError(
@@ -192,11 +193,14 @@ class RunCafaEvaluationOperation:
         provenance = self._build_eval_provenance(p, inputs.eval_set, bool(reranker_models))
         eval_result = build_result_row(
             ResultRow(
-                result_id=result_id, inputs=inputs, payload=payload,
+                result_id=result_id,
+                inputs=inputs,
+                payload=payload,
                 scoring_config_id=p.scoring_config_id,
                 first_reranker_id=first_reranker_id,
                 reranker_config_snapshot=reranker_config_snapshot,
-                results=results, provenance=provenance,
+                results=results,
+                provenance=provenance,
                 max_sequence_rank=p.max_sequence_rank,
                 max_k_position=p.max_k_position,
             )
@@ -234,7 +238,8 @@ class RunCafaEvaluationOperation:
         refuse_if_it_reads_the_holdout(
             session,
             eval_set.new_annotation_set_id,
-            waiver=p.holdout_waiver,
+            claim=Claim(p.holdout_waiver, p.prospective_declaration),
+            old_annotation_set_id=eval_set.old_annotation_set_id,
             context="scoring at",
             emit=emit,
         )
@@ -263,7 +268,8 @@ class RunCafaEvaluationOperation:
             data=data,
             snapshot=snapshot,
             pivot_snapshot_id=pivot_snapshot_id,
-            toi_go_ids=_load_terms_of_interest(session, pivot_snapshot_id),
+            toi_go_ids=_load_terms_of_interest(session, pivot_snapshot_id, eval_set, p.toi_rule),
+            toi_rule=p.toi_rule,
         )
         _emit_evaluation_setup_events(emit, inputs)
         if data.delta_proteins == 0:
@@ -457,9 +463,8 @@ class RunCafaEvaluationOperation:
             scoring_config=ctx.scoring_snapshot,
         )
 
-    @classmethod
+    @staticmethod
     def _resolve_and_gate_ia(
-        cls,
         tmpdir: str,
         snapshot: OntologySnapshot,
         p: RunCafaEvaluationPayload,
@@ -475,57 +480,18 @@ class RunCafaEvaluationOperation:
             session,
             p.information_accretion_set_id,
         )
-        cls._enforce_band(p.band, snapshot, p.ia_file, emit)
+        # The guard gets the SOURCE reference, not the tempfile: a downloaded
+        # copy is always called ia.tsv and would tokenise to that. When the IA
+        # was pinned by set id, the canonical key for that set is the reference,
+        # and ia_key_for is the same builder compute_information_accretion wrote
+        # it with, so the two cannot drift.
+        band_ref = (
+            ia_key_for(p.information_accretion_set_id)
+            if p.information_accretion_set_id
+            else p.ia_file
+        )
+        refuse_if_the_band_is_foreign(p.band, snapshot, band_ref, emit)
         return ia_path
-
-    @staticmethod
-    def _enforce_band(
-        declared_band: str | None,
-        snapshot: OntologySnapshot,
-        payload_ia_file: str | None,
-        emit: EmitFn,
-    ) -> None:
-        """Phantom-gap guard: when the payload declares a band, reject the run
-        if the pivot ontology snapshot or the resolved IA come from a foreign
-        band, and forbid the uniform IC=1 fallback.
-
-        Binds propagation / term-universe / orphans (the snapshot) AND the IA
-        to the declared band, extending the #599 IA-only resolver. Resolves the
-        IA *reference* (payload ``ia_file`` first, else snapshot ``ia_url``) so
-        the band is checked against the source artifact, not a downloaded
-        tempfile copy. No-op when ``declared_band`` is None (ad-hoc episode).
-
-        Note that the IA half of this guard resolves by BASENAME
-        (``band_registry.ia_token``), which cannot distinguish two tables built
-        from different corpora that happen to share a filename. An
-        ``InformationAccretionSet`` always serialises to ``IA.tsv``, so a band
-        whose token set omits that name rejects it. That is the safe direction:
-        promoting a computed table to authoritative for a band is a registry
-        decision, not something this resolver should infer.
-        """
-        if not declared_band:
-            return
-        ia_ref = payload_ia_file or snapshot.ia_url
-        band = assert_band_consistency(
-            declared_band, obo_version=snapshot.obo_version, ia_ref=ia_ref
-        )
-        # No-future-data: even a set-canonical snapshot must not post-date the
-        # band's t0 (the set-membership check and the temporal ordering are
-        # independent; a band could in principle accept a date-bearing OBO that
-        # is still after its cutoff). Raises CutoffViolationError.
-        assert_release_not_after_cutoff(
-            declared_band, artifact="ontology snapshot", release_ref=snapshot.obo_version
-        )
-        emit(
-            "run_cafa_evaluation.band_verified",
-            None,
-            {
-                "band": band.name,
-                "obo_version": snapshot.obo_version,
-                "ia_token": ia_token(ia_ref),
-            },
-            "info",
-        )
 
     @staticmethod
     def _upload_artifacts(

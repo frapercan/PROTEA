@@ -202,8 +202,8 @@ class TestGenerateEvaluationSetExecute:
         assert mock_reconciled.called
         assert not mock_same.called
         # Pivot defaults to new_set.ontology_snapshot_id.
-        kwargs_or_args = mock_reconciled.call_args
-        assert kwargs_or_args.args[5] == new_set.ontology_snapshot_id
+        window = mock_reconciled.call_args.args[1]
+        assert window.pivot_snapshot_id == new_set.ontology_snapshot_id
 
     def test_explicit_pivot_snapshot(self):
         """Explicit pivot with matching old+new snapshots still uses same-snapshot path."""
@@ -434,9 +434,9 @@ class TestGenerateEvaluationSetExecute:
 
         assert mock_reconciled.called
         assert not mock_same.called
-        args = mock_reconciled.call_args.args
-        assert args[3] == old_native  # old native DAG = override, NOT old_set's binding
-        assert args[4] == new_native  # new native DAG = override
+        window = mock_reconciled.call_args.args[1]
+        assert window.old_native_snapshot_id == old_native  # the override, not old_set's binding
+        assert window.new_native_snapshot_id == new_native
 
     def test_native_override_beside_an_existing_pair_computes_a_second_set(self):
         """The pair no longer settles identity, so an override is a new measurement.
@@ -445,8 +445,8 @@ class TestGenerateEvaluationSetExecute:
         nowhere to go. The two deltas are genuinely different -- on GOA
         220 -> 227 the propagation graph moves the PK bucket by 21 percent of
         its annotations -- so refusing the second one made two legitimate
-        measurements mutually exclusive. The lookup now filters on all five
-        identity fields, finds nothing under the overridden graph, and computes.
+        measurements mutually exclusive. The lookup now filters on every
+        identity field, finds nothing under the overridden graph, and computes.
         """
         session = MagicMock()
         old_set = _make_annotation_set(uuid.uuid4())
@@ -469,10 +469,18 @@ class TestGenerateEvaluationSetExecute:
                 self.op.execute(session, payload, emit=self.emit)
 
         assert mock_reconciled.called
-        assert mock_reconciled.call_args[0][3] == old_native
+        assert mock_reconciled.call_args.args[1].old_native_snapshot_id == old_native
 
-    def test_identity_lookup_filters_on_all_five_fields(self):
-        """A lookup on fewer fields would serve a delta the caller did not ask for."""
+    def test_identity_lookup_filters_on_every_field_of_the_identity(self):
+        """A lookup on fewer fields would serve a delta the caller did not ask for.
+
+        Eight now, not five. ``truth_profile`` decides how the t1 truth is
+        built, ``toi_rule`` which part of it counts as a gain, and
+        ``not_codes`` which denials may take it away, so a lookup that
+        ignored any of them would hand back a delta the caller did not ask
+        for. The literal list is the point: it is what fails when a ninth
+        field is added to the identity and not to the lookup.
+        """
         session = MagicMock()
         old_set = _make_annotation_set(uuid.uuid4())
         new_set = _make_annotation_set(uuid.uuid4())
@@ -494,7 +502,13 @@ class TestGenerateEvaluationSetExecute:
             "pivot_snapshot_id",
             "old_native_snapshot_id",
             "new_native_snapshot_id",
+            "truth_profile",
+            "toi_rule",
+            "not_codes",
         }
+        assert len(session.query.return_value.filter_by.call_args.kwargs) == len(
+            _Identity._fields
+        )
 
 
 class TestDeltaModeAndEmptyRefusal:

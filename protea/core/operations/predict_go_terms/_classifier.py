@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn
+from protea.core.producer_sentinels import CLASSIFIER
 
 if TYPE_CHECKING:
     from protea.core.operations.predict_go_terms._batch_op import (
@@ -221,7 +222,7 @@ def _new_classifier_record(
         "protein_accession": accession,
         "go_term_id": go_term_id,
         "go_id": go_id,
-        "ref_protein_accession": "classifier",
+        "ref_protein_accession": CLASSIFIER,
         "distance": float("nan"),
         "qualifier": "",
         "evidence_code": "",

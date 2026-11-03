@@ -33,7 +33,23 @@ router = APIRouter(prefix="/strata", tags=["strata"])
 _SETTINGS = ("NK", "LK", "PK")
 
 #: Columns the parquet always carries, whatever axes were crossed.
-_MEASURES = ("n_proteins", "precision_w", "recall_w", "f_micro_w", "reportable")
+#: Columns that are the cell's numbers rather than one of its axes. Everything
+#: else in the table is a dimension, which is how the endpoint discovers the
+#: axes a run crossed without being told.
+#:
+#: ``variant`` is in here as a measure and not as an axis: it says which
+#: weighting the three numbers beside it hold, so it describes them rather
+#: than slicing the population. Reading it as an axis would publish one cell
+#: per weighting and invite a reader to compare two different term sets as if
+#: they were two strata.
+_MEASURES = (
+    "n_proteins",
+    "variant",
+    "precision",
+    "recall",
+    "f_micro",
+    "reportable",
+)
 
 
 def _cells(raw: bytes) -> list[dict[str, Any]]:
@@ -118,7 +134,7 @@ _COMPARE_TTL = 300.0
 #: project has already hit and named: a single-field comparison that was not.
 _ARMS = text(
     with_arm_identity(
-    """
+        """
     SELECT er.id            AS evaluation_result_id,
            ec.id            AS embedding_config_id,
            ec.model_name    AS model,
@@ -195,7 +211,7 @@ def _label(arms: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # Layer first when it is what differs, since it is the axis rung 2
         # declares. Otherwise the config id, which always distinguishes.
         suffix = f"L{layers}" if layers is not None else a["embedding_config_id"][:8]
-        a["display_name"] = f'{a["display_name"]} [{suffix}]'
+        a["display_name"] = f"{a['display_name']} [{suffix}]"
     return arms
 
 

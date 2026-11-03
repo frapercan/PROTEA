@@ -109,7 +109,7 @@ function SettingTable({
                 </th>
               ))}
               <th className={`${TH} text-right`}>proteins</th>
-              <th className={`${TH} text-right`}>f_micro_w</th>
+              <th className={`${TH} text-right`}>f_micro</th>
               <th className={TH} />
             </tr>
           </thead>
@@ -130,10 +130,10 @@ function SettingTable({
                 </td>
                 <td
                   className={`${TD} text-right ${
-                    cell.reportable ? scoreShade(cell.f_micro_w, shaded) : ""
+                    cell.reportable ? scoreShade(cell.f_micro, shaded) : ""
                   }`}
                 >
-                  {formatScore(cell.f_micro_w)}
+                  {formatScore(cell.f_micro)}
                 </td>
                 <td className={`${TD} whitespace-nowrap`}>
                   {cell.reportable ? null : (

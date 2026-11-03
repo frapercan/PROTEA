@@ -174,7 +174,7 @@
     "welcomeBody": "Give it an amino-acid sequence and it returns the functions that sequence is likely to carry out, drawn from the Gene Ontology. It is a working platform rather than a paper, and everything below runs on the machine serving this page.",
     "welcomeResult": "It placed <cafa>{rank, number}th of {teams, number} teams in {competition}</cafa>, an open competition scored by its organisers rather than by us.",
     "welcomeValidation": "The method is submitted to the <lafa>LAFA benchmark</lafa> as a running container rather than as a file of predictions. Before anything is claimed here we reproduce the scoring ourselves, with the <evaluator>CAFA evaluator deployed on this machine</evaluator>, a fork of <upstream>the published one</upstream> with the scoring unchanged, so a third party can regenerate any figure on this site.",
-    "welcomeCampaign": "A new data campaign is rebuilding the annotation corpus from the ground up. As of {asOf} it has read {read, number} of the series' {releases, number} releases of the Gene Ontology Annotation database, which is {gigabytes, number} GB of files in all, and loaded {proteins, number} protein entries (canonical plus isoforms), each tagged with the release it came from. The tools below are built and running; their figures come back when the rebuild finishes.",
+    "welcomeCampaign": "A data campaign has rebuilt the annotation corpus from the ground up. As of {asOf} it has read {read, number} of the series' {releases, number} releases of the Gene Ontology Annotation database, which is {gigabytes, number} GB of files in all, and loaded {proteins, number} protein entries (canonical plus isoforms), each tagged with the release it came from. The tools below are built, running, and their figures are in.",
     "argumentRecord": "The argument is published below in full, as it was measured against the LAFA board for {frame}.",
     "headlineSentence": "Stated with its frame, the sealed result is <value></value> on <metric></metric>, first in seven of nine cells<note>.</note>",
     "headlineSentenceWithheld": "Stated with its frame, the sealed result on <metric></metric> is being recomputed, first in seven of nine cells<note>.</note>",
@@ -318,14 +318,15 @@
     "panelPopulation": "panel",
     "panelPopulationHint": "Every protein the run SCORED in this cell, read from the per-protein artefact. It is not the same count as the ground truth's: the graph counts proteins that gained a term of this aspect in this bucket, and on this campaign the two agree on eight of the nine panels and differ by one on PK x BPO, because a query the evaluation kernel could not key is dropped when the artefact is written.",
     "placed": "placed",
-    "placedHint": "How many of the panel could be put on the length and homology axes. A query whose run retrieved no donor other than itself cannot be placed on either.",
+    "placedHint": "How many of the panel could be put on the axes at all. A query needs only its own length for that, so retrieving no donor does not unplace it: it only leaves the four donor axes unread.",
     "matched": "matched",
     "matchedHint": "How many survive the bands pinned above. Equal to the placed count when no band is pinned.",
     "scoredZero": "scored nothing",
     "scoredZeroHint": "How many of the matched proteins the run scored exactly zero on. A count and not a rate: a cell reading 0.09 over 375 proteins is one claim when the mass is spread and a different one when most of it is exactly zero, and the pooled number cannot tell the two apart.",
     "tau": "tau",
     "tauHint": "The decision threshold the run reported for this aspect. Every score in the table is taken at it.",
-    "unplacedWhy": "{count} of the panel carry no band: {noDonor} retrieved no donor other than the query, {noLength} have no recorded length, {offScale} carry an identity that is not a percentage. They stay in the table with empty bands rather than being dropped, because they are part of the population the panel counts.",
+    "unplacedWhy": "{count} of the panel carry no band: {noLength} have no recorded length and {offScale} carry an identity that is not a percentage. They stay in the table with empty bands rather than being dropped, because they are part of the population the panel counts.",
+    "withoutDonorWhy": "{count} of the panel carry their length band but have no aligned donor, so the four donor axes go unread. They are counted among the placed: retrieving no donor costs those four axes and nothing else.",
     "sortLabel": "order",
     "sort": {
       "f_asc": "weakest first",
@@ -1064,20 +1065,8 @@
     }
   },
   "evaluation": {
-    "title": "CAFA Evaluation",
-    "generateSection": {
-      "heading": "New Evaluation Set",
-      "description": "Computes the delta between two GOA releases. Applies experimental evidence filtering and NOT-qualifier propagation through the GO DAG.",
-      "oldSetLabel": "Old GOA set (reference)",
-      "selectSet": "— select —",
-      "newSetLabel": "New GOA set (ground truth)",
-      "errorSameSets": "Old and new sets must be different.",
-      "generateEvaluationSet": "Generate Evaluation Set",
-      "generating": "Queuing…"
-    },
-    "evaluationSetsSection": {
-      "heading": "Evaluation Sets"
-    },
+    "backToList": "Back to evaluation sets",
+    "detailTitle": "Evaluation set detail",
     "evaluationSetCard": {
       "deleteConfirm": "Delete this evaluation set and all its results?",
       "delete": "Delete",
@@ -1114,6 +1103,30 @@
       "resultDelete": "Delete",
       "deleteResultConfirm": "Delete this evaluation result?"
     },
+    "evaluationSetsSection": {
+      "heading": "Evaluation Sets"
+    },
+    "generateSection": {
+      "heading": "New Evaluation Set",
+      "description": "Computes the delta between two GOA releases. Applies experimental evidence filtering and NOT-qualifier propagation through the GO DAG.",
+      "oldSetLabel": "Old GOA set (reference)",
+      "selectSet": "— select —",
+      "newSetLabel": "New GOA set (ground truth)",
+      "errorSameSets": "Old and new sets must be different.",
+      "generateEvaluationSet": "Generate Evaluation Set",
+      "generating": "Queuing…"
+    },
+    "jumpToContext": "Jump to context",
+    "loading": "Loading evaluation set...",
+    "manualEvaluatorSection": {
+      "heading": "Manual evaluator command"
+    },
+    "modelUsed": "Reranker model used",
+    "noResults": "No evaluation results yet for this set.",
+    "openPredictionSet": "Open prediction set",
+    "openReranker": "Open reranker model",
+    "proteinExamples": "Protein examples (prediction set)",
+    "provenanceLabel": "provenance",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -1127,9 +1140,9 @@
       "coverage": "Coverage",
       "tau": "τ"
     },
-    "manualEvaluatorSection": {
-      "heading": "Manual evaluator command"
-    }
+    "statDelta": "delta proteins",
+    "statsTitle": "Set stats",
+    "title": "CAFA Evaluation"
   },
   "scoring": {
     "title": "Scoring Configs",

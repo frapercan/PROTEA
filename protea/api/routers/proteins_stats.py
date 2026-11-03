@@ -172,8 +172,7 @@ def _compute_go_matrix(factory: sessionmaker[Session]) -> dict[str, Any]:
             .filter(
                 or_(
                     AnnotationSet.source_published_at.is_(None),
-                    cast(AnnotationSet.source_published_at, Date)
-                    <= release(BOARD_MARK).published,
+                    cast(AnnotationSet.source_published_at, Date) <= release(BOARD_MARK).published,
                 )
             )
             .group_by(
@@ -364,13 +363,14 @@ def _ultimo_set_goa(session: Session):
     porque ``source_version`` es texto y otras fuentes no lo usan numerico.
     """
     orden = case(
-        (AnnotationSet.source_version.op("~")(r"^[0-9]+$"), cast(AnnotationSet.source_version, Integer)),
+        (
+            AnnotationSet.source_version.op("~")(r"^[0-9]+$"),
+            cast(AnnotationSet.source_version, Integer),
+        ),
         else_=literal(-1),
     )
     return (
-        _no_pasada_la_marca(
-            session.query(AnnotationSet).filter(AnnotationSet.source == "goa")
-        )
+        _no_pasada_la_marca(session.query(AnnotationSet).filter(AnnotationSet.source == "goa"))
         .order_by(orden.desc())
         .first()
     )

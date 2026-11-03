@@ -226,7 +226,7 @@ function ArmPicker({
         {arms.map((a) => {
           const one = soleCell(a);
           const suffix = one
-            ? ` · ${one.f_micro_w.toFixed(4)} / ${one.n_proteins.toLocaleString(locale)}${
+            ? ` · ${one.f_micro.toFixed(4)} / ${one.n_proteins.toLocaleString(locale)}${
                 one.reportable === false ? ` ${t("withheldShort")}` : ""
               }`
             : ` · ${t("cellsCovered", { count: a.cells.length })}`;
@@ -314,10 +314,14 @@ function Counts({ data }: { data: StratumProteinsResponse }) {
         <p className="text-xs leading-relaxed text-amber-800" role="status">
           {t("unplacedWhy", {
             count: gap,
-            noDonor: data.unplaced.no_donor,
             noLength: data.unplaced.no_length,
             offScale: data.unplaced.off_scale,
           })}
+        </p>
+      )}
+      {data.without_donor > 0 && (
+        <p className="text-xs leading-relaxed text-slate-500" role="status">
+          {t("withoutDonorWhy", { count: data.without_donor })}
         </p>
       )}
     </div>
@@ -375,11 +379,11 @@ function ProteinTable({ data }: { data: StratumProteinsResponse }) {
                 </Link>
               </td>
               <td className="px-3 py-1.5 text-right font-mono text-xs font-semibold text-slate-900">
-                {num(p.f_w)}
+                {num(p.f)}
               </td>
-              <td className="px-3 py-1.5 text-right font-mono text-xs text-slate-700">{num(p.precision_w)}</td>
-              <td className="px-3 py-1.5 text-right font-mono text-xs text-slate-700">{num(p.recall_w)}</td>
-              <td className="px-3 py-1.5 text-right font-mono text-xs text-slate-700">{num(p.n_gt_w, 2)}</td>
+              <td className="px-3 py-1.5 text-right font-mono text-xs text-slate-700">{num(p.precision)}</td>
+              <td className="px-3 py-1.5 text-right font-mono text-xs text-slate-700">{num(p.recall)}</td>
+              <td className="px-3 py-1.5 text-right font-mono text-xs text-slate-700">{num(p.n_gt, 2)}</td>
               <td className="px-3 py-1.5 text-right font-mono text-xs text-slate-700">
                 {p.best_identity == null ? "∅" : `${p.best_identity.toFixed(1)}%`}
               </td>

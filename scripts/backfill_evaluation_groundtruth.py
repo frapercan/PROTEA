@@ -28,6 +28,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from sqlalchemy import select  # noqa: E402
 
 from protea.core.evaluation import (  # noqa: E402
+    ReconciledWindow,
     compute_evaluation_data,
     compute_evaluation_data_reconciled,
     groundtruth_key_for,
@@ -83,8 +84,14 @@ def _backfill_one(session, store, eval_set: EvaluationSet) -> str | None:
         data = compute_evaluation_data(session, ann_old.id, ann_new.id, pivot_id)
     else:
         data = compute_evaluation_data_reconciled(
-            session, ann_old.id, ann_new.id,
-            ann_old.ontology_snapshot_id, ann_new.ontology_snapshot_id, pivot_id,
+            session,
+            ReconciledWindow(
+                ann_old.id,
+                ann_new.id,
+                ann_old.ontology_snapshot_id,
+                ann_new.ontology_snapshot_id,
+                pivot_id,
+            ),
         )
 
     key = groundtruth_key_for(eval_set.id)

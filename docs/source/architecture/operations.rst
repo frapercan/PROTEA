@@ -1900,6 +1900,44 @@ The script lets pip resolve the runtime deps automatically; any unrelated
 version bumps (sympy, networkx, MarkupSafe) stay inside the permissive
 ranges declared in ``pyproject.toml``.
 
+encode_residue_vocabulary
+-------------------------
+
+Keeps the sparse code of EVERY residue of a corpus under a frozen residue vocabulary
+(ADR-D51). A coordinator on ``protea.embeddings`` resolves the vocabulary artifact,
+creates the target configuration (backend ``residue-vocabulary``, cut taken from the
+artifact's ``training_release``) and fans out ``encode_residue_vocabulary_batch``
+messages to ``protea.embeddings.batch``. Each batch runs Ankh with exact attention, one
+hidden state per selected layer (``embed_batch_per_layer`` in protea-backends), encodes
+every residue with :mod:`protea.core.residue_vocabulary`, puts one compressed shard in the
+artifact store (:mod:`protea.core.residue_code_shards`) and publishes one message to
+``protea.embeddings.write``. There ``store_residue_codes``, on the host that owns the
+database, checks the shard against the message, inserts one ``residue_code`` row per
+sequence and advances the parent job, as ``store_embeddings`` does for
+``compute_embeddings``. :func:`protea.core.residue_codes.load_residue_codes` reads the
+codes back.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``source_embedding_config_id``
+     - The corpus (sequences with an embedding under it) and the model that runs.
+   * - ``vocabulary_artifact_uri`` or ``vocabulary_artifact_path``
+     - Exactly one: the ``residue-vocabulary`` artifact (an ``.npz`` with ``meta_json``).
+   * - ``sequences_per_job``
+     - Sequences per batch message (default 256).
+   * - ``residues_per_call``
+     - Residues per backend call, which bounds the host copy of the states (default 32768).
+   * - ``sequence_id_limit``
+     - Optional cap on the sequences encoded, for trials.
+
+
 Registering a new operation
 ----------------------------
 

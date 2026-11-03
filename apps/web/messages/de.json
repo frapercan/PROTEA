@@ -175,7 +175,7 @@
     "welcomeBody": "Man übergibt eine Aminosäuresequenz und erhält die Funktionen zurück, die sie wahrscheinlich erfüllt, entnommen der Gene Ontology. Es ist eine laufende Plattform und kein Aufsatz, und alles Weitere läuft auf der Maschine, die diese Seite ausliefert.",
     "welcomeResult": "Es belegte Platz {rank, number} von {teams, number} Teams in <cafa>{competition}</cafa>, einem offenen Wettbewerb, der von seinen Organisatoren bewertet wird und nicht von uns.",
     "welcomeValidation": "Die Methode wird beim <lafa>LAFA-Benchmark</lafa> als laufender Container eingereicht, nicht als Datei mit Vorhersagen. Bevor hier etwas behauptet wird, reproduzieren wir die Bewertung selbst, mit dem <evaluator>auf dieser Maschine betriebenen CAFA-Evaluator</evaluator>, einem Fork <upstream>des veröffentlichten</upstream> mit unveränderter Bewertung, sodass Dritte jede Zahl dieser Seite neu erzeugen können.",
-    "welcomeCampaign": "Eine neue Datenkampagne baut den Annotationskorpus von Grund auf neu. Stand {asOf} hat sie {read, number} der insgesamt {releases, number} Releases der Gene-Ontology-Annotationsdatenbank gelesen, zusammen {gigabytes, number} GB an Dateien, und {proteins, number} Proteineinträge geladen (kanonische plus Isoformen), jeder mit dem Release, aus dem er stammt. Die Werkzeuge unten sind gebaut und laufen; ihre Zahlen erscheinen wieder, sobald der Neuaufbau abgeschlossen ist.",
+    "welcomeCampaign": "Eine Datenkampagne hat den Annotationskorpus von Grund auf neu gebaut. Stand {asOf} hat sie {read, number} der insgesamt {releases, number} Releases der Gene-Ontology-Annotationsdatenbank gelesen, zusammen {gigabytes, number} GB an Dateien, und {proteins, number} Proteineinträge geladen (kanonische plus Isoformen), jeder mit dem Release, aus dem er stammt. Die Werkzeuge unten sind gebaut, laufen und zeigen ihre Zahlen.",
     "argumentRecord": "Die Argumentation ist unten vollständig veröffentlicht, so wie sie gegen das LAFA-Board für {frame} gemessen wurde.",
     "headlineSentence": "Mit ihrem Rahmen genannt, lautet das versiegelte Ergebnis <value></value> bei <metric></metric>, Erster in sieben von neun Zellen<note>.</note>",
     "headlineSentenceWithheld": "Mit seinem Rahmen genannt: das versiegelte Ergebnis bei <metric></metric> wird neu berechnet, Erster in sieben von neun Zellen<note>.</note>",
@@ -319,14 +319,15 @@
     "panelPopulation": "Panel",
     "panelPopulationHint": "Jedes Protein, das der Lauf in dieser Zelle BEWERTET hat, aus dem Artefakt pro Protein gelesen. Es ist nicht dieselbe Zahl wie die der Referenzannotation: der Graph zählt Proteine, die in diesem Eimer einen Term dieses Aspekts hinzugewonnen haben, und in dieser Kampagne stimmen beide auf acht der neun Panels überein und weichen bei PK x BPO um eins ab, weil eine Anfrage, die der Auswertungskern nicht zuordnen konnte, beim Schreiben des Artefakts wegfällt.",
     "placed": "platziert",
-    "placedHint": "Wie viele des Panels sich auf den Längen- und Homologieachsen platzieren ließen. Eine Anfrage, deren Lauf keinen anderen Spender als sie selbst gefunden hat, lässt sich auf keiner der beiden platzieren.",
+    "placedHint": "Wie viele des Panels sich ueberhaupt auf den Achsen platzieren liessen. Dafuer genuegt die eigene Laenge, also verhindert ein fehlender Spender die Platzierung nicht: er laesst nur die vier Spenderachsen ungelesen.",
     "matched": "übrig",
     "matchedHint": "Wie viele die oben festgesetzten Bänder überstehen. Gleich der Zahl der Platzierten, wenn kein Band festgesetzt ist.",
     "scoredZero": "ohne Wert",
     "scoredZeroHint": "Wie viele der übrigen Proteine der Lauf mit genau null bewertet hat. Eine Zahl und keine Rate: eine Zelle mit 0,09 über 375 Proteinen sagt das eine, wenn die Masse verteilt ist, und etwas anderes, wenn fast alles genau null ist, und der gepoolte Wert unterscheidet die beiden nicht.",
     "tau": "Tau",
     "tauHint": "Die Entscheidungsschwelle, die der Lauf für diesen Aspekt berichtet hat. Jeder Wert in der Tabelle ist an ihr genommen.",
-    "unplacedWhy": "{count} des Panels tragen kein Band: {noDonor} fanden keinen Spender außer der Anfrage, {noLength} haben keine erfasste Länge, {offScale} tragen eine Identität, die kein Prozentwert ist. Sie bleiben mit leeren Bändern in der Tabelle statt entfernt zu werden, denn sie gehören zu der Population, die das Panel zählt.",
+    "unplacedWhy": "{count} des Panels tragen kein Band: {noLength} haben keine erfasste Laenge und {offScale} tragen eine Identitaet, die kein Prozentwert ist. Sie bleiben mit leeren Baendern in der Tabelle statt entfernt zu werden, denn sie gehoeren zu der Population, die das Panel zaehlt.",
+    "withoutDonorWhy": "{count} des Panels tragen ihr Laengenband, haben aber keinen ausgerichteten Spender, sodass die vier Spenderachsen ungelesen bleiben. Sie zaehlen zu den platzierten: keinen Spender zu finden kostet diese vier Achsen und sonst keine.",
     "sortLabel": "Reihenfolge",
     "sort": {
       "f_asc": "schwächste zuerst",
@@ -1065,20 +1066,8 @@
     }
   },
   "evaluation": {
-    "title": "CAFA-Evaluierung",
-    "generateSection": {
-      "heading": "Neues Evaluierungsset",
-      "description": "Berechnet das Delta zwischen zwei GOA-Releases. Wendet experimentelle Evidenzfilterung und NOT-Qualifier-Propagation durch den GO-DAG an.",
-      "oldSetLabel": "Altes GOA-Set (Referenz)",
-      "selectSet": "— auswählen —",
-      "newSetLabel": "Neues GOA-Set (Ground Truth)",
-      "errorSameSets": "Altes und neues Set müssen unterschiedlich sein.",
-      "generateEvaluationSet": "Evaluierungsset generieren",
-      "generating": "Wird eingereiht…"
-    },
-    "evaluationSetsSection": {
-      "heading": "Evaluierungssets"
-    },
+    "backToList": "Zurück zu den Evaluationssets",
+    "detailTitle": "Details zum Evaluationsset",
     "evaluationSetCard": {
       "deleteConfirm": "Dieses Evaluierungsset und alle Ergebnisse löschen?",
       "delete": "Löschen",
@@ -1115,6 +1104,30 @@
       "resultDelete": "Löschen",
       "deleteResultConfirm": "Dieses Evaluierungsergebnis löschen?"
     },
+    "evaluationSetsSection": {
+      "heading": "Evaluierungssets"
+    },
+    "generateSection": {
+      "heading": "Neues Evaluierungsset",
+      "description": "Berechnet das Delta zwischen zwei GOA-Releases. Wendet experimentelle Evidenzfilterung und NOT-Qualifier-Propagation durch den GO-DAG an.",
+      "oldSetLabel": "Altes GOA-Set (Referenz)",
+      "selectSet": "— auswählen —",
+      "newSetLabel": "Neues GOA-Set (Ground Truth)",
+      "errorSameSets": "Altes und neues Set müssen unterschiedlich sein.",
+      "generateEvaluationSet": "Evaluierungsset generieren",
+      "generating": "Wird eingereiht…"
+    },
+    "jumpToContext": "Zum Kontext springen",
+    "loading": "Evaluationsset wird geladen...",
+    "manualEvaluatorSection": {
+      "heading": "Manueller Evaluator-Befehl"
+    },
+    "modelUsed": "Verwendetes Reranker-Modell",
+    "noResults": "Für dieses Set liegen noch keine Evaluationsergebnisse vor.",
+    "openPredictionSet": "Vorhersagesatz öffnen",
+    "openReranker": "Reranker-Modell öffnen",
+    "proteinExamples": "Proteinbeispiele (Vorhersagesatz)",
+    "provenanceLabel": "Herkunft",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -1128,9 +1141,9 @@
       "coverage": "Abdeckung",
       "tau": "τ"
     },
-    "manualEvaluatorSection": {
-      "heading": "Manueller Evaluator-Befehl"
-    }
+    "statDelta": "Delta-Proteine",
+    "statsTitle": "Statistiken des Sets",
+    "title": "CAFA-Evaluierung"
   },
   "scoring": {
     "title": "Scoring",

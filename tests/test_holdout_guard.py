@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from protea.core.operations._holdout_guard import (
+    Claim,
     refuse_if_the_set_reads_the_holdout,
 )
 from protea.core.split_registry import (
@@ -116,13 +117,13 @@ class TestAGuardThatCannotDecideSaysSo:
         """Refusing every undated window would take down the tune windows to
         protect the holdout from a case that cannot be decided either way."""
         refuse_if_the_set_reads_the_holdout(
-            self._set_without_a_date(), waiver=None, context="scoring at", emit=MagicMock()
+            self._set_without_a_date(), claim=Claim(), context="scoring at", emit=MagicMock()
         )
 
     def test_but_it_emits_a_warning_naming_the_remedy(self):
         emit = MagicMock()
         refuse_if_the_set_reads_the_holdout(
-            self._set_without_a_date(), waiver=None, context="scoring at", emit=emit
+            self._set_without_a_date(), claim=Claim(), context="scoring at", emit=emit
         )
         assert emit.call_count == 1
         event, _msg, fields, level = emit.call_args[0]
@@ -135,7 +136,7 @@ class TestAGuardThatCannotDecideSaysSo:
         """``emit`` is optional so the guard stays callable from a context that
         has none, and the absence of a logger must not become an exception."""
         refuse_if_the_set_reads_the_holdout(
-            self._set_without_a_date(), waiver=None, context="scoring at"
+            self._set_without_a_date(), claim=Claim(), context="scoring at"
         )
 
     def test_a_dated_set_emits_nothing(self):
@@ -145,5 +146,5 @@ class TestAGuardThatCannotDecideSaysSo:
         s = MagicMock()
         s.source_published_at = date(2024, 4, 16)
         s.source_version = "v220"
-        refuse_if_the_set_reads_the_holdout(s, waiver=None, context="scoring at", emit=emit)
+        refuse_if_the_set_reads_the_holdout(s, claim=Claim(), context="scoring at", emit=emit)
         emit.assert_not_called()

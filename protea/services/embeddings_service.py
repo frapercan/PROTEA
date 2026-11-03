@@ -151,6 +151,20 @@ def config_to_dict(c: EmbeddingConfig, embedding_count: int | None = None) -> di
         "chunk_size": c.chunk_size,
         "chunk_overlap": c.chunk_overlap,
         "description": c.description,
+        "display_name": c.display_name,
+        "family": c.family,
+        "kind": c.kind,
+        "derived_from_embedding_config_id": (
+            str(c.derived_from_embedding_config_id)
+            if c.derived_from_embedding_config_id
+            else None
+        ),
+        # The cut, read by the leakage guard. Serialised because a field that
+        # decides whether a configuration may be scored at all should be
+        # visible from the surface that creates it.
+        "trained_on_annotation_set_id": (
+            str(c.trained_on_annotation_set_id) if c.trained_on_annotation_set_id else None
+        ),
         "created_at": c.created_at.isoformat(),
     }
     if embedding_count is not None:

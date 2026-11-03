@@ -65,6 +65,7 @@ def compute_evaluation_data_for_sets(
         An annotation set or the pivot snapshot does not exist.
     """
     from protea.core.evaluation import (
+        ReconciledWindow,
         compute_evaluation_data,
         compute_evaluation_data_reconciled,
     )
@@ -94,11 +95,7 @@ def compute_evaluation_data_for_sets(
             new_annotation_set_id=new_annotation_set_id,
             ontology_snapshot_id=pivot_snapshot_id,
         )
-    return compute_evaluation_data_reconciled(
-        session,
-        old_annotation_set_id,
-        new_annotation_set_id,
-        old_native,
-        new_native,
-        pivot_snapshot_id,
+    window = ReconciledWindow(
+        old_annotation_set_id, new_annotation_set_id, old_native, new_native, pivot_snapshot_id
     )
+    return compute_evaluation_data_reconciled(session, window)

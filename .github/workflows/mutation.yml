@@ -111,18 +111,35 @@ jobs:
           IFS=',' read -ra paths <<< "${MODULES}"
           for path in "${paths[@]}"; do
             slug=$(echo "${path}" | tr '/.' '_')
+            stem=$(basename "${path}" .py)
             cfg="mutation-reports/${slug}.toml"
             db="mutation-reports/${slug}.sqlite"
             report="mutation-reports/${slug}.txt"
-            echo "::group::cosmic-ray ${path}"
-            # Render a per-module config by rewriting ``module-path`` in
-            # the committed cosmic-ray.toml. Everything else (timeout,
-            # test-command, distributor) is inherited from the template.
-            python - "${path}" "${cfg}" <<'PY'
+            # THE KILL CRITERION HAS TO BE THIS MODULE'S OWN TESTS. Rewriting
+            # module-path alone left test-command pinned to the template's
+            # tests/property/test_scoring_property.py, so every module but
+            # scoring was mutated while another module's tests decided whether
+            # the mutant lived: on 2026-10-29 that reported 195 SURVIVED and 0
+            # killed for _leaf_record_builder.py, which reads as a coverage
+            # result and only means the tests never imported it.
+            test_file=$(python3 -c 'import json, sys; print(json.load(open("property_test_map.json")).get(sys.argv[1], ""))' "${stem}")
+            if [ -z "${test_file}" ]; then
+              # SKIPPED AND SAID OUT LOUD, never run against another module's
+              # tests. A skip reports nothing; the old path reported zero kills,
+              # which is worse than nothing because it looks like a finding.
+              echo "::warning title=No mutation kill criterion::${path} has no tests/property/test_${stem}_property.py, so its mutants cannot be killed by anything. Skipped."
+              echo "${path}: skipped, no tests/property/test_${stem}_property.py" >> mutation-reports/skipped.txt
+              continue
+            fi
+            echo "::group::cosmic-ray ${path} against ${test_file}"
+            # Render a per-module config from the committed cosmic-ray.toml,
+            # rewriting BOTH module-path and the test file inside test-command.
+            # Everything else (timeout, distributor) is inherited.
+            python - "${path}" "${test_file}" "${cfg}" <<'PY'
           import re
           import sys
           from pathlib import Path
-          target, dest = sys.argv[1], sys.argv[2]
+          target, test_file, dest = sys.argv[1], sys.argv[2], sys.argv[3]
           src = Path("cosmic-ray.toml").read_text(encoding="utf-8")
           rewritten = re.sub(
               r'^(module-path\s*=\s*)"[^"]*"',
@@ -131,6 +148,20 @@ jobs:
               count=1,
               flags=re.MULTILINE,
           )
+          rewritten, swapped = re.subn(
+              r'^(test-command\s*=\s*"pytest\s+)tests/property/\S+',
+              lambda m: f"{m.group(1)}{test_file}",
+              rewritten,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if swapped != 1:
+              raise SystemExit(
+                  "cosmic-ray.toml no longer carries a test-command naming a "
+                  "tests/property/ file, so the kill criterion cannot be pointed "
+                  f"at {test_file}. Refusing to run a mutation pass whose tests "
+                  "may belong to another module."
+              )
           Path(dest).write_text(rewritten, encoding="utf-8")
           PY
             poetry run cosmic-ray init "${cfg}" "${db}"

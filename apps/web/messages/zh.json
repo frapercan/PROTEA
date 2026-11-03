@@ -175,7 +175,7 @@
     "welcomeBody": "输入一条氨基酸序列，它会返回该序列可能承担的功能，取自 Gene Ontology。这是一个真正运行的平台，而非一篇论文，下方的一切都运行在提供本页面的这台机器上。",
     "welcomeResult": "它在 <cafa>{competition}</cafa> 中于 {teams, number} 支队伍里名列第 {rank, number}，这是一项公开竞赛，由其组织方评分，而非由我们自评。",
     "welcomeValidation": "该方法以运行中的容器而非预测文件的形式提交给 <lafa>LAFA 评测基准</lafa>。在本站陈述任何结论之前，我们会自行复算评分，使用<evaluator>部署在本机的 CAFA 评估器</evaluator>，它是<upstream>已发布版本</upstream>的一个分支，评分逻辑未作改动，因此第三方可以重新生成本站的任何数字。",
-    "welcomeCampaign": "新一轮数据运行正在从零重建注释语料库。截至 {asOf}，已读取该系列 {releases, number} 个 Gene Ontology 注释数据库版本中的 {read, number} 个（全系列共 {gigabytes, number} GB 文件），并载入 {proteins, number} 条蛋白质记录（规范条目加同工型），每条都标注了其来源版本。下方的工具均已构建并在运行；待本轮重建结束后其数字将恢复显示。",
+    "welcomeCampaign": "一轮数据运行已从零重建注释语料库。截至 {asOf}，已读取该系列 {releases, number} 个 Gene Ontology 注释数据库版本中的 {read, number} 个（全系列共 {gigabytes, number} GB 文件），并载入 {proteins, number} 条蛋白质记录（规范条目加同工型），每条都标注了其来源版本。下方的工具均已构建、正在运行，其数字已可查看。",
     "argumentRecord": "完整的科学论证发表于下方，其测量是针对 {frame} 期间的 LAFA 评测板进行的。",
     "headlineSentence": "连同其评测框架，封存结果为 <value></value>（<metric></metric>），九格中七格居首<note>。</note>",
     "headlineSentenceWithheld": "连同其框架一并说明：<metric></metric> 上的封存结果正在重新计算，九格中七格居首<note>。</note>",
@@ -319,14 +319,15 @@
     "panelPopulation": "面板",
     "panelPopulationHint": "本次运行在这一格中打过分的全部蛋白质，读自按蛋白质的产物文件。它与参考注释的计数并不相同：实验图统计的是在该桶中新获得该分支术语的蛋白质，在本轮实验中两者在九个面板中的八个完全一致，而在 PK x BPO 上相差一个，因为评估内核无法索引的查询在写出产物文件时会被丢弃。",
     "placed": "已定位",
-    "placedHint": "面板中有多少能放到长度轴与同源性轴上。若某个查询在本次运行中没有检索到自身以外的供体，则两条轴都无法定位。",
+    "placedHint": "面板中有多少能放到轴上。只需自身长度即可，因此未检索到供体并不妨碍定位，只是四条供体轴未被读取。",
     "matched": "命中",
     "matchedHint": "有多少通过了上面固定的区间。未固定任何区间时等于已定位数。",
     "scoredZero": "零分",
     "scoredZeroHint": "命中的蛋白质中有多少被本次运行判为恰好零分。这是计数而非比率：375 个蛋白质上得到 0.09 的一格，在分数分散时和在绝大多数恰好为零时说的是两回事，而汇总数字无法区分二者。",
     "tau": "tau",
     "tauHint": "本次运行为该分支报告的判定阈值。表中所有分数都取自该阈值。",
-    "unplacedWhy": "面板中有 {count} 个没有区间：{noDonor} 个未检索到查询以外的供体，{noLength} 个没有记录长度，{offScale} 个携带的一致性不是百分比。它们以空区间留在表中而不被删除，因为它们属于面板所计的总体。",
+    "unplacedWhy": "面板中有 {count} 个没有区间：{noLength} 个没有记录长度，{offScale} 个携带的一致性不是百分比。它们以空区间留在表中而不被删除，因为它们属于面板所计的总体。",
+    "withoutDonorWhy": "面板中有 {count} 个带有长度区间，但没有对齐的供体，因此四条供体轴未被读取。它们计入已定位：未检索到供体只影响这四条轴，不影响其他。",
     "sortLabel": "排序",
     "sort": {
       "f_asc": "最差在前",
@@ -1065,20 +1066,8 @@
     }
   },
   "evaluation": {
-    "title": "CAFA 评估",
-    "generateSection": {
-      "heading": "新建评估集",
-      "description": "计算两个 GOA 版本之间的差异。",
-      "oldSetLabel": "旧 GOA 集（参考）",
-      "selectSet": "— 选择 —",
-      "newSetLabel": "新 GOA 集（真实标注）",
-      "errorSameSets": "旧集和新集必须不同。",
-      "generateEvaluationSet": "生成评估集",
-      "generating": "排队中…"
-    },
-    "evaluationSetsSection": {
-      "heading": "评估集"
-    },
+    "backToList": "返回评估集",
+    "detailTitle": "评估集详情",
     "evaluationSetCard": {
       "deleteConfirm": "删除此评估集及其所有结果？",
       "delete": "删除",
@@ -1115,6 +1104,30 @@
       "resultDelete": "删除",
       "deleteResultConfirm": "删除此评估结果？"
     },
+    "evaluationSetsSection": {
+      "heading": "评估集"
+    },
+    "generateSection": {
+      "heading": "新建评估集",
+      "description": "计算两个 GOA 版本之间的差异。",
+      "oldSetLabel": "旧 GOA 集（参考）",
+      "selectSet": "— 选择 —",
+      "newSetLabel": "新 GOA 集（真实标注）",
+      "errorSameSets": "旧集和新集必须不同。",
+      "generateEvaluationSet": "生成评估集",
+      "generating": "排队中…"
+    },
+    "jumpToContext": "跳转到上下文",
+    "loading": "正在加载评估集…",
+    "manualEvaluatorSection": {
+      "heading": "手动评估器命令"
+    },
+    "modelUsed": "所用重排模型",
+    "noResults": "该评估集尚无评估结果。",
+    "openPredictionSet": "打开预测集",
+    "openReranker": "打开重排模型",
+    "proteinExamples": "蛋白示例（预测集）",
+    "provenanceLabel": "来源",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -1128,9 +1141,9 @@
       "coverage": "覆盖率",
       "tau": "τ"
     },
-    "manualEvaluatorSection": {
-      "heading": "手动评估器命令"
-    }
+    "statDelta": "差集蛋白数",
+    "statsTitle": "评估集统计",
+    "title": "CAFA 评估"
   },
   "scoring": {
     "title": "评分配置",

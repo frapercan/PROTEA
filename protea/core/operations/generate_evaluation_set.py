@@ -11,12 +11,16 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evaluation import (
+    GAIN_RULES,
+    NOT_CODE_RULES,
+    TRUTH_PROFILES,
+    ReconciledWindow,
     compute_evaluation_data,
     compute_evaluation_data_reconciled,
     groundtruth_key_for,
     serialize_evaluation_data_to_parquet,
 )
-from protea.core.operations._holdout_guard import refuse_if_the_set_reads_the_holdout
+from protea.core.operations._holdout_guard import Claim, refuse_if_the_set_reads_the_holdout
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -26,11 +30,18 @@ from protea.infrastructure.storage import get_artifact_store
 
 
 class _Identity(NamedTuple):
-    """The five fields that decide which delta a row holds.
+    """The seven fields that decide which delta a row holds.
 
     Kept as one object because they travel together: every lookup, every
-    refusal and every insert needs all five, and a signature that took them
-    loose is a signature somebody can call with four.
+    refusal and every insert needs all of them, and a signature that took
+    them loose is a signature somebody can call with four.
+
+    ``truth_profile`` is the sixth and the only one that is not an id. It
+    belongs here rather than beside ``window_role`` because it changes the
+    delta: under ``projected`` a t1 term with no node at t0 becomes its first
+    live ancestors instead of being dropped. Two profiles over the same five
+    ids are two different truths and coexist, which is why the database key
+    holds it too.
     """
 
     old_set_id: uuid.UUID
@@ -38,6 +49,9 @@ class _Identity(NamedTuple):
     pivot_id: uuid.UUID
     old_native: uuid.UUID
     new_native: uuid.UUID
+    truth_profile: str = TRUTH_PROFILES[0]
+    toi_rule: str = GAIN_RULES[0]
+    not_codes: str = NOT_CODE_RULES[0]
 
 
 class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
@@ -59,11 +73,59 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     # | ``None`` (unbound). Defaults to None so existing callers are
     # unaffected.
     window_role: str | None = None
+    # How the t1 side's truth is built. ``as_closed`` (the default) is what
+    # every stored window did: a term the pivot cannot name is dropped by the
+    # closure. ``projected`` replaces it by its first live ancestors at t0,
+    # same aspect, before the binding rule. It is part of the window's
+    # identity, so asking for the other profile over the same two corpora
+    # builds a second window rather than colliding with the first.
+    truth_profile: str = TRUTH_PROFILES[0]
+    # Which terms the GAIN may contain. ``pivot_terms`` (the default) is what
+    # every stored window did; ``live_in_both_ends`` restricts it before the
+    # delta is classified, which is what the lab's frame does. Independent of
+    # the profile: the projection decides what a gain CAN be, this decides
+    # which gains COUNT.
+    toi_rule: str = GAIN_RULES[0]
+    # Which NOT annotations may take truth away. ``any`` (the default) is what
+    # every stored window did: every NOT row whatever its evidence.
+    # ``experimental`` restricts the negation to the thirteen experimental
+    # codes, which is the lab's frame. Independent of the other two: they
+    # decide what a gain can be and which gains count, this decides which
+    # denials bind.
+    not_codes: str = NOT_CODE_RULES[0]
+
+    @field_validator("truth_profile")
+    @classmethod
+    def _known_profile(cls, value: str) -> str:
+        if value not in TRUTH_PROFILES:
+            raise ValueError(f"unknown truth_profile {value!r}; expected one of {TRUTH_PROFILES}")
+        return value
+
+    @field_validator("toi_rule")
+    @classmethod
+    def _known_gain_rule(cls, value: str) -> str:
+        if value not in GAIN_RULES:
+            raise ValueError(f"unknown toi_rule {value!r}; expected one of {GAIN_RULES}")
+        return value
+
+    @field_validator("not_codes")
+    @classmethod
+    def _known_not_rule(cls, value: str) -> str:
+        if value not in NOT_CODE_RULES:
+            raise ValueError(f"unknown not_codes {value!r}; expected one of {NOT_CODE_RULES}")
+        return value
     #: The sentence a caller must repeat verbatim to build a window that reads
     #: past the board's mark. Deliberately not a boolean: the holdout is meant
     #: to be scored once, at the end, and a flag that can be set by reflex is a
     #: flag that gets set by reflex. See split_registry.HOLDOUT_WAIVER.
     holdout_waiver: str | None = None
+    #: The other sentence: a band BEYOND the spent holdout, which begins at or
+    #: after it and therefore cannot be a second look at it. Separate from the
+    #: waiver because the waiver says of itself that it is the single pass, and
+    #: that pass is written on a row already. Honoured only when the window's
+    #: start is at or after the band's end; a straddle is refused by name. See
+    #: split_registry.PROSPECTIVE_DECLARATION.
+    prospective_declaration: str | None = None
 
     @field_validator("old_annotation_set_id", "new_annotation_set_id", mode="before")
     @classmethod
@@ -143,13 +205,23 @@ class GenerateEvaluationSetOperation:
         # Before anything is built: the holdout is scored once, at the end.
         refuse_if_the_set_reads_the_holdout(
             new_set,
-            waiver=p.holdout_waiver,
+            claim=Claim(p.holdout_waiver, p.prospective_declaration),
+            old_set=old_set,
             context="building the window ending at",
             emit=emit,
         )
         mode = self._delta_mode(old_set, new_set, old_native, new_native, pivot_id)
 
-        ident = _Identity(old_set_id, new_set_id, pivot_id, old_native, new_native)
+        ident = _Identity(
+            old_set_id,
+            new_set_id,
+            pivot_id,
+            old_native,
+            new_native,
+            p.truth_profile,
+            p.toi_rule,
+            p.not_codes,
+        )
         short = self._maybe_reuse_existing(session, ident, p.window_role, emit)
         if short is not None:
             return short
@@ -163,6 +235,9 @@ class GenerateEvaluationSetOperation:
             pivot_snapshot_id=pivot_id,
             old_native_snapshot_id=old_native,
             new_native_snapshot_id=new_native,
+            truth_profile=p.truth_profile,
+            toi_rule=p.toi_rule,
+            not_codes=p.not_codes,
             stats=stats,
             window_role=p.window_role,
             job_id=job_id_from_payload(payload),
@@ -232,7 +307,17 @@ class GenerateEvaluationSetOperation:
             },
             "info",
         )
-        emit("generate_evaluation_set.computing_delta", None, {"mode": mode}, "info")
+        emit(
+            "generate_evaluation_set.computing_delta",
+            None,
+            {
+                "mode": mode,
+                "truth_profile": ident.truth_profile,
+                "toi_rule": ident.toi_rule,
+                "not_codes": ident.not_codes,
+            },
+            "info",
+        )
         if mode == "same_snapshot":
             data = compute_evaluation_data(
                 session, ident.old_set_id, ident.new_set_id, ident.pivot_id
@@ -240,15 +325,23 @@ class GenerateEvaluationSetOperation:
         else:
             data = compute_evaluation_data_reconciled(
                 session,
-                ident.old_set_id,
-                ident.new_set_id,
-                ident.old_native,
-                ident.new_native,
-                ident.pivot_id,
+                ReconciledWindow(
+                    ident.old_set_id,
+                    ident.new_set_id,
+                    ident.old_native,
+                    ident.new_native,
+                    ident.pivot_id,
+                    ident.truth_profile,
+                    ident.toi_rule,
+                    ident.not_codes,
+                ),
             )
         stats = data.stats()
         stats["mode"] = mode
         stats["pivot_ontology_snapshot_id"] = str(ident.pivot_id)
+        stats["truth_profile"] = ident.truth_profile
+        stats["toi_rule"] = ident.toi_rule
+        stats["not_codes"] = ident.not_codes
         emit("generate_evaluation_set.delta_done", None, stats, "info")
         return data, stats
 
@@ -304,6 +397,9 @@ class GenerateEvaluationSetOperation:
                 pivot_snapshot_id=ident.pivot_id,
                 old_native_snapshot_id=ident.old_native,
                 new_native_snapshot_id=ident.new_native,
+                truth_profile=ident.truth_profile,
+                toi_rule=ident.toi_rule,
+                not_codes=ident.not_codes,
             )
             .one_or_none()
         )

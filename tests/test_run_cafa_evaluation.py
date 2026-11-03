@@ -835,6 +835,7 @@ def _base_row(
     anc2vec_neighbor_maxcos=None,
     go_term_frequency=None,
     donor_count=None,
+    method_score=None,
 ):
     """Build a single Core row in ``_BASE_SCORE_COLS`` order.
 
@@ -864,6 +865,9 @@ def _base_row(
         "anc2vec_neighbor_cos": anc2vec_neighbor_cos,
         "anc2vec_neighbor_maxcos": anc2vec_neighbor_maxcos,
         "go_term_frequency": go_term_frequency,
+        # None on every row these tests build: they are retrieval rows, and
+        # the method formula is covered in test_method_score_is_the_score.
+        "method_score": method_score,
     }
     missing = set(_BASE_SCORE_COLS) - set(named)
     assert not missing, f"the row builder does not know these columns: {sorted(missing)}"

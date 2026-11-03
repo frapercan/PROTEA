@@ -634,7 +634,15 @@ export type Prediction = {
   go_id: string;
   name: string | null;
   aspect: string | null;
-  distance: number;
+  /**
+   * Cosine distance to the donor, or null when there was no retrieval.
+   *
+   * Declared non-nullable until 2026-10-28, which is why nothing warned: a
+   * set written by `ingest_method_predictions` has no donor and no distance,
+   * and the detail page called `.toFixed(4)` on it. Measured on prediction
+   * set ac1d4f00: 0 of 12.159.300 rows carry one.
+   */
+  distance: number | null;
   ref_protein_accession: string;
   qualifier: string | null;
   evidence_code: string | null;
@@ -1305,6 +1313,12 @@ export type BenchmarkMatrixResponse = {
   categories: string[];
   aspects: string[];
   ks: number[];
+  /** The ONE window both grids are about. Null only when nothing is scored.
+   *  The per-cell maximum used to run over the rows of every stored window,
+   *  so each of the nine cells could land on a different one; the API now
+   *  decides the window once and names it here, and the grid has to print it
+   *  or a reader cannot tell nine measurements from one. */
+  grid_evaluation_set_id: string | null;
   best_per_cell: BenchmarkBestCell[];
   /** Same shape as best_per_cell but ignores stage and K filters. Stable
    *  across filter changes; the absolute champion per cell within the

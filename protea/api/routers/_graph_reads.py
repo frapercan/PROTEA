@@ -75,7 +75,14 @@ _Q_ACCRETION = text(
                FROM evaluation_result er
                JOIN job j ON j.id = er.job_id
                WHERE j.payload ->> 'information_accretion_set_id' = ia.id::text
-           )                             AS in_use
+           )                             AS in_use,
+           -- The first published number this table weighted. ``ia.created_at``
+           -- dates the table; this dates its entry into the campaign.
+           (SELECT min(er.created_at)::date::text
+            FROM evaluation_result er
+            JOIN job j ON j.id = er.job_id
+            WHERE j.payload ->> 'information_accretion_set_id' = ia.id::text)
+                                         AS first_used_on
     FROM information_accretion_set ia
     ORDER BY ia.created_at
     """
@@ -83,11 +90,23 @@ _Q_ACCRETION = text(
 
 _Q_QUERY_SETS = text(
     """
-    SELECT qs.id::text AS id,
-           qs.name     AS name,
-           (SELECT count(*) FROM query_set_entry e WHERE e.query_set_id = qs.id) AS entries,
-           EXISTS (SELECT 1 FROM prediction_set ps WHERE ps.query_set_id = qs.id) AS in_use
+    SELECT qs.id::text              AS id,
+           qs.name                  AS name,
+           COALESCE(e.entries, 0)   AS entries,
+           EXISTS (SELECT 1 FROM prediction_set ps WHERE ps.query_set_id = qs.id) AS in_use,
+           (SELECT min(ps.created_at)::date::text
+            FROM prediction_set ps
+            WHERE ps.query_set_id = qs.id) AS first_used_on
     FROM query_set qs
+    -- Grouped once and joined, not one correlated count per set. The
+    -- correlated form cost 106 ms for two rows, because the planner cannot
+    -- estimate a correlated value and sizes the filter at the whole table.
+    -- ``prediction_set`` holds eight rows, so its EXISTS stays correlated.
+    LEFT JOIN (
+        SELECT query_set_id, count(*) AS entries
+        FROM query_set_entry
+        GROUP BY query_set_id
+    ) e ON e.query_set_id = qs.id
     ORDER BY qs.created_at
     """
 )
@@ -134,12 +153,27 @@ _Q_SUBSTRATES = text(
            tr.source_version                        AS trained_on_version,
            tr.source_published_at::date::text       AS trained_on_date,
            COALESCE(cov.stored, 0)                  AS stored,
-           EXISTS (
-               SELECT 1 FROM prediction_set ps WHERE ps.embedding_config_id = ec.id
-           )                                        AS in_use,
-           EXISTS (
-               SELECT 1 FROM sequence_embedding se WHERE se.embedding_config_id = ec.id
-           )                                        AS producible
+           use.first_used IS NOT NULL               AS in_use,
+           -- WHEN this configuration became a LEVEL, which is not when it was
+           -- registered. ``ec.created_at`` dates the row; a representation
+           -- becomes a level of this node the day something is retrieved
+           -- against it, and the two are months apart for the nine that never
+           -- were. Reading the wrong one would date every unbuilt alternative
+           -- as though it had been tried.
+           use.first_used::date::text               AS first_used_on,
+           -- The SAME FACT as ``stored > 0``, and it used to be asked for a
+           -- second time as a correlated EXISTS. That cost 905 ms of the
+           -- graph's 1.37 s of reads, for ten rows: the planner cannot
+           -- estimate ``embedding_config_id = ec.id``, sizes the filter at
+           -- the whole table and picks a sequential scan, so the EXISTS
+           -- scanned all 615,643 rows ONCE PER CONFIGURATION -- ten passes
+           -- over a gigabyte, 1,055,187 blocks read, to answer a question
+           -- the aggregate below had already answered in 37 ms.
+           --
+           -- Verified equal on the live record before the change: ten
+           -- configurations, ten agreements, the one built representation
+           -- true in both and the nine unbuilt ones false in both.
+           COALESCE(cov.stored, 0) > 0              AS producible
     FROM embedding_config ec
     LEFT JOIN annotation_set tr ON tr.id = ec.trained_on_annotation_set_id
     -- Grouped once and joined, not one correlated count per configuration.
@@ -151,6 +185,17 @@ _Q_SUBSTRATES = text(
         FROM sequence_embedding
         GROUP BY embedding_config_id
     ) cov ON cov.embedding_config_id = ec.id
+    -- Grouped for the same reason, and it REPLACES the correlated EXISTS that
+    -- answered ``in_use``: one scan of an eight-row table now answers both
+    -- whether a prediction set names this configuration and when the first one
+    -- did. Two correlated subqueries for one fact and its date is the shape
+    -- #1055 took out of this query. Verified equal on the live record before
+    -- the change: ten configurations, ten agreements.
+    LEFT JOIN (
+        SELECT embedding_config_id, min(created_at) AS first_used
+        FROM prediction_set
+        GROUP BY embedding_config_id
+    ) use ON use.embedding_config_id = ec.id
     ORDER BY ec.model_name
     """
 )
@@ -172,6 +217,7 @@ _Q_CORPUS = text(
 _Q_PREDICTION_SETS = text(
     """
     SELECT ps.id::text                             AS id,
+           ps.created_at::date::text               AS created_on,
            ps.embedding_config_id::text            AS embedding_config_id,
            ps.annotation_set_id::text              AS annotation_set_id,
            a.source                                AS bank_source,
@@ -214,6 +260,11 @@ _Q_BANKS = text(
     SELECT a.id::text       AS id,
            a.source         AS source,
            a.source_version AS source_version,
+           -- The day this corpus became a level: the first prediction set
+           -- drawn from it, not the day the release was loaded.
+           (SELECT min(ps.created_at)::date::text
+            FROM prediction_set ps
+            WHERE ps.annotation_set_id = a.id) AS first_used_on,
            EXISTS (
                SELECT 1 FROM prediction_set ps WHERE ps.annotation_set_id = a.id
            )                AS in_use
@@ -231,7 +282,12 @@ _Q_SCORING = text(
            sc.evidence_weights::text AS evidence_weights,
            sc.params::text           AS params,
            (SELECT count(*) FROM evaluation_result er WHERE er.scoring_config_id = sc.id)
-                                     AS results
+                                     AS results,
+           -- A scoring configuration becomes a level when it scores something.
+           (SELECT min(er.created_at)::date::text
+            FROM evaluation_result er
+            WHERE er.scoring_config_id = sc.id)
+                                     AS first_used_on
     FROM scoring_config sc
     ORDER BY sc.name
     """
@@ -244,6 +300,7 @@ _Q_SCORING = text(
 _Q_RESULTS = text(
     """
     SELECT er.id::text                  AS id,
+           er.created_at::date::text    AS created_on,
            er.evaluation_set_id::text   AS evaluation_set_id,
            er.prediction_set_id::text   AS prediction_set_id,
            er.scoring_config_id::text   AS scoring_config_id,
@@ -253,11 +310,33 @@ _Q_RESULTS = text(
            -- harness produced a number and nothing about the parameters that
            -- decide whether two numbers can be read side by side. A result is
            -- attributable when it carries a digest of those parameters.
-           er.frame_digest              AS frame,
+           --
+           -- ALIASED BY ITS OWN NAME. This used to come out as ``frame``, so
+           -- the key ``frame`` carried a digest here and the harness label at
+           -- /v1/benchmark/matrix, where the frontend tests it against the
+           -- literal "lafa". Two endpoints, one key, two meanings: the trap
+           -- this campaign exists to avoid, and the panel query one screen
+           -- down already aliased the same column correctly.
+           er.frame_digest              AS frame_digest,
            ps.embedding_config_id::text AS embedding_config_id,
-           ps.annotation_set_id::text   AS annotation_set_id
+           ps.annotation_set_id::text   AS annotation_set_id,
+           -- WHICH query set and WHICH accretion table THIS result was read
+           -- over. Both used to be answered globally, by the first row in the
+           -- record that anything had ever used, so a window whose own results
+           -- resolved neither got described by another window's.
+           --
+           -- Null in either is a FACT and is published as one. An ingested
+           -- method carries no query set, and the weighting of any arm lives
+           -- only in the producing job's payload, because no column on
+           -- ``evaluation_result`` records it.
+           ps.query_set_id::text        AS query_set_id,
+           j.payload ->> 'information_accretion_set_id' AS accretion_id
     FROM evaluation_result er
     LEFT JOIN prediction_set ps ON ps.id = er.prediction_set_id
+    -- LEFT, like the join above it: a result whose producing job is gone still
+    -- happened, and an inner join here would lose it from every count on this
+    -- page while the row sat in the table.
+    LEFT JOIN job j ON j.id = er.job_id
     ORDER BY er.created_at
     """
 )
@@ -268,7 +347,7 @@ _Q_RESULTS = text(
 #: non-object raises rather than skipping.
 _Q_PANELS = text(
     with_arm_identity(
-    """
+        """
     SELECT er.id::text                              AS result_id,
            -- The seal, carried into the panels so a comparison can refuse two
            -- arms that were not scored under the same frame. Without it
@@ -450,7 +529,8 @@ _Q_FLOORS = text(
     f"""
     SELECT er.config ->> 'graph_node' AS node,
            er.config ->> 'floor'      AS floor,
-           er.name                    AS name
+           er.name                    AS name,
+           er.created_at::date::text  AS declared_on
     FROM experiment_run er
     WHERE er.config ? 'graph_node' AND er.config ? 'floor'
       AND er.status IN ({_STANDING_FLOOR_STATUSES})
@@ -484,6 +564,29 @@ _TIMELINE = text("""
     ORDER BY 4
 """)
 
+#: What each window reproduces, and how much of it was comparable.
+#:
+#: ``compared`` travels with ``agreed`` because a claim without its
+#: denominator is unreadable: twenty-six of twenty-six and one of one are both
+#: "reproduces", and only the first says anything. Newest first, so the frame
+#: shows the claim made against the latest bytes of a contract that can be
+#: regenerated.
+_Q_REPRODUCTIONS = text(
+    """
+    SELECT rr.evaluation_set_id::text AS evaluation_set_id,
+           rr.reference_key           AS reference_key,
+           rr.reference_digest        AS reference_digest,
+           rr.reference_commit        AS reference_commit,
+           rr.compared                AS compared,
+           rr.agreed                  AS agreed,
+           jsonb_array_length(rr.disagreements) AS disagreements,
+           rr.created_at::date::text  AS verified_on
+    FROM reference_reproduction rr
+    ORDER BY rr.created_at DESC
+    """
+)
+
+
 QUERIES: dict[str, TextClause] = {
     "timeline": _TIMELINE,
     "evaluation_sets": _Q_EVALUATION_SETS,
@@ -501,6 +604,7 @@ QUERIES: dict[str, TextClause] = {
     "artifacts": _Q_ARTIFACTS,
     "feature_selections": _Q_FEATURE_SELECTIONS,
     "floors": _Q_FLOORS,
+    "reproductions": _Q_REPRODUCTIONS,
 }
 
 

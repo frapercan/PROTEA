@@ -27,10 +27,55 @@ import re
 import tempfile
 import uuid
 
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+
+#: Fields the artifact must declare. Absent any of them the artifact is refused:
+#: defaulting them would let a pooled-encoder artifact run through the residue path
+#: and produce codes that look right and were computed from something else.
+#:
+#: ``aggregate`` joined this list once the aggregate stopped being a constant. A code
+#: built from two moments and one built from the mean have the same weights and
+#: different widths, so a default here would silently halve or double a corpus.
+REQUIRED_META = (
+    "k_residue",
+    "k_sequence",
+    "dict_dim",
+    "in_dim",
+    "layer_indices",
+    "aggregate",
+    "order",
+    "training_release",
+)
+
+#: Which of two pipelines the map was fitted for.
+#:
+#: ``select-then-pool`` applies the map per residue, keeps ``k_residue``
+#: atoms of each, aggregates, then keeps ``k_sequence``. It is what this
+#: operation implements and what every shipped recipe uses.
+#:
+#: ``pool-then-select`` aggregates the residues first and applies the map
+#: to the result. It is the natural control arm, and it is NOT implemented
+#: here: declaring it is refused with a message saying so, rather than
+#: executed as the other order.
+#:
+#: The distinction cannot be recovered from the weights. The map is affine,
+#: so mean(X @ W + b) equals mean(X) @ W + b to within 7e-07, and an
+#: artifact fitted either way has identical shapes and passes every check
+#: on them. Served under the wrong order it produced a code sharing 130 of
+#: 2048 atoms with the intended one, at cosine 0.10. Not a degradation, a
+#: different encoder.
+ORDERS = ("select-then-pool", "pool-then-select")
+
+#: How the per-residue codes become one code. ``mean`` is the first moment alone;
+#: ``moments`` concatenates the mean with the per-atom dispersion and therefore emits
+#: twice the dictionary width. Both are a fixed-width reduction over residues, which is
+#: what keeps a corpus pass costing one protein of memory rather than the corpus.
+AGGREGATES = ("mean", "moments")
+
 
 #: A key ending in ``-<hex>`` before its extension names its own content. Twelve hex
 #: characters of sha256 is 48 bits, which is far past the point where a collision is a
@@ -121,3 +166,57 @@ def resolve_training_cut(session: Session, meta: dict) -> uuid.UUID:
             "frame it is about to be scored in"
         )
     return aset
+
+
+def load_frozen_encoder(path: str) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Read the map and its recipe, refusing anything that does not declare one.
+
+    The refusal is the point. An artifact fitted for pooled use has the same tensor
+    shapes as one fitted for residue use, so nothing about the weights themselves
+    would reveal the mistake, and the codes it produced would be complete and wrong.
+    """
+    data = np.load(path, allow_pickle=True)
+    missing = [k for k in REQUIRED_META if k not in data]
+    if missing:
+        raise ValueError(
+            f"{path} declares no {missing}; a residue-level encoder must state its "
+            "recipe, and defaulting it would let a pooled-encoder artifact produce "
+            "codes through this path that look right and were computed differently"
+        )
+    meta = {k: data[k].tolist() for k in REQUIRED_META}
+    weight = np.asarray(data["W"], dtype=np.float32)
+    bias = np.asarray(data["b"], dtype=np.float32)
+    if weight.shape != (meta["in_dim"], meta["dict_dim"]):
+        raise ValueError(
+            f"the map is {weight.shape} but the recipe declares "
+            f"({meta['in_dim']}, {meta['dict_dim']})"
+        )
+    if str(meta["aggregate"]) not in AGGREGATES:
+        raise ValueError(
+            f"{path} declares aggregate {meta['aggregate']!r}, which is not one of "
+            f"{list(AGGREGATES)}. The aggregate decides the code's width, so an "
+            "unknown one cannot be guessed"
+        )
+    order = str(meta["order"])
+    if order not in ORDERS:
+        raise ValueError(
+            f"{path} declares order {order!r}, which is not one of {list(ORDERS)}. "
+            "The order decides what the code IS, and it cannot be recovered from the "
+            "weights: an artifact fitted either way has identical shapes"
+        )
+    if order == "pool-then-select":
+        raise ValueError(
+            f"{path} declares order 'pool-then-select', which this operation does not "
+            "implement. Refused rather than run as 'select-then-pool', because the two "
+            "produce different codes from the same weights and the difference is "
+            "invisible in the output"
+        )
+    if int(meta["k_residue"]) >= int(meta["dict_dim"]):
+        raise ValueError(
+            f"k_residue {meta['k_residue']} selects the whole {meta['dict_dim']}-atom "
+            "dictionary, which is not a sparse code. Note that under "
+            "'pool-then-select' this is exactly the right value, since the map is "
+            "affine and k_residue = dict_dim expresses pooling exactly; that is the "
+            "hole this check used to have, and the order field is what closes it"
+        )
+    return weight, bias, meta

@@ -265,13 +265,34 @@ class TestBenchmarkMatrix:
         )
 
     @staticmethod
-    def _dual_execute(session, matrix_rows, eval_set_rows):
-        """Configure session.execute to return matrix_rows then eval_set_rows."""
-        first = MagicMock()
-        first.all.return_value = matrix_rows
-        second = MagicMock()
-        second.all.return_value = eval_set_rows
-        session.execute.side_effect = [first, second, second, second]
+    def _dual_execute(session, matrix_rows, eval_set_rows, cut_rows=()):
+        """Answer each of the matrix endpoint's queries by WHAT IT ASKS.
+
+        It used to be a positional list, ``[first, second, second, second]``,
+        which meant the double depended on how many times the endpoint
+        happened to call execute. Adding the leak-badge query (one pass over
+        ``embedding_config`` for each arm's training cut) shifted every slot
+        and six tests failed with "too many values to unpack": the eval-set
+        rows were being handed to the cut reader.
+
+        Routing on the statement instead makes the double answer questions
+        rather than count them. ``cut_rows`` defaults to empty, which is an
+        honest answer for a fixture that declares no configs: every row then
+        gets ``leak: None``, which is what "cannot be derived" looks like.
+        """
+
+        def _route(stmt):
+            text = str(stmt)
+            result = MagicMock()
+            if "evaluation_result" in text:
+                result.all.return_value = matrix_rows
+            elif "embedding_config" in text and "annotation_set" in text:
+                result.all.return_value = list(cut_rows)
+            else:
+                result.all.return_value = eval_set_rows
+            return result
+
+        session.execute.side_effect = _route
 
     @staticmethod
     def _eval_set_row(eval_set_id):

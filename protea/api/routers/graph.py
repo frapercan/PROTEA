@@ -144,24 +144,172 @@ router = APIRouter(prefix="/graph", tags=["graph"])
 # ── The frame ─────────────────────────────────────────────────────────────────
 
 
+def _pivot_of(head: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The window's pivot snapshot, or nothing. Never a half-filled record:
+    an id with no version reads as a resolved pivot and is not one."""
+    if not head or not head["pivot_snapshot_id"]:
+        return None
+    return {"id": head["pivot_snapshot_id"], "version": head["pivot_version"]}
+
+
+def _accretion_of(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The accretion table in use, with the digest that fixes its bytes."""
+    if not row:
+        return None
+    return {"id": row["id"], "regime": row["regime"], "sha256": row["sha256"]}
+
+
+def _query_set_of(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The query set in use, with its size: a named set of unknown size
+    cannot say what a panel was drawn from."""
+    if not row:
+        return None
+    return {"id": row["id"], "name": row["name"], "entries": row["entries"]}
+
+
+def _reproductions_of(
+    record: dict[str, list[dict[str, Any]]], head: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """What this window reproduces, newest claim first.
+
+    A DECLARED frame is one a reader cannot misread. A FAITHFUL one computes
+    what somebody else's implementation computes from the same inputs, and no
+    amount of declaring gets the second. These rows are the only place the
+    platform states it.
+
+    Each carries its denominator, because "reproduces" over one counter and
+    over twenty-six are both true and only one of them says anything. The
+    digest and the commit are shortened for reading and are a prefix of what
+    the row holds, so a reader who needs the whole value goes to the row.
+    """
+    return [
+        {
+            "reference": r["reference_key"],
+            "compared": r["compared"],
+            "agreed": r["agreed"],
+            "disagreements": r["disagreements"],
+            "digest": r["reference_digest"][:12],
+            "commit": (r["reference_commit"] or "")[:12] or None,
+            "verified_on": r["verified_on"],
+        }
+        for r in record.get("reproductions", [])
+        if head and r["evaluation_set_id"] == head["id"]
+    ]
+
+
+def _one_under(
+    name: str,
+    catalogue: list[dict[str, Any]],
+    mine: list[dict[str, Any]],
+    field: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """The one row THIS window's results were read over, or why there is not one.
+
+    WHAT THIS REPLACES. Both of these were read as the first row of the
+    catalogue carrying ``in_use`` -- the oldest thing in the whole record that
+    anything had ever used, in a list ordered by creation, with nothing in the
+    expression mentioning the window. So the frame for the titular 211->227
+    window published ``delta-219-220-t0-c787b26a94ac``: a query set of 5.810
+    entries belonging to the 219->220 window, because it was the oldest in use.
+    A reader of that block concluded the headline number had been measured over
+    5.810 targets named for a different pair of releases. It had not.
+
+    NULL IS PUBLISHED WITH ITS REASON, never bare, on the same argument a
+    blocked node's ``blocked_reason`` rests on. The titular window's results
+    come from an ingested method and an ingested method carries no query set at
+    all, so "none, and here is why" is an answer. Another window's name is not
+    one, and a bare null is barely better: it cannot be told from nobody having
+    looked.
+
+    SEVERAL IS REFUSED RATHER THAN RESOLVED. Two query sets under one window
+    means the panels below were drawn from two populations, and printing one of
+    them is how a block that looks complete describes half of what it
+    summarises. Likewise a window where some results name one and others name
+    none: that is not a window with a query set.
+    """
+    if not mine:
+        return None, f"no published result sits under this window, so no {name} is in use under it"
+    named = [r.get(field) for r in mine]
+    known = {value for value in named if value}
+    if not known:
+        return None, (
+            f"none of this window's {len(mine)} results names a {name}. An ingested method "
+            "carries no query set, and the weighting of any arm is recoverable only from its "
+            "producing job's payload"
+        )
+    if len(known) > 1:
+        return None, (
+            f"this window's results were read over {len(known)} different {name}s, so the "
+            "panels below are drawn from more than one population and no single row describes "
+            "them"
+        )
+    if len(known) == 1 and None in named:
+        missing = sum(1 for value in named if not value)
+        return None, (
+            f"{missing} of this window's {len(mine)} results name no {name} and the rest name "
+            "one, so no single row describes them together"
+        )
+    wanted = known.pop()
+    row = next((r for r in catalogue if str(r["id"]) == str(wanted)), None)
+    if row is None:
+        return None, (
+            f"this window's results name {name} {wanted}, which is not in the record this page read"
+        )
+    return row, None
+
+
+def _is_declared(
+    heads: list[dict[str, Any]],
+    window: str | None,
+    pivot: dict[str, Any] | None,
+    accretion: dict[str, Any] | None,
+    query_set: dict[str, Any] | None,
+    unsealed: int,
+) -> bool:
+    """Whether the record leaves a reader nothing to guess about the frame.
+
+    Not "a frame exists". Every one of these has to resolve: exactly one
+    evaluation set, so there is a single window under measurement; both ends
+    resolving to a release; a pivot, an accretion table and a query set; and no
+    published result left unsealed. So the block can be fully populated and
+    still report false.
+
+    IT GOT STRICTER WITH ``_one_under`` AND THAT IS THE POINT. The last two
+    arguments used to be the oldest in-use row in the whole record, which is
+    something almost any populated record has, so ``declared`` could be true
+    while the window's OWN query set was unrecoverable -- the exact state it
+    exists to report. Now they are null unless this window's results resolve
+    exactly one, so the flag answers the question it claims to.
+    """
+    return bool(
+        heads and len(heads) == 1 and window and pivot and accretion and query_set and unsealed == 0
+    )
+
+
 def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     """The frame every number below is read in, and whether it is declared.
 
     ``declared`` is not "a frame exists". It is true only when the record leaves
     a reader nothing to guess: exactly one evaluation set, so there is a single
-    window under measurement; both ends of that window resolve to a release; a
-    pivot snapshot, an accretion table and a query set all resolve; and no
-    published result is unsealed. A result is sealed when its ``frame`` column
-    says which scoring frame it lives in. Today every one of them is null, which
-    is why the block below can be fully populated and still report false: the
-    frame is recoverable, but no published number states it.
+    window under measurement; both ends resolve to a release; a pivot snapshot,
+    an accretion table and a query set all resolve; and no published result is
+    unsealed. So the block can be fully populated and still report false -- the
+    frame recoverable, and no published number stating it.
+
+    ``reproduces`` is the other half, and the two are not the same property: a
+    declared frame is one a reader cannot misread, a faithful one computes what
+    another implementation computes. See :func:`_reproductions_of`.
     """
     heads = record["evaluation_sets"]
     head = heads[0] if heads else None
-    accretion = next((a for a in record["accretion"] if a["in_use"]), None)
-    query_set = next((q for q in record["query_sets"] if q["in_use"]), None)
+    claims = _reproductions_of(record, head)
+    mine = [r for r in record["results"] if head and r["evaluation_set_id"] == head["id"]]
+    accretion, accretion_why = _one_under(
+        "accretion table", record["accretion"], mine, "accretion_id"
+    )
+    query_set, query_set_why = _one_under("query set", record["query_sets"], mine, "query_set_id")
     results = record["results"]
-    sealed = sum(1 for r in results if r["frame"])
+    sealed = sum(1 for r in results if r["frame_digest"])
     unsealed = len(results) - sealed
     ends = (head["window_from"], head["window_to"]) if head else (None, None)
     window = f"{ends[0]}->{ends[1]}" if all(ends) else None
@@ -170,39 +318,29 @@ def build_frame(record: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     # of a temporal benchmark: it bounds how much annotation could accumulate,
     # and therefore what any panel drawn from it could possibly resolve.
     span = _window_span(head) if head else None
-    pivot = (
-        {"id": head["pivot_snapshot_id"], "version": head["pivot_version"]}
-        if head and head["pivot_snapshot_id"]
-        else None
-    )
+    pivot = _pivot_of(head)
     return {
-        "declared": bool(
-            head is not None
-            and len(heads) == 1
-            and window
-            and pivot
-            and accretion
-            and query_set
-            and unsealed == 0
-        ),
+        "declared": _is_declared(heads, window, pivot, accretion, query_set, unsealed),
         "evaluation_set_id": head["id"] if head else None,
         "window": window,
         "window_span": span,
         "window_role": head["window_role"] if head else None,
         "mode": head["mode"] if head else None,
         "pivot_snapshot": pivot,
-        "information_accretion_set": (
-            {"id": accretion["id"], "regime": accretion["regime"], "sha256": accretion["sha256"]}
-            if accretion
-            else None
-        ),
-        "query_set": (
-            {"id": query_set["id"], "name": query_set["name"], "entries": query_set["entries"]}
-            if query_set
-            else None
-        ),
+        "information_accretion_set": _accretion_of(accretion),
+        "query_set": _query_set_of(query_set),
+        # Present only when the two above are null, for the reason a blocked
+        # node carries ``blocked_reason``: a null a reader cannot account for
+        # is indistinguishable from a null nobody looked at.
+        "information_accretion_absent": accretion_why,
+        "query_set_absent": query_set_why,
         "sealed_rows": sealed,
         "unsealed_rows": unsealed,
+        # Declared says the record is unambiguous. This says it is faithful:
+        # the counters agree with an external implementation's, named with
+        # their denominator and the bytes they were checked against. Empty
+        # until verify_window_against_reference has run on this window.
+        "reproduces": claims,
     }
 
 
@@ -322,9 +460,7 @@ def build_graph(
     }
 
 
-def _promote_head(
-    record: dict[str, list[dict[str, Any]]], evaluation_set_id: str | None
-) -> None:
+def _promote_head(record: dict[str, list[dict[str, Any]]], evaluation_set_id: str | None) -> None:
     """Move the requested evaluation set to the front of the record, in place.
 
     The graph reads its window from ``record["evaluation_sets"][0]`` in four

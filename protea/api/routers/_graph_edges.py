@@ -73,6 +73,7 @@ class StaleStructuralBlock(ValueError):
     is the defect the field was added to end.
     """
 
+
 # ── The reading a declared comparison came back with ──────────────────────────
 #
 # The instrument's vocabulary, named here so that a producer which misspells one
@@ -168,6 +169,10 @@ class DeclaredFloor:
 
     floor: str | None = None
     reading: str = NULL_UNREAD
+    #: The day the declaring run was created. A floor is a decision somebody
+    #: made on a date, and it is the only rung of the ladder whose date is not
+    #: on a row this node counts: it is on the run that declared it.
+    declared_on: str | None = None
 
 
 #: Where a node with nothing declared for it stands. Its reading is the
@@ -216,6 +221,13 @@ class Edge:
     refusal: str | None = None
     reading: str = NULL_UNREAD
     expressible: bool = True
+    #: The date the record puts on each rung of the ladder this node climbed, as
+    #: ``dates(first_level=..., contrast=...)`` builds it. WHICH rungs were
+    #: climbed is never here: that is derived by :func:`climbed` from the fields
+    #: above, so the axis cannot say one thing while the strength says another.
+    #: Empty is the honest default -- a node whose rows the builder cannot date
+    #: still reports its rungs, undated.
+    dated: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         """Refuse an edge that carries a verdict and a refusal at the same time.
@@ -337,6 +349,165 @@ def strength_of(edge: Edge) -> str:
     return STRENGTH_OF_READING[edge.reading]
 
 
+# ── The temporal axis: which rungs of the ladder below were climbed, and when ──
+#
+# A strength is present tense. It says how firmly a decision is held NOW, and a
+# campaign is the story of how it came to be held, which the word cannot carry:
+# a node that was ``blocked`` in September and ``chosen`` in October reads today
+# exactly like one that was ``chosen`` from the start. The two sent a reader to
+# different places and the surface said the same thing about both.
+#
+# WHAT IS DERIVED AND WHAT IS SUPPLIED, AND WHY THE LINE IS THERE. WHICH rungs a
+# node has climbed is derived here, by :func:`crossings_of`, from the same fields
+# :func:`strength_of` reads, in the same order, stopping at the same place. It is
+# never supplied by a builder, because an axis that disagreed with the word would
+# be two reports of one decision and a reader would have to pick. WHEN each was
+# climbed IS supplied, because only the builder knows which rows its own counts
+# came from, and a date invented anywhere else is a date about different rows.
+#
+# A rung climbed with no date is published as climbed and undated. That is a
+# third state and not a missing one: the record says this happened and does not
+# say when, which is a different fact from its not having happened, and the two
+# are told apart here for the same reason ``reference_commit`` is nullable.
+FIRST_LEVEL = "first_level"
+#: A second level, so there is something to compare. Not a second ROW: two rows
+#: of one level are one level held twice.
+CONTRAST = "contrast"
+#: Two levels carrying a number, so the contrast can be read at all.
+POWER = "power"
+#: A floor declared for this node. Climbed when one EXISTS, which is a fact about
+#: the record on a date; whether it could be answered is the next rung's business
+#: and the refusal's.
+FLOOR = "floor"
+#: The declared comparison cleared the floor.
+SEPARATION = "separation"
+
+#: The ladder, in the order :func:`strength_of` climbs it. The order is the whole
+#: of the meaning: a rung is reported only when every rung below it was climbed,
+#: so a node holding a declared floor it never had the power to read publishes no
+#: floor crossing. The word never reached that test either.
+THRESHOLDS: tuple[str, ...] = (FIRST_LEVEL, CONTRAST, POWER, FLOOR, SEPARATION)
+
+#: The rungs a node climbs on ITS OWN ROWS, and the only ones a date can
+#: contradict. Their dates and their counts come off the same rows, so a date
+#: beyond the count means the builder dated one set and counted another, and
+#: either number may be the wrong one.
+#:
+#: WHY THE OTHER TWO ARE NOT HELD TO IT. A floor is declared for the campaign and
+#: a reading is taken over the whole panel set; both reach all ten nodes exactly
+#: as ``Edge.floor`` and ``Edge.separated`` already do, and every node carries
+#: those today whether or not its word ever read them -- ``strength_of`` returns
+#: at the single-level test and never looks. A date must be treated as the field
+#: it dates, so these two are TRUNCATED by :func:`crossings_of` like their own
+#: fields and not refused. Refusing the date while accepting the field it dates
+#: would be the inconsistency, and it is the one this guard was first written
+#: with: it fired on nine nodes that had simply never reached the rung.
+COUNTED_THRESHOLDS: tuple[str, ...] = (FIRST_LEVEL, CONTRAST, POWER)
+
+
+class DateForUnclimbedThreshold(ValueError):
+    """A builder dated a rung its own counts say the node never reached.
+
+    Raised and not dropped. A date is read off rows, so a date for a rung the
+    counts deny means the builder measured one thing and counted another, and
+    either number may be the wrong one. Publishing the axis without it would hide
+    the disagreement; publishing it with would put a date on the surface that the
+    node's own strength contradicts.
+    """
+
+
+@dataclass(frozen=True)
+class Crossing:
+    """One rung this node climbed, and the date the record puts on it."""
+
+    threshold: str
+    #: ``None`` where the record holds no date for a rung it says was climbed.
+    on: str | None
+
+
+def dates(**on: str | None) -> tuple[tuple[str, str], ...]:
+    """The dates a builder has, keyed by threshold, as an :class:`Edge` takes them.
+
+    Keyword arguments rather than a dict literal so a misspelled threshold is a
+    refusal at the call site instead of a date that silently belongs to no rung
+    and is never printed. ``None`` values are dropped here, so a builder can hand
+    over whatever it managed to read without branching: the rung is still
+    reported, undated, by :func:`crossings_of`.
+
+    Returned as a tuple of pairs and not a mapping because :class:`Edge` is
+    frozen and hashable, and one dict field would make ``hash(edge)`` a
+    ``TypeError`` waiting for the first caller who tries it.
+    """
+    unknown = sorted(set(on) - set(THRESHOLDS))
+    if unknown:
+        raise ValueError(
+            f"{unknown} name no threshold of the ladder ({', '.join(THRESHOLDS)}). "
+            "A date filed under a rung that does not exist is never printed, so the axis "
+            "would come out short with nothing saying so."
+        )
+    return tuple((key, value) for key, value in on.items() if value is not None)
+
+
+def climbed(edge: Edge) -> tuple[str, ...]:
+    """The rungs of :func:`strength_of`'s ladder this edge has climbed.
+
+    One test per rung, each reading the single field that settles it, and the
+    walk stops at the first one that fails. That stop is what keeps the axis and
+    the word from ever disagreeing: :func:`strength_of` returns at exactly the
+    same point, so a rung this function reports is a rung that function used.
+
+    Not a method on :class:`Edge` for the reason ``strength_of`` is not one
+    either: the ladder is the argument this surface rests on and it is read in one
+    place, beside the other reading of it.
+    """
+    if not edge.expressible or not edge.produced or edge.instantiated < 1:
+        return ()
+    if edge.instantiated < 2:
+        return (FIRST_LEVEL,)
+    if edge.scored < 2:
+        return (FIRST_LEVEL, CONTRAST)
+    if edge.floor is None:
+        return (FIRST_LEVEL, CONTRAST, POWER)
+    # A FLOOR THAT WAS REFUSED STILL CLIMBED THIS RUNG, and it is the one place
+    # the axis carries something the word cannot. ``strength_of`` returns CHOSEN
+    # on a compound test -- no floor, or a floor with no verdict -- so the word
+    # is the same for a node nobody declared one for and a node whose declared
+    # comparison could not be asked. The declaration happened on a day either
+    # way, and dropping the rung would publish the first state while holding the
+    # second. The refusal itself reaches the reader as ``floor_refusal``.
+    if not edge.separated:
+        return (FIRST_LEVEL, CONTRAST, POWER, FLOOR)
+    return THRESHOLDS
+
+
+def crossings_of(edge: Edge) -> tuple[Crossing, ...]:
+    """The temporal axis of one node: every rung it climbed, in order, dated.
+
+    This is what reaches the response as the node's ``crossings``: the one key of
+    a node that reports anything but the present tense. A reader with the word
+    alone cannot tell a node that was blocked last month from one that has always
+    stood where it stands.
+
+    Truncates at the last rung climbed, so a date handed to every node for a
+    comparison declared once reaches only the nodes whose word read it.
+
+    Refuses a date for an unclimbed rung ONLY among ``COUNTED_THRESHOLDS``, where
+    the count and the date are two readings of one set of rows and may therefore
+    disagree. The other direction -- a climbed rung with no date -- is never a
+    refusal: it is a real state of the record, published as itself.
+    """
+    reached, held = climbed(edge), dict(edge.dated)
+    early = sorted((set(held) - set(reached)) & set(COUNTED_THRESHOLDS), key=THRESHOLDS.index)
+    if early:
+        raise DateForUnclimbedThreshold(
+            f"dated {early} on a node that climbed {list(reached)!r}. These rungs are counted "
+            "off the same rows they are dated off, so one of the two is about a different set "
+            "of rows than the other, and publishing either would put a date on the surface "
+            "that this node's own count denies."
+        )
+    return tuple(Crossing(threshold=rung, on=held.get(rung)) for rung in reached)
+
+
 @dataclass(frozen=True)
 class Spec:
     """A node's fixed identity: what it is, where it sits, what it asks."""
@@ -424,6 +595,7 @@ def _node(
         "separated": edge.separated,
         "floor_refusal": edge.refusal,
         "results": edge.results,
+        "crossings": [{"threshold": c.threshold, "on": c.on} for c in crossings_of(edge)],
     }
 
 

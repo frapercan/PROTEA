@@ -123,7 +123,12 @@ class ArchiveOntologySnapshotOperation:
                 obsolete = line.split(":", 1)[1].strip() == "true"
         if in_term and current and not obsolete:
             ids.add(current)
-        return ids, version
+        # Named, not a bare tuple. The annotation said ``_Fetched`` and the
+        # return was a plain pair, so the gate that reads ``fetched.version``
+        # died on the first real file with ``'tuple' object has no attribute
+        # 'version'`` -- after the download and the sha256, which is the part
+        # that costs.
+        return _Fetched(ids=ids, version=version)
 
     @staticmethod
     def _reuse_result(snapshot: OntologySnapshot, emit: EmitFn) -> OperationResult:

@@ -156,7 +156,13 @@ function HeatmapCell({
                       </span>
                     )}
                     <Link
-                      href={`/${locale}/instrument/evaluation/${r.evaluation_result_id}`}
+                      // The SET is the route and the RESULT is a query param,
+                      // which is what the benchmark page's own three links do.
+                      // These two used the result id as the path segment, and
+                      // /instrument/evaluation/[id] loads an evaluation SET:
+                      // every click answered 404 and the page showed
+                      // "HTTP 404 on /annotations/evaluation-sets/<result>".
+                      href={`/${locale}/instrument/evaluation/${r.evaluation_set_id}?result=${r.evaluation_result_id}`}
                       className="text-[11px] font-medium text-slate-700 truncate hover:text-blue-700 hover:underline focus:outline-none focus-visible:underline focus-visible:text-blue-700"
                     >
                       {name}
@@ -187,7 +193,13 @@ function HeatmapCell({
                   </div>
                   <div className="text-right leading-tight">
                     <Link
-                      href={`/${locale}/instrument/evaluation/${r.evaluation_result_id}`}
+                      // The SET is the route and the RESULT is a query param,
+                      // which is what the benchmark page's own three links do.
+                      // These two used the result id as the path segment, and
+                      // /instrument/evaluation/[id] loads an evaluation SET:
+                      // every click answered 404 and the page showed
+                      // "HTTP 404 on /annotations/evaluation-sets/<result>".
+                      href={`/${locale}/instrument/evaluation/${r.evaluation_set_id}?result=${r.evaluation_result_id}`}
                       className="block text-[11px] tabular-nums font-semibold text-slate-700 hover:text-blue-700 focus:outline-none focus-visible:text-blue-700"
                     >
                       {r.primary.toFixed(3)}

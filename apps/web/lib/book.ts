@@ -309,11 +309,14 @@ export const PILLARS: Pillar[] = [
     },
     evidenceLabel:
       "These eight figures claimed the sealed board as their source, and that " +
-      "claim does not hold here. Measured on this server 2026-10-27: " +
+      "claim does not hold here. Measured on this server 2026-10-28: " +
       "reranker_model holds 0 rows, so there is no booster to read a gain share " +
-      "from; the cited gain_report.json is absent from the whole filesystem and " +
-      "not only from storage/; and evaluation_frame holds 0 rows with no result " +
-      "carrying a frame or a frame_digest, so nothing is sealed. The numbers are " +
+      "from; and the cited gain_report.json is absent from the whole filesystem " +
+      "and not only from storage/. The third reason given here has since been " +
+      "resolved and is recorded rather than removed: evaluation_frame held 0 " +
+      "rows and no result carried a digest, so nothing was sealed. It now holds " +
+      "7 frames over 8 sealed results, which is why these figures can be shown " +
+      "to belong to none of them instead of merely failing to resolve. The numbers are " +
       "kept rather than deleted because they may well be a real pre-wipe " +
       "measurement and the ordering they assert is this chapter's point; what is " +
       "withdrawn is the attribution. Chapters two and three already withdrew " +
