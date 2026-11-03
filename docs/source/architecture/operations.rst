@@ -634,7 +634,8 @@ compute_embeddings
 ------------------
 
 **Operation name:** ``compute_embeddings``; queue: ``protea.embeddings``
-(coordinator, serialised; one at a time via ``RetryLaterError`` if GPU busy)
+(coordinator, serialised; waits via ``RetryLaterError`` while the card is busy, see
+*The card is one resource* below)
 
 | **How to invoke this:** see *Compute sequence embeddings* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``EmbeddingConfig``, ``SequenceEmbedding`` (see *Embeddings* in :doc:`/architecture/data_model`).
@@ -1916,6 +1917,15 @@ database, checks the shard against the message, inserts one ``residue_code`` row
 sequence and advances the parent job, as ``store_embeddings`` does for
 ``compute_embeddings``. :func:`protea.core.residue_codes.load_residue_codes` reads the
 codes back.
+
+**The card is one resource.** ``compute_embeddings``, ``encode_residue_vocabulary`` and
+``encode_residue_sparse`` all send their batches to ``protea.embeddings.batch``, which the
+same card consumes, and each coordinator checks the card before it dispatches
+(``protea.core.operations._card_guard``). The card is busy when a coordinator of any of the
+three is RUNNING, or when the batch queue still holds messages: a coordinator that closed as
+it dispatched (the code before #1091 did) is SUCCEEDED while its batches wait, and only the
+queue knows. A busy card makes the coordinator wait and try again with ``RetryLaterError``;
+it never fails it. An unreachable broker does not count as busy.
 
 Payload fields
 ~~~~~~~~~~~~~~

@@ -56,6 +56,7 @@ from protea.core.contracts.operation import (
     ProteaPayload,
 )
 from protea.core.contracts.parent_progress import update_parent_progress
+from protea.core.operations._card_guard import refuse_if_card_busy
 from protea.core.operations._compute_embeddings_helpers import (
     scale_and_clip_embedding,
 )
@@ -177,7 +178,6 @@ class EncodeResidueSparsePayload(ProteaPayload, frozen=True):
             )
         object.__setattr__(self, "encoder_artifact_addresses", addresses)
         return self
-
 
 
 class EncodeResidueSparseBatchPayload(ProteaPayload, frozen=True):
@@ -563,6 +563,7 @@ class EncodeResidueSparseOperation(Operation):
         """
         p = EncodeResidueSparsePayload.model_validate(contract_payload(payload))
         parent_job_id = uuid.UUID(payload["_job_id"])
+        refuse_if_card_busy(session, parent_job_id)
         source = session.get(EmbeddingConfig, uuid.UUID(p.source_embedding_config_id))
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")

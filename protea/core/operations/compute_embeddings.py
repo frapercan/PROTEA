@@ -9,11 +9,12 @@ from pydantic import BeforeValidator, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload, RetryLaterError
+from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.operations._batch_skip_existing import (
     close_fully_stored_batch,
     sequences_still_missing,
 )
+from protea.core.operations._card_guard import refuse_if_card_busy
 from protea.core.operations._compute_embeddings_backends import (
     ChunkEmbedding,
     _aggregate_1d,
@@ -54,7 +55,6 @@ from protea.core.operations.store_embeddings import (
 )
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
-from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -326,25 +326,14 @@ class ComputeEmbeddingsOperation:
         )
 
     def _refuse_if_gpu_busy(self, session: Session, parent_job_id: UUID) -> None:
-        """Only one compute_embeddings job at a time: the GPU is a shared resource."""
-        conflict = (
-            session.query(Job)
-            .filter(
-                Job.operation == "compute_embeddings",
-                Job.status == JobStatus.RUNNING,
-                Job.id != parent_job_id,
-            )
-            .first()
-        )
-        if conflict is None:
-            return
-        from protea.config.tuning import get_tuning
+        """Wait while another pass holds the card, whichever operation it is.
 
-        raise RetryLaterError(
-            f"GPU busy: compute_embeddings job {conflict.id} is already running. "
-            f"Will retry automatically.",
-            delay_seconds=get_tuning().operation.gpu_busy_retry_seconds,
-        )
+        This used to look only at other ``compute_embeddings`` jobs in RUNNING, so a
+        residue pass on the same card, or one whose coordinator closed when it
+        dispatched, was invisible to it. :mod:`._card_guard` checks every coordinator
+        that sends work to the card and the batches still waiting for it.
+        """
+        refuse_if_card_busy(session, parent_job_id)
 
     def _load_sequence_ids(
         self,

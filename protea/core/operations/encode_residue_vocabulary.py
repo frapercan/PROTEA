@@ -46,6 +46,7 @@ from protea.core.contracts.operation import (
     ProteaPayload,
 )
 from protea.core.contracts.parent_progress import update_parent_progress
+from protea.core.operations._card_guard import refuse_if_card_busy
 from protea.core.operations._encoder_artifact import (
     resolve_encoder_artifact,
     resolve_training_cut,
@@ -377,6 +378,9 @@ class EncodeResidueVocabularyOperation(Operation):
         """Resolve, scope and hand the work to whoever has a card."""
         p = EncodeResidueVocabularyPayload.model_validate(contract_payload(payload))
         parent_job_id = uuid.UUID(payload["_job_id"])
+        # A corpus pass holds the card for hours; a second one waits for it rather than
+        # interleave with the first (the guard every card operation shares).
+        refuse_if_card_busy(session, parent_job_id)
         source = session.get(EmbeddingConfig, uuid.UUID(p.source_embedding_config_id))
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")
