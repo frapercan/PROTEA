@@ -452,6 +452,10 @@ class RunLabMethodOperation:
         "and enqueue their ingestion."
     )
 
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        pl = payload or {}
+        return f"{pl.get('method_name', '?')} at cut {pl.get('cut', '?')}"
+
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
