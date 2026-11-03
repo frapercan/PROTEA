@@ -46,20 +46,35 @@ a field to it reissues every id in the registry, which is a migration of every r
 references one. A configuration's granularity and storage follow from its producer, so
 they describe the recipe without being part of what makes it distinct.
 
-2. Sequence summaries of sparse codes in ``sparsevec``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2. Per-protein representations of residue codes are learned, not pooled
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The author, 2026-11-03: "Queriamos evitar las agregaciones que pierdan mucha
+información", and "el objetivo es no utilizar agregaciones max mean... sino learned
+representations mejor si fuese posible".
+
+* **Nothing fixed is stored per protein.** No maximum or mean of the residue codes is
+  written as a representation of record. A fixed pooling loses where a feature fires, how
+  often it repeats and which features occur together, which is what the aggregation pillar
+  of the thesis studies.
+* **A per-protein representation, when a consumer needs one, is learned.** It is the
+  output of an aggregator fitted in the lab over the residue codes (attention pooling, the
+  reader's own aggregation, or the term generator), entered as an artifact with its hashes
+  and cut, registered as a configuration of kind ``learned`` and granularity ``sequence``,
+  and computed by a platform operation that reads the residue store.
+* **Fixed pooling stays a baseline.** The maximum and the mean are measured against the
+  learned aggregator on the 211 to 227 frame, stratified by length, identity and panel as
+  every platform evaluation is, and are never the representation a consumer reads.
+* **Retrieval does not need a pooled vector.** Neighbours can be found per region (one
+  sparse vector per domain or window, the best match among regions) and measured against
+  the residue-level match.
 
 A new table ``sequence_sparse_embedding`` (sequence, configuration, ``sparsevec``,
-non-zero count) holds sparse vectors as sparse vectors. pgvector's ``sparsevec`` stores
-an index and a value per non-zero (8 bytes) and supports nearest neighbour search with
-an HNSW index for up to 1000 non-zeros. It needs pgvector 0.7.0 or later on the server.
+non-zero count) holds the sparse per-protein vectors that a learned aggregator produces.
+pgvector's ``sparsevec`` stores an index and a value per non-zero (8 bytes) and supports
+nearest neighbour search with an HNSW index for up to 1000 non-zeros. It needs pgvector
+0.7.0 or later on the server.
 
-* **Residue vocabularies.** The write stage of ``encode_residue_vocabulary`` also
-  receives one summary per sequence, computed on the card from the codes it already
-  holds. The definition is open and is decided by measurement, not here: per feature the
-  maximum or the mean read back value over the residues, keeping the strongest features
-  up to the index's limit. It is the north star of the lab's line: how much of the
-  sparse vocabulary survives once pooled, alone and inside the reader.
 * **``learned-code``** can move to this table later, which removes the in-memory CSR
   rebuild. That is a separate migration with its own parity check.
 
@@ -101,20 +116,20 @@ vocabulary does. The platform registers, stores, reads, predicts and evaluates.
 Consequences
 ~~~~~~~~~~~~
 
-* **Storage.** Summaries at up to 1000 non-zeros are at most 8 KB per sequence, about
-  5.5 GB for the corpus, or 1.4 GB at 256. The catalog is 8192 rows per vocabulary. The
+* **Storage.** A learned sparse per-protein vector at up to 1000 non-zeros is at most
+  8 KB per sequence, about 5.5 GB for the corpus, or 1.4 GB at 256. The catalog is 8192 rows per vocabulary. The
   inverted index at 64 features per sequence is about 44 million rows.
 * **Nothing existing moves.** ``sequence_embedding`` and its readers are untouched. Every
   new table is additive, and each comes with the operation that needs it.
-* **Order.** ADR-D51 first (residue codes). Then the summaries, once their definition is
-  measured on the 211 to 227 frame. Then the catalog, with the first explanation in the
+* **Order.** ADR-D51 first (residue codes). Then the first learned aggregator, once it
+  beats fixed pooling on the 211 to 227 frame, stratified. Then the catalog, with the first explanation in the
   platform. The inverted index comes last, and only if a consumer asks for it.
 
 Open questions for the author
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. The summary's definition (maximum or mean, how many features), measured before it is
-   fixed.
+1. Settled on 2026-11-03 (section 2): no fixed summary; learned per-protein
+   representations, with fixed pooling as a baseline.
 2. The population of the residue store: the whole corpus, or the annotated sequences and
-   the queries the readers need.
+   the queries the readers need. The first corpus pass covers the whole bank.
 3. Whether ``learned-code`` migrates to ``sparsevec``.
