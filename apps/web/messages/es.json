@@ -78,7 +78,8 @@
     "apiKeys": "Claves API",
     "apiKeysHint": "Emitir, listar y revocar claves de acceso programatico",
     "dlq": "Cola de mensajes muertos",
-    "dlqHint": "Auditar y purgar mensajes fallidos de la DLQ"
+    "dlqHint": "Auditar y purgar mensajes fallidos de la DLQ",
+    "modelWeights": "Pesos de modelos"
   },
   "home": {
     "title": "Pipeline de Prediccion de Funcion Proteica",
@@ -958,7 +959,7 @@
       "loading": "Leyendo el índice...",
       "emptyTitle": "Todavía no hay ningún vocabulario por residuo",
       "emptyBody": "Esta pestaña muestra hasta dónde llegan los códigos de cada vocabulario sobre su corpus de origen en cuanto una pasada de encode_residue_vocabulary crea su configuración. Aún no hay ninguna.",
-      "footnote": "La cobertura cuenta las secuencias del corpus de origen que tienen código. La estimación divide lo que falta entre las secuencias escritas en la última hora, así que se mueve con el ritmo del nodo de GPU.",
+      "footnote": "La cobertura cuenta las secuencias del corpus de origen que tienen código. La estimación divide lo que falta entre las secuencias escritas en la última hora, así que se mueve con el ritmo del nodo de GPU. Las cifras incluyen todas las pasadas hechas con este vocabulario, también las de prueba; el contador de un trabajo solo cuenta sus propios lotes.",
       "layers": "capas {layers}",
       "from": "desde {source}",
       "sequencesNoTotal": "{done} secuencias con código",
@@ -2305,5 +2306,85 @@
     "eyebrow": "Panel operativo",
     "title": "El instrumento",
     "subtitle": "Todas las superficies de datos, pipeline, resultados y operaciones detrás del argumento, agrupadas como se ejecuta el pipeline. El libro permanece en el nivel superior; esta es la pestaña que abres para operarlo."
+  },
+  "weights": {
+    "title": "Pesos de modelos",
+    "loading": "Leyendo el registro...",
+    "close": "Cerrar",
+    "cancel": "Cancelar",
+    "intro": "Cada fichero de pesos ajustados que la plataforma puede usar, identificado por su sha256: vocabularios por residuo, codificadores aprendidos, el modelo del mundo, lectores, generadores y paquetes de método. Cada peso muestra sobre qué se ajustó, las configuraciones hechas con él y los trabajos que lo leen. Los boosters del re-ranker tienen su propia página:",
+    "rerankerLink": "boosters del re-ranker",
+    "kindFilter": "Tipo de peso",
+    "all": "Todos",
+    "emptyTitle": "Todavía no hay pesos registrados",
+    "emptyBody": "Registra un fichero que ya esté en el almacén de artefactos o sube uno. El primer candidato es el vocabulario v1, en residue-vocabulary/vocabulary-v1-06fed75ca76d17be.npz.",
+    "configurationsCount": "{n} configuraciones",
+    "detail": {
+      "uri": "Clave en el almacén",
+      "format": "Formato",
+      "trainedOn": "Ajustado sobre el conjunto de anotaciones",
+      "noCut": "ninguno (sin corte)",
+      "registered": "Registrado",
+      "configurations": "Configuraciones hechas con él",
+      "noConfigurations": "Ninguna todavía.",
+      "jobs": "Trabajos que lo nombran",
+      "noJobs": "Ninguno todavía."
+    },
+    "actions": {
+      "encode": "Codificar un corpus"
+    },
+    "form": {
+      "kind": "Tipo",
+      "name": "Nombre",
+      "nameHint": "Pasa a formar parte de la clave: letras, dígitos, punto, guion o guion bajo.",
+      "description": "Descripción",
+      "meta": "Metadatos (JSON, opcional)",
+      "metaHint": "Capas, anchura, activos, niveles, receta, procedencia.",
+      "trainedOn": "Conjunto de anotaciones sobre el que se ajustó (opcional)",
+      "trainedOnHint": "Vacío para pesos sin corte.",
+      "nameInvalid": "El nombre debe tener letras, dígitos, punto, guion o guion bajo, y empezar por letra o dígito.",
+      "metaInvalid": "Los metadatos deben ser un objeto JSON."
+    },
+    "upload": {
+      "open": "Subir pesos",
+      "title": "Subir pesos",
+      "subtitle": "El fichero se envía por partes, se une y se calcula su huella en el servidor, y se guarda con una clave que lleva su huella.",
+      "file": "Fichero",
+      "noFile": "Elige primero un fichero.",
+      "progressLabel": "Progreso de la subida",
+      "sending": "Enviada la parte {sent} de {parts}",
+      "submit": "Subir"
+    },
+    "register": {
+      "open": "Registrar por referencia",
+      "title": "Registrar pesos que ya están en el almacén",
+      "subtitle": "Se calcula la huella del objeto en el almacén de artefactos y solo se registra si coincide con el sha256 dado.",
+      "uri": "Clave en el almacén",
+      "sha256": "sha256",
+      "sha256Hint": "La huella que anotó quien lo produjo, 64 caracteres hexadecimales.",
+      "shaInvalid": "El sha256 debe tener 64 caracteres hexadecimales.",
+      "submit": "Registrar"
+    },
+    "encode": {
+      "title": "Codificar un corpus con {name}",
+      "subtitle": "Pone en cola encode_residue_vocabulary: el código de cada residuo del corpus de origen, guardado en fragmentos e indexado por secuencia.",
+      "source": "Corpus de origen (configuración de embeddings)",
+      "sourceHint": "La pasada del modelo base cuyas secuencias se codifican; el vocabulario lee sus estados.",
+      "device": "Dispositivo",
+      "sequencesPerJob": "Secuencias por lote",
+      "residuesPerCall": "Residuos por llamada",
+      "warning": "Una pasada del corpus ocupa el nodo de GPU durante horas. Mira antes en la página de trabajos si ya hay una pasada en marcha con este vocabulario.",
+      "queued": "Trabajo en cola:",
+      "submit": "Poner la pasada en cola",
+      "noSource": "Elige un corpus de origen."
+    },
+    "kinds": {
+      "residue_vocabulary": "Vocabulario por residuo",
+      "learned_encoder": "Codificador aprendido",
+      "world_model": "Modelo del mundo",
+      "reader": "Lector",
+      "generator": "Generador",
+      "method_bundle": "Paquete de método"
+    }
   }
 }

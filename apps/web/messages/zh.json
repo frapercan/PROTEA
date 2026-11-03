@@ -79,7 +79,8 @@
     "apiKeys": "API 密钥",
     "apiKeysHint": "创建、查看和撤销程序访问密钥",
     "dlq": "死信队列",
-    "dlqHint": "审计和清理 DLQ 中的失败消息"
+    "dlqHint": "审计和清理 DLQ 中的失败消息",
+    "modelWeights": "模型权重"
   },
   "home": {
     "title": "蛋白质功能预测流水线",
@@ -959,7 +960,7 @@
       "loading": "正在读取索引...",
       "emptyTitle": "还没有残基词表",
       "emptyBody": "一旦 encode_residue_vocabulary 的一次运行创建了其配置，此标签页会显示每个词表的编码在其来源语料上覆盖到哪里。目前还没有。",
-      "footnote": "覆盖率统计来源语料中已有编码的序列。估计值用剩余数量除以最近一小时写入的序列数，因此随 GPU 节点的速度而变化。",
+      "footnote": "覆盖率统计来源语料中已有编码的序列。估计值用剩余数量除以最近一小时写入的序列数，因此随 GPU 节点的速度而变化。 这些数字包括用此词表进行的所有运行（含试运行）；任务的计数器只计算它自己的批次。",
       "layers": "层 {layers}",
       "from": "来自 {source}",
       "sequencesNoTotal": "{done} 条序列已有编码",
@@ -2306,5 +2307,85 @@
     "eyebrow": "运维面板",
     "title": "仪表台",
     "subtitle": "论证背后的全部数据、流水线、结果与运维界面，按流水线运行顺序分组。书保留在顶层；这是你打开以进行操作的标签页。"
+  },
+  "weights": {
+    "title": "模型权重",
+    "loading": "正在读取注册表...",
+    "close": "关闭",
+    "cancel": "取消",
+    "intro": "平台可使用的每个已拟合权重文件，以其 sha256 标识：残基词表、学习型编码器、世界模型、读取器、生成器和方法包。每个权重显示其拟合所依据的数据、由它生成的配置以及读取它的任务。重排序器的 booster 有自己的页面：",
+    "rerankerLink": "重排序器 booster",
+    "kindFilter": "权重类型",
+    "all": "全部",
+    "emptyTitle": "尚未注册任何权重",
+    "emptyBody": "注册一个已在制品存储中的文件，或上传一个。第一个候选是词表 v1，位于 residue-vocabulary/vocabulary-v1-06fed75ca76d17be.npz。",
+    "configurationsCount": "{n} 个配置",
+    "detail": {
+      "uri": "存储键",
+      "format": "格式",
+      "trainedOn": "拟合所用的注释集",
+      "noCut": "无（无截断）",
+      "registered": "注册时间",
+      "configurations": "由它生成的配置",
+      "noConfigurations": "暂无。",
+      "jobs": "引用它的任务",
+      "noJobs": "暂无。"
+    },
+    "actions": {
+      "encode": "编码一个语料"
+    },
+    "form": {
+      "kind": "类型",
+      "name": "名称",
+      "nameHint": "将成为存储键的一部分：字母、数字、点、连字符或下划线。",
+      "description": "描述",
+      "meta": "元数据（JSON，可选）",
+      "metaHint": "层、宽度、激活数、级别、配方、来源。",
+      "trainedOn": "拟合所用的注释集（可选）",
+      "trainedOnHint": "无截断的权重留空。",
+      "nameInvalid": "名称只能包含字母、数字、点、连字符或下划线，并以字母或数字开头。",
+      "metaInvalid": "元数据必须是一个 JSON 对象。"
+    },
+    "upload": {
+      "open": "上传权重",
+      "title": "上传权重",
+      "subtitle": "文件分段发送，在服务器上合并并计算哈希，以带有其哈希的键存储。",
+      "file": "文件",
+      "noFile": "请先选择一个文件。",
+      "progressLabel": "上传进度",
+      "sending": "已发送第 {sent} 段，共 {parts} 段",
+      "submit": "上传"
+    },
+    "register": {
+      "open": "按引用注册",
+      "title": "注册已在存储中的权重",
+      "subtitle": "在制品存储中计算对象的哈希，仅当与给定的 sha256 一致时才注册。",
+      "uri": "存储键",
+      "sha256": "sha256",
+      "sha256Hint": "生成者记录的哈希，64 个十六进制字符。",
+      "shaInvalid": "sha256 必须是 64 个十六进制字符。",
+      "submit": "注册"
+    },
+    "encode": {
+      "title": "用 {name} 编码一个语料",
+      "subtitle": "将 encode_residue_vocabulary 加入队列：来源语料中每个残基的编码，以分片存储并按序列索引。",
+      "source": "来源语料（嵌入配置）",
+      "sourceHint": "其序列被编码的骨干模型运行；词表读取其状态。",
+      "device": "设备",
+      "sequencesPerJob": "每批序列数",
+      "residuesPerCall": "每次调用的残基数",
+      "warning": "一次语料运行会占用 GPU 节点数小时。请先在任务页面检查是否已有使用此词表的运行。",
+      "queued": "任务已入队：",
+      "submit": "将运行加入队列",
+      "noSource": "请选择一个来源语料。"
+    },
+    "kinds": {
+      "residue_vocabulary": "残基词表",
+      "learned_encoder": "学习型编码器",
+      "world_model": "世界模型",
+      "reader": "读取器",
+      "generator": "生成器",
+      "method_bundle": "方法包"
+    }
   }
 }
