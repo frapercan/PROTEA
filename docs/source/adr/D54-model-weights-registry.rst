@@ -45,12 +45,12 @@ The re-ranker keeps its own registry, and the weights page links to it.
 * **Content addressed.** An uploaded file is stored at
   ``model-weights/<kind>/<name>-<sha256[:16]><extension>``. The same bytes uploaded twice
   give the same key and the same row, and the API answers 409 with the existing id.
-* **Registered by reference.** A file already in the store, such as vocabulary v1 at
-  ``residue-vocabulary/vocabulary-v1-06fed75ca76d17be.npz``, is registered with its key
-  and the sha256 its producer recorded. The API reads the object and refuses the row if the
+* **Registered by reference.** A file already in the store, such as the deployed residue
+  vocabulary at a key of the form ``residue-vocabulary/vocabulary-<name>-<sha256[:16]>.npz``,
+  is registered with its key and the sha256 its producer recorded. The API reads the object and refuses the row if the
   hash differs.
-* **Uploaded in parts.** The web proxy caps a request at 100 MB, and vocabulary v1 alone is
-  260 MB. A dialog therefore sends the file in parts: create an upload, send numbered
+* **Uploaded in parts.** The web proxy caps a request at 100 MB, and the deployed residue
+  vocabulary alone is 260 MB. A dialog therefore sends the file in parts: create an upload, send numbered
   parts, then complete. The server joins the parts on disk, hashes the result, puts it in
   the store and inserts the row. No request carries more than one part, and the API never
   holds a whole file in memory.
