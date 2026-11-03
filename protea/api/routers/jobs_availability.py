@@ -47,6 +47,9 @@ _GPU_OPERATIONS: frozenset[str] = frozenset(
         "encode_residue_vocabulary_batch",
         "encode_residue_sparse",
         "encode_residue_sparse_batch",
+        # A method's container holds the node's card for hours (ADR-D53); a RUNNING run
+        # keeps a live lease, so it counts as fresh like any leased job.
+        "run_lab_method",
     }
 )
 

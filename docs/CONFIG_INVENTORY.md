@@ -60,6 +60,7 @@ Cada parámetro identificado abajo:
 | `backoff_max_seconds` | `core/operations/{insert,fetch}_uniprot*.py` | 20.0 | Cap backoff UniProt. | 10-60 | no |
 | `jitter_seconds` | `core/operations/{insert,fetch}_uniprot*.py` | 0.4 | Jitter agregado al sleep. | 0-1 | no |
 | `method_scratch_dir` | `core/operations/run_lab_method.py` (`scratch_root`) | None (the system's temporary folder) | Folder where run_lab_method writes the queries, the container's output and its log; a method's TSV can be several GB. | a folder on disk on any node whose temporary folder is a tmpfs | no |
+| `method_bundle_root` | `core/operations/run_lab_method.py` (`bundle_root`, `checked_bundle`) | None (no run starts) | Folder that holds the bundles a method's container may mount. A payload's `bundle_path` must lie inside it once its symlinks are resolved, and the resolved path is the one mounted. | the folder on the node that holds the lab's bundles; never `/` | no |
 
 ### D. APILimits (HTTP boundaries)
 

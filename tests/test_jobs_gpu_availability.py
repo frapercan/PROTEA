@@ -305,3 +305,29 @@ def test_a_leaseless_running_row_that_never_dispatched_is_still_a_zombie(postgre
     assert body["busy"] is False
     assert body["running_stale"] == 1
     assert body["running_dispatched"] == 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("status", [JobStatus.RUNNING, JobStatus.QUEUED])
+def test_a_method_run_on_the_card_is_busy(postgres_url: str, status: JobStatus):
+    """A method's container holds the node's card for hours (ADR-D53), queued or running."""
+    engine = _fresh_engine(postgres_url)
+    factory = sessionmaker(engine, future=True)
+
+    now = utcnow()
+    with factory() as session:
+        session.add(
+            Job(
+                operation="run_lab_method",
+                queue_name="protea.methods",
+                status=status,
+                started_at=now if status == JobStatus.RUNNING else None,
+                leased_until=now + timedelta(minutes=2) if status == JobStatus.RUNNING else None,
+            )
+        )
+        session.commit()
+
+    body = _client(factory).get("/jobs/gpu-availability").json()
+    assert body["busy"] is True
+    assert body["active_operation"] == "run_lab_method"
+    assert body["running_fresh" if status == JobStatus.RUNNING else "queued"] == 1
