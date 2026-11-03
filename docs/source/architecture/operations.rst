@@ -1923,8 +1923,9 @@ codes back.
 same card consumes, and each coordinator checks the card before it dispatches
 (``protea.core.operations._card_guard``). The card is busy when another of these
 coordinators still has batches in flight: RUNNING (all three wait for their batches), or
-FAILED by the reaper while its count is short of its total. The check reads only the job
-table, never the broker. A busy card makes the coordinator wait and try again with
+FAILED by the reaper while its batches still arrive (its count short of its total and a job
+event within the reaper's liveness window; a reaped coordinator silent for longer is dead).
+The check reads only the job tables, never the broker. A busy card makes the coordinator wait and try again with
 ``RetryLaterError``; it never fails it.
 
 Payload fields

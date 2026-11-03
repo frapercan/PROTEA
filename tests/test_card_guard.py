@@ -19,6 +19,7 @@ the queue of the pass that was running. The guard now reads only the database, a
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -29,7 +30,8 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import RetryLaterError
 from protea.core.contracts.parent_progress import REAPED
 from protea.core.operations import _card_guard as guard
-from protea.infrastructure.orm.models.job import Job, JobStatus
+from protea.core.utils import utcnow
+from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 
 
 def _session(holder: Any = None) -> MagicMock:
@@ -104,7 +106,14 @@ def _fresh(postgres_url: str) -> Any:
     return engine
 
 
-def _job(session: Session, operation: str, status: JobStatus, **fields: Any) -> uuid.UUID:
+def _job(
+    session: Session,
+    operation: str,
+    status: JobStatus,
+    *,
+    event_age: timedelta | None = None,
+    **fields: Any,
+) -> uuid.UUID:
     job = Job(
         id=uuid.uuid4(),
         operation=operation,
@@ -116,6 +125,16 @@ def _job(session: Session, operation: str, status: JobStatus, **fields: Any) -> 
     )
     session.add(job)
     session.flush()
+    if event_age is not None:
+        session.add(
+            JobEvent(
+                job_id=job.id,
+                event="child.store_embeddings.done",
+                fields={},
+                ts=utcnow() - event_age,
+            )
+        )
+        session.flush()
     return job.id
 
 
@@ -138,6 +157,18 @@ def test_which_rows_hold_the_card(postgres_url: str) -> None:
             "itself, a finished pass, an operation off the card, a real failure and a reaped "
             "pass whose batches all arrived do not hold it"
         )
+        # b185a6d0, measured on the live base: reaped on 2026-10-30 at 0 of 7, its batches
+        # skipped the next day, nothing since. Incomplete forever; it must not hold the card.
+        _job(
+            session,
+            "compute_embeddings",
+            JobStatus.FAILED,
+            error_code=REAPED,
+            progress_current=0,
+            progress_total=7,
+            event_age=timedelta(days=3),
+        )
+        assert guard.card_busy(session, me) is None, "a reaped pass silent for days is dead"
         reaped = _job(
             session,
             "encode_residue_sparse",
@@ -145,6 +176,7 @@ def test_which_rows_hold_the_card(postgres_url: str) -> None:
             error_code=REAPED,
             progress_current=2,
             progress_total=7,
+            event_age=timedelta(minutes=5),
         )
         reason = guard.card_busy(session, me)
         assert reason is not None and str(reaped) in reason, (

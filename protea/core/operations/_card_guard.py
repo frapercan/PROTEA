@@ -13,10 +13,11 @@ batches in flight, which the job table says on its own:
 * **RUNNING.** All three coordinators wait for their batches (``deferred``: #1091 for
   the residue vocabulary, #1098 for the sparse encoder), so a pass is RUNNING until its
   last batch is stored.
-* **FAILED by the reaper with batches still counting.** A waiting coordinator that the
+* **FAILED by the reaper while its batches still arrive.** A waiting coordinator that the
   reaper gave up on (``error_code`` ``lease_expired``) keeps receiving its batches, which
-  advance it and close it (#1097); while its count is short of its total, its batches
-  still hold the card.
+  advance it and close it (#1097). It holds the card while its count is short of its
+  total AND it received an event within the reaper's liveness window; one with no event
+  for that long is dead, as is one whose batches were discarded before #1095.
 
 The guard reads only the database. It does not ask the broker how many batches are
 queued: that made every test of these operations talk to whatever broker listens on
@@ -39,7 +40,8 @@ from sqlalchemy.orm import Session
 
 from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import RetryLaterError
-from protea.core.contracts.parent_progress import IN_FLIGHT
+from protea.core.contracts.parent_progress import in_flight
+from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job
 
 #: The coordinators whose batches go to ``protea.embeddings.batch``, the card's queue.
@@ -57,7 +59,7 @@ def card_busy(session: Session, own_job_id: UUID) -> str | None:
         .filter(
             Job.operation.in_(BATCH_QUEUE_COORDINATORS),
             Job.id != own_job_id,
-            IN_FLIGHT,
+            in_flight(utcnow()),
         )
         .first()
     )
