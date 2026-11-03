@@ -305,7 +305,7 @@ later revision) or *Superseded* (a named later decision replaces it).
      - T-PLATFORM
    * - D52
      - :doc:`Representations by granularity in one registry, sparse first <D52-representations-by-granularity-sparse-first>`
-     - Proposed
+     - Accepted
      - T-PLATFORM
    * - D53
      - :doc:`A laboratory method runs as a platform job, from an image pinned by id <D53-lab-method-runs-as-a-platform-job>`
