@@ -467,6 +467,83 @@
         "title": "CreateJobRequest",
         "type": "object"
       },
+      "CreateUploadRequest": {
+        "description": "An upload in parts: what the file is and how large; the server answers the part size.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the weight is, in a sentence.",
+            "title": "Description"
+          },
+          "filename": {
+            "description": "The original file name; its extension gives the format.",
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "description": "One of the registry's kinds, e.g. residue_vocabulary.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "description": "Free metadata: layers, width, actives, levels, recipe, provenance.",
+            "title": "Meta",
+            "type": "object"
+          },
+          "name": {
+            "description": "A file-name stem: letters, digits, dot, dash, underscore.",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When given, the joined file must hash to it.",
+            "title": "Sha256"
+          },
+          "size_bytes": {
+            "description": "The size of the whole file, in bytes.",
+            "exclusiveMinimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "trained_on_annotation_set_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The annotation set it was fitted on; none for a weight without a cut.",
+            "title": "Trained On Annotation Set Id"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "filename",
+          "size_bytes"
+        ],
+        "title": "CreateUploadRequest",
+        "type": "object"
+      },
       "DlqPurgeRequest": {
         "description": "Filter for DLQ messages to permanently discard.\n\nDefaults to a dry run for the reason in :class:`DlqReplayRequest`, and more\nso: an empty body used to discard up to ten thousand messages with no\nfilter and no undo. A dead letter is often the only surviving copy of the\npayload that produced it.",
         "properties": {
@@ -727,7 +804,7 @@
           },
           "gpu_present": {
             "default": true,
-            "description": "Whether a CUDA GPU is available to the embedding workers. When false, embedding novel sequences falls back to CPU and is noticeably slower; the UI surfaces this so users understand why.",
+            "description": "Whether the API host's torch sees a CUDA GPU. It says nothing about the GPU node's card, which runs the embedding batches and is not visible from the API host.",
             "title": "Gpu Present",
             "type": "boolean"
           },
@@ -760,13 +837,19 @@
             "title": "Queued",
             "type": "integer"
           },
+          "running_dispatched": {
+            "default": 0,
+            "description": "Count of coordinators waiting for batches they dispatched: RUNNING with no live lease after a job.dispatched event (a waiting coordinator clears its lease on purpose), or failed by the reaper while their batches still arrive (an event within the reaper's liveness window). They set busy.",
+            "title": "Running Dispatched",
+            "type": "integer"
+          },
           "running_fresh": {
             "description": "Count of RUNNING GPU jobs with a live (future) lease.",
             "title": "Running Fresh",
             "type": "integer"
           },
           "running_stale": {
-            "description": "Count of RUNNING GPU jobs whose lease has expired (zombie rows; ignored for the busy signal).",
+            "description": "Count of RUNNING GPU jobs whose lease has expired and that are not waiting for dispatched batches (zombie rows; ignored for the busy signal).",
             "title": "Running Stale",
             "type": "integer"
           }
@@ -1439,6 +1522,70 @@
           "pulls"
         ],
         "title": "PullsResponse",
+        "type": "object"
+      },
+      "RegisterByReferenceRequest": {
+        "description": "A file already in the artifact store, to be hashed there and registered.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the weight is, in a sentence.",
+            "title": "Description"
+          },
+          "kind": {
+            "description": "One of the registry's kinds, e.g. residue_vocabulary.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "description": "Free metadata: layers, width, actives, levels, recipe, provenance.",
+            "title": "Meta",
+            "type": "object"
+          },
+          "name": {
+            "description": "A file-name stem: letters, digits, dot, dash, underscore.",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "The digest its producer recorded; the object is hashed and must match.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "trained_on_annotation_set_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The annotation set it was fitted on; none for a weight without a cut.",
+            "title": "Trained On Annotation Set Id"
+          },
+          "uri": {
+            "description": "The artifact store key, e.g. residue-vocabulary/vocabulary-v1-06fed75ca76d17be.npz.",
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "uri",
+          "sha256"
+        ],
+        "title": "RegisterByReferenceRequest",
         "type": "object"
       },
       "RepoEntry": {
@@ -6770,6 +6917,33 @@
         ]
       }
     },
+    "/v1/embeddings/residue-codes": {
+      "get": {
+        "description": "How far each residue vocabulary's codes reach over its source corpus (ADR-D51).\n\nOne entry per ``residue-vocabulary`` configuration, newest first: sequences,\nresidues and entries indexed in ``residue_code``, shards written, the first and\nthe last write, the last hour's pace, the coverage of the source corpus, what is\nleft of it and the hours that takes at that pace, and the job that wrote them.\n\nEvery number is a count over rows. The answer is cached 30 seconds, so a page\nthat polls it while a pass runs does not scan the index on every request, and\nthe last value is served when a recompute fails. The source corpus sizes, most of\nthe cost and constant while a pass reads a frozen bank, are cached an hour.",
+        "operationId": "list_residue_codes_v1_embeddings_residue_codes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Residue Codes V1 Embeddings Residue Codes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Per-residue codes by residue vocabulary",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
     "/v1/experiment-runs": {
       "get": {
         "description": "Return runs newest-first, optionally filtered by status.\n\nPagination is cursor-based: pass ``after=<created_at>`` to get the\nnext page. Microsecond resolution on ``created_at`` keeps tie\ncollisions astronomically rare.",
@@ -7494,7 +7668,7 @@
     },
     "/v1/jobs/gpu-availability": {
       "get": {
-        "description": "Report whether the shared GPU pipeline is genuinely busy.\n\nPowers the annotation form's \"GPU busy\" banner. Unlike a raw\n``GET /jobs?status=running`` scan, this gates on real liveness: a\nRUNNING job only counts when its ``leased_until`` is still in the\nfuture (a live worker renews the lease every heartbeat). Expired-lease\nRUNNING rows are zombies (dead worker) and are excluded from ``busy``\nso the form is not blocked by stale state.",
+        "description": "Report whether the shared GPU pipeline is genuinely busy.\n\nPowers the annotation form's \"GPU busy\" banner. Unlike a raw\n``GET /jobs?status=running`` scan, this gates on real liveness: a\nRUNNING job only counts when its ``leased_until`` is still in the\nfuture (a live worker renews the lease every heartbeat). Expired-lease\nRUNNING rows are zombies (dead worker) and are excluded from ``busy``\nso the form is not blocked by stale state. A coordinator waiting for the\nbatches it dispatched has no lease on purpose and still counts: it holds\nthe card until its last batch is stored.",
         "operationId": "gpu_availability_v1_jobs_gpu_availability_get",
         "responses": {
           "200": {
@@ -8233,6 +8407,560 @@
         "summary": "Get Metrics",
         "tags": [
           "metrics"
+        ]
+      }
+    },
+    "/v1/model-weights": {
+      "get": {
+        "description": "Every registered weight, newest first, with how many configurations were made from it.",
+        "operationId": "list_model_weights_v1_model_weights_get",
+        "parameters": [
+          {
+            "description": "Only this kind.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this kind.",
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Model Weights V1 Model Weights Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List model weights",
+        "tags": [
+          "model-weights"
+        ]
+      }
+    },
+    "/v1/model-weights/by-reference": {
+      "post": {
+        "description": "Hash the object in the store and register it if it matches the sha256 given.",
+        "operationId": "register_model_weights_by_reference_v1_model_weights_by_reference_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterByReferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Register Model Weights By Reference V1 Model Weights By Reference Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register a file of weights already in the artifact store",
+        "tags": [
+          "model-weights"
+        ]
+      }
+    },
+    "/v1/model-weights/uploads": {
+      "post": {
+        "description": "Returns the upload id, the part size and how many parts to send.",
+        "operationId": "create_model_weights_upload_v1_model_weights_uploads_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Model Weights Upload V1 Model Weights Uploads Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open an upload of model weights in parts",
+        "tags": [
+          "model-weights"
+        ]
+      }
+    },
+    "/v1/model-weights/uploads/{upload_id}": {
+      "delete": {
+        "description": "Remove the upload's folder and every part in it; nothing was registered.",
+        "operationId": "abort_model_weights_upload_v1_model_weights_uploads__upload_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Abort Model Weights Upload V1 Model Weights Uploads  Upload Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Abandon an upload",
+        "tags": [
+          "model-weights"
+        ]
+      }
+    },
+    "/v1/model-weights/uploads/{upload_id}/complete": {
+      "post": {
+        "description": "The registered weight; the upload is removed whether this succeeds or fails.",
+        "operationId": "complete_model_weights_upload_v1_model_weights_uploads__upload_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Complete Model Weights Upload V1 Model Weights Uploads  Upload Id  Complete Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Join an upload's parts, store the file and register it",
+        "tags": [
+          "model-weights"
+        ]
+      }
+    },
+    "/v1/model-weights/uploads/{upload_id}/parts/{n}": {
+      "put": {
+        "description": "Part ``n`` of the upload; every part but the last has exactly the part size.",
+        "operationId": "put_model_weights_part_v1_model_weights_uploads__upload_id__parts__n__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "n",
+            "required": true,
+            "schema": {
+              "title": "N",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Model Weights Part V1 Model Weights Uploads  Upload Id  Parts  N  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send one part of an upload (the raw bytes as the body)",
+        "tags": [
+          "model-weights"
+        ]
+      }
+    },
+    "/v1/model-weights/{weights_id}": {
+      "get": {
+        "description": "The weight, the configurations made from it and the jobs whose payload names its key.",
+        "operationId": "get_model_weights_v1_model_weights__weights_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "weights_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Weights Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Model Weights V1 Model Weights  Weights Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get one model weight and what uses it",
+        "tags": [
+          "model-weights"
         ]
       }
     },
@@ -11148,6 +11876,10 @@
     {
       "description": "Frozen re-ranker datasets \u2014 enqueue export jobs, list/fetch registered dumps, resolve URIs for the lab.",
       "name": "datasets"
+    },
+    {
+      "description": "The registry of model weights (ADR-D54): residue vocabularies, learned encoders and the lab's other fitted files, registered by reference or uploaded in parts, with what uses each one.",
+      "name": "model-weights"
     },
     {
       "description": "Register lab-trained LightGBM boosters \u2014 multipart upload or by-reference import of artefacts already in MinIO.",

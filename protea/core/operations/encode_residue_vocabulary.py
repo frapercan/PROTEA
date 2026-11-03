@@ -46,10 +46,12 @@ from protea.core.contracts.operation import (
     ProteaPayload,
 )
 from protea.core.contracts.parent_progress import update_parent_progress
+from protea.core.operations._card_guard import refuse_if_card_busy
 from protea.core.operations._encoder_artifact import (
     resolve_encoder_artifact,
     resolve_training_cut,
 )
+from protea.core.operations._parent_guard import parent_cancelled
 from protea.core.operations.store_residue_codes import WRITE_QUEUE
 from protea.core.residue_code_shards import pack_shard
 from protea.core.residue_vocabulary import (
@@ -62,7 +64,6 @@ from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.residue_code import ResidueCode as ResidueCodeRow
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
-from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 #: Backend tag on the produced config: the producer, not an architecture.
@@ -258,6 +259,29 @@ def build_messages(
     ]
 
 
+def dispatched_result(
+    messages: list[tuple[str, dict[str, Any]]], sequences: int, target_id: uuid.UUID, digest: str
+) -> OperationResult:
+    """The coordinator's result: deferred, so the job stays RUNNING until the last write.
+
+    ``store_residue_codes`` advances the parent once per batch and closes it on the last
+    one, as ``store_embeddings`` does for ``compute_embeddings``. Without ``deferred`` the
+    worker marked the job SUCCEEDED the moment the batches were published, so the job's
+    state said nothing about whether any code had been written.
+    """
+    return OperationResult(
+        result={
+            "batches": len(messages),
+            "sequences": sequences,
+            "embedding_config_id": str(target_id),
+            "vocabulary_sha256": digest,
+        },
+        progress_total=len(messages),
+        publish_operations=messages,
+        deferred=True,
+    )
+
+
 def _ensure_target_config(
     session: Session, meta: dict[str, Any], source: EmbeddingConfig, digest: str
 ) -> uuid.UUID:
@@ -354,6 +378,9 @@ class EncodeResidueVocabularyOperation(Operation):
         """Resolve, scope and hand the work to whoever has a card."""
         p = EncodeResidueVocabularyPayload.model_validate(contract_payload(payload))
         parent_job_id = uuid.UUID(payload["_job_id"])
+        # A corpus pass holds the card for hours; a second one waits for it rather than
+        # interleave with the first (the guard every card operation shares).
+        refuse_if_card_busy(session, parent_job_id)
         source = session.get(EmbeddingConfig, uuid.UUID(p.source_embedding_config_id))
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")
@@ -387,16 +414,7 @@ class EncodeResidueVocabularyOperation(Operation):
                 }
             )
         messages = build_messages(p, parent_job_id, source.id, target_id, pending)
-        return OperationResult(
-            result={
-                "batches": len(messages),
-                "sequences": len(pending),
-                "embedding_config_id": str(target_id),
-                "vocabulary_sha256": digest,
-            },
-            progress_total=len(messages),
-            publish_operations=messages,
-        )
+        return dispatched_result(messages, len(pending), target_id, digest)
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         return (
@@ -495,20 +513,6 @@ def build_store_message(
     )
 
 
-def _parent_stopped(session: Session, parent_job_id: str, emit: EmitFn) -> bool:
-    """Whether the coordinator was cancelled or failed, in which case the batch does nothing."""
-    parent = session.get(Job, uuid.UUID(parent_job_id)) if parent_job_id else None
-    if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-        emit(
-            "encode.skipped",
-            None,
-            {"reason": "parent_not_running", "parent_status": parent.status.value},
-            "warning",
-        )
-        return True
-    return False
-
-
 class EncodeResidueVocabularyBatchOperation(Operation):
     """One batch of sequences, encoded where the card is."""
 
@@ -527,7 +531,7 @@ class EncodeResidueVocabularyBatchOperation(Operation):
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")
         target_id = uuid.UUID(p.target_embedding_config_id)
-        if _parent_stopped(session, p.parent_job_id, emit):
+        if parent_cancelled(session, p.parent_job_id, emit, "encode"):
             return OperationResult(result={"skipped": True})
         pending = _pending_in_batch(session, p, target_id)
         if not pending:

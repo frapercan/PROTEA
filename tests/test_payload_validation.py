@@ -150,6 +150,7 @@ from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
 )
+from protea.core.operations.run_lab_method import RunLabMethodPayload
 from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
 from protea.core.operations.store_residue_codes import StoreResidueCodesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
@@ -751,6 +752,26 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "expected_sha256": "0" * 64,
         },
         ("contract_path",),
+    ),
+    (
+        # A tag is a name anyone can move; the run is pinned by the image's content id,
+        # so a payload that pins a tag pins nothing.
+        "run_lab_method",
+        RunLabMethodPayload,
+        {
+            "method_name": "lab-reader-cut211",
+            "image": "localhost/lab:dev",
+            "image_id": "localhost/lab:dev",
+            "bundle_path": "/srv/bundle",
+            "bundle_mount": "/srv/bundle",
+            "cut": 211,
+            "queries_fasta_uri": "evaluation-targets/q.fasta",
+            "queries_fasta_sha256": "0" * 64,
+            "embedding_config_id": "cfg",
+            "annotation_set_id": "ann",
+            "ontology_snapshot_id": "snap",
+        },
+        ("image_id",),
     ),
 ]
 

@@ -262,6 +262,18 @@ neighbour queries are performed in Python via ``protea.core.knn_search``.
    :undoc-members:
    :show-inheritance:
 
+**Model weights**
+
+``ModelWeights`` registers one file of fitted weights in the artifact store per row:
+its kind, its store key, its sha256 and size, free metadata and the annotation set it
+was fitted on (ADR-D54). Operations still take the key in their payload; the registry
+is how the instrument lists, uploads and launches from them.
+
+.. automodule:: protea.infrastructure.orm.models.embedding.model_weights
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **GO Prediction Features**
 
 ``GOPredictionFeatures`` stores the per-prediction feature vector used

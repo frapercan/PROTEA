@@ -82,7 +82,9 @@ def _wait_ready(container: str, user: str, db: str, timeout_s: int = 60) -> None
         return last_proc.returncode == 0
 
     try:
-        wait_until(_ready, timeout=float(timeout_s), interval=0.25, msg=f"psql -d {db} on {container}")
+        wait_until(
+            _ready, timeout=float(timeout_s), interval=0.25, msg=f"psql -d {db} on {container}"
+        )
     except AssertionError as err:
         logs = subprocess.run(["docker", "logs", container], text=True, capture_output=True)
         stdout = last_proc.stdout if last_proc else ""
@@ -149,6 +151,33 @@ _PROTECTED_DB_NAMES = frozenset({"protea", "biodata"})
 # against it unless the operator explicitly opts in.
 _DEV_HOST_PORT = ("localhost", "5432")
 _DEV_HOST_ALIASES = frozenset({"localhost", "127.0.0.1", "::1", ""})
+
+
+@pytest.fixture(autouse=True)
+def _no_live_broker(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test opens a connection to a real AMQP broker unless it is marked ``broker``.
+
+    On the host that runs PROTEA, localhost:5672 IS the live broker, and a fresh checkout,
+    with no ``system.yaml`` and no ``.env``, resolves its settings to it. On 2026-11-03 a unit
+    test of ``compute_embeddings`` read the queue of the corpus pass that was running there
+    (a passive declare, so only a read, but the next one could publish). The database has
+    ``_guard_external_db``; the broker had nothing.
+
+    Every ``pika.BlockingConnection`` raises ``AMQPConnectionError`` as an unreachable broker
+    does, so code that handles a missing broker behaves as it would, and nothing leaves the
+    process. A test that patches ``BlockingConnection`` itself still gets its mock.
+    """
+    if request.node.get_closest_marker("broker"):
+        return
+    import pika
+    import pika.exceptions
+
+    def _refuse(*_args: object, **_kwargs: object) -> None:
+        raise pika.exceptions.AMQPConnectionError(
+            "tests do not reach a real AMQP broker; mark the test @pytest.mark.broker if it must"
+        )
+
+    monkeypatch.setattr(pika, "BlockingConnection", _refuse)
 
 
 def _guard_external_db(user: str, host: str, port: str, db: str) -> None:

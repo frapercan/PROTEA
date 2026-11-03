@@ -39,6 +39,7 @@ def _build_reaper_config(worker_settings: WorkerTuning) -> StaleJobReaperConfig:
         stall_seconds=worker_settings.reaper_stall_seconds,
         max_lease_requeues=worker_settings.max_lease_requeues,
         event_grace_seconds=worker_settings.reaper_event_grace_seconds,
+        deferred_stall_seconds=worker_settings.reaper_deferred_stall_seconds,
     )
 
 

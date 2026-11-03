@@ -12,7 +12,7 @@ ADRs come in two layers:
   PROTEA. They explain trade-offs of concrete code paths (KNN
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
-- **Strategic decisions** (``D1``-``D51``): plan-level decisions. The
+- **Strategic decisions** (``D1``-``D54``): plan-level decisions. The
   ``D1``-``D31`` block was taken in the master plan revision 3 (2026-05-05)
   and drives the structure of the project, the deployment story, and the
   thesis writing cadence. Later records (``D34`` onward) were added as the
@@ -303,6 +303,14 @@ later revision) or *Superseded* (a named later decision replaces it).
      - :doc:`The sparse code of every residue, from a frozen vocabulary, stored as shards <D51-per-residue-vocabulary-codes>`
      - Proposed
      - T-PLATFORM
+   * - D53
+     - :doc:`A laboratory method runs as a platform job, from an image pinned by id <D53-lab-method-runs-as-a-platform-job>`
+     - Proposed
+     - T-PLATFORM
+   * - D54
+     - :doc:`Model weights in one registry, uploaded or registered, and used from the instrument <D54-model-weights-registry>`
+     - Proposed
+     - T-PLATFORM
 
 .. toctree::
    :maxdepth: 1
@@ -366,3 +374,5 @@ later revision) or *Superseded* (a named later decision replaces it).
    D49-corpus-is-four-tiers-of-the-gaf-series
    D50-term-identity-across-the-series
    D51-per-residue-vocabulary-codes
+   D53-lab-method-runs-as-a-platform-job
+   D54-model-weights-registry

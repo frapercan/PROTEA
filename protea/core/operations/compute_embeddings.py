@@ -9,11 +9,12 @@ from pydantic import BeforeValidator, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload, RetryLaterError
+from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.operations._batch_skip_existing import (
     close_fully_stored_batch,
     sequences_still_missing,
 )
+from protea.core.operations._card_guard import refuse_if_card_busy
 from protea.core.operations._compute_embeddings_backends import (
     ChunkEmbedding,
     _aggregate_1d,
@@ -46,6 +47,7 @@ from protea.core.operations._long_sequence_isolation import (
     load_lengths_for_isolation,
     refuse_and_record,
 )
+from protea.core.operations._parent_guard import parent_cancelled
 from protea.core.operations.store_embeddings import (
     StoredConfigEmbeddings,
     StoreEmbeddingsOperation,
@@ -53,7 +55,6 @@ from protea.core.operations.store_embeddings import (
 )
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
-from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -325,25 +326,13 @@ class ComputeEmbeddingsOperation:
         )
 
     def _refuse_if_gpu_busy(self, session: Session, parent_job_id: UUID) -> None:
-        """Only one compute_embeddings job at a time: the GPU is a shared resource."""
-        conflict = (
-            session.query(Job)
-            .filter(
-                Job.operation == "compute_embeddings",
-                Job.status == JobStatus.RUNNING,
-                Job.id != parent_job_id,
-            )
-            .first()
-        )
-        if conflict is None:
-            return
-        from protea.config.tuning import get_tuning
+        """Wait while another pass holds the card, whichever operation it is.
 
-        raise RetryLaterError(
-            f"GPU busy: compute_embeddings job {conflict.id} is already running. "
-            f"Will retry automatically.",
-            delay_seconds=get_tuning().operation.gpu_busy_retry_seconds,
-        )
+        This used to look only at other ``compute_embeddings`` jobs in RUNNING, so a
+        residue pass on the same card was invisible to it. :mod:`._card_guard` checks
+        every coordinator that sends batches to the card.
+        """
+        refuse_if_card_busy(session, parent_job_id)
 
     def _load_sequence_ids(
         self,
@@ -435,14 +424,9 @@ class ComputeEmbeddingsBatchOperation:
         p = ComputeEmbeddingsBatchPayload.model_validate(contract_payload(payload))
         parent_job_id = UUID(p.parent_job_id)
 
-        parent = session.get(Job, parent_job_id)
-        if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit(
-                "compute_embeddings_batch.skipped",
-                None,
-                {"reason": "parent_not_running", "parent_status": parent.status.value},
-                "warning",
-            )
+        # Only a cancellation stops the batch; see store_embeddings for why a
+        # FAILED coordinator must not (#1095, #1096).
+        if parent_cancelled(session, p.parent_job_id, emit, "compute_embeddings_batch"):
             return OperationResult(result={"skipped": True})
 
         configs = load_pass_group(session, p.embedding_config_ids)
@@ -587,8 +571,24 @@ class ComputeEmbeddingsBatchOperation:
         ``embed_chunks_multi`` when the backend offers it (the route the saved
         hours live on); one ``self._embed_batch`` per config otherwise, correct
         and N passes. See ``shared_pass_emitter`` and ``warn_if_pass_not_shared``.
-        Routing through ``self._embed_batch`` keeps the documented
-        ``patch.object(op, "_embed_batch")`` seam covering the group path too.
+
+        THE SEAM THAT COVERS BOTH ROUTES IS THIS METHOD, and not
+        ``_embed_batch``. An earlier version of this docstring promised that
+        ``patch.object(op, "_embed_batch")`` kept the group path covered, and
+        that holds only on the fallback: when the installed plugin offers
+        ``embed_chunks_multi`` the patch is bypassed and the real backend runs
+        on whatever doubles the test handed to ``_load_model``. So a test that
+        patched ``_embed_batch`` in order NOT to reach a backend passed or
+        failed according to which commit of a separately pinned dependency was
+        installed, which is not a property a test is allowed to have: it was
+        green for a year because the pin happened to lack the method, and it
+        went red on the bump without anything about the test or the operation
+        changing.
+
+        A test that does not care how a batch is embedded patches
+        ``_embed_batch_group``; one that cares which route ran asserts the
+        route. ``tests/test_embedding_pass_group.py`` now does both, so this
+        branch is covered rather than inferred from the pin.
         """
         shared = shared_pass_emitter(configs[0])
         if shared is not None:

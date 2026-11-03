@@ -79,7 +79,8 @@
     "apiKeys": "Chaves de API",
     "apiKeysHint": "Emitir, listar e revogar chaves de acesso programatico",
     "dlq": "Fila de mensagens mortas",
-    "dlqHint": "Auditar e drenar mensagens falhadas da DLQ"
+    "dlqHint": "Auditar e drenar mensagens falhadas da DLQ",
+    "modelWeights": "Pesos de modelos"
   },
   "home": {
     "title": "Pipeline de Predição de Função Proteica",
@@ -849,7 +850,8 @@
     "title": "Embeddings",
     "tabs": {
       "configs": "Configurações",
-      "compute": "Computar"
+      "compute": "Computar",
+      "residue": "Códigos por resíduo"
     },
     "configsTab": {
       "configs": "{count} configurações",
@@ -951,6 +953,35 @@
       "errors": {
         "configRequired": "Selecione uma configuração de embedding."
       }
+    },
+    "residueTab": {
+      "title": "Códigos por resíduo, por vocabulário",
+      "intro": "Cada vocabulário por resíduo transforma os estados de um modelo base num código esparso para cada resíduo de cada proteína. Os códigos ficam no armazém de artefactos como fragmentos comprimidos, um por lote de GPU; a base de dados guarda uma linha de índice por sequência e vocabulário que aponta para eles. Nada é agregado por proteína: uma representação por proteína, quando for precisa, sai de um agregador aprendido sobre estes códigos. Os números são lidos do índice e atualizam a cada 30 segundos.",
+      "loading": "A ler o índice...",
+      "emptyTitle": "Ainda não há nenhum vocabulário por resíduo",
+      "emptyBody": "Este separador mostra até onde chegam os códigos de cada vocabulário sobre o seu corpus de origem assim que uma passagem de encode_residue_vocabulary cria a sua configuração. Ainda não existe nenhuma.",
+      "footnote": "A cobertura conta as sequências do corpus de origem que têm código. A estimativa divide o que falta pelas sequências escritas na última hora, por isso acompanha o ritmo do nó de GPU. Os números incluem todas as passagens feitas com este vocabulário, também as de teste; o contador de um trabalho só conta os seus próprios lotes.",
+      "layers": "camadas {layers}",
+      "from": "a partir de {source}",
+      "sequencesNoTotal": "{done} sequências com código",
+      "sequencesOfTotal": "{done} de {total} sequências com código",
+      "coverageLabel": "Cobertura de {name}",
+      "residues": "Resíduos",
+      "entries": "Entradas ativas",
+      "entriesHint": "Ativações de características guardadas, sobre todos os resíduos",
+      "shards": "Fragmentos",
+      "shardsHint": "Fragmentos comprimidos no armazém de artefactos, um por lote de GPU",
+      "lastWrite": "Última escrita",
+      "firstWrite": "Primeira escrita",
+      "pace": "Última hora",
+      "paceValue": "{n} sequências",
+      "paceHint": "Sequências indexadas na última hora",
+      "remaining": "Sequências em falta",
+      "eta": "Tempo restante",
+      "etaHint": "O que falta, ao ritmo da última hora",
+      "done": "concluído",
+      "job": "Escrito pelo trabalho",
+      "batches": "{done} de {total} lotes"
     }
   },
   "functionalAnnotation": {
@@ -2276,5 +2307,88 @@
     "eyebrow": "Painel operacional",
     "title": "O instrumento",
     "subtitle": "Todas as superfícies de dados, pipeline, resultados e operações por trás do argumento, agrupadas como o pipeline é executado. O livro permanece no nível superior; esta é a aba que você abre para operá-lo."
+  },
+  "weights": {
+    "title": "Pesos de modelos",
+    "loading": "A ler o registo...",
+    "close": "Fechar",
+    "cancel": "Cancelar",
+    "intro": "Cada ficheiro de pesos ajustados que a plataforma pode usar, identificado pelo seu sha256: vocabulários por resíduo, codificadores aprendidos, o modelo do mundo, leitores, geradores e pacotes de método. Cada peso mostra sobre o que foi ajustado, as configurações feitas com ele e os trabalhos que o leem. Os boosters do re-ranker têm a sua própria página:",
+    "rerankerLink": "boosters do re-ranker",
+    "kindFilter": "Tipo de peso",
+    "all": "Todos",
+    "emptyTitle": "Ainda não há pesos registados",
+    "emptyBody": "Regista um ficheiro que já esteja no armazém de artefactos ou carrega um. O primeiro candidato é o vocabulário v1, em residue-vocabulary/vocabulary-v1-06fed75ca76d17be.npz.",
+    "configurationsCount": "{n} configurações",
+    "detail": {
+      "uri": "Chave no armazém",
+      "format": "Formato",
+      "trainedOn": "Ajustado sobre o conjunto de anotações",
+      "noCut": "nenhum (sem corte)",
+      "registered": "Registado",
+      "configurations": "Configurações feitas com ele",
+      "noConfigurations": "Nenhuma ainda.",
+      "jobs": "Trabalhos que o nomeiam",
+      "noJobs": "Nenhum ainda."
+    },
+    "actions": {
+      "encode": "Codificar um corpus"
+    },
+    "form": {
+      "kind": "Tipo",
+      "name": "Nome",
+      "nameHint": "Passa a fazer parte da chave: letras, dígitos, ponto, hífen ou sublinhado.",
+      "description": "Descrição",
+      "meta": "Metadados (JSON, opcional)",
+      "metaHint": "Camadas, largura, ativos, níveis, receita, proveniência.",
+      "trainedOn": "Conjunto de anotações sobre o qual foi ajustado (opcional)",
+      "trainedOnHint": "Vazio para pesos sem corte.",
+      "nameInvalid": "O nome deve ter letras, dígitos, ponto, hífen ou sublinhado e começar por letra ou dígito.",
+      "metaInvalid": "Os metadados devem ser um objeto JSON."
+    },
+    "upload": {
+      "open": "Carregar pesos",
+      "title": "Carregar pesos",
+      "subtitle": "O ficheiro é enviado por partes, juntado e com o hash calculado no servidor, e guardado com uma chave que leva o seu hash.",
+      "file": "Ficheiro",
+      "noFile": "Escolhe primeiro um ficheiro.",
+      "progressLabel": "Progresso do carregamento",
+      "sending": "Enviada a parte {sent} de {parts}",
+      "submit": "Carregar"
+    },
+    "register": {
+      "open": "Registar por referência",
+      "title": "Registar pesos que já estão no armazém",
+      "subtitle": "O hash do objeto é calculado no armazém de artefactos e só é registado se coincidir com o sha256 dado.",
+      "uri": "Chave no armazém",
+      "sha256": "sha256",
+      "sha256Hint": "O hash que o produtor anotou, 64 caracteres hexadecimais.",
+      "shaInvalid": "O sha256 deve ter 64 caracteres hexadecimais.",
+      "submit": "Registar"
+    },
+    "encode": {
+      "title": "Codificar um corpus com {name}",
+      "subtitle": "Põe em fila encode_residue_vocabulary: o código de cada resíduo do corpus de origem, guardado em fragmentos e indexado por sequência.",
+      "source": "Corpus de origem (configuração de embeddings)",
+      "sourceHint": "A passagem do modelo base cujas sequências são codificadas; o vocabulário lê os seus estados.",
+      "device": "Dispositivo",
+      "sequencesPerJob": "Sequências por lote",
+      "residuesPerCall": "Resíduos por chamada",
+      "warning": "Uma passagem do corpus ocupa o nó de GPU durante horas. Verifica primeiro na página de trabalhos se já há uma passagem a correr com este vocabulário.",
+      "queued": "Trabalho em fila:",
+      "submit": "Pôr a passagem em fila",
+      "noSource": "Escolhe um corpus de origem.",
+      "busyTitle": "A placa está ocupada. Uma segunda passagem esperaria por ela.",
+      "busyWriting": "{name} escreveu códigos na última hora.",
+      "queueAnyway": "Pôr em fila mesmo assim: o trabalho espera e começa quando a placa ficar livre."
+    },
+    "kinds": {
+      "residue_vocabulary": "Vocabulário por resíduo",
+      "learned_encoder": "Codificador aprendido",
+      "world_model": "Modelo do mundo",
+      "reader": "Leitor",
+      "generator": "Gerador",
+      "method_bundle": "Pacote de método"
+    }
   }
 }

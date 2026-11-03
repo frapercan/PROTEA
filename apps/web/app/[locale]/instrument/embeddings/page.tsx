@@ -9,6 +9,7 @@ import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { ContextBanner } from "@/components/ContextBanner";
 import { ComputeEmbeddingsDialog } from "@/components/ComputeEmbeddingsDialog";
+import { ResidueCodesPanel } from "@/components/ResidueCodesPanel";
 import {
   listEmbeddingConfigs,
   createEmbeddingConfig,
@@ -52,7 +53,7 @@ const MODEL_PRESETS: Record<string, ModelPreset[]> = {
   ],
 };
 
-type Tab = "configs" | "compute";
+type Tab = "configs" | "compute" | "residue";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
@@ -230,6 +231,7 @@ const tToast = useTranslations("toasts");
   const tabs: { key: Tab; label: string }[] = [
     { key: "configs", label: t("tabs.configs") },
     { key: "compute", label: t("tabs.compute") },
+    { key: "residue", label: t("tabs.residue") },
   ];
 
   const inputClass =
@@ -760,6 +762,9 @@ const tToast = useTranslations("toasts");
           </div>
         </div>
       )}
+
+      {/* ── Per-residue codes Tab (ADR-D51) ── */}
+      {activeTab === "residue" && <ResidueCodesPanel />}
     </>
   );
 }

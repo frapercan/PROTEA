@@ -289,7 +289,13 @@ def test_plugin_embed_chunks_matches_legacy_embed_t5_bit_exact() -> None:
         mock_model = MagicMock()
         mock_model.return_value = mock_outputs
         mock_tokenizer = MagicMock()
+        # A real PreTrainedTokenizer answers BOTH forms, and this double has to
+        # as well: PROTEA's legacy shim calls ``batch_encode_plus`` while the
+        # plugin calls the tokeniser itself. A double that answered only one of
+        # them made this comparison pass according to which form the code under
+        # test happened to pick, which is the thing this test exists to pin down.
         mock_tokenizer.batch_encode_plus.return_value = tokens_dict
+        mock_tokenizer.return_value = tokens_dict
         return mock_model, mock_tokenizer
 
     # Reference: legacy _embed_t5 shim.
@@ -380,7 +386,13 @@ def test_plugin_embed_chunks_matches_legacy_embed_ankh_bit_exact() -> None:
         mock_model = MagicMock()
         mock_model.return_value = mock_outputs
         mock_tokenizer = MagicMock()
+        # A real PreTrainedTokenizer answers BOTH forms, and this double has to
+        # as well: PROTEA's legacy shim calls ``batch_encode_plus`` while the
+        # plugin calls the tokeniser itself. A double that answered only one of
+        # them made this comparison pass according to which form the code under
+        # test happened to pick, which is the thing this test exists to pin down.
         mock_tokenizer.batch_encode_plus.return_value = tokens_dict
+        mock_tokenizer.return_value = tokens_dict
         return mock_model, mock_tokenizer
 
     # Reference: legacy _embed_ankh shim.

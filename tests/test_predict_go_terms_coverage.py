@@ -387,6 +387,32 @@ class TestShouldSkipForParent:
         )
 
 
+class TestShouldSkipForParentOnlyOnCancel:
+    """#1095's rule in the prediction batch: a cancellation stops it, a FAILED parent does not."""
+
+    def test_cancelled_parent_skips(self) -> None:
+        from protea.infrastructure.orm.models.job import JobStatus
+
+        session = MagicMock()
+        session.get.return_value = MagicMock(status=JobStatus.CANCELLED)
+        events: list[str] = []
+        assert PredictGOTermsBatchOperation._should_skip_for_parent(
+            session, uuid.uuid4(), lambda e, *_: events.append(e)
+        )
+        assert events == ["predict_go_terms_batch.skipped"]
+
+    def test_failed_parent_warns_and_does_not_skip(self) -> None:
+        from protea.infrastructure.orm.models.job import JobStatus
+
+        session = MagicMock()
+        session.get.return_value = MagicMock(status=JobStatus.FAILED, error_code="lease_expired")
+        events: list[str] = []
+        assert not PredictGOTermsBatchOperation._should_skip_for_parent(
+            session, uuid.uuid4(), lambda e, *_: events.append(e)
+        )
+        assert events == ["predict_go_terms_batch.parent_failed"]
+
+
 class TestChunkedPublish:
     def _setup_tuning(self, monkeypatch, size: int) -> None:
         from protea.config import tuning
@@ -766,7 +792,9 @@ class TestLoadReferenceDataPerAspect:
             ),
         ):
             emit, events = _emit_capture()
-            result = op._load_reference_data_per_aspect(MagicMock(), _PoolRequest(ec_id, as_id), emit)
+            result = op._load_reference_data_per_aspect(
+                MagicMock(), _PoolRequest(ec_id, as_id), emit
+            )
         for asp in ASPECT_CODES:
             view = result[asp]
             assert isinstance(view["embeddings_f32"], np.ndarray)

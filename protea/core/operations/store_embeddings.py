@@ -26,8 +26,8 @@ from protea.core.operations._compute_embeddings_helpers import (
     fold_legacy_store_groups,
     store_group_rows,
 )
+from protea.core.operations._parent_guard import parent_cancelled
 from protea.core.utils import contract_payload
-from protea.infrastructure.orm.models.job import Job, JobStatus
 
 
 class StoredConfigEmbeddings(ProteaPayload, frozen=True):
@@ -81,14 +81,11 @@ class StoreEmbeddingsOperation:
         p = StoreEmbeddingsPayload.model_validate(contract_payload(payload))
         parent_job_id = UUID(p.parent_job_id)
 
-        parent = session.get(Job, parent_job_id)
-        if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit(
-                "store_embeddings.skipped",
-                None,
-                {"reason": "parent_not_running", "parent_status": parent.status.value},
-                "warning",
-            )
+        # The coordinator's state decides nothing but a cancellation. A FAILED one
+        # is warned about and its batch still lands: on 2026-10-31 the reaper failed
+        # a waiting coordinator and its batches were acked here with no rows and no
+        # dead letter (#1095, #1096).
+        if parent_cancelled(session, p.parent_job_id, emit, "store_embeddings"):
             return OperationResult(result={"skipped": True})
 
         # Every config in one call, so every config lands in one transaction.

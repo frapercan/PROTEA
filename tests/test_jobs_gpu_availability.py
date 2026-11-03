@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 import protea.infrastructure.orm.models  # noqa: F401
 from protea.api.routers.jobs_availability import router
 from protea.core.utils import utcnow
-from protea.infrastructure.orm.models.job import Job, JobStatus
+from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 
 
 def _client(factory: sessionmaker) -> TestClient:
@@ -37,8 +37,10 @@ def _fresh_engine(postgres_url: str):
     suite to the pgvector extension for no reason.
     """
     engine = create_engine(postgres_url, future=True)
+    JobEvent.__table__.drop(engine, checkfirst=True)
     Job.__table__.drop(engine, checkfirst=True)
     Job.__table__.create(engine, checkfirst=True)
+    JobEvent.__table__.create(engine, checkfirst=True)
     return engine
 
 
@@ -196,3 +198,110 @@ def test_fresh_running_preferred_over_queued_representative(postgres_url: str):
     assert body["queued"] == 1
     # The live running job is the more informative representative.
     assert body["active_operation"] == "compute_embeddings"
+
+
+def _dispatched(session, job: Job) -> None:
+    session.add(job)
+    session.flush()
+    session.add(
+        JobEvent(job_id=job.id, event="job.dispatched", fields={"result": {}}, level="info")
+    )
+
+
+@pytest.mark.integration
+def test_a_coordinator_waiting_for_its_batches_is_busy(postgres_url: str):
+    """The corpus pass of 2026-11-03 held the card for a day and the banner said free.
+
+    A coordinator that waits for its batches clears its lease on purpose and emits
+    ``job.dispatched``; it holds the card until the last batch is stored. The residue
+    passes use the same card and were not in the list at all.
+    """
+    engine = _fresh_engine(postgres_url)
+    factory = sessionmaker(engine, future=True)
+    now = utcnow()
+    with factory() as session:
+        _dispatched(
+            session,
+            Job(
+                operation="encode_residue_vocabulary",
+                queue_name="protea.embeddings",
+                status=JobStatus.RUNNING,
+                started_at=now - timedelta(hours=8),
+                leased_until=None,
+                progress_current=1500,
+                progress_total=5329,
+            ),
+        )
+        session.commit()
+
+    body = _client(factory).get("/jobs/gpu-availability").json()
+    assert body["busy"] is True
+    assert body["running_dispatched"] == 1
+    assert body["running_stale"] == 0
+    assert body["active_operation"] == "encode_residue_vocabulary"
+    assert (body["progress_current"], body["progress_total"]) == (1500, 5329)
+
+
+@pytest.mark.integration
+def test_a_reaped_coordinator_still_receiving_batches_is_busy(postgres_url: str):
+    """Failed by the reaper, its batches still land and advance it (#1097): the card is held."""
+    engine = _fresh_engine(postgres_url)
+    factory = sessionmaker(engine, future=True)
+    now = utcnow()
+    with factory() as session:
+        for current, last_event in (
+            (2, timedelta(minutes=5)),
+            (7, timedelta(minutes=5)),
+            (0, timedelta(days=3)),
+        ):
+            job = Job(
+                operation="compute_embeddings",
+                queue_name="protea.embeddings",
+                status=JobStatus.FAILED,
+                error_code="lease_expired",
+                started_at=now - timedelta(hours=9),
+                progress_current=current,
+                progress_total=7,
+            )
+            session.add(job)
+            session.flush()
+            session.add(
+                JobEvent(
+                    job_id=job.id,
+                    event="child.store_embeddings.done",
+                    fields={},
+                    ts=now - last_event,
+                )
+            )
+        session.commit()
+
+    body = _client(factory).get("/jobs/gpu-availability").json()
+    assert body["busy"] is True
+    assert body["running_dispatched"] == 1, (
+        "only the reaped pass whose batches still arrive: not the one whose batches all "
+        "arrived, nor the one silent for three days (b185a6d0's shape on the live base)"
+    )
+
+
+@pytest.mark.integration
+def test_a_leaseless_running_row_that_never_dispatched_is_still_a_zombie(postgres_url: str):
+    """Without job.dispatched a RUNNING row with no lease is what it always was: stale."""
+    engine = _fresh_engine(postgres_url)
+    factory = sessionmaker(engine, future=True)
+    now = utcnow()
+    with factory() as session:
+        session.add(
+            Job(
+                operation="encode_residue_sparse",
+                queue_name="protea.embeddings",
+                status=JobStatus.RUNNING,
+                started_at=now - timedelta(hours=3),
+                leased_until=None,
+            )
+        )
+        session.commit()
+
+    body = _client(factory).get("/jobs/gpu-availability").json()
+    assert body["busy"] is False
+    assert body["running_stale"] == 1
+    assert body["running_dispatched"] == 0

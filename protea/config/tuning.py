@@ -148,6 +148,18 @@ class WorkerTuning(BaseModel):
         ge=60,
         description=("Tiempo sin JobEvent antes de considerar un job stalled candidato a reapear."),
     )
+    reaper_deferred_stall_seconds: int = Field(
+        default=21600,
+        ge=60,
+        description=(
+            "The same, for a DEFERRED coordinator, which is recognised by having "
+            "emitted job.dispatched. Its children do the work on another queue, so "
+            "its silence measures ANOTHER machine's pause and not its own: a node "
+            "that cedes its card for hours leaves it without events while nothing "
+            "is wrong with it. Defaults to 6h, the same order as "
+            "reaper_main_timeout_seconds."
+        ),
+    )
     reaper_event_grace_seconds: int = Field(
         default=2700,
         ge=60,
@@ -317,6 +329,15 @@ class OperationTuning(BaseModel):
             "por lo que la ganancia es real. 1 desactiva la paralelización."
         ),
     )
+    method_scratch_dir: str | None = Field(
+        default=None,
+        description=(
+            "Folder where run_lab_method writes the query file, the container's output and "
+            "its log while a run lasts. A method's TSV can be several GB, so on a node whose "
+            "temporary folder is a tmpfs this must be a folder on disk. None uses the system's "
+            "temporary folder. Override: PROTEA_TUNING__operation__method_scratch_dir."
+        ),
+    )
     gpu_busy_retry_seconds: int = Field(
         default=8,
         ge=1,
@@ -362,6 +383,32 @@ class APILimits(BaseModel):
         default=100,
         ge=1,
         description="Page size hard cap para list endpoints de soporte.",
+    )
+    max_weights_bytes: int = Field(
+        default=8 * 1024**3,
+        ge=1024,
+        description=(
+            "Largest file of model weights an upload may assemble (ADR-D54). Vocabulary v1 "
+            "is 260 MB. Override: PROTEA_TUNING__api__max_weights_bytes."
+        ),
+    )
+    weights_part_bytes: int = Field(
+        default=32 * 1024**2,
+        ge=1024,
+        le=90 * 1024**2,
+        description=(
+            "Largest part of a weights upload. The web proxy caps a request at 100 MB, so a "
+            "part stays below it. Override: PROTEA_TUNING__api__weights_part_bytes."
+        ),
+    )
+    weights_upload_dir: str | None = Field(
+        default=None,
+        description=(
+            "Folder on the API host where the parts of a weights upload and the joined file "
+            "live until the upload completes or is aborted; ~/.cache/protea/weights-uploads "
+            "when unset, on disk, never the system temporary folder (a tmpfs on the API host). "
+            "Override: PROTEA_TUNING__api__weights_upload_dir."
+        ),
     )
 
 

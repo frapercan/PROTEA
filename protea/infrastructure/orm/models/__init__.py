@@ -18,6 +18,7 @@ from .auth_audit import AuthAudit  # noqa: F401
 from .embedding.dataset import Dataset  # noqa: F401
 from .embedding.embedding_config import EmbeddingConfig  # noqa: F401
 from .embedding.go_prediction import GOPrediction  # noqa: F401
+from .embedding.model_weights import ModelWeights  # noqa: F401
 from .embedding.prediction_set import PredictionSet  # noqa: F401
 from .embedding.reranker_model import RerankerModel  # noqa: F401
 from .embedding.residue_code import ResidueCode  # noqa: F401

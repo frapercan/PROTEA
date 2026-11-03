@@ -103,6 +103,7 @@ from protea.core.operations.resolve_protein_sequences import (
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
+from protea.core.operations.run_lab_method import RunLabMethodOperation
 from protea.core.operations.seal_evaluation_frames import (
     SealEvaluationFramesOperation,
 )
@@ -163,6 +164,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(CountBackendParametersOperation())
     registry.register(ExportEvaluationTargetsOperation())
     registry.register(IngestMethodPredictionsOperation())
+    registry.register(RunLabMethodOperation())
     registry.register(LoadOntologyAliasesOperation())
     _register_residue_encoders(registry)
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer

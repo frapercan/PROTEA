@@ -8,6 +8,7 @@ on instantiation if the dependency is missing.
 from __future__ import annotations
 
 import io
+from collections.abc import Iterator
 from pathlib import Path
 
 
@@ -92,9 +93,7 @@ class MinioArtifactStore:
     def put(self, key: str, src: Path | bytes) -> str:
         if isinstance(src, (bytes, bytearray)):
             data = bytes(src)
-            self._client.put_object(
-                self.bucket, key, io.BytesIO(data), length=len(data)
-            )
+            self._client.put_object(self.bucket, key, io.BytesIO(data), length=len(data))
         else:
             self._client.fput_object(self.bucket, key, str(Path(src)))
         return self.url(key)
@@ -104,6 +103,16 @@ class MinioArtifactStore:
         response = self._client.get_object(self.bucket, key)
         try:
             return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+
+    def iter_chunks(self, key: str, chunk_size: int = 8 << 20) -> Iterator[bytes]:
+        """The object's bytes in chunks, so a large file is hashed without being held whole."""
+        key = self._key(key)
+        response = self._client.get_object(self.bucket, key)
+        try:
+            yield from response.stream(chunk_size)
         finally:
             response.close()
             response.release_conn()

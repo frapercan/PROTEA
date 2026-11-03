@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 
@@ -63,6 +64,12 @@ class LocalFsArtifactStore:
 
     def get(self, key: str) -> bytes:
         return self._full_path(key).read_bytes()
+
+    def iter_chunks(self, key: str, chunk_size: int = 8 << 20) -> Iterator[bytes]:
+        """The object's bytes in chunks, so a large file is hashed without being held whole."""
+        with self._full_path(key).open("rb") as f:
+            while chunk := f.read(chunk_size):
+                yield chunk
 
     def url(self, key: str) -> str:
         return f"file://{self._full_path(key).as_posix()}"

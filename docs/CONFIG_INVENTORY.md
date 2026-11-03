@@ -59,6 +59,7 @@ Cada parámetro identificado abajo:
 | `backoff_base_seconds` | `core/operations/{insert,fetch}_uniprot*.py` | 0.8 | Backoff inicial UniProt. | 0.5-2 | no |
 | `backoff_max_seconds` | `core/operations/{insert,fetch}_uniprot*.py` | 20.0 | Cap backoff UniProt. | 10-60 | no |
 | `jitter_seconds` | `core/operations/{insert,fetch}_uniprot*.py` | 0.4 | Jitter agregado al sleep. | 0-1 | no |
+| `method_scratch_dir` | `core/operations/run_lab_method.py` (`scratch_root`) | None (the system's temporary folder) | Folder where run_lab_method writes the queries, the container's output and its log; a method's TSV can be several GB. | a folder on disk on any node whose temporary folder is a tmpfs | no |
 
 ### D. APILimits (HTTP boundaries)
 
@@ -68,6 +69,9 @@ Cada parámetro identificado abajo:
 | `_MAX_COMMENT_LENGTH` | `api/routers/support.py:14` | 500 | Max chars comentario soporte. | 200-2000 | no |
 | `_RECENT_LIMIT` | `api/routers/support.py:15` | 20 | Items en /support/recent. | 10-100 | no |
 | `_PAGE_LIMIT` | `api/routers/support.py:16` | 100 | Page size hard cap. | 50-500 | no |
+| `max_weights_bytes` | `config/tuning.py` (`APILimits`) | 8 GiB | Largest file a weights upload assembles (ADR-D54). | 1-16 GiB | no |
+| `weights_part_bytes` | `config/tuning.py` (`APILimits`) | 32 MiB | Part size of a weights upload; below the 100 MB web proxy cap. | 8-90 MiB | no |
+| `weights_upload_dir` | `config/tuning.py` (`APILimits`) | `~/.cache/protea/weights-uploads` | Folder for the parts and the joined file while an upload lasts; on disk, never a tmpfs. | a disk with room for the largest file plus 1 GB | no |
 
 ### E. ResearchKnobs (modelado, no infraestructura)
 
