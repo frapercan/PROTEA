@@ -445,6 +445,28 @@ def _pending_in_batch(
     return [(i, found[i]) for i in p.sequence_ids if i not in done]
 
 
+#: Waits between attempts to put a shard, in seconds. The card and the store are different
+#: machines here, joined by a link that drops now and then; a put of a content-addressed
+#: key is idempotent, so trying again is safe.
+PUT_RETRY_WAITS: tuple[float, ...] = (5.0, 30.0, 120.0)
+
+
+def put_with_retries(
+    store: Any, key: str, blob: bytes, waits: tuple[float, ...] = PUT_RETRY_WAITS
+) -> None:
+    """Put a shard, retrying after each wait; the last failure is raised."""
+    import time
+
+    for wait in (*waits, None):
+        try:
+            store.put(key, blob)
+            return
+        except Exception:  # noqa: BLE001 - any transport fault; the last one is re-raised
+            if wait is None:
+                raise
+            time.sleep(wait)
+
+
 def _write_shard(
     session: Session,
     target_id: uuid.UUID,
@@ -454,7 +476,7 @@ def _write_shard(
     """Put the shard in the store, then its index rows: a row never points at nothing."""
     blob, sha = pack_shard(codes, header)
     key = shard_key(target_id, codes, sha)
-    _artifact_store().put(key, blob)
+    put_with_retries(_artifact_store(), key, blob)
     session.execute(
         pg_insert(ResidueCodeRow).on_conflict_do_nothing(),
         index_rows(target_id, key, sha, codes),

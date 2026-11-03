@@ -26,6 +26,7 @@ from protea.core.operations.encode_residue_vocabulary import (  # noqa: E402
     calls_by_residues,
     encode_sequences,
     index_rows,
+    put_with_retries,
     read_vocabulary_meta,
     refuse_backend_without_layers,
     shard_key,
@@ -210,3 +211,22 @@ def test_the_meta_is_read_without_the_arrays(
 def test_the_backend_tag_is_registered_and_declares_a_cut() -> None:
     assert TARGET_BACKEND in VALID_BACKENDS
     assert TARGET_BACKEND in FITTED_BACKENDS
+
+
+def test_a_shard_put_is_retried_until_the_store_takes_it() -> None:
+    class Flaky:
+        def __init__(self, failures: int):
+            self.failures, self.kept = failures, {}
+
+        def put(self, key: str, blob: bytes) -> str:
+            if self.failures:
+                self.failures -= 1
+                raise ConnectionError("the link dropped")
+            self.kept[key] = blob
+            return key
+
+    store = Flaky(2)
+    put_with_retries(store, "k", b"x", waits=(0.0, 0.0, 0.0))
+    assert store.kept == {"k": b"x"}
+    with pytest.raises(ConnectionError):
+        put_with_retries(Flaky(5), "k", b"x", waits=(0.0, 0.0))
