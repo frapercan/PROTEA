@@ -36,6 +36,12 @@ importing FastAPI.
    :show-inheritance:
    :noindex:
 
+.. automodule:: protea.services.model_weights_service
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
 .. automodule:: protea.services.scoring_service
    :members:
    :undoc-members:

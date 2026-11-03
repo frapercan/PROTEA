@@ -384,6 +384,31 @@ class APILimits(BaseModel):
         ge=1,
         description="Page size hard cap para list endpoints de soporte.",
     )
+    max_weights_bytes: int = Field(
+        default=8 * 1024**3,
+        ge=1024,
+        description=(
+            "Largest file of model weights an upload may assemble (ADR-D54). Vocabulary v1 "
+            "is 260 MB. Override: PROTEA_TUNING__api__max_weights_bytes."
+        ),
+    )
+    weights_part_bytes: int = Field(
+        default=32 * 1024**2,
+        ge=1024,
+        le=90 * 1024**2,
+        description=(
+            "Largest part of a weights upload. The web proxy caps a request at 100 MB, so a "
+            "part stays below it. Override: PROTEA_TUNING__api__weights_part_bytes."
+        ),
+    )
+    weights_upload_dir: str | None = Field(
+        default=None,
+        description=(
+            "Folder on the API host where the parts of a weights upload and the joined file "
+            "live until the upload completes or is aborted; the system temporary folder when "
+            "unset. Override: PROTEA_TUNING__api__weights_upload_dir."
+        ),
+    )
 
 
 class ServeTuning(BaseModel):

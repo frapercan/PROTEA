@@ -37,6 +37,7 @@ from protea.api.routers import jobs as jobs_router
 from protea.api.routers import jobs_availability as jobs_availability_router
 from protea.api.routers import maintenance as maintenance_router
 from protea.api.routers import metrics as metrics_router
+from protea.api.routers import model_weights as model_weights_router
 from protea.api.routers import proteins as proteins_router
 from protea.api.routers import proteins_stats as proteins_stats_router
 from protea.api.routers import query_sets as query_sets_router
@@ -137,6 +138,14 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
         ),
     },
     {
+        "name": "model-weights",
+        "description": (
+            "The registry of model weights (ADR-D54): residue vocabularies, learned "
+            "encoders and the lab's other fitted files, registered by reference or "
+            "uploaded in parts, with what uses each one."
+        ),
+    },
+    {
         "name": "reranker-models",
         "description": (
             "Register lab-trained LightGBM boosters — multipart "
@@ -205,6 +214,7 @@ _ROUTER_MODULES = (
     support_router,
     datasets_router,
     reranker_models_router,
+    model_weights_router,
     registry_router,
     features_router,
     stack_router,
