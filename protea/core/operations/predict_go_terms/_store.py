@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.contracts.parent_progress import update_parent_progress
+from protea.core.operations._parent_guard import parent_cancelled
 from protea.core.operations.predict_go_terms._common import (
     _WRITE_QUEUE,
     StorePredictionsPayload,
@@ -21,7 +22,6 @@ from protea.core.operations.predict_go_terms._common import (
 )
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
-from protea.infrastructure.orm.models.job import Job, JobStatus
 
 
 def chunked_publish(
@@ -90,11 +90,9 @@ class StorePredictionsOperation:
         parent_job_id = UUID(p.parent_job_id)
         prediction_set_id = uuid.UUID(p.prediction_set_id)
 
-        parent = session.get(Job, parent_job_id)
-        if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit(
-                "store_predictions.skipped", None, {"parent_job_id": str(parent_job_id)}, "warning"
-            )
+        # Only a cancellation stops the write; a FAILED coordinator is warned about
+        # and its predictions still land (#1095, #1096).
+        if parent_cancelled(session, p.parent_job_id, emit, "store_predictions"):
             return OperationResult(result={"skipped": True})
 
         if p.predictions:

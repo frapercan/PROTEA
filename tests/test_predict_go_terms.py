@@ -624,12 +624,16 @@ class TestStorePredictions:
         result = op.execute(session, payload, emit=_noop_emit)
         assert result.result["skipped"] is True
 
-    def test_skips_when_parent_failed(self) -> None:
+    def test_a_failed_parent_does_not_stop_the_write(self) -> None:
+        """Only a cancellation stops a child (#1095): a FAILED coordinator is
+        warned about and its predictions still land."""
         op = self._op()
         session = MagicMock()
         parent = MagicMock()
         parent.status = JobStatus.FAILED
+        parent.error_code = "lease_expired"
         session.get.return_value = parent
+        events: list[str] = []
 
         payload = {
             "parent_job_id": str(uuid.uuid4()),
@@ -637,8 +641,12 @@ class TestStorePredictions:
             "predictions": [self._make_prediction()],
         }
 
-        result = op.execute(session, payload, emit=_noop_emit)
-        assert result.result["skipped"] is True
+        with patch("protea.core.operations.predict_go_terms._store.update_parent_progress"):
+            result = op.execute(session, payload, emit=lambda e, *_: events.append(e))
+        assert result.result.get("skipped") is not True
+        assert events[0] == "store_predictions.parent_failed"
+        assert "store_predictions.done" in events
+        assert session.execute.called, "the predictions were inserted"
 
     def test_empty_predictions_still_updates_progress(self) -> None:
         op = self._op()
@@ -724,12 +732,15 @@ class TestPredictBatchParentCancellation:
         result = op.execute(session, payload, emit=_noop_emit)
         assert result.result["skipped"] is True
 
-    def test_skips_when_parent_failed(self) -> None:
+    def test_a_failed_parent_does_not_stop_the_batch(self) -> None:
+        """Only a cancellation stops a child (#1095): the batch is warned and runs."""
         op = self._op()
         session = MagicMock()
         parent = MagicMock()
         parent.status = JobStatus.FAILED
+        parent.error_code = "lease_expired"
         session.get.return_value = parent
+        events: list[str] = []
 
         payload = {
             "embedding_config_id": str(uuid.uuid4()),
@@ -740,8 +751,15 @@ class TestPredictBatchParentCancellation:
             "query_accessions": ["P1"],
         }
 
-        result = op.execute(session, payload, emit=_noop_emit)
-        assert result.result["skipped"] is True
+        class _Reached(Exception):
+            pass
+
+        with (
+            patch.object(type(op), "_refuse_foreign_revision", side_effect=_Reached),
+            pytest.raises(_Reached),
+        ):
+            op.execute(session, payload, emit=lambda e, *_: events.append(e))
+        assert events == ["predict_go_terms_batch.parent_failed"]
 
 
 class TestFinalizeParentProgress:
