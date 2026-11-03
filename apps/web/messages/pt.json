@@ -849,7 +849,8 @@
     "title": "Embeddings",
     "tabs": {
       "configs": "Configurações",
-      "compute": "Computar"
+      "compute": "Computar",
+      "residue": "Códigos por resíduo"
     },
     "configsTab": {
       "configs": "{count} configurações",
@@ -951,6 +952,35 @@
       "errors": {
         "configRequired": "Selecione uma configuração de embedding."
       }
+    },
+    "residueTab": {
+      "title": "Códigos por resíduo, por vocabulário",
+      "intro": "Cada vocabulário por resíduo transforma os estados de um modelo base num código esparso para cada resíduo de cada proteína. Os códigos ficam no armazém de artefactos como fragmentos comprimidos, um por lote de GPU; a base de dados guarda uma linha de índice por sequência e vocabulário que aponta para eles. Nada é agregado por proteína: uma representação por proteína, quando for precisa, sai de um agregador aprendido sobre estes códigos. Os números são lidos do índice e atualizam a cada 30 segundos.",
+      "loading": "A ler o índice...",
+      "emptyTitle": "Ainda não há nenhum vocabulário por resíduo",
+      "emptyBody": "Este separador mostra até onde chegam os códigos de cada vocabulário sobre o seu corpus de origem assim que uma passagem de encode_residue_vocabulary cria a sua configuração. Ainda não existe nenhuma.",
+      "footnote": "A cobertura conta as sequências do corpus de origem que têm código. A estimativa divide o que falta pelas sequências escritas na última hora, por isso acompanha o ritmo do nó de GPU.",
+      "layers": "camadas {layers}",
+      "from": "a partir de {source}",
+      "sequencesNoTotal": "{done} sequências com código",
+      "sequencesOfTotal": "{done} de {total} sequências com código",
+      "coverageLabel": "Cobertura de {name}",
+      "residues": "Resíduos",
+      "entries": "Entradas ativas",
+      "entriesHint": "Ativações de características guardadas, sobre todos os resíduos",
+      "shards": "Fragmentos",
+      "shardsHint": "Fragmentos comprimidos no armazém de artefactos, um por lote de GPU",
+      "lastWrite": "Última escrita",
+      "firstWrite": "Primeira escrita",
+      "pace": "Última hora",
+      "paceValue": "{n} sequências",
+      "paceHint": "Sequências indexadas na última hora",
+      "remaining": "Sequências em falta",
+      "eta": "Tempo restante",
+      "etaHint": "O que falta, ao ritmo da última hora",
+      "done": "concluído",
+      "job": "Escrito pelo trabalho",
+      "batches": "{done} de {total} lotes"
     }
   },
   "functionalAnnotation": {

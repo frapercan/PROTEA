@@ -849,7 +849,8 @@
     "title": "嵌入向量",
     "tabs": {
       "configs": "配置",
-      "compute": "计算"
+      "compute": "计算",
+      "residue": "逐残基编码"
     },
     "configsTab": {
       "configs": "{count} 个配置",
@@ -951,6 +952,35 @@
       "errors": {
         "configRequired": "请选择 embedding 配置。"
       }
+    },
+    "residueTab": {
+      "title": "按词表的逐残基编码",
+      "intro": "每个残基词表把骨干模型的状态转换为每个蛋白每个残基的稀疏编码。编码以压缩分片的形式存放在制品存储中，每个 GPU 批次一个分片；数据库为每条序列和每个词表保存一行指向它们的索引。不做任何按蛋白的汇总：需要按蛋白的表示时，由在这些编码上学习得到的聚合器产生。下面的数字读自索引，每 30 秒刷新一次。",
+      "loading": "正在读取索引...",
+      "emptyTitle": "还没有残基词表",
+      "emptyBody": "一旦 encode_residue_vocabulary 的一次运行创建了其配置，此标签页会显示每个词表的编码在其来源语料上覆盖到哪里。目前还没有。",
+      "footnote": "覆盖率统计来源语料中已有编码的序列。估计值用剩余数量除以最近一小时写入的序列数，因此随 GPU 节点的速度而变化。",
+      "layers": "层 {layers}",
+      "from": "来自 {source}",
+      "sequencesNoTotal": "{done} 条序列已有编码",
+      "sequencesOfTotal": "{total} 条序列中 {done} 条已有编码",
+      "coverageLabel": "{name} 的覆盖率",
+      "residues": "残基",
+      "entries": "激活条目",
+      "entriesHint": "所有残基上存储的特征激活",
+      "shards": "分片",
+      "shardsHint": "制品存储中的压缩分片，每个 GPU 批次一个",
+      "lastWrite": "最近写入",
+      "firstWrite": "首次写入",
+      "pace": "最近一小时",
+      "paceValue": "{n} 条序列",
+      "paceHint": "最近一小时索引的序列",
+      "remaining": "剩余序列",
+      "eta": "剩余时间",
+      "etaHint": "按最近一小时的速度计算的剩余量",
+      "done": "已完成",
+      "job": "写入任务",
+      "batches": "{total} 个批次中 {done} 个"
     }
   },
   "functionalAnnotation": {

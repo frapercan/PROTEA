@@ -848,7 +848,8 @@
     "title": "Embeddings",
     "tabs": {
       "configs": "Configs",
-      "compute": "Compute"
+      "compute": "Compute",
+      "residue": "Per-residue codes"
     },
     "configsTab": {
       "configs": "{count} configs",
@@ -950,6 +951,35 @@
       "errors": {
         "configRequired": "Pick an embedding config."
       }
+    },
+    "residueTab": {
+      "title": "Per-residue codes by vocabulary",
+      "intro": "Each residue vocabulary turns the states of a backbone into a sparse code for every residue of every protein. The codes live in the artifact store as compressed shards, one per GPU batch; the database keeps one index row per sequence and vocabulary that points into them. Nothing is pooled per protein: a per-protein representation, when one is needed, comes from a learned aggregator over these codes. The counts below are read from the index and refresh every 30 seconds.",
+      "loading": "Reading the index...",
+      "emptyTitle": "No residue vocabulary yet",
+      "emptyBody": "This tab shows how far the codes of each residue vocabulary reach over its source corpus, once an encode_residue_vocabulary pass has created its configuration. None exists yet.",
+      "footnote": "Coverage counts the sequences of the source corpus that have a code. The estimate divides what is left by the sequences written in the last hour, so it moves with the pace of the GPU node.",
+      "layers": "layers {layers}",
+      "from": "from {source}",
+      "sequencesNoTotal": "{done} sequences with a code",
+      "sequencesOfTotal": "{done} of {total} sequences with a code",
+      "coverageLabel": "Coverage of {name}",
+      "residues": "Residues",
+      "entries": "Active entries",
+      "entriesHint": "Feature activations stored, over all residues",
+      "shards": "Shards",
+      "shardsHint": "Compressed shards in the artifact store, one per GPU batch",
+      "lastWrite": "Last write",
+      "firstWrite": "First write",
+      "pace": "Last hour",
+      "paceValue": "{n} sequences",
+      "paceHint": "Sequences indexed in the last hour",
+      "remaining": "Sequences left",
+      "eta": "Time left",
+      "etaHint": "What is left, at the pace of the last hour",
+      "done": "done",
+      "job": "Written by job",
+      "batches": "{done} of {total} batches"
     }
   },
   "functionalAnnotation": {
