@@ -23,7 +23,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
-from protea.core.contracts.parent_progress import IN_FLIGHT
+from protea.core.contracts.parent_progress import in_flight
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.session import session_scope
@@ -103,7 +103,8 @@ class GpuAvailability(BaseModel):
         description=(
             "Count of coordinators waiting for batches they dispatched: RUNNING with no "
             "live lease after a job.dispatched event (a waiting coordinator clears its "
-            "lease on purpose), or failed by the reaper while their batches still arrive. "
+            "lease on purpose), or failed by the reaper while their batches still arrive "
+            "(an event within the reaper's liveness window). "
             "They set busy."
         ),
     )
@@ -195,7 +196,7 @@ def gpu_availability(
             session.query(Job)
             .filter(
                 Job.operation.in_(_GPU_OPERATIONS),
-                or_(Job.status == JobStatus.QUEUED, IN_FLIGHT),
+                or_(Job.status == JobStatus.QUEUED, in_flight(utcnow())),
             )
             .all()
         )

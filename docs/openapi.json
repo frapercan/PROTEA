@@ -762,7 +762,7 @@
           },
           "running_dispatched": {
             "default": 0,
-            "description": "Count of coordinators waiting for batches they dispatched: RUNNING with no live lease after a job.dispatched event (a waiting coordinator clears its lease on purpose), or failed by the reaper while their batches still arrive. They set busy.",
+            "description": "Count of coordinators waiting for batches they dispatched: RUNNING with no live lease after a job.dispatched event (a waiting coordinator clears its lease on purpose), or failed by the reaper while their batches still arrive (an event within the reaper's liveness window). They set busy.",
             "title": "Running Dispatched",
             "type": "integer"
           },

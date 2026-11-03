@@ -249,34 +249,37 @@ def test_a_reaped_coordinator_still_receiving_batches_is_busy(postgres_url: str)
     factory = sessionmaker(engine, future=True)
     now = utcnow()
     with factory() as session:
-        session.add(
-            Job(
+        for current, last_event in (
+            (2, timedelta(minutes=5)),
+            (7, timedelta(minutes=5)),
+            (0, timedelta(days=3)),
+        ):
+            job = Job(
                 operation="compute_embeddings",
                 queue_name="protea.embeddings",
                 status=JobStatus.FAILED,
                 error_code="lease_expired",
                 started_at=now - timedelta(hours=9),
-                progress_current=2,
+                progress_current=current,
                 progress_total=7,
             )
-        )
-        session.add(
-            Job(
-                operation="compute_embeddings",
-                queue_name="protea.embeddings",
-                status=JobStatus.FAILED,
-                error_code="lease_expired",
-                started_at=now - timedelta(hours=9),
-                progress_current=7,
-                progress_total=7,
+            session.add(job)
+            session.flush()
+            session.add(
+                JobEvent(
+                    job_id=job.id,
+                    event="child.store_embeddings.done",
+                    fields={},
+                    ts=now - last_event,
+                )
             )
-        )
         session.commit()
 
     body = _client(factory).get("/jobs/gpu-availability").json()
     assert body["busy"] is True
     assert body["running_dispatched"] == 1, (
-        "the reaped pass whose batches all arrived does not count"
+        "only the reaped pass whose batches still arrive: not the one whose batches all "
+        "arrived, nor the one silent for three days (b185a6d0's shape on the live base)"
     )
 
 
