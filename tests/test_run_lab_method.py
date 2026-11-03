@@ -1,0 +1,334 @@
+"""run_lab_method: the gates before the card is spent, the run, and the child ingestion job.
+
+The container is replaced by a small Python program that plays the method: it reads the query
+file the operation wrote, writes a TSV and the JSON record beside it, and either tells the truth
+about them or does not. podman and the card are replaced by functions the tests set.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import sys
+import uuid
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from protea.core.contracts.operation import RetryLaterError
+from protea.core.operations import run_lab_method as rlm
+from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+from protea.infrastructure.orm.models.embedding.embedding_config import (
+    INGESTED_METHOD_BACKEND,
+    EmbeddingConfig,
+)
+from protea.infrastructure.orm.models.job import Job, JobEvent
+
+IMAGE_ID = "d" * 64
+FASTA = b">P1\nMKV\n>P2\nMAL\n"
+FASTA_SHA = hashlib.sha256(FASTA).hexdigest()
+FASTA_KEY = "evaluation-targets/queries-0123456789ab.fasta"
+
+METHOD = r"""
+import hashlib, json, sys
+from pathlib import Path
+work, name, mode = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+query = (work / "in" / "queries.fasta").read_bytes()
+tsv = b"protein\tgo_id\taspect\tscore\nP1\tGO:0005515\tF\t0.5\n"
+(work / "out" / "predictions.tsv").write_bytes(tsv)
+record = {"name": name, "query_file": ["/app/data/queries.fasta", hashlib.sha256(query).hexdigest()],
+          "predictions": {"sha256": hashlib.sha256(tsv).hexdigest()}}
+if mode == "lies":
+    record["predictions"]["sha256"] = "0" * 64
+(work / "out" / "predictions.json").write_text(json.dumps(record))
+"""
+
+
+class FakeStore:
+    def __init__(self, objects: dict[str, bytes]) -> None:
+        self.objects = dict(objects)
+
+    def get(self, key: str) -> bytes:
+        return self.objects[key]
+
+    def put(self, key: str, src: Path | bytes) -> str:
+        self.objects[key] = src.read_bytes() if isinstance(src, Path) else bytes(src)
+        return f"mem://{key}"
+
+
+class FakeSession:
+    def __init__(self, rows: dict[tuple[type, uuid.UUID], Any]) -> None:
+        self.rows = rows
+        self.added: list[Any] = []
+
+    def get(self, model: type, key: uuid.UUID) -> Any:
+        return self.rows.get((model, key))
+
+    def add(self, obj: Any) -> None:
+        self.added.append(obj)
+
+    def flush(self) -> None:
+        pass
+
+
+def _arm(cut: str | None = "211", start: str = "211", backend: str = INGESTED_METHOD_BACKEND):
+    """A session holding one method configuration, its cut and the window's first release."""
+    config_id, cut_id, start_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    rows: dict[tuple[type, uuid.UUID], Any] = {
+        (EmbeddingConfig, config_id): SimpleNamespace(
+            model_backend=backend, trained_on_annotation_set_id=cut_id if cut else None
+        ),
+        (AnnotationSet, start_id): SimpleNamespace(source_version=start),
+    }
+    if cut:
+        rows[(AnnotationSet, cut_id)] = SimpleNamespace(source_version=cut)
+    return FakeSession(rows), config_id, start_id
+
+
+def _payload(config_id: uuid.UUID, start_id: uuid.UUID, **over: Any) -> dict[str, Any]:
+    base = {
+        "method_name": "lab-reader-cut211",
+        "image": "localhost/lab:dev",
+        "image_id": IMAGE_ID,
+        "bundle_path": "/srv/bundle",
+        "bundle_mount": "/opt/bundle",
+        "cut": 211,
+        "queries_fasta_uri": FASTA_KEY,
+        "queries_fasta_sha256": FASTA_SHA,
+        "embedding_config_id": str(config_id),
+        "annotation_set_id": str(start_id),
+        "ontology_snapshot_id": str(uuid.uuid4()),
+    }
+    return {**base, **over}
+
+
+def _model(**over: Any) -> rlm.RunLabMethodPayload:
+    return rlm.RunLabMethodPayload.model_validate(_payload(uuid.uuid4(), uuid.uuid4(), **over))
+
+
+class Events:
+    def __init__(self) -> None:
+        self.seen: list[tuple[str, dict[str, Any]]] = []
+
+    def __call__(self, event: str, message: Any, fields: dict[str, Any], level: str) -> None:
+        self.seen.append((event, fields))
+
+    def named(self, event: str) -> list[dict[str, Any]]:
+        return [fields for name, fields in self.seen if name == event]
+
+
+def _play(monkeypatch: pytest.MonkeyPatch, program: str, *args: str) -> None:
+    monkeypatch.setattr(
+        rlm,
+        "container_command",
+        lambda p, work, name: [sys.executable, "-c", program, str(work), *args],
+    )
+
+
+# The container call ------------------------------------------------------------------------
+
+
+def test_the_container_runs_the_pinned_id_with_no_network_and_the_bundle_read_only() -> None:
+    p = _model()
+    command = rlm.container_command(p, Path("/scratch/run"), "protea-method-x")
+    assert command[:2] == ["podman", "run"]
+    assert command[command.index("--network") + 1] == "none"
+    assert "/srv/bundle:/opt/bundle:ro" in command
+    assert "/scratch/run/in:/app/data:ro" in command
+    assert command[command.index("--memory") + 1] == "40g"
+    # Started from the content id, never from the tag the payload names for the record.
+    assert IMAGE_ID in command and "localhost/lab:dev" not in command
+    assert command[command.index(IMAGE_ID) + 1 :] == [
+        "--cut", "211",
+        "--query_file", "/app/data/queries.fasta",
+        "--output", "/app/output/predictions.tsv",
+    ]  # fmt: skip
+
+
+def test_no_memory_ceiling_when_the_payload_asks_for_none() -> None:
+    command = rlm.container_command(_model(memory_gb=None), Path("/w"), "n")
+    assert "--memory" not in command
+
+
+def test_a_tag_is_not_an_image_id() -> None:
+    with pytest.raises(ValueError):
+        _model(image_id="localhost/lab:dev")
+
+
+def test_store_keys_name_the_method_the_cut_and_the_content() -> None:
+    key = rlm.content_key(_model(method_name="lab reader/211"), "predictions", "ab" * 32, ".tsv")
+    assert key == "method-runs/lab-reader-211/cut211/predictions-abababababababab.tsv"
+
+
+# The gates before the card is spent ------------------------------------------------------
+
+
+def test_the_arm_passes_when_it_declares_the_cut_and_the_window_starts_at_it() -> None:
+    session, config_id, start_id = _arm(cut="211", start="211")
+    rlm.check_arm(session, rlm.RunLabMethodPayload.model_validate(_payload(config_id, start_id)))
+    session, config_id, start_id = _arm(cut="211", start="227")
+    rlm.check_arm(session, rlm.RunLabMethodPayload.model_validate(_payload(config_id, start_id)))
+
+
+@pytest.mark.parametrize(
+    ("arm", "words"),
+    [
+        ({"backend": "ankh"}, "ingested under"),
+        ({"cut": None}, "declares no cut"),
+        ({"cut": "227"}, "declares cut 227"),
+        ({"cut": "211", "start": "194"}, "before the cut 211"),
+    ],
+)
+def test_the_arm_is_refused_before_the_card_is_spent(arm: dict[str, Any], words: str) -> None:
+    session, config_id, start_id = _arm(**arm)
+    p = rlm.RunLabMethodPayload.model_validate(_payload(config_id, start_id))
+    with pytest.raises(ValueError, match=words):
+        rlm.check_arm(session, p)
+
+
+def test_a_missing_configuration_is_refused() -> None:
+    with pytest.raises(ValueError, match="not found"):
+        rlm.check_arm(FakeSession({}), _model())
+
+
+def test_the_query_file_is_refused_when_its_hash_is_not_the_pinned_one(tmp_path: Path) -> None:
+    store = FakeStore({FASTA_KEY: FASTA + b">P3\nMMM\n"})
+    with pytest.raises(ValueError, match="the payload pins"):
+        rlm.fetch_queries(store, _model(), tmp_path)
+
+
+def test_the_query_file_lands_in_the_input_folder(tmp_path: Path) -> None:
+    assert rlm.fetch_queries(FakeStore({FASTA_KEY: FASTA}), _model(), tmp_path) == 2
+    assert (tmp_path / "in" / "queries.fasta").read_bytes() == FASTA
+    assert (tmp_path / "out").is_dir()
+
+
+# The run --------------------------------------------------------------------------------
+
+
+def test_a_long_run_emits_while_it_works(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(rlm, "HEARTBEAT_SECONDS", 0.1)
+    _play(monkeypatch, "import time; time.sleep(0.6)")
+    events = Events()
+    rlm.run_container(_model(), tmp_path, "n", events)
+    assert len(events.named("run_lab_method.running")) >= 2
+
+
+def test_a_failing_container_fails_the_job_with_its_last_words(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _play(monkeypatch, "import sys; print('the bundle has no world model'); sys.exit(3)")
+    events = Events()
+    with pytest.raises(RuntimeError, match="exited 3"):
+        rlm.run_container(_model(), tmp_path, "n", events)
+    (failed,) = events.named("run_lab_method.container_failed")
+    assert "no world model" in failed["tail"]
+
+
+def test_a_run_past_its_limit_is_stopped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    stopped: list[str] = []
+    monkeypatch.setattr(rlm, "HEARTBEAT_SECONDS", 0.1)
+    monkeypatch.setattr(rlm, "clear_previous_attempt", stopped.append)
+    _play(monkeypatch, "import time; time.sleep(30)")
+    with pytest.raises(TimeoutError):
+        rlm.run_container(_model(timeout_hours=0.0001), tmp_path, "protea-method-x", Events())
+    assert stopped == ["protea-method-x"]
+
+
+def test_the_record_must_name_what_the_platform_gave_and_measured() -> None:
+    p = _model()
+    honest = {
+        "name": p.method_name,
+        "query_file": ["q", FASTA_SHA],
+        "predictions": {"sha256": "a" * 64},
+    }
+    rlm.check_provenance(p, rlm.RunOutputs("k", "a" * 64, "j", honest))
+    rlm.check_provenance(p, rlm.RunOutputs("k", "a" * 64, None, {}))
+    for lie, words in [
+        ({"query_file": ["q", "b" * 64]}, "query file"),
+        ({"predictions": {"sha256": "b" * 64}}, "predictions sha256"),
+        ({"name": "another-arm"}, "calls itself"),
+    ]:
+        with pytest.raises(ValueError, match=words):
+            rlm.check_provenance(p, rlm.RunOutputs("k", "a" * 64, "j", {**honest, **lie}))
+
+
+# The whole job ----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def node(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """A node that holds the pinned image, a free card, and a store with the query file."""
+    state = SimpleNamespace(store=FakeStore({FASTA_KEY: FASTA}), cleared=[], free=20_000)
+    monkeypatch.setattr(rlm, "_artifact_store", lambda: state.store)
+    monkeypatch.setattr(rlm, "image_id_on_node", lambda image: IMAGE_ID)
+    monkeypatch.setattr(rlm, "free_card_mib", lambda: state.free)
+    monkeypatch.setattr(rlm, "clear_previous_attempt", state.cleared.append)
+    return state
+
+
+def test_a_run_stores_its_outputs_and_enqueues_the_ingestion_as_a_child_job(
+    monkeypatch: pytest.MonkeyPatch, node: SimpleNamespace
+) -> None:
+    session, config_id, start_id = _arm()
+    job_id = str(uuid.uuid4())
+    payload = {**_payload(config_id, start_id, query_set_id="qs"), "_job_id": job_id}
+    _play(monkeypatch, METHOD, "lab-reader-cut211", "honest")
+    events = Events()
+
+    result = rlm.RunLabMethodOperation().execute(session, payload, emit=events)  # type: ignore[arg-type]
+
+    assert node.cleared == [f"protea-method-{job_id}"]
+    (child,) = [o for o in session.added if isinstance(o, Job)]
+    assert result.publish_after_commit == [(rlm.INGEST_QUEUE, child.id)]
+    assert (child.operation, child.queue_name) == (
+        "ingest_method_predictions",
+        "protea.methods.write",
+    )
+    assert child.parent_job_id == uuid.UUID(job_id)
+    stored = node.store.objects[child.payload["predictions_uri"]]
+    assert hashlib.sha256(stored).hexdigest() == child.payload["predictions_sha256"]
+    assert child.payload["query_set_id"] == "qs"
+    assert child.payload["method"]["name"] == "lab-reader-cut211"
+    run = child.payload["method"]["platform_run"]
+    assert (run["image_id"], run["queries_fasta_sha256"], run["job_id"]) == (
+        IMAGE_ID,
+        FASTA_SHA,
+        job_id,
+    )
+    assert run["provenance_key"] in node.store.objects
+    (created,) = [o for o in session.added if isinstance(o, JobEvent)]
+    assert created.job_id == child.id and created.event == "job.created"
+    assert events.named("run_lab_method.queries") == [{"queries": 2}]
+
+
+def test_a_busy_card_sends_the_job_back_without_running_anything(
+    monkeypatch: pytest.MonkeyPatch, node: SimpleNamespace
+) -> None:
+    session, config_id, start_id = _arm()
+    node.free = 2_000
+    monkeypatch.setattr(rlm, "run_in_scratch", lambda *a: pytest.fail("the card was busy"))
+    with pytest.raises(RetryLaterError) as busy:
+        rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=Events())  # type: ignore[arg-type]
+    assert busy.value.delay_seconds == rlm.CARD_BUSY_RETRY_SECONDS
+    assert session.added == []
+
+
+def test_a_tag_that_moved_is_refused(
+    monkeypatch: pytest.MonkeyPatch, node: SimpleNamespace
+) -> None:
+    session, config_id, start_id = _arm()
+    monkeypatch.setattr(rlm, "image_id_on_node", lambda image: "e" * 64)
+    with pytest.raises(ValueError, match="the payload pins"):
+        rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=Events())  # type: ignore[arg-type]
+
+
+def test_a_record_that_lies_about_its_output_enqueues_nothing(
+    monkeypatch: pytest.MonkeyPatch, node: SimpleNamespace
+) -> None:
+    session, config_id, start_id = _arm()
+    _play(monkeypatch, METHOD, "lab-reader-cut211", "lies")
+    with pytest.raises(ValueError, match="predictions sha256"):
+        rlm.RunLabMethodOperation().execute(session, _payload(config_id, start_id), emit=Events())  # type: ignore[arg-type]
+    assert session.added == []
