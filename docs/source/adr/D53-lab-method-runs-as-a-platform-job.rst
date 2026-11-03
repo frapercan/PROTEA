@@ -72,9 +72,11 @@ image for, and the window the predictions go into starts at or after that cut.
 What this does not decide
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* **Which method runs first.** The cut-211 recipe needs its readers retrained (they were
-  deleted on 2026-10-30), and the cut-230 recipe reads releases from 228 on, which needs
-  the author's word.
+* **Which method runs first** was left to the author, because the cut-211 recipe needs its
+  readers retrained (they were deleted on 2026-10-30) and the cut-230 recipe reads releases
+  from 228 on. He chose cut 230 on 2026-11-03 ("3. OK" to that recommendation): the
+  deployed model, on the platform's 230 to 235 window, once the corpus pass has ended and
+  this operation is deployed. The permission covers that run.
 * **Whether the platform rebuilds the method's inputs itself.** The bundle is a laboratory
   artifact. This operation records which bundle and which image ran; it does not reproduce
   them.
