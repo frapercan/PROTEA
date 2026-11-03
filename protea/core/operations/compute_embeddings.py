@@ -329,9 +329,8 @@ class ComputeEmbeddingsOperation:
         """Wait while another pass holds the card, whichever operation it is.
 
         This used to look only at other ``compute_embeddings`` jobs in RUNNING, so a
-        residue pass on the same card, or one whose coordinator closed when it
-        dispatched, was invisible to it. :mod:`._card_guard` checks every coordinator
-        that sends work to the card and the batches still waiting for it.
+        residue pass on the same card was invisible to it. :mod:`._card_guard` checks
+        every coordinator that sends batches to the card.
         """
         refuse_if_card_busy(session, parent_job_id)
 

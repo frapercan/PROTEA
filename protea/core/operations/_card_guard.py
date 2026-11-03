@@ -1,87 +1,86 @@
-"""One guard for the GPU node's card, shared by every operation that sends work to it.
+"""One guard for the GPU node's card, shared by the coordinators that send it batches.
 
 ``compute_embeddings``, ``encode_residue_vocabulary`` and ``encode_residue_sparse`` all
-dispatch batches to the same queue, ``protea.embeddings.batch``, which the same card
-consumes. Before this module only ``compute_embeddings`` checked whether the card was
-busy, and only against other ``compute_embeddings`` jobs in RUNNING: a residue pass was
-invisible to it, and a second residue pass could be queued behind a first with nothing
-in the way, interleaving two passes on one card for hours.
+dispatch batches to ``protea.embeddings.batch``, which one card consumes. Before this
+module only ``compute_embeddings`` checked whether the card was busy, and only against
+other ``compute_embeddings`` jobs in RUNNING: a residue pass was invisible to it, and a
+second residue pass could be queued behind a first with nothing in the way,
+interleaving two passes on one card for hours.
 
-Busy means either of two things, because each one misses a case the other sees:
+The card is busy for a coordinator when another coordinator of the three still has
+batches in flight, which the job table says on its own:
 
-* **A coordinator of a card operation is RUNNING.** A coordinator that waits for its
-  batches (``deferred``) stays RUNNING until the last one is stored.
-* **The batch queue holds messages.** A coordinator that closed the moment it dispatched
-  (the code before #1091 did, and the corpus pass of 2026-11-03 was such a one) is
-  SUCCEEDED while its batches still wait, and only the queue knows.
+* **RUNNING.** All three coordinators wait for their batches (``deferred``: #1091 for
+  the residue vocabulary, #1098 for the sparse encoder), so a pass is RUNNING until its
+  last batch is stored.
+* **FAILED by the reaper with batches still counting.** A waiting coordinator that the
+  reaper gave up on (``error_code`` ``lease_expired``) keeps receiving its batches, which
+  advance it and close it (#1097); while its count is short of its total, its batches
+  still hold the card.
+
+The guard reads only the database. It does not ask the broker how many batches are
+queued: that made every test of these operations talk to whatever broker listens on
+localhost, which on the host that runs PROTEA is the live one. A coordinator from
+before #1091, closed SUCCEEDED as it dispatched, is the one case the job table cannot
+see; the corpus pass of 2026-11-03 is one, and it ends before this is deployed.
 
 A busy card is not a failure: the coordinator raises :class:`RetryLaterError`, the worker
-waits and publishes it again, and the pass starts when the card is free. When the broker
-cannot be asked, the queue is not counted as busy: not knowing is not evidence of work,
-and the coordinator's own dispatch would fail on the same broker anyway.
+waits and publishes it again, and the pass starts when the card is free.
+
+``apply_learned_encoder`` also uses a card, but inline, wherever its queue is consumed,
+and it sends nothing to ``protea.embeddings.batch``; it is not one of these coordinators.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import RetryLaterError
+from protea.core.contracts.parent_progress import REAPED
 from protea.infrastructure.orm.models.job import Job, JobStatus
 
-#: The coordinators whose batches run on the card.
-CARD_OPERATIONS: tuple[str, ...] = (
+#: The coordinators whose batches go to ``protea.embeddings.batch``, the card's queue.
+BATCH_QUEUE_COORDINATORS: tuple[str, ...] = (
     "compute_embeddings",
     "encode_residue_vocabulary",
     "encode_residue_sparse",
 )
 
-#: The queue the card consumes.
-CARD_BATCH_QUEUE = "protea.embeddings.batch"
+#: A coordinator whose batches are still in flight: running, or reaped while its
+#: count is still short of its total.
+_IN_FLIGHT = or_(
+    Job.status == JobStatus.RUNNING,
+    and_(
+        Job.status == JobStatus.FAILED,
+        Job.error_code == REAPED,
+        func.coalesce(Job.progress_current, 0) < Job.progress_total,
+    ),
+)
 
 
-def _amqp_url() -> str | None:
-    try:
-        from protea.infrastructure.settings import load_settings
-
-        return load_settings(Path(__file__).resolve().parents[3]).amqp_url
-    except Exception:
-        return None
-
-
-def _pending_batches(amqp_url: str | None) -> int | None:
-    if not amqp_url:
-        return None
-    from protea.infrastructure.queue.publisher import pending_message_count
-
-    return pending_message_count(amqp_url, CARD_BATCH_QUEUE)
-
-
-def card_busy(session: Session, own_job_id: UUID, amqp_url: str | None = None) -> str | None:
+def card_busy(session: Session, own_job_id: UUID) -> str | None:
     """Why the card is busy for the coordinator ``own_job_id``, or None when it is free."""
     other = (
         session.query(Job)
         .filter(
-            Job.operation.in_(CARD_OPERATIONS),
-            Job.status == JobStatus.RUNNING,
+            Job.operation.in_(BATCH_QUEUE_COORDINATORS),
             Job.id != own_job_id,
+            _IN_FLIGHT,
         )
         .first()
     )
-    if other is not None:
-        return f"{other.operation} job {other.id} is running on the card"
-    pending = _pending_batches(amqp_url if amqp_url is not None else _amqp_url())
-    if pending:
-        return f"{pending} batches of another pass are waiting in {CARD_BATCH_QUEUE}"
-    return None
+    if other is None:
+        return None
+    return f"{other.operation} job {other.id} still has batches on the card"
 
 
-def refuse_if_card_busy(session: Session, own_job_id: UUID, amqp_url: str | None = None) -> None:
+def refuse_if_card_busy(session: Session, own_job_id: UUID) -> None:
     """Wait for the card: raise :class:`RetryLaterError` while another pass holds it."""
-    reason = card_busy(session, own_job_id, amqp_url)
+    reason = card_busy(session, own_job_id)
     if reason is None:
         return
     raise RetryLaterError(

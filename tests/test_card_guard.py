@@ -1,13 +1,19 @@
-"""One guard for the card, shared by every operation that sends it work.
+"""One guard for the card, shared by the coordinators that send it batches.
 
 WHAT WENT WRONG WITHOUT IT. Only ``compute_embeddings`` checked whether the card was busy,
-and only against other ``compute_embeddings`` jobs in RUNNING. On 2026-11-03 a corpus pass of
-``encode_residue_vocabulary`` held the card with about 3,900 batches queued while its
-coordinator, which ran the code from before #1091, sat SUCCEEDED. A second pass, one click
-away on the model weights page, would have been queued behind it with nothing in the way.
+and only against other ``compute_embeddings`` jobs in RUNNING. A residue pass was
+invisible to it, and a second ``encode_residue_vocabulary`` pass, one click away on the
+model weights page, would have been queued behind a running one with nothing in the way.
 
-So busy means a coordinator of ANY card operation in RUNNING, or batches waiting in the
-card's queue; a busy card makes the coordinator wait (``RetryLaterError``), never fail.
+So the card is busy when another coordinator of the three still has batches in flight:
+RUNNING, or FAILED by the reaper with its count still short of its total. A busy card makes
+the coordinator wait (``RetryLaterError``), never fail.
+
+WHAT AN EARLIER VERSION GOT WRONG. It also asked the broker how many batches were queued,
+discovering the broker from the project's settings. In a fresh checkout those fall back to
+localhost, and on the host that runs PROTEA localhost is the live broker: a unit test read
+the queue of the pass that was running. The guard now reads only the database, and
+``test_the_guard_never_reaches_a_broker`` keeps it that way.
 """
 
 from __future__ import annotations
@@ -21,49 +27,45 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import RetryLaterError
+from protea.core.contracts.parent_progress import REAPED
 from protea.core.operations import _card_guard as guard
 from protea.infrastructure.orm.models.job import Job, JobStatus
 
 
-def _session(running: Any = None) -> MagicMock:
+def _session(holder: Any = None) -> MagicMock:
     session = MagicMock()
-    session.query.return_value.filter.return_value.first.return_value = running
+    session.query.return_value.filter.return_value.first.return_value = holder
     return session
 
 
-def test_another_card_operation_running_makes_the_coordinator_wait() -> None:
+def test_another_coordinator_in_flight_makes_this_one_wait() -> None:
     other = MagicMock(operation="encode_residue_vocabulary", id=uuid.uuid4())
     with pytest.raises(RetryLaterError, match="encode_residue_vocabulary job"):
-        guard.refuse_if_card_busy(_session(other), uuid.uuid4(), amqp_url="amqp://x")
+        guard.refuse_if_card_busy(_session(other), uuid.uuid4())
 
 
-def test_batches_waiting_on_the_card_make_it_wait_even_with_no_coordinator_running() -> None:
-    """The case of 2026-11-03: the coordinator closed when it dispatched; only the queue knew."""
-    with (
-        patch.object(guard, "_pending_batches", return_value=3900),
-        pytest.raises(RetryLaterError, match="3900 batches"),
-    ):
-        guard.refuse_if_card_busy(_session(None), uuid.uuid4(), amqp_url="amqp://x")
-
-
-@pytest.mark.parametrize("pending", [0, None])
-def test_a_free_card_or_an_unreachable_broker_lets_it_start(pending: int | None) -> None:
-    """Not knowing is not evidence of work: an unreachable broker does not hold a pass back."""
-    with patch.object(guard, "_pending_batches", return_value=pending):
-        guard.refuse_if_card_busy(_session(None), uuid.uuid4(), amqp_url="amqp://x")
+def test_a_free_card_lets_it_start() -> None:
+    guard.refuse_if_card_busy(_session(None), uuid.uuid4())
 
 
 def test_the_wait_uses_the_configured_delay() -> None:
     other = MagicMock(operation="compute_embeddings", id=uuid.uuid4())
     with pytest.raises(RetryLaterError) as err:
-        guard.refuse_if_card_busy(_session(other), uuid.uuid4(), amqp_url="amqp://x")
+        guard.refuse_if_card_busy(_session(other), uuid.uuid4())
     from protea.config.tuning import get_tuning
 
     assert err.value.delay_seconds == get_tuning().operation.gpu_busy_retry_seconds
 
 
+def test_the_guard_never_reaches_a_broker() -> None:
+    """A test of these operations must not be able to talk to whatever broker is on localhost."""
+    with patch("pika.BlockingConnection", side_effect=AssertionError("the guard opened a broker")):
+        assert guard.card_busy(_session(None), uuid.uuid4()) is None
+
+
 def test_every_coordinator_that_feeds_the_card_asks_the_guard() -> None:
     """compute_embeddings and both residue coordinators wait on a busy card, before any work."""
+    from protea.core.operations.compute_embeddings import ComputeEmbeddingsOperation
     from protea.core.operations.encode_residue_sparse import EncodeResidueSparseOperation
     from protea.core.operations.encode_residue_vocabulary import EncodeResidueVocabularyOperation
 
@@ -89,8 +91,6 @@ def test_every_coordinator_that_feeds_the_card_asks_the_guard() -> None:
                 },
                 emit=lambda *a, **k: None,
             )
-        from protea.core.operations.compute_embeddings import ComputeEmbeddingsOperation
-
         with pytest.raises(RetryLaterError):
             ComputeEmbeddingsOperation()._refuse_if_gpu_busy(MagicMock(), uuid.UUID(job_id))
 
@@ -104,7 +104,7 @@ def _fresh(postgres_url: str) -> Any:
     return engine
 
 
-def _job(session: Session, operation: str, status: JobStatus) -> uuid.UUID:
+def _job(session: Session, operation: str, status: JobStatus, **fields: Any) -> uuid.UUID:
     job = Job(
         id=uuid.uuid4(),
         operation=operation,
@@ -112,6 +112,7 @@ def _job(session: Session, operation: str, status: JobStatus) -> uuid.UUID:
         status=status,
         payload={},
         meta={},
+        **fields,
     )
     session.add(job)
     session.flush()
@@ -120,13 +121,41 @@ def _job(session: Session, operation: str, status: JobStatus) -> uuid.UUID:
 
 def test_which_rows_hold_the_card(postgres_url: str) -> None:
     engine = _fresh(postgres_url)
-    with Session(engine) as session, patch.object(guard, "_pending_batches", return_value=0):
+    with Session(engine) as session:
         me = _job(session, "encode_residue_vocabulary", JobStatus.RUNNING)
         _job(session, "encode_residue_vocabulary", JobStatus.SUCCEEDED)
         _job(session, "predict_go_terms", JobStatus.RUNNING)
-        assert guard.card_busy(session, me, amqp_url="amqp://x") is None, (
-            "itself, a finished pass and an operation off the card do not hold it"
+        _job(session, "compute_embeddings", JobStatus.FAILED, error_code="HoldoutTouchedError")
+        _job(
+            session,
+            "compute_embeddings",
+            JobStatus.FAILED,
+            error_code=REAPED,
+            progress_current=7,
+            progress_total=7,
         )
+        assert guard.card_busy(session, me) is None, (
+            "itself, a finished pass, an operation off the card, a real failure and a reaped "
+            "pass whose batches all arrived do not hold it"
+        )
+        reaped = _job(
+            session,
+            "encode_residue_sparse",
+            JobStatus.FAILED,
+            error_code=REAPED,
+            progress_current=2,
+            progress_total=7,
+        )
+        reason = guard.card_busy(session, me)
+        assert reason is not None and str(reaped) in reason, (
+            "a reaped pass still receiving batches does"
+        )
+
+
+def test_a_running_pass_of_another_operation_holds_it(postgres_url: str) -> None:
+    engine = _fresh(postgres_url)
+    with Session(engine) as session:
+        me = _job(session, "encode_residue_vocabulary", JobStatus.RUNNING)
         other = _job(session, "compute_embeddings", JobStatus.RUNNING)
-        reason = guard.card_busy(session, me, amqp_url="amqp://x")
+        reason = guard.card_busy(session, me)
         assert reason is not None and str(other) in reason

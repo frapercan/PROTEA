@@ -1921,11 +1921,11 @@ codes back.
 **The card is one resource.** ``compute_embeddings``, ``encode_residue_vocabulary`` and
 ``encode_residue_sparse`` all send their batches to ``protea.embeddings.batch``, which the
 same card consumes, and each coordinator checks the card before it dispatches
-(``protea.core.operations._card_guard``). The card is busy when a coordinator of any of the
-three is RUNNING, or when the batch queue still holds messages: a coordinator that closed as
-it dispatched (the code before #1091 did) is SUCCEEDED while its batches wait, and only the
-queue knows. A busy card makes the coordinator wait and try again with ``RetryLaterError``;
-it never fails it. An unreachable broker does not count as busy.
+(``protea.core.operations._card_guard``). The card is busy when another of these
+coordinators still has batches in flight: RUNNING (all three wait for their batches), or
+FAILED by the reaper while its count is short of its total. The check reads only the job
+table, never the broker. A busy card makes the coordinator wait and try again with
+``RetryLaterError``; it never fails it.
 
 Payload fields
 ~~~~~~~~~~~~~~
