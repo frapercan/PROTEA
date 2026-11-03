@@ -67,6 +67,7 @@ __all__ = (
     "call_pipeline_predict",
     "enrich_v6_features",
 )
+from protea.core.operations._parent_guard import parent_cancelled
 from protea.core.operations.predict_go_terms._batch_op_feature import _FeatureLoadingMixin
 from protea.core.operations.predict_go_terms._batch_op_reference import _ReferenceMixin
 from protea.core.operations.predict_go_terms._common import (
@@ -75,7 +76,6 @@ from protea.core.operations.predict_go_terms._common import (
     _UnifiedPredictContext,
 )
 from protea.core.operations.predict_go_terms._reranker_scorer import RerankerScorer
-from protea.infrastructure.orm.models.job import Job, JobStatus
 
 
 class _BatchExecCtx(NamedTuple):
@@ -332,17 +332,13 @@ class PredictGOTermsBatchOperation(
 
     @staticmethod
     def _should_skip_for_parent(session: Session, parent_job_id: UUID, emit: EmitFn) -> bool:
-        """Skip the batch if its parent Job was cancelled or failed in flight."""
-        parent = session.get(Job, parent_job_id)
-        if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit(
-                "predict_go_terms_batch.skipped",
-                None,
-                {"parent_job_id": str(parent_job_id)},
-                "warning",
-            )
-            return True
-        return False
+        """Skip the batch only if its parent Job was cancelled.
+
+        A FAILED parent is warned about and the batch runs: the reaper fails a
+        coordinator that waits for its batches, and skipping on FAILED discarded
+        their work with no dead letter (#1095, #1096).
+        """
+        return parent_cancelled(session, str(parent_job_id), emit, "predict_go_terms_batch")
 
     def _run_knn_path(
         self,

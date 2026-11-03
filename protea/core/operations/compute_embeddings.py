@@ -46,6 +46,7 @@ from protea.core.operations._long_sequence_isolation import (
     load_lengths_for_isolation,
     refuse_and_record,
 )
+from protea.core.operations._parent_guard import parent_cancelled
 from protea.core.operations.store_embeddings import (
     StoredConfigEmbeddings,
     StoreEmbeddingsOperation,
@@ -435,14 +436,9 @@ class ComputeEmbeddingsBatchOperation:
         p = ComputeEmbeddingsBatchPayload.model_validate(contract_payload(payload))
         parent_job_id = UUID(p.parent_job_id)
 
-        parent = session.get(Job, parent_job_id)
-        if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit(
-                "compute_embeddings_batch.skipped",
-                None,
-                {"reason": "parent_not_running", "parent_status": parent.status.value},
-                "warning",
-            )
+        # Only a cancellation stops the batch; see store_embeddings for why a
+        # FAILED coordinator must not (#1095, #1096).
+        if parent_cancelled(session, p.parent_job_id, emit, "compute_embeddings_batch"):
             return OperationResult(result={"skipped": True})
 
         configs = load_pass_group(session, p.embedding_config_ids)

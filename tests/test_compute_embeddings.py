@@ -759,6 +759,41 @@ class TestComputeEmbeddingsBatchExecute:
             "_job_id": str(uuid.uuid4()),
         }
 
+    def test_a_cancelled_parent_skips_the_batch(self) -> None:
+        cfg = MagicMock()
+        cfg.id = uuid.uuid4()
+        session = MagicMock()
+        session.get.return_value = MagicMock(status=JobStatus.CANCELLED)
+        events: list[str] = []
+        result = self._op().execute(
+            session, self._base_payload(cfg), emit=lambda e, *_: events.append(e)
+        )
+        assert result.result == {"skipped": True}
+        assert events == ["compute_embeddings_batch.skipped"]
+
+    def test_a_failed_parent_does_not_stop_the_batch(self) -> None:
+        """Only a cancellation stops a child (#1095): a FAILED coordinator is warned about."""
+        cfg = MagicMock()
+        cfg.id = uuid.uuid4()
+        session = MagicMock()
+        session.get.return_value = MagicMock(status=JobStatus.FAILED, error_code="lease_expired")
+        events: list[str] = []
+
+        class _Reached(Exception):
+            pass
+
+        with (
+            patch(
+                "protea.core.operations.compute_embeddings.load_pass_group",
+                side_effect=_Reached,
+            ),
+            pytest.raises(_Reached),
+        ):
+            self._op().execute(
+                session, self._base_payload(cfg), emit=lambda e, *_: events.append(e)
+            )
+        assert events == ["compute_embeddings_batch.parent_failed"]
+
     def test_inference_publishes_write_operation(self) -> None:
         op = self._op()
         cfg = _mock_config()
@@ -1050,15 +1085,33 @@ class TestStoreEmbeddingsOperation:
         result = op.execute(session, self._make_payload(), emit=_noop_emit)
         assert result.result["skipped"] is True
 
-    def test_skips_when_parent_failed(self) -> None:
+    def test_a_failed_parent_does_not_stop_the_write(self) -> None:
+        """Only a cancellation stops a child (#1095).
+
+        A FAILED coordinator is warned about and the batch still lands: on
+        2026-10-31 the reaper failed a coordinator that was waiting for its
+        batches, and this guard acked them with no rows and no dead letter.
+        """
         op = self._op()
         session = MagicMock()
         parent = MagicMock()
         parent.status = JobStatus.FAILED
+        parent.error_code = "lease_expired"
         session.get.return_value = parent
+        events: list[str] = []
 
-        result = op.execute(session, self._make_payload(), emit=_noop_emit)
-        assert result.result["skipped"] is True
+        class _Reached(Exception):
+            pass
+
+        with (
+            patch(
+                "protea.core.operations.store_embeddings.store_group_rows",
+                side_effect=_Reached,
+            ),
+            pytest.raises(_Reached),
+        ):
+            op.execute(session, self._make_payload(), emit=lambda e, *_: events.append(e))
+        assert events == ["store_embeddings.parent_failed"]
 
     def test_last_batch_closes_parent(self) -> None:
         op = self._op()
@@ -1240,9 +1293,17 @@ class TestEmbeddingScale:
             "embedding_config_id": str(uuid.uuid4()),
             "skip_existing": False,
             "sequences": [
-                {"sequence_id": 1, "chunks": [
-                    {"chunk_index_s": 0, "chunk_index_e": None,
-                     "vector": [32.0, 64.0, -96.0], "embedding_dim": 3}]},
+                {
+                    "sequence_id": 1,
+                    "chunks": [
+                        {
+                            "chunk_index_s": 0,
+                            "chunk_index_e": None,
+                            "vector": [32.0, 64.0, -96.0],
+                            "embedding_dim": 3,
+                        }
+                    ],
+                },
             ],
         }
         op.execute(session, payload, emit=_noop_emit)
@@ -1277,9 +1338,17 @@ class TestEmbeddingScale:
             "embedding_config_id": str(uuid.uuid4()),
             "skip_existing": False,
             "sequences": [
-                {"sequence_id": 1, "chunks": [
-                    {"chunk_index_s": 0, "chunk_index_e": None,
-                     "vector": [0.1, 0.2, 0.3], "embedding_dim": 3}]},
+                {
+                    "sequence_id": 1,
+                    "chunks": [
+                        {
+                            "chunk_index_s": 0,
+                            "chunk_index_e": None,
+                            "vector": [0.1, 0.2, 0.3],
+                            "embedding_dim": 3,
+                        }
+                    ],
+                },
             ],
         }
         op.execute(session, payload, emit=capture_emit)
