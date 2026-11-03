@@ -303,6 +303,10 @@ later revision) or *Superseded* (a named later decision replaces it).
      - :doc:`The sparse code of every residue, from a frozen vocabulary, stored as shards <D51-per-residue-vocabulary-codes>`
      - Proposed
      - T-PLATFORM
+   * - D52
+     - :doc:`Representations by granularity in one registry, sparse first <D52-representations-by-granularity-sparse-first>`
+     - Proposed
+     - T-PLATFORM
    * - D53
      - :doc:`A laboratory method runs as a platform job, from an image pinned by id <D53-lab-method-runs-as-a-platform-job>`
      - Proposed
@@ -374,5 +378,6 @@ later revision) or *Superseded* (a named later decision replaces it).
    D49-corpus-is-four-tiers-of-the-gaf-series
    D50-term-identity-across-the-series
    D51-per-residue-vocabulary-codes
+   D52-representations-by-granularity-sparse-first
    D53-lab-method-runs-as-a-platform-job
    D54-model-weights-registry
