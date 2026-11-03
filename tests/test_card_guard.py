@@ -169,6 +169,15 @@ def test_which_rows_hold_the_card(postgres_url: str) -> None:
             event_age=timedelta(days=3),
         )
         assert guard.card_busy(session, me) is None, "a reaped pass silent for days is dead"
+        # 48c500ac's shape: reaped with no total at all, so it never dispatched batches.
+        _job(
+            session,
+            "compute_embeddings",
+            JobStatus.FAILED,
+            error_code=REAPED,
+            event_age=timedelta(minutes=5),
+        )
+        assert guard.card_busy(session, me) is None, "a reaped row with no total holds no batches"
         reaped = _job(
             session,
             "encode_residue_sparse",
