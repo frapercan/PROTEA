@@ -151,6 +151,7 @@ from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
 )
 from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
+from protea.core.operations.store_residue_codes import StoreResidueCodesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
 from protea.core.operations.verify_window_against_reference import (
     VerifyWindowAgainstReferencePayload,
@@ -670,6 +671,19 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "residues_per_call": 0,
         },
         ("residues_per_call",),
+    ),
+    (
+        # A write with no sequences would advance the parent for a shard that indexes nothing.
+        "store_residue_codes",
+        StoreResidueCodesPayload,
+        {
+            "parent_job_id": "job",
+            "target_embedding_config_id": "tgt",
+            "shard_key": "residue-codes/t/1-2-0123456789abcdef.bin",
+            "shard_sha256": "0" * 64,
+            "sequences": [],
+        },
+        ("sequences",),
     ),
     (
         # A batch of zero is an infinite loop that reports success.

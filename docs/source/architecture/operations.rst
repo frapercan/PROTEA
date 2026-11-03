@@ -1909,9 +1909,13 @@ creates the target configuration (backend ``residue-vocabulary``, cut taken from
 artifact's ``training_release``) and fans out ``encode_residue_vocabulary_batch``
 messages to ``protea.embeddings.batch``. Each batch runs Ankh with exact attention, one
 hidden state per selected layer (``embed_batch_per_layer`` in protea-backends), encodes
-every residue with :mod:`protea.core.residue_vocabulary`, writes one compressed shard to
-the artifact store (:mod:`protea.core.residue_code_shards`) and then one ``residue_code``
-row per sequence. :func:`protea.core.residue_codes.load_residue_codes` reads them back.
+every residue with :mod:`protea.core.residue_vocabulary`, puts one compressed shard in the
+artifact store (:mod:`protea.core.residue_code_shards`) and publishes one message to
+``protea.embeddings.write``. There ``store_residue_codes``, on the host that owns the
+database, checks the shard against the message, inserts one ``residue_code`` row per
+sequence and advances the parent job, as ``store_embeddings`` does for
+``compute_embeddings``. :func:`protea.core.residue_codes.load_residue_codes` reads the
+codes back.
 
 Payload fields
 ~~~~~~~~~~~~~~

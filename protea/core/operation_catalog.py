@@ -106,6 +106,7 @@ from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOp
 from protea.core.operations.seal_evaluation_frames import (
     SealEvaluationFramesOperation,
 )
+from protea.core.operations.store_residue_codes import StoreResidueCodesOperation
 from protea.core.operations.stratify_evaluation import StratifyEvaluationOperation
 from protea.core.operations.verify_window_against_reference import (
     VerifyWindowAgainstReferenceOperation,
@@ -118,6 +119,7 @@ def _register_residue_encoders(registry: OperationRegistry) -> None:
     registry.register(EncodeResidueSparseBatchOperation())
     registry.register(EncodeResidueVocabularyOperation())
     registry.register(EncodeResidueVocabularyBatchOperation())
+    registry.register(StoreResidueCodesOperation())
 
 
 def build_operation_registry() -> OperationRegistry:

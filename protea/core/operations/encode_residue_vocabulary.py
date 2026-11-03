@@ -3,9 +3,11 @@
 ADR-D51. ``encode_residue_sparse`` selects atoms per residue and then pools, so nothing
 per residue survives it. This operation keeps the residues: a GPU batch runs Ankh with
 exact attention, one hidden state per selected layer (``embed_batch_per_layer``), passes
-every residue through the vocabulary (:mod:`protea.core.residue_vocabulary`), writes ONE
-compressed shard with the codes of its sequences to the artifact store, and only then
-inserts one ``residue_code`` row per sequence pointing at it.
+every residue through the vocabulary (:mod:`protea.core.residue_vocabulary`) and puts ONE
+compressed shard with the codes of its sequences in the artifact store. The database is
+written on the server: the batch publishes one message to ``protea.embeddings.write``,
+where ``store_residue_codes`` checks the shard and inserts one ``residue_code`` row per
+sequence, as ``store_embeddings`` does for ``compute_embeddings``.
 
 WHY THE STATES ARE NOT POOLED OR AVERAGED ANYWHERE
 
@@ -35,7 +37,6 @@ from typing import Annotated, Any
 import numpy as np
 from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import (
@@ -44,10 +45,12 @@ from protea.core.contracts.operation import (
     OperationResult,
     ProteaPayload,
 )
+from protea.core.contracts.parent_progress import update_parent_progress
 from protea.core.operations._encoder_artifact import (
     resolve_encoder_artifact,
     resolve_training_cut,
 )
+from protea.core.operations.store_residue_codes import WRITE_QUEUE
 from protea.core.residue_code_shards import pack_shard
 from protea.core.residue_vocabulary import (
     KIND,
@@ -59,6 +62,7 @@ from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.residue_code import ResidueCode as ResidueCodeRow
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
+from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 #: Backend tag on the produced config: the producer, not an architecture.
@@ -221,24 +225,6 @@ def shard_key(target_id: uuid.UUID | str, codes: list[tuple[int, ResidueCode]], 
     """Store key of a shard: the config, the id range it covers, and its own digest."""
     ids = [i for i, _c in codes]
     return f"residue-codes/{target_id}/{min(ids)}-{max(ids)}-{sha[:16]}.bin"
-
-
-def index_rows(
-    target_id: uuid.UUID, key: str, sha: str, codes: list[tuple[int, ResidueCode]]
-) -> list[dict[str, Any]]:
-    """One ``residue_code`` row per sequence of a shard."""
-    return [
-        {
-            "sequence_id": int(sequence_id),
-            "embedding_config_id": target_id,
-            "shard_key": key,
-            "shard_sha256": sha,
-            "position": position,
-            "residue_count": code.residues,
-            "entry_count": code.entries,
-        }
-        for position, (sequence_id, code) in enumerate(codes)
-    ]
 
 
 def build_messages(
@@ -467,22 +453,60 @@ def put_with_retries(
             time.sleep(wait)
 
 
-def _write_shard(
-    session: Session,
-    target_id: uuid.UUID,
-    codes: list[tuple[int, ResidueCode]],
-    header: dict[str, Any],
+def upload_shard(
+    store: Any, target_id: uuid.UUID, codes: list[tuple[int, ResidueCode]], header: dict[str, Any]
 ) -> tuple[str, str, int]:
-    """Put the shard in the store, then its index rows: a row never points at nothing."""
+    """Put one shard in the store, retrying; the card writes nothing to the database."""
     blob, sha = pack_shard(codes, header)
     key = shard_key(target_id, codes, sha)
-    put_with_retries(_artifact_store(), key, blob)
-    session.execute(
-        pg_insert(ResidueCodeRow).on_conflict_do_nothing(),
-        index_rows(target_id, key, sha, codes),
-    )
-    session.commit()
+    put_with_retries(store, key, blob)
     return key, sha, len(blob)
+
+
+def build_store_message(
+    parent_job_id: str,
+    target_id: uuid.UUID,
+    key: str,
+    sha: str,
+    codes: list[tuple[int, ResidueCode]],
+) -> tuple[str, dict[str, Any]]:
+    """The write-queue message of a shard: what the server checks and indexes."""
+    return (
+        WRITE_QUEUE,
+        {
+            "operation": "store_residue_codes",
+            "job_id": parent_job_id,
+            "payload": {
+                "parent_job_id": parent_job_id,
+                "target_embedding_config_id": str(target_id),
+                "shard_key": key,
+                "shard_sha256": sha,
+                "sequences": [
+                    {
+                        "sequence_id": int(sequence_id),
+                        "position": position,
+                        "residue_count": code.residues,
+                        "entry_count": code.entries,
+                    }
+                    for position, (sequence_id, code) in enumerate(codes)
+                ],
+            },
+        },
+    )
+
+
+def _parent_stopped(session: Session, parent_job_id: str, emit: EmitFn) -> bool:
+    """Whether the coordinator was cancelled or failed, in which case the batch does nothing."""
+    parent = session.get(Job, uuid.UUID(parent_job_id)) if parent_job_id else None
+    if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
+        emit(
+            "encode.skipped",
+            None,
+            {"reason": "parent_not_running", "parent_status": parent.status.value},
+            "warning",
+        )
+        return True
+    return False
 
 
 class EncodeResidueVocabularyBatchOperation(Operation):
@@ -491,8 +515,8 @@ class EncodeResidueVocabularyBatchOperation(Operation):
     name = "encode_residue_vocabulary_batch"
     description = (
         "GPU child job: exact-attention Ankh per layer over one batch of sequences, the residue "
-        "vocabulary's code per residue, one shard in the artifact store and one residue_code "
-        "row per sequence."
+        "vocabulary's code per residue, one shard in the artifact store, and one message to "
+        "store_residue_codes, which indexes it on the server."
     )
 
     def execute(
@@ -503,8 +527,16 @@ class EncodeResidueVocabularyBatchOperation(Operation):
         if source is None:
             raise ValueError(f"EmbeddingConfig {p.source_embedding_config_id} not found")
         target_id = uuid.UUID(p.target_embedding_config_id)
+        if _parent_stopped(session, p.parent_job_id, emit):
+            return OperationResult(result={"skipped": True})
         pending = _pending_in_batch(session, p, target_id)
         if not pending:
+            # no write message follows, so the batch advances the parent itself, as a
+            # compute_embeddings batch that was already stored does
+            if p.parent_job_id:
+                update_parent_progress(
+                    session, uuid.UUID(p.parent_job_id), emit, event_name="encode.parent_succeeded"
+                )
             return OperationResult(
                 result={"encoded": 0, "note": "every sequence already had a code"}
             )
@@ -532,13 +564,14 @@ class EncodeResidueVocabularyBatchOperation(Operation):
             "target_embedding_config_id": str(target_id),
             "parent_job_id": p.parent_job_id,
         }
-        key, sha, nbytes = _write_shard(session, target_id, codes, header)
+        key, sha, nbytes = upload_shard(_artifact_store(), target_id, codes, header)
         residues = sum(c.residues for _i, c in codes)
         entries = sum(c.entries for _i, c in codes)
         stats = {"encoded": len(codes), "residues": residues, "entries": entries, "shard_key": key}
         emit("encode.done", f"{len(codes)} sequences, shard of {nbytes} bytes", stats, "info")
         return OperationResult(
-            result={**stats, "shard_sha256": sha, "embedding_config_id": str(target_id)}
+            result={**stats, "shard_sha256": sha, "embedding_config_id": str(target_id)},
+            publish_operations=[build_store_message(p.parent_job_id, target_id, key, sha, codes)],
         )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:

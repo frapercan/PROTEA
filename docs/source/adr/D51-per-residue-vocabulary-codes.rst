@@ -112,10 +112,16 @@ is over 40 billion values, on a database the campaign already measured as disk b
 4. One operation, two queues
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``encode_residue_vocabulary`` follows ``encode_residue_sparse``. A coordinator on
-``protea.embeddings`` resolves the artifact, creates the configuration and fans out
-batches to ``protea.embeddings.batch``, where the card runs Ankh and the vocabulary,
-writes the shard and inserts the index rows. It trains nothing.
+``encode_residue_vocabulary`` has the three stages of ``compute_embeddings``. A
+coordinator on ``protea.embeddings`` resolves the artifact, creates the configuration and
+fans out batches to ``protea.embeddings.batch``. There the card runs Ankh and the
+vocabulary, puts the shard in the artifact store (retrying, since the key names its
+content) and publishes one message to ``protea.embeddings.write``. On the host that owns
+the database, ``store_residue_codes`` fetches the shard, checks its sha256 and that it
+holds what the message lists, inserts the index rows in one transaction and advances the
+parent job. The database is written only on that host, never across the link from the
+card. The codes do not travel in the message: through the broker, 87 GB would be stored
+in its message store and written a second time to the artifact store. It trains nothing.
 
 5. A read path
 ^^^^^^^^^^^^^^

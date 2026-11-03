@@ -23,15 +23,21 @@ from protea.core.operations.encode_residue_vocabulary import (  # noqa: E402
     EncodeResidueVocabularyPayload,
     ModelPass,
     build_messages,
+    build_store_message,
     calls_by_residues,
     encode_sequences,
-    index_rows,
     put_with_retries,
     read_vocabulary_meta,
     refuse_backend_without_layers,
     shard_key,
+    upload_shard,
 )
-from protea.core.residue_code_shards import pack_shard  # noqa: E402
+from protea.core.operations.store_residue_codes import (  # noqa: E402
+    StoreResidueCodesPayload,
+    check_shard,
+    index_rows_of,
+)
+from protea.core.residue_code_shards import pack_shard, unpack_shard  # noqa: E402
 from protea.core.residue_codes import codes_from_index  # noqa: E402
 from protea.core.residue_vocabulary import REQUIRED_ARRAYS, ResidueVocabulary  # noqa: E402
 from protea.infrastructure.orm.models.embedding.embedding_config import (  # noqa: E402
@@ -160,22 +166,39 @@ def test_the_codes_are_the_reference_codes(vectors: dict[str, np.ndarray]) -> No
     assert len(backend.calls) > 1
 
 
-def test_a_shard_and_its_index_read_back_every_code(vectors: dict[str, np.ndarray]) -> None:
+def _codes(vectors: dict[str, np.ndarray]) -> list:
     seqs = _sequences(vectors)
-    voc = _vocabulary(vectors)
-    codes = encode_sequences(
+    return encode_sequences(
         ModelPass(_Backend({s: st for _i, s, st, _a in seqs}), None, None),
-        voc,
+        _vocabulary(vectors),
         [(i, s) for i, s, _st, _a in seqs],
         emit=lambda *a, **k: None,
         residues_per_call=1000,
     )
-    blob, sha = pack_shard(codes, {"vocabulary": "toy"})
+
+
+class _Store(dict):
+    def put(self, key: str, blob: bytes) -> str:
+        self[key] = blob
+        return key
+
+
+def test_the_card_uploads_and_the_server_indexes_what_it_checked(
+    vectors: dict[str, np.ndarray],
+) -> None:
+    codes = _codes(vectors)
     target = uuid.uuid4()
-    key = shard_key(target, codes, sha)
+    store = _Store()
+    header = {"target_embedding_config_id": str(target)}
+    key, sha, nbytes = upload_shard(store, target, codes, header)
     assert key.startswith(f"residue-codes/{target}/100-105-") and key.endswith(".bin")
-    store = {key: blob}
-    rows = index_rows(target, key, sha, codes)
+    assert len(store[key]) == nbytes
+    queue, message = build_store_message("job-1", target, key, sha, codes)
+    assert queue == "protea.embeddings.write"
+    assert message["operation"] == "store_residue_codes"
+    p = StoreResidueCodesPayload.model_validate(message["payload"])
+    check_shard(unpack_shard(store[key], p.shard_sha256), p)
+    rows = index_rows_of(p)
     assert [r["position"] for r in rows] == list(range(len(codes)))
     got = codes_from_index(
         [(r["sequence_id"], r["shard_key"], r["shard_sha256"], r["position"]) for r in rows],
@@ -187,6 +210,29 @@ def test_a_shard_and_its_index_read_back_every_code(vectors: dict[str, np.ndarra
         assert np.array_equal(got[sequence_id].offsets, code.offsets)
     with pytest.raises(ValueError, match="the index says"):
         codes_from_index([(999, key, sha, 0)], store.__getitem__)
+
+
+def test_the_server_refuses_a_shard_that_is_not_what_the_message_says(
+    vectors: dict[str, np.ndarray],
+) -> None:
+    codes = _codes(vectors)
+    target = uuid.uuid4()
+    blob, sha = pack_shard(codes, {"target_embedding_config_id": str(target)})
+    key = shard_key(target, codes, sha)
+    _q, message = build_store_message("job-1", target, key, sha, codes)
+    shard = unpack_shard(blob, sha)
+    other = dict(message["payload"], target_embedding_config_id=str(uuid.uuid4()))
+    with pytest.raises(ValueError, match="written for config"):
+        check_shard(shard, StoreResidueCodesPayload.model_validate(other))
+    moved = [dict(s) for s in message["payload"]["sequences"]]
+    moved[0]["residue_count"] += 1
+    with pytest.raises(ValueError, match="at position 0"):
+        check_shard(
+            shard,
+            StoreResidueCodesPayload.model_validate(dict(message["payload"], sequences=moved)),
+        )
+    with pytest.raises(ValueError, match="sha256"):
+        unpack_shard(blob, "0" * 64)
 
 
 def test_a_backend_without_per_layer_states_is_refused() -> None:
