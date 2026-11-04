@@ -41,7 +41,10 @@ from protea.core.operations._encoder_artifact import (
     resolve_training_cut,
 )
 from protea.core.utils import contract_payload
-from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
+from protea.infrastructure.orm.models.embedding.embedding_config import (
+    UNCHUNKED,
+    EmbeddingConfig,
+)
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 
 
@@ -562,6 +565,12 @@ def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta:
     columns that say "this owes a training cut" and "this is derived from that
     vector" both said the opposite of what the row was. The cut was already
     being recorded one field over, which made the row disagree with itself.
+
+    The recipe is stated in full for the same reason. ``max_length``,
+    ``chunk_size``, ``chunk_overlap`` and ``embedding_scale`` used to be left
+    out, and the three that have column defaults were hashed as None and
+    stored as their defaults, so ``76792dc2`` and ``9d72dc44`` hold ids their
+    own rows do not derive.
     """
     pooling = str(meta.get("pooling", "mean")).lower()
     pool_tag = "attn" if pooling == "attention" else "mean"
@@ -571,10 +580,20 @@ def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta:
     ).scalar_one_or_none()
     if existing is not None:
         return existing.id
+    source = session.get(EmbeddingConfig, uuid.UUID(str(p.source_embedding_config_id)))
+    if source is None:
+        raise ValueError(f"source embedding config {p.source_embedding_config_id} does not exist")
     cfg = EmbeddingConfig(
         model_name=name, model_backend="learned-code", layer_indices=[0], layer_agg="none",
         pooling=pooling if pooling == "attention" else "learned",
-        normalize_residues=False, normalize=False, use_chunking=False,
+        normalize_residues=False, normalize=False,
+        # One code per sequence, pooled over the source's chunks, so the
+        # code covers exactly what its source vectors covered.
+        max_length=source.max_length,
+        # The divisor before the halfvec store; _encode_and_store_batch
+        # reports any value the fp16 range still clips.
+        embedding_scale=1.0,
+        **UNCHUNKED,
         description=(f"learned GO-aligned code ({pool_tag}-pool, dict={meta['dict_dim']}, "
                      f"top_k={meta['top_k']}{_declared_suffix(meta)}, "
                      f"objective={meta.get('objective')}, "
