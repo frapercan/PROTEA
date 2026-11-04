@@ -280,6 +280,25 @@ def append_event(
     return _write(factory, ref, principal, act)
 
 
+@router.post("/{ref}/report", summary="Generate the report from rows")
+def report_exploration(
+    ref: str,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    principal: Any = Depends(require_role(ROLE_OPERATOR)),
+) -> dict[str, Any]:
+    """Generate the report of a running exploration from rows and move it to reported.
+
+    The report, with its receipt, comparisons, checklist, verdict and grade, goes
+    whole into the log's report event with its sha256.
+    """
+
+    def act(s: Session, row: Any, actor: svc.Actor) -> Any:
+        svc.report(s, row, actor)
+        return row
+
+    return _write(factory, ref, principal, act)
+
+
 @router.post("/{ref}/review", summary="The reviewer's mark, which the decision requires")
 def review_exploration(
     ref: str,

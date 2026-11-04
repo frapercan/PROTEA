@@ -168,13 +168,13 @@ class _Exploration(SimpleNamespace):
 def test_only_a_crossed_one_axis_pair_blocks_a_launch(monkeypatch: pytest.MonkeyPatch) -> None:
     row = _Exploration(id=uuid.uuid4(), kind="one_axis", rules={"axis": "annotation_set_id"})
     monkeypatch.setattr(receipt, "_arm_sets", lambda _s, _e: {"base": [1], "candidate": [2]})
-    monkeypatch.setattr(receipt, "_arm_rows", lambda _s, _e: CROSSED)
+    monkeypatch.setattr(receipt, "arm_rows", lambda _s, _e: CROSSED)
     blockers, layer = receipt.launch_blockers(None, row)  # type: ignore[arg-type]
     assert blockers == ["the arms differ in more than the declared axis"]
-    monkeypatch.setattr(receipt, "_arm_rows", lambda _s, _e: CLEAN)
+    monkeypatch.setattr(receipt, "arm_rows", lambda _s, _e: CLEAN)
     assert receipt.launch_blockers(None, row)[0] == []  # type: ignore[arg-type]
     row.kind = "full_method"
-    monkeypatch.setattr(receipt, "_arm_rows", lambda _s, _e: CROSSED)
+    monkeypatch.setattr(receipt, "arm_rows", lambda _s, _e: CROSSED)
     assert receipt.launch_blockers(None, row)[0] == []  # type: ignore[arg-type]
 
 

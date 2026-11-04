@@ -34,12 +34,20 @@ from protea.infrastructure.orm.models.annotation.evaluation_result import Evalua
 from protea.infrastructure.orm.models.exploration.exploration import Exploration
 from protea.infrastructure.orm.models.exploration.exploration_link import ExplorationLink
 
-__all__ = ["NOT_RECORDED", "compute", "launch_blockers", "method_layer"]
+__all__ = [
+    "CONFIG_SQL",
+    "NOT_RECORDED",
+    "arm_rows",
+    "compute",
+    "launch_blockers",
+    "method_layer",
+    "read_row",
+]
 
 NOT_RECORDED = "not recorded"
 
 _PREDICTION_SET_SQL = text("SELECT * FROM prediction_set WHERE id = CAST(:id AS uuid)")
-_CONFIG_SQL = text("SELECT * FROM embedding_config WHERE id = CAST(:id AS uuid)")
+CONFIG_SQL = text("SELECT * FROM embedding_config WHERE id = CAST(:id AS uuid)")
 _READING_SQL = text(
     "SELECT COALESCE(payload ->> 'score_reading', 'raw') FROM job WHERE id = CAST(:id AS uuid)"
 )
@@ -62,7 +70,7 @@ def _arm_sets(session: Session, exploration: Exploration) -> dict[str, list[uuid
     return dict(arms)
 
 
-def _row(session: Session, sql: Any, ident: Any) -> dict[str, Any] | None:
+def read_row(session: Session, sql: Any, ident: Any) -> dict[str, Any] | None:
     found = session.execute(sql, {"id": str(ident)}).mappings().first()
     return dict(found) if found is not None else None
 
@@ -114,7 +122,7 @@ def _reproduced(config: dict[str, Any]) -> str:
 
 def _recipe_layer(session: Session, sets: dict[str, dict[str, Any]]) -> dict[str, Any]:
     configs = {
-        arm: _row(session, _CONFIG_SQL, row["embedding_config_id"]) for arm, row in sets.items()
+        arm: read_row(session, CONFIG_SQL, row["embedding_config_id"]) for arm, row in sets.items()
     }
     if not configs or any(c is None for c in configs.values()):
         return {"status": NOT_RECORDED}
@@ -199,12 +207,12 @@ def _declared_axis(exploration: Exploration) -> list[str]:
     return [raw] if isinstance(raw, str) else [str(f) for f in raw or []]
 
 
-def _arm_rows(session: Session, exploration: Exploration) -> dict[str, dict[str, Any]]:
+def arm_rows(session: Session, exploration: Exploration) -> dict[str, dict[str, Any]]:
     """Each arm's whole prediction set row; an arm linked twice is read at its last link."""
     return {
         arm: row
         for arm, psets in _arm_sets(session, exploration).items()
-        if (row := _row(session, _PREDICTION_SET_SQL, psets[-1])) is not None
+        if (row := read_row(session, _PREDICTION_SET_SQL, psets[-1])) is not None
     }
 
 
@@ -219,7 +227,7 @@ def launch_blockers(session: Session, exploration: Exploration) -> tuple[list[st
     if exploration.kind != "one_axis" or len(_arm_sets(session, exploration)) < 2:
         return [], {"status": NOT_RECORDED}
     layer = method_layer(
-        exploration.kind, _declared_axis(exploration), _arm_rows(session, exploration)
+        exploration.kind, _declared_axis(exploration), arm_rows(session, exploration)
     )
     blockers = (
         ["the arms differ in more than the declared axis"] if layer["status"] == "crossed" else []
@@ -229,7 +237,7 @@ def launch_blockers(session: Session, exploration: Exploration) -> tuple[list[st
 
 def compute(session: Session, exploration: Exploration) -> dict[str, Any]:
     """The receipt as the rows stand now, with what blocks a launch or a verdict."""
-    sets = _arm_rows(session, exploration)
+    sets = arm_rows(session, exploration)
     results = _results(session, exploration)
     layers = {
         "method": method_layer(exploration.kind, _declared_axis(exploration), sets),

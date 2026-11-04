@@ -161,3 +161,20 @@ def test_arms_that_cross_the_axis_cannot_be_launched(pg: Session) -> None:
     row = _one_axis_with_arms(pg, crossed=True)
     with pytest.raises(svc.ExplorationError, match="declared axis"):
         svc.launch(pg, row, SERVER)
+
+
+def test_the_report_is_built_from_real_rows_and_blocks_an_undeclared_population(
+    pg: Session,
+) -> None:
+    # Two clean arms over one axis, but neither declares the corpus membership
+    # of its bank, which is the leak D55's checklist exists to block.
+    row = _one_axis_with_arms(pg, crossed=False)
+    svc.launch(pg, row, SERVER)
+    svc.report(pg, row, SERVER)
+    body = svc.describe(pg, row)["events"][-1]["body"]
+    items = body["report"]["checklist"]["items"]
+    assert items["one_axis"]["answer"] == "pass"
+    assert items["no_leak"]["answer"] == "fail"
+    assert any("membership is not declared" in p for p in items["no_leak"]["problems"])
+    assert (row.state, row.verdict, row.grade) == ("reported", "blocked", "exploratory")
+    assert len(body["sha256"]) == 64

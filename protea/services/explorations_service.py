@@ -58,6 +58,7 @@ __all__ = [
     "launch",
     "link",
     "listing",
+    "report",
     "review",
 ]
 
@@ -355,6 +356,38 @@ def append(
     return row
 
 
+def report(session: Session, exploration: Exploration, actor: Actor) -> None:
+    """Generate the report from rows and move a running exploration to ``reported``.
+
+    The whole report goes into the ``report`` event with its sha256, so the log
+    holds what the reviewer reads, and the server's verdict and grade are set
+    on the row from the same report.
+    """
+    from protea.services.exploration_report import CHECKLIST_VERSION, build
+
+    _require_state(exploration, "running")
+    document, sha = build(session, exploration)
+    _move(exploration, "reported")
+    exploration.verdict = document["verdict"]
+    exploration.grade = document["grade"]
+    exploration.checklist_version = CHECKLIST_VERSION
+    _event(session, exploration, "report", actor, {"sha256": sha, "report": document})
+    session.flush()
+
+
+def _last_report_sha(session: Session, exploration: Exploration) -> str | None:
+    body = session.execute(
+        select(ExplorationEvent.body)
+        .where(
+            ExplorationEvent.exploration_id == exploration.id,
+            ExplorationEvent.event == "report",
+        )
+        .order_by(ExplorationEvent.id.desc())
+        .limit(1)
+    ).scalar()
+    return (body or {}).get("sha256")
+
+
 def review(session: Session, exploration: Exploration, actor: Actor) -> None:
     """The reviewer's ``reviewed`` event, which the decision requires.
 
@@ -399,8 +432,14 @@ def decide(
         raise ExplorationError("a decision says why")
     if not _was_reviewed(session, exploration):
         raise ExplorationConflict("the exploration has not been reviewed yet")
+    # Read before the move: the query autoflushes, and a decided row without its
+    # decision is exactly what the table's CHECK refuses.
+    accepted_report = _last_report_sha(session, exploration) if decision == "accepted" else None
     _move(exploration, "decided")
     exploration.decision = decision
+    if accepted_report is not None:
+        # Accepting fixes the report it accepted, by its fingerprint.
+        exploration.report_sha256 = accepted_report
     exploration.decision_text = text.strip()
     exploration.decided_at = func.now()  # type: ignore[assignment]
     exploration.decided_by = actor.name
