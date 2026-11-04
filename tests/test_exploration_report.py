@@ -107,6 +107,37 @@ class TestAnInstrumentReadsItsPredicate:
         )
 
 
+class TestTheBanksCameFromOnePipeline:
+    """A cold load runs the pool query and its ORDER BY; a warm one runs neither."""
+
+    def _loads(self, a: list[str], b: list[str]) -> dict[str, dict[str, Any]]:
+        return {
+            "first": {"sources": a, "hosts": ["node"]},
+            "second": {"sources": b, "hosts": ["node"]},
+        }
+
+    def test_two_cold_loads_are_one_pipeline(self) -> None:
+        assert report.bank_load_problems(self._loads(["database"], ["database"]), "database") == []
+
+    def test_a_cold_run_against_a_warm_one_is_two_pipelines(self) -> None:
+        problems = report.bank_load_problems(self._loads(["database"], ["disk_cache"]), None)
+        assert problems == [
+            "the runs loaded their banks from different sources: first=database; second=disk_cache"
+        ]
+
+    def test_two_warm_loads_break_a_rule_that_asks_for_cold_ones(self) -> None:
+        problems = report.bank_load_problems(
+            self._loads(["disk_cache"], ["disk_cache"]), "database"
+        )
+        assert len(problems) == 2
+        assert all("the rules require database" in p for p in problems)
+
+    def test_an_unrecorded_or_mixed_load_cannot_be_vouched_for(self) -> None:
+        problems = report.bank_load_problems(self._loads([], ["database", "disk_cache"]), None)
+        assert "first: no bank load recorded" in problems
+        assert "second: its bank came from database and disk_cache" in problems
+
+
 def _exploration(**over: Any) -> Any:
     return SimpleNamespace(**{"kind": "one_axis", "post_hoc": False, **over})
 

@@ -20,7 +20,10 @@ FIRST VERSIONS, written down so the review can change them on purpose:
   assertion of identity and power does not apply to it: ``for`` when its two
   runs hold the same rows, with zero tolerance, and every deciding panel's
   delta is within the rules' ``panel_tolerance``, zero by default; ``against``
-  otherwise, naming the first row that differs.
+  otherwise, naming the first row that differs. Its two runs must have loaded
+  their banks from one and the same source, the rules' ``bank_load`` when
+  declared, or no verdict is read: a cold run against a warm one is two
+  pipelines.
 * The grade: ``exploratory`` when the rules were frozen post hoc or a blocking
   check fails; ``check`` for an instrument; ``thesis`` on a test window;
   ``development`` on a validation window; ``exploratory`` otherwise. Whether a
@@ -33,7 +36,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 import protea.services.exploration_receipt as receipt
@@ -44,7 +47,7 @@ from protea.infrastructure.orm.models.exploration.exploration import Exploration
 from protea.infrastructure.orm.models.exploration.exploration_link import ExplorationLink
 from protea.infrastructure.orm.models.job import JobEvent
 
-__all__ = ["CHECKLIST_VERSION", "build", "grade", "verdict"]
+__all__ = ["CHECKLIST_VERSION", "bank_load_problems", "build", "grade", "verdict"]
 
 #: The version of the fixed checklist the report answers. A report reviewed
 #: against another version is another review.
@@ -207,18 +210,69 @@ def verdict(
     return "underpowered"
 
 
-def _identity(session: Session, exploration: Exploration) -> dict[str, Any]:
-    """An instrument's two runs compared row for row, or why they cannot be."""
+_LOADS_SQL = text(
+    "SELECT fields ->> 'source' AS source, fields ->> 'host' AS host FROM job_event "
+    "WHERE job_id = CAST(:job AS uuid) "
+    "AND event = 'child.predict_go_terms_batch.load_references_done'"
+)
+
+
+def _bank_loads(session: Session, rows: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Where each arm's bank came from, read off its producing job's events.
+
+    ``source`` is ``database`` for a cold load and ``disk_cache`` for a warm
+    one, and the two are different code: a warm load never runs the pool
+    query, so it never runs the ORDER BY that fixes the bank's order, which is
+    what an instrument exists to certify. The hosts are recorded beside it.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for arm, row in rows.items():
+        job = (row.get("meta") or {}).get("job_id")
+        found = session.execute(_LOADS_SQL, {"job": str(job)}).all() if job else []
+        out[arm] = {
+            "job_id": str(job) if job else None,
+            "sources": sorted({r.source for r in found if r.source}),
+            "hosts": sorted({r.host for r in found if r.host}),
+        }
+    return out
+
+
+def bank_load_problems(loads: dict[str, dict[str, Any]], declared: str | None) -> list[str]:
+    """What forbids reading two runs as the same pipeline: their banks' sources.
+
+    Each arm must record its bank load, from one source, the one the rules
+    declare in ``bank_load`` when they declare one, and the same in both arms.
+    A cold run against a warm run compares two pipelines, not one twice.
+    """
+    problems = []
+    for arm, load in loads.items():
+        if not load["sources"]:
+            problems.append(f"{arm}: no bank load recorded")
+        elif len(load["sources"]) > 1:
+            problems.append(f"{arm}: its bank came from {' and '.join(load['sources'])}")
+        elif declared and load["sources"][0] != declared:
+            problems.append(f"{arm}: bank from {load['sources'][0]}, the rules require {declared}")
+    if len({tuple(load["sources"]) for load in loads.values()}) > 1:
+        seen = "; ".join(
+            f"{arm}={'+'.join(load['sources']) or 'none'}" for arm, load in loads.items()
+        )
+        problems.append(f"the runs loaded their banks from different sources: {seen}")
+    return problems
+
+
+def _instrument(session: Session, exploration: Exploration) -> tuple[dict[str, Any], list[str]]:
+    """An instrument's two runs: their row identity, their bank loads, and what blocks."""
     from protea.services.exploration_identity import row_identity
 
+    rules = exploration.rules or {}
     rows = receipt.arm_rows(session, exploration)
     if len(rows) != 2:
-        return {
-            "identical": None,
-            "detail": f"an instrument compares two runs with a prediction set each; {len(rows)} linked",
-        }
+        detail = f"an instrument compares two runs with a prediction set each; {len(rows)} linked"
+        return {"identical": None, "detail": detail}, []
     a, b = (str(row["id"]) for row in rows.values())
-    return {"arms": list(rows), **row_identity(session, a, b)}
+    loads = _bank_loads(session, rows)
+    identity = {"arms": list(rows), "bank_loads": loads, **row_identity(session, a, b)}
+    return identity, bank_load_problems(loads, rules.get("bank_load"))
 
 
 def grade(exploration: Exploration, window_role: str | None, failed_blocking: bool) -> str:
@@ -243,14 +297,14 @@ def build(session: Session, exploration: Exploration) -> tuple[dict[str, Any], s
     comparisons = _comparisons(session, exploration)
     deciding = (exploration.rules or {}).get("deciding_panels")
     blocks = list(computed["blocks_verdict"]) + [f"check failed: {k}" for k in failed]
-    instrument = (
-        {
-            "identity": _identity(session, exploration),
+    instrument = None
+    if exploration.kind == "instrument":
+        identity, load_problems = _instrument(session, exploration)
+        blocks += load_problems
+        instrument = {
+            "identity": identity,
             "panel_tolerance": float((exploration.rules or {}).get("panel_tolerance", 0.0)),
         }
-        if exploration.kind == "instrument"
-        else None
-    )
     report = {
         "exploration": {
             "id": str(exploration.id),

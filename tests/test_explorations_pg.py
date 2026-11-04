@@ -198,16 +198,22 @@ def _set_with_rows(pg: Session, parents: dict[str, Any], rows: dict[tuple[str, i
     return pset
 
 
-def test_row_identity_sees_one_double_move(pg: Session) -> None:
+def _terms(pg: Session, parents: dict[str, Any], n: int) -> list[Any]:
     from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-    from protea.services.exploration_identity import row_identity
 
-    parents = make_parents(pg)
     terms = [
-        GOTerm(go_id=f"GO:000000{i}", ontology_snapshot_id=parents["snapshot"]) for i in range(3)
+        GOTerm(go_id=f"GO:000000{i}", ontology_snapshot_id=parents["snapshot"]) for i in range(n)
     ]
     pg.add_all(terms)
     pg.flush()
+    return terms
+
+
+def test_row_identity_sees_one_double_move(pg: Session) -> None:
+    from protea.services.exploration_identity import row_identity
+
+    parents = make_parents(pg)
+    terms = _terms(pg, parents, 3)
     rows = {("P1", terms[0].id): 0.1, ("P1", terms[1].id): 0.2, ("P2", terms[2].id): 0.3}
     a = _set_with_rows(pg, parents, rows)
     b = _set_with_rows(pg, parents, rows)
@@ -223,3 +229,75 @@ def test_row_identity_sees_one_double_move(pg: Session) -> None:
     assert moved["first_difference"]["protein_accession"] == "P2"
     assert moved["first_difference"]["go_term_id"] == terms[2].id
     assert moved["first_difference"]["a"] != moved["first_difference"]["b"]
+
+
+def test_two_proteins_that_swap_their_predictions_are_not_identical(pg: Session) -> None:
+    # The shape a linear sum of row hashes is blind to, and the one that
+    # matters: retrieval handing one protein's predictions to another.
+    from protea.services.exploration_identity import row_identity
+
+    parents = make_parents(pg)
+    terms = _terms(pg, parents, 2)
+    a = _set_with_rows(pg, parents, {("P1", terms[0].id): 0.1, ("P2", terms[1].id): 0.2})
+    b = _set_with_rows(pg, parents, {("P1", terms[1].id): 0.2, ("P2", terms[0].id): 0.1})
+    swapped = row_identity(pg, str(a), str(b))
+    assert swapped["identical"] is False
+    assert swapped["rows"] == {"a": 2, "b": 2}
+    assert swapped["first_difference"]["protein_accession"] == "P1"
+    # The lowest key, P1 with the first term, exists only in the first set.
+    assert swapped["first_difference"]["b"] is None
+
+
+def _job_with_loads(pg: Session, sources: list[str]) -> Any:
+    from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
+
+    job = Job(
+        operation="predict_go_terms", queue_name="protea.predictions", status=JobStatus.SUCCEEDED
+    )
+    pg.add(job)
+    pg.flush()
+    for source in sources:
+        pg.add(
+            JobEvent(
+                job_id=job.id,
+                event="child.predict_go_terms_batch.load_references_done",
+                fields={"source": source, "host": "node"},
+            )
+        )
+    pg.flush()
+    return job.id
+
+
+def test_an_instrument_with_a_cold_and_a_warm_run_is_not_read(pg: Session) -> None:
+    from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+
+    window = make_window(pg)
+    parents = make_parents(pg)
+    terms = _terms(pg, parents, 1)
+    first = _set_with_rows(pg, parents, {("P1", terms[0].id): 0.1})
+    second = _set_with_rows(pg, parents, {("P1", terms[0].id): 0.1})
+    for pset, source in ((first, "database"), (second, "disk_cache")):
+        pg.get(PredictionSet, pset).meta = {"job_id": str(_job_with_loads(pg, [source]))}
+    pg.flush()
+    draft = svc.Draft(
+        title="the instrument repeats",
+        question="q",
+        hypothesis="h",
+        kind="instrument",
+        evaluation_set_id=window,
+        rules={"bank_load": "database"},
+    )
+    row = svc.create(pg, draft, LAB)
+    svc.link(
+        pg, row, svc.LinkSpec(role="arm", arm="first", target={"prediction_set_id": first}), LAB
+    )
+    svc.link(
+        pg, row, svc.LinkSpec(role="arm", arm="second", target={"prediction_set_id": second}), LAB
+    )
+    svc.launch(pg, row, SERVER)
+    svc.report(pg, row, SERVER)
+    body = svc.describe(pg, row)["events"][-1]["body"]["report"]
+    # The rows are identical, and still no verdict: the second bank came warm.
+    assert body["identity"]["identical"] is True
+    assert row.verdict == "blocked"
+    assert any("different sources" in b for b in body["blocks_verdict"])
