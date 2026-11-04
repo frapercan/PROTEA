@@ -163,6 +163,25 @@ def get_exploration(
         raise _http(exc) from exc
 
 
+@router.get("/{ref}/receipt", summary="The receipt, computed from rows")
+def get_receipt(
+    ref: str, factory: sessionmaker[Session] = Depends(get_session_factory)
+) -> dict[str, Any]:
+    """The receipt as the rows stand now: each layer, or "not recorded", and what blocks.
+
+    Computed on every read and never stored by hand: the method seal between the
+    two arms, their recipes and whether each id rederives, the frame of every
+    linked result, and the scale its scores were read in.
+    """
+    from protea.services.exploration_receipt import compute
+
+    try:
+        with session_scope(factory) as session:
+            return compute(session, svc.find(session, ref))
+    except _ERRORS as exc:
+        raise _http(exc) from exc
+
+
 @router.post("", status_code=201, summary="Create a draft exploration")
 def create_exploration(
     body: ExplorationCreateRequest,

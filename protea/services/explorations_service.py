@@ -230,6 +230,15 @@ def _had_results_already(session: Session, exploration: Exploration) -> bool:
     return bool(session.execute(query).scalar())
 
 
+def _refuse_crossed_arms(session: Session, exploration: Exploration) -> None:
+    """Refuse when the arms already differ in more than the declared axis."""
+    from protea.services.exploration_receipt import launch_blockers
+
+    blockers, layer = launch_blockers(session, exploration)
+    if blockers:
+        raise ExplorationError(f"{blockers[0]}: {layer.get('detail', '')}")
+
+
 def launch(session: Session, exploration: Exploration, actor: Actor) -> None:
     """Freeze the rules with their fingerprint, the database time and the launcher.
 
@@ -241,6 +250,7 @@ def launch(session: Session, exploration: Exploration, actor: Actor) -> None:
     _require_state(exploration, "draft")
     if actor.name == exploration.proposer:
         raise ExplorationError("the launcher must be a principal other than the proposer")
+    _refuse_crossed_arms(session, exploration)
     fingerprint = rules_fingerprint(exploration.rules)
     post_hoc = _had_results_already(session, exploration)
     _move(exploration, "running")
@@ -320,6 +330,10 @@ def link(
     )
     session.add(row)
     session.flush()
+    if spec.role == "arm" and exploration.state == "running":
+        # The rules are frozen, so an arm that crosses the axis is refused here,
+        # and the transaction that would have linked it rolls back.
+        _refuse_crossed_arms(session, exploration)
     return row
 
 

@@ -8,6 +8,7 @@ over ``evaluation_result`` and ``prediction_set``, which SQLite cannot build.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
@@ -86,3 +87,77 @@ def test_the_whole_cycle_runs_on_postgres(pg: Session) -> None:
         "reviewed",
         "decision",
     ]
+
+
+def _arm_pair(pg: Session, *, crossed: bool) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Two prediction sets over one config and snapshot that differ in the bank.
+
+    With ``crossed`` the candidate also expands votes to ancestors, which is
+    the second field the comparison of 2026-08-28 moved without declaring it.
+    """
+    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+
+    window = make_window(pg)
+    parents = make_parents(pg)
+    other_bank = AnnotationSet(
+        source="goa", source_version="165", ontology_snapshot_id=parents["snapshot"]
+    )
+    pg.add(other_bank)
+    pg.flush()
+    meta = {"code_revision": "8699bfd7", "dependency_revisions": {"protea-method": "a120f613"}}
+    base = make_prediction_set(pg, parents, {**meta, "expand_votes_to_ancestors": False})
+    candidate = make_prediction_set(
+        pg,
+        {**parents, "annotation": other_bank.id},
+        {**meta, "expand_votes_to_ancestors": crossed},
+    )
+    # The seal refuses a set that does not record its population, so both
+    # arms score one query set, as a real comparison would.
+    from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+    from protea.infrastructure.orm.models.query.query_set import QuerySet
+
+    population = QuerySet(name="exploration-arms")
+    pg.add(population)
+    pg.flush()
+    for pset in (base, candidate):
+        pg.get(PredictionSet, pset).query_set_id = population.id
+    pg.flush()
+    return window, base, candidate
+
+
+def _one_axis_with_arms(pg: Session, *, crossed: bool) -> Any:
+    window, base, candidate = _arm_pair(pg, crossed=crossed)
+    draft = svc.Draft(
+        title="the bank, one axis",
+        question="q",
+        hypothesis="h",
+        kind="one_axis",
+        evaluation_set_id=window,
+        rules={"axis": "annotation_set_id"},
+    )
+    row = svc.create(pg, draft, LAB)
+    svc.link(pg, row, svc.LinkSpec(role="arm", arm="base", target={"prediction_set_id": base}), LAB)
+    svc.link(
+        pg,
+        row,
+        svc.LinkSpec(role="arm", arm="candidate", target={"prediction_set_id": candidate}),
+        LAB,
+    )
+    return row
+
+
+def test_the_receipt_reads_the_arms_for_real(pg: Session) -> None:
+    from protea.services.exploration_receipt import compute
+
+    row = _one_axis_with_arms(pg, crossed=False)
+    layers = compute(pg, row)["layers"]
+    assert layers["method"] == {"status": "one axis", "axis": ["annotation_set_id"]}
+    assert layers["recipe"]["status"] == "reproduced"
+    assert layers["recipe"]["differs_in"] == []
+    assert layers["population"]["status"] == "not recorded"
+
+
+def test_arms_that_cross_the_axis_cannot_be_launched(pg: Session) -> None:
+    row = _one_axis_with_arms(pg, crossed=True)
+    with pytest.raises(svc.ExplorationError, match="declared axis"):
+        svc.launch(pg, row, SERVER)
