@@ -25,6 +25,10 @@ from .embedding.residue_code import ResidueCode  # noqa: F401
 from .embedding.scoring_config import ScoringConfig  # noqa: F401
 from .embedding.sequence_embedding import SequenceEmbedding  # noqa: F401
 from .experiment_run import ExperimentRun, ExperimentRunStatus  # noqa: F401
+from .exploration.exploration import Exploration  # noqa: F401
+from .exploration.exploration_event import ExplorationEvent  # noqa: F401
+from .exploration.exploration_link import ExplorationLink  # noqa: F401
+from .exploration.external_reference import ExternalReference  # noqa: F401
 from .job import Job, JobEvent  # noqa: F401
 from .protein.protein import Protein  # noqa: F401
 from .protein.protein_metadata import ProteinUniProtMetadata  # noqa: F401
