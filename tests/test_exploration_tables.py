@@ -43,6 +43,12 @@ assert _spec and _spec.loader
 migration = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(migration)
 
+_TRUNCATE = _MIGRATION.parent / "c5e9a1d3f720_exploration_event_refuses_truncate.py"
+_tspec = importlib.util.spec_from_file_location("migration_refuses_truncate", _TRUNCATE)
+assert _tspec and _tspec.loader
+truncate_migration = importlib.util.module_from_spec(_tspec)
+_tspec.loader.exec_module(truncate_migration)
+
 
 def _squash(sql: str) -> str:
     return re.sub(r"\s+", " ", sql).strip()
@@ -62,6 +68,12 @@ class TestTheMigrationCreatesWhatTheModelsDescribe:
     def test_the_trigger_is_the_same_text(self) -> None:
         assert _squash(event_module.APPEND_ONLY_FUNCTION) == _squash(migration.APPEND_ONLY_FUNCTION)
         assert _squash(event_module.APPEND_ONLY_TRIGGER) == _squash(migration.APPEND_ONLY_TRIGGER)
+
+    def test_the_truncate_trigger_is_the_same_text(self) -> None:
+        assert _squash(event_module.NO_TRUNCATE_TRIGGER) == _squash(
+            truncate_migration.NO_TRUNCATE_TRIGGER
+        )
+        assert truncate_migration.down_revision == "b2f6c3d8e154"
 
     def test_the_arc_has_the_same_targets(self) -> None:
         frozen = (*(column for column, _ in migration._TARGETS), "store_key")
@@ -248,7 +260,7 @@ def pg(postgres_url: str) -> Any:
 
 
 class TestOnPostgres:
-    def test_the_log_refuses_an_update_and_a_delete(self, pg: Session) -> None:
+    def test_the_log_refuses_an_update_a_delete_and_a_truncate(self, pg: Session) -> None:
         row = _exploration(evaluation_set_id=_seed_window(pg))
         pg.add(row)
         pg.flush()
@@ -261,6 +273,7 @@ class TestOnPostgres:
         for statement in (
             "UPDATE exploration_event SET actor = 'someone else'",
             "DELETE FROM exploration_event",
+            "TRUNCATE exploration_event",
         ):
             with pytest.raises(DBAPIError, match="append only"):
                 pg.execute(text(statement))
