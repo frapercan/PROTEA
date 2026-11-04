@@ -277,3 +277,13 @@ def test_an_actor_says_what_it_is() -> None:
         svc.Actor(name="x", type="robot")
     with pytest.raises(svc.ExplorationError):
         svc.Actor(name="", type="user")
+
+
+def test_the_answer_to_a_creation_carries_its_event_without_autoflush() -> None:
+    # PROTEA builds its sessions with autoflush=False; the create route answers
+    # with describe() in the same transaction, which must already see the event.
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[Base.metadata.tables[t] for t in TABLES])
+    with Session(engine, autoflush=False) as s:
+        row = _draft(s)
+        assert [e["event"] for e in svc.describe(s, row)["events"]] == ["created"]
