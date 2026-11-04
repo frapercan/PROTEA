@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import signal
@@ -21,6 +22,7 @@ from protea.infrastructure.queue import _failure_aggregation as _agg
 from protea.infrastructure.queue._deadletter import DLX_NAME, setup_dead_letter
 from protea.infrastructure.queue._host import compute_host
 from protea.infrastructure.queue._job_pump import ack_when_done, run_while_pumping
+from protea.infrastructure.queue._operation_window import OperationWatchdog
 from protea.infrastructure.queue._stoppable import Stoppable
 from protea.infrastructure.queue.publisher import publish_operation, safe_republish_job
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
@@ -357,6 +359,7 @@ class OperationConsumer(Stoppable):
         self._requeue_on_failure = options.requeue_on_failure
         self._stop = False
         self._channel: BlockingChannel | None = None
+        self._watchdog = OperationWatchdog.for_heartbeat(get_tuning().queue.amqp_heartbeat)
 
     def run(self) -> None:
         signal.signal(signal.SIGINT, self._handle_stop)
@@ -387,16 +390,12 @@ class OperationConsumer(Stoppable):
         try:
             channel.start_consuming()
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 if channel.is_open:
                     channel.stop_consuming()
-            except Exception:
-                pass
-            try:
+            with contextlib.suppress(Exception):
                 if connection.is_open:
                     connection.close()
-            except Exception:
-                pass
             self._channel = None
             logger.info("OperationConsumer stopped. queue=%s", self._queue_name)
 
@@ -528,7 +527,8 @@ class OperationConsumer(Stoppable):
             try:
                 emit = make_safe_emit(self._make_raw_emit(decoded.parent_job_id))
                 stamp_library_provenance(emit)
-                result = op.execute(session, decoded.payload, emit=emit)
+                with self._watchdog.armed(decoded.operation_name):
+                    result = op.execute(session, decoded.payload, emit=emit)
                 session.commit()
                 # Forward any downstream operation messages (e.g. GPU→write worker).
                 for queue_name, op_payload in result.publish_operations or []:
