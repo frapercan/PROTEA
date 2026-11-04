@@ -8360,6 +8360,142 @@
         ]
       }
     },
+    "/v1/explorations/{ref}/receipt": {
+      "get": {
+        "description": "The receipt as the rows stand now: each layer, or \"not recorded\", and what blocks.\n\nComputed on every read and never stored by hand: the method seal between the\ntwo arms, their recipes and whether each id rederives, the frame of every\nlinked result, and the scale its scores were read in.",
+        "operationId": "get_receipt_v1_explorations__ref__receipt_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Receipt V1 Explorations  Ref  Receipt Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "The receipt, computed from rows",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
+    "/v1/explorations/{ref}/report": {
+      "post": {
+        "description": "Generate the report of a running exploration from rows and move it to reported.\n\nThe report, with its receipt, comparisons, checklist, verdict and grade, goes\nwhole into the log's report event with its sha256.",
+        "operationId": "report_exploration_v1_explorations__ref__report_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Report Exploration V1 Explorations  Ref  Report Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate the report from rows",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
     "/v1/explorations/{ref}/review": {
       "post": {
         "description": "Mark a reported exploration reviewed; its proposer cannot.",

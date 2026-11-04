@@ -58,6 +58,7 @@ __all__ = [
     "launch",
     "link",
     "listing",
+    "report",
     "review",
 ]
 
@@ -230,6 +231,15 @@ def _had_results_already(session: Session, exploration: Exploration) -> bool:
     return bool(session.execute(query).scalar())
 
 
+def _refuse_crossed_arms(session: Session, exploration: Exploration) -> None:
+    """Refuse when the arms already differ in more than the declared axis."""
+    from protea.services.exploration_receipt import launch_blockers
+
+    blockers, layer = launch_blockers(session, exploration)
+    if blockers:
+        raise ExplorationError(f"{blockers[0]}: {layer.get('detail', '')}")
+
+
 def launch(session: Session, exploration: Exploration, actor: Actor) -> None:
     """Freeze the rules with their fingerprint, the database time and the launcher.
 
@@ -241,6 +251,7 @@ def launch(session: Session, exploration: Exploration, actor: Actor) -> None:
     _require_state(exploration, "draft")
     if actor.name == exploration.proposer:
         raise ExplorationError("the launcher must be a principal other than the proposer")
+    _refuse_crossed_arms(session, exploration)
     fingerprint = rules_fingerprint(exploration.rules)
     post_hoc = _had_results_already(session, exploration)
     _move(exploration, "running")
@@ -320,6 +331,10 @@ def link(
     )
     session.add(row)
     session.flush()
+    if spec.role == "arm" and exploration.state == "running":
+        # The rules are frozen, so an arm that crosses the axis is refused here,
+        # and the transaction that would have linked it rolls back.
+        _refuse_crossed_arms(session, exploration)
     return row
 
 
@@ -339,6 +354,38 @@ def append(
     row = _event(session, exploration, event, actor, body, link_id)
     session.flush()
     return row
+
+
+def report(session: Session, exploration: Exploration, actor: Actor) -> None:
+    """Generate the report from rows and move a running exploration to ``reported``.
+
+    The whole report goes into the ``report`` event with its sha256, so the log
+    holds what the reviewer reads, and the server's verdict and grade are set
+    on the row from the same report.
+    """
+    from protea.services.exploration_report import CHECKLIST_VERSION, build
+
+    _require_state(exploration, "running")
+    document, sha = build(session, exploration)
+    _move(exploration, "reported")
+    exploration.verdict = document["verdict"]
+    exploration.grade = document["grade"]
+    exploration.checklist_version = CHECKLIST_VERSION
+    _event(session, exploration, "report", actor, {"sha256": sha, "report": document})
+    session.flush()
+
+
+def _last_report_sha(session: Session, exploration: Exploration) -> str | None:
+    body = session.execute(
+        select(ExplorationEvent.body)
+        .where(
+            ExplorationEvent.exploration_id == exploration.id,
+            ExplorationEvent.event == "report",
+        )
+        .order_by(ExplorationEvent.id.desc())
+        .limit(1)
+    ).scalar()
+    return (body or {}).get("sha256")
 
 
 def review(session: Session, exploration: Exploration, actor: Actor) -> None:
@@ -385,8 +432,14 @@ def decide(
         raise ExplorationError("a decision says why")
     if not _was_reviewed(session, exploration):
         raise ExplorationConflict("the exploration has not been reviewed yet")
+    # Read before the move: the query autoflushes, and a decided row without its
+    # decision is exactly what the table's CHECK refuses.
+    accepted_report = _last_report_sha(session, exploration) if decision == "accepted" else None
     _move(exploration, "decided")
     exploration.decision = decision
+    if accepted_report is not None:
+        # Accepting fixes the report it accepted, by its fingerprint.
+        exploration.report_sha256 = accepted_report
     exploration.decision_text = text.strip()
     exploration.decided_at = func.now()  # type: ignore[assignment]
     exploration.decided_by = actor.name

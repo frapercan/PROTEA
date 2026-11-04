@@ -131,3 +131,14 @@ def test_the_listing_is_public_and_passes_its_filters() -> None:
         "evaluation_set_id": window,
         "include_archived": False,
     }
+
+
+def test_the_receipt_is_public_and_computed_on_read() -> None:
+    from protea.services import exploration_receipt
+
+    computed = {"layers": {}, "blocks_launch": [], "blocks_verdict": []}
+    with patch.object(exploration_receipt, "compute", return_value=computed) as compute:
+        response = _client().get("/explorations/1/receipt")
+    assert response.status_code == 200
+    assert response.json() == computed
+    compute.assert_called_once()
