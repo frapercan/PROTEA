@@ -99,3 +99,23 @@ def test_the_startup_line_carries_the_revision() -> None:
     # because that is the only moment the difference matters.
     assert "TREE_HAS_MOVED_TO" in line
     assert "code_revision()" in line and "tree_revision_now()" in line
+
+
+def test_the_startup_line_comes_before_the_taxonomy_warmup() -> None:
+    """The proof of what a process loaded must not wait on a download.
+
+    The revision is settled at import, so the line could always have been
+    written first. Behind the warm-up it waited on a ~100 MB download and 2.9
+    million parsed nodes for three queues, and the compute node's deploy sync
+    reads this exact line, with a bounded wait, as the only witness that a
+    worker came back on the declared revision. On that node the dump is already
+    cached and the warm-up costs under 1 ms, so nothing was failing there; the
+    coupling is the defect, and a node without the dump would publish its
+    identity minutes late or never.
+    """
+    from pathlib import Path
+
+    text_ = (Path(__file__).resolve().parents[1] / "scripts/worker.py").read_text()
+    assert text_.index('"Worker started.') < text_.index("warmup_taxonomy_db()"), (
+        "the startup line must be stamped before the taxonomy warm-up, not after it"
+    )
