@@ -208,6 +208,42 @@ every cell:
 
 Strata not declared as deciding are described, and are never read as verdicts.
 
+**The scale of the score is part of comparability.** Without a re-ranker or a
+``ScoringConfig``, a neighbour prediction is scored ``1 - cosine_distance / 2``. Its floor is
+then set by how anisotropic the bank is. The server session measured the cosine between
+random pairs (4,000 per bank, seed 20261104) on 2026-11-04:
+
+=========  ================================================  ============  ==========
+Bank       Recipe                                            Random pair   Score floor
+=========  ================================================  ============  ==========
+f3a7fe16   ankh-base, full length, mean and max, raw           0.950        0.975
+e7ba37da   ankh-base, cut at 1,022, mean, normalised           0.562        0.781
+76792dc2   learned sparse code over e7ba37da, cut 211          0.138        0.569
+9d72dc44   learned sparse code over e7ba37da, cut 227          0.199        0.600
+=========  ================================================  ============  ==========
+
+Two unrelated proteins already score 0.975 in the first bank. The useful range is 0.025 there
+and 0.431 in the third, and on a threshold grid of step 0.01 the first bank has two steps.
+
+The maximum it reports is not a maximum. On the panel of no prior knowledge in biological
+process, the F curve of both neighbour arms rises to the last point of the grid, 0.99, where
+99.7 % of the first bank's predictions sit at 0.98 or above. A difference between two such
+readings compares a censored edge with another, not two maxima. So:
+
+* The receipt gains a sixth layer, the scale. For each arm it records:
+
+  * the random-pair similarity and the score floor it implies;
+  * the share of predictions in the grid's top bin;
+  * whether the F curve's maximum is interior.
+
+* A censored maximum blocks a verdict.
+* For a comparison, each prediction set's scores are read through their own empirical
+  distribution, as a percentile rank within the set. The transform is monotone, so it
+  preserves each arm's ordering and every threshold metric in principle. What it changes is
+  where a uniform grid falls: on the arm's own quantiles, so the grid resolves the curve.
+  The raw reading is kept as a secondary check.
+* Both arms use the same scoring, and the receipt records it.
+
 7. Review in two steps, and the grade
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -316,7 +352,15 @@ Consequences
   * ``run_lab_method`` takes ``model_weights_id``;
   * the artifact store gains ``list(prefix)``;
   * the band registry takes the new length bands;
-  * an operation computes per-query identity per window.
+  * an operation computes per-query identity per window;
+  * evaluation offers the percentile-rank reading of section 6 and reports whether the
+    maximum is interior;
+  * the residue code configuration ``22166300`` is repaired. Its recipe says ``max_length``
+    1022, the default the identity hook applies when the field is omitted, but
+    ``encode_residue_vocabulary`` never truncates: its codes reach 8,259 residues. Its id
+    therefore does not describe its own computation. The repair creates the configuration
+    with an explicit null and moves the rows, and the operation refuses a target whose
+    ``max_length`` is not null.
 
 * **Ordering.** The clean start closes the pipeline with four explorations:
 
