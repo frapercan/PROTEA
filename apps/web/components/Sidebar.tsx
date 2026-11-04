@@ -33,6 +33,7 @@ import {
   PanelLeftClose,
   ChevronRight,
   Archive,
+  FlaskConical,
   ShieldCheck,
   KeyRound,
   Users,
@@ -358,6 +359,7 @@ export function Sidebar({
       hint: t("resultsHint"),
       icon: BarChart3,
       items: [
+        { href: "/instrument/explorations", label: t("explorations"), hint: "One hypothesis each: its frozen rules, its receipt, its report and its review", icon: FlaskConical },
         { href: "/instrument/graph", label: t("graph"), hint: "Every decision as a node, with the strength of the evidence behind it", icon: Workflow , needsData: true },
         { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 , needsData: true },
         { href: "/instrument/stratum", label: t("stratum"), hint: "One cell opened into its proteins, banded by length and by donor identity", icon: Rows3 , needsData: true },

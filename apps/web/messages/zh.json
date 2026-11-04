@@ -80,7 +80,8 @@
     "apiKeysHint": "创建、查看和撤销程序访问密钥",
     "dlq": "死信队列",
     "dlqHint": "审计和清理 DLQ 中的失败消息",
-    "modelWeights": "模型权重"
+    "modelWeights": "模型权重",
+    "explorations": "探索"
   },
   "home": {
     "title": "蛋白质功能预测流水线",
@@ -2389,6 +2390,67 @@
       "reader": "读取器",
       "generator": "生成器",
       "method_bundle": "方法包"
+    }
+  },
+  "explorations": {
+    "title": "探索",
+    "intro": "每个探索对应一个可证伪的假设，在一个时间窗口上作答，规则在读取任何数字之前冻结。按所回答的问题分组，从不按数值排序。凭据由数据行计算；报告由数据行生成并完整保存在日志中；决定由作者做出。",
+    "includeArchived": "显示已归档的探索",
+    "empty": "暂无探索。",
+    "loading": "加载中…",
+    "number": "探索 {number}",
+    "postHoc": "事后：冻结规则时某个分支在此窗口中已有结果，因此等级为探索性。",
+    "kinds": {
+      "one_axis": "单轴",
+      "full_method": "完整方法",
+      "instrument": "仪器"
+    },
+    "states": {
+      "draft": "草稿",
+      "running": "运行中",
+      "reported": "已出报告",
+      "decided": "已决定"
+    },
+    "blocks": {
+      "rules": "冻结的规则",
+      "receipt": "凭据",
+      "report": "报告",
+      "review": "审查与决定",
+      "links": "它使用和产生的一切"
+    },
+    "fields": {
+      "hypothesis": "假设",
+      "window": "窗口",
+      "proposer": "提出者",
+      "launcher": "启动者",
+      "reviewer": "审查者"
+    },
+    "receipt": {
+      "blocksVerdict": "阻止裁定",
+      "nothingBlocks": "凭据中没有阻止裁定的内容。"
+    },
+    "report": {
+      "none": "尚无报告：探索运行后生成。",
+      "verdict": "裁定",
+      "grade": "等级",
+      "noVerdict": "无",
+      "panel": "面板",
+      "status": "状态",
+      "reading": "读数"
+    },
+    "moves": {
+      "launch": "冻结规则并启动",
+      "report": "生成报告",
+      "review": "标记为已审查"
+    },
+    "decision": {
+      "awaitingReview": "决定需等待审查。",
+      "signIn": "决定由作者在已登录的会话中做出。",
+      "meaning": "接受表示测量及其解读成立，而不是假设为真：被接受的反对结果也是结果。",
+      "accepted": "接受",
+      "rejected": "拒绝",
+      "why": "原因，用你自己的话",
+      "submit": "记录决定"
     }
   }
 }

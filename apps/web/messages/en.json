@@ -79,7 +79,8 @@
     "apiKeysHint": "Mint, list and revoke programmatic access keys",
     "dlq": "Dead-letter queue",
     "dlqHint": "Audit and drain failed messages from the DLQ",
-    "modelWeights": "Model weights"
+    "modelWeights": "Model weights",
+    "explorations": "Explorations"
   },
   "home": {
     "title": "Protein Function Prediction Pipeline",
@@ -2388,6 +2389,67 @@
       "reader": "Reader",
       "generator": "Generator",
       "method_bundle": "Method bundle"
+    }
+  },
+  "explorations": {
+    "title": "Explorations",
+    "intro": "One falsifiable hypothesis per exploration, answered on one window under rules frozen before any number is read. Grouped by the question they answer and never sorted by a figure. The receipt is computed from rows; the report is generated from rows and kept whole in the log; the decision is the author's.",
+    "includeArchived": "Show archived explorations",
+    "empty": "No explorations yet.",
+    "loading": "Loading…",
+    "number": "Exploration {number}",
+    "postHoc": "Post hoc: an arm already had results in this window when the rules were frozen, so the grade is exploratory.",
+    "kinds": {
+      "one_axis": "one axis",
+      "full_method": "full method",
+      "instrument": "instrument"
+    },
+    "states": {
+      "draft": "draft",
+      "running": "running",
+      "reported": "reported",
+      "decided": "decided"
+    },
+    "blocks": {
+      "rules": "Frozen rules",
+      "receipt": "Receipt",
+      "report": "Report",
+      "review": "Review and decision",
+      "links": "Everything it uses and produces"
+    },
+    "fields": {
+      "hypothesis": "Hypothesis",
+      "window": "window",
+      "proposer": "proposed by",
+      "launcher": "launched by",
+      "reviewer": "reviewed by"
+    },
+    "receipt": {
+      "blocksVerdict": "Blocks a verdict",
+      "nothingBlocks": "Nothing in the receipt blocks a verdict."
+    },
+    "report": {
+      "none": "No report yet: it is generated once the exploration has run.",
+      "verdict": "Verdict",
+      "grade": "Grade",
+      "noVerdict": "none",
+      "panel": "Panel",
+      "status": "Status",
+      "reading": "Reading"
+    },
+    "moves": {
+      "launch": "Freeze the rules and launch",
+      "report": "Generate the report",
+      "review": "Mark as reviewed"
+    },
+    "decision": {
+      "awaitingReview": "The decision waits for the review.",
+      "signIn": "The decision is the author's, from a signed-in session.",
+      "meaning": "Accepting means the measure and its reading hold, not that the hypothesis is true: an accepted result against it is a result.",
+      "accepted": "Accept",
+      "rejected": "Reject",
+      "why": "Why, in your words",
+      "submit": "Record the decision"
     }
   }
 }

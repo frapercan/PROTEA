@@ -79,7 +79,8 @@
     "apiKeysHint": "Emitir, listar y revocar claves de acceso programatico",
     "dlq": "Cola de mensajes muertos",
     "dlqHint": "Auditar y purgar mensajes fallidos de la DLQ",
-    "modelWeights": "Pesos de modelos"
+    "modelWeights": "Pesos de modelos",
+    "explorations": "Exploraciones"
   },
   "home": {
     "title": "Pipeline de Prediccion de Funcion Proteica",
@@ -2388,6 +2389,67 @@
       "reader": "Lector",
       "generator": "Generador",
       "method_bundle": "Paquete de método"
+    }
+  },
+  "explorations": {
+    "title": "Exploraciones",
+    "intro": "Una hipótesis falsable por exploración, respondida en una ventana con reglas congeladas antes de leer ningún número. Agrupadas por la pregunta que responden y nunca ordenadas por una cifra. El recibo se calcula a partir de filas; el informe se genera a partir de filas y se guarda entero en el registro; la decisión es del autor.",
+    "includeArchived": "Mostrar las exploraciones archivadas",
+    "empty": "Todavía no hay exploraciones.",
+    "loading": "Cargando…",
+    "number": "Exploración {number}",
+    "postHoc": "A posteriori: un brazo ya tenía resultados en esta ventana cuando se congelaron las reglas, así que el grado es exploratorio.",
+    "kinds": {
+      "one_axis": "un eje",
+      "full_method": "método completo",
+      "instrument": "instrumento"
+    },
+    "states": {
+      "draft": "borrador",
+      "running": "en marcha",
+      "reported": "con informe",
+      "decided": "decidida"
+    },
+    "blocks": {
+      "rules": "Reglas congeladas",
+      "receipt": "Recibo",
+      "report": "Informe",
+      "review": "Revisión y decisión",
+      "links": "Todo lo que usa y produce"
+    },
+    "fields": {
+      "hypothesis": "Hipótesis",
+      "window": "ventana",
+      "proposer": "propuesta por",
+      "launcher": "lanzada por",
+      "reviewer": "revisada por"
+    },
+    "receipt": {
+      "blocksVerdict": "Impide un veredicto",
+      "nothingBlocks": "Nada en el recibo impide un veredicto."
+    },
+    "report": {
+      "none": "Aún no hay informe: se genera cuando la exploración ha corrido.",
+      "verdict": "Veredicto",
+      "grade": "Grado",
+      "noVerdict": "ninguno",
+      "panel": "Panel",
+      "status": "Estado",
+      "reading": "Lectura"
+    },
+    "moves": {
+      "launch": "Congelar las reglas y lanzar",
+      "report": "Generar el informe",
+      "review": "Marcar como revisada"
+    },
+    "decision": {
+      "awaitingReview": "La decisión espera a la revisión.",
+      "signIn": "La decisión es del autor, desde una sesión iniciada.",
+      "meaning": "Aceptar significa que la medida y su lectura se sostienen, no que la hipótesis sea cierta: un resultado aceptado en contra es un resultado.",
+      "accepted": "Aceptar",
+      "rejected": "Rechazar",
+      "why": "Por qué, con tus palabras",
+      "submit": "Registrar la decisión"
     }
   }
 }

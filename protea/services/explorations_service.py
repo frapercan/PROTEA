@@ -462,6 +462,7 @@ def archive(session: Session, exploration: Exploration, reason: str, actor: Acto
 _HEADLINE = (
     "number",
     "title",
+    "question",
     "kind",
     "state",
     "archived_reason",
