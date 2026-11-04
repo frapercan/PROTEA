@@ -39,7 +39,7 @@ dependencies = [
     "uvicorn (>=0.41.0,<0.42.0)",
     "pydantic-settings (>=2.0,<3.0)",
     "prometheus-client (>=0.20.0,<1.0.0)",
-    "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@74d329ff22a77baa5142f477889dd6e2e2ca2a4f",
+    "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@dd335182a6624a82e3285df9d04a7ace3402effd",
     "argon2-cffi (>=23.1.0,<26.0.0)",
     "minio (>=7.2,<8.0)",
     "scipy (>=1.11.0,<2.0.0)",
@@ -80,10 +80,10 @@ priority = "explicit"
 # NOTE: protea-contracts is a MAIN dependency (imported at runtime by
 # protea.core.contracts.operation); the remaining four are optional
 # plugin extras installed via --with plugins.
-protea-method = { git = "https://github.com/frapercan/protea-method.git", rev = "a120f613b9d2f1646ab5a566f97a8eadc1310a23" }
-protea-sources = { git = "https://github.com/frapercan/protea-sources.git", rev = "fc43ab942ebec811afae25eda3be18b3f37d0e46" }
-protea-runners = { git = "https://github.com/frapercan/protea-runners.git", rev = "ccd06fd80c12b5195339478dae7255d1ea58f4a6" }
-protea-backends = { git = "https://github.com/frapercan/protea-backends.git", rev = "86e826055fbfa7239bc8cca0af98095772a684c7" }
+protea-method = { git = "https://github.com/frapercan/protea-method.git", rev = "10490506ce2cde1c1e401daf4773e81552347003" }
+protea-sources = { git = "https://github.com/frapercan/protea-sources.git", rev = "fa42f5963c5a55fd5669862c727ee690bd573168" }
+protea-runners = { git = "https://github.com/frapercan/protea-runners.git", rev = "fb8ae81b5674a94e2d8ec29c68f21c944510501f" }
+protea-backends = { git = "https://github.com/frapercan/protea-backends.git", rev = "5fec3f59453714fb18d31d3bd43a502ad244c5d7" }
 
 
 [build-system]
@@ -142,7 +142,7 @@ hypothesis = ">=6.100,<7"
 # on ``--timeout=<seconds>`` to cap runaway mutants.
 cosmic-ray = ">=8.4.6,<9.0.0"
 pytest-timeout = ">=2.3,<3"
-protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", rev = "6d4dc2d4b5330485b8830b20f7789356af7be1d4"}
+protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", rev = "434cc6db40e8d36bd36f8f0d51ad0dbb93be08c3"}
 
 
 [tool.poetry.group.profiling]

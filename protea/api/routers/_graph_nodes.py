@@ -256,6 +256,7 @@ _BANK_FIELDS: tuple[str, ...] = (
     "donor_reviewed_only",
     "donor_evidence_codes",
     "donor_exclusions",
+    "donor_admitted_by_release",
 )
 
 
