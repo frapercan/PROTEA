@@ -31,6 +31,7 @@ from protea.api.routers import benchmark as benchmark_router
 from protea.api.routers import datasets as datasets_router
 from protea.api.routers import embeddings as embeddings_router
 from protea.api.routers import experiment_runs as experiment_runs_router
+from protea.api.routers import explorations as explorations_router
 from protea.api.routers import features as features_router
 from protea.api.routers import graph as graph_router
 from protea.api.routers import jobs as jobs_router
@@ -215,6 +216,7 @@ _ROUTER_MODULES = (
     datasets_router,
     reranker_models_router,
     model_weights_router,
+    explorations_router,
     registry_router,
     features_router,
     stack_router,

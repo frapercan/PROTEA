@@ -653,6 +653,226 @@
         "title": "ExperimentRunStatus",
         "type": "string"
       },
+      "ExplorationAmendRequest": {
+        "description": "Frozen rules changed after launch, with the reason; the log keeps both fingerprints.",
+        "properties": {
+          "reason": {
+            "description": "Why they change after being frozen.",
+            "title": "Reason",
+            "type": "string"
+          },
+          "rules": {
+            "additionalProperties": true,
+            "description": "The amended rules, whole.",
+            "title": "Rules",
+            "type": "object"
+          }
+        },
+        "required": [
+          "rules",
+          "reason"
+        ],
+        "title": "ExplorationAmendRequest",
+        "type": "object"
+      },
+      "ExplorationArchiveRequest": {
+        "description": "Archiving, with its reason. Nothing is deleted.",
+        "properties": {
+          "reason": {
+            "description": "abandoned, closed, superseded or withdrawn.",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ExplorationArchiveRequest",
+        "type": "object"
+      },
+      "ExplorationCreateRequest": {
+        "description": "A hypothesis, the one window it is answered on, and its draft rules.",
+        "properties": {
+          "evaluation_set_id": {
+            "description": "The evaluation window.",
+            "format": "uuid",
+            "title": "Evaluation Set Id",
+            "type": "string"
+          },
+          "hypothesis": {
+            "description": "The falsifiable claim, stated before any number.",
+            "title": "Hypothesis",
+            "type": "string"
+          },
+          "kind": {
+            "description": "one_axis, full_method or instrument.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "question": {
+            "description": "The question it answers.",
+            "title": "Question",
+            "type": "string"
+          },
+          "rules": {
+            "additionalProperties": true,
+            "description": "The draft rules.",
+            "title": "Rules",
+            "type": "object"
+          },
+          "title": {
+            "description": "What a person calls it, in a line.",
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "question",
+          "hypothesis",
+          "kind",
+          "evaluation_set_id"
+        ],
+        "title": "ExplorationCreateRequest",
+        "type": "object"
+      },
+      "ExplorationDecisionRequest": {
+        "description": "The author's decision on a reviewed exploration.",
+        "properties": {
+          "decision": {
+            "description": "accepted or rejected.",
+            "title": "Decision",
+            "type": "string"
+          },
+          "text": {
+            "description": "Why, in the author's words.",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "text"
+        ],
+        "title": "ExplorationDecisionRequest",
+        "type": "object"
+      },
+      "ExplorationEventRequest": {
+        "description": "An objection, a reply or an answered check, on a reported exploration.",
+        "properties": {
+          "body": {
+            "additionalProperties": true,
+            "description": "What is said: the text, the cell, the answer.",
+            "title": "Body",
+            "type": "object"
+          },
+          "event": {
+            "description": "objection, reply or check_answered.",
+            "title": "Event",
+            "type": "string"
+          },
+          "link_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The link it is about, if any.",
+            "title": "Link Id"
+          }
+        },
+        "required": [
+          "event"
+        ],
+        "title": "ExplorationEventRequest",
+        "type": "object"
+      },
+      "ExplorationLinkRequest": {
+        "description": "One object the exploration uses or produces: exactly one target.",
+        "properties": {
+          "arm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The arm's name, for an arm's link.",
+            "title": "Arm"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the target may be collected; mandatory for temporary.",
+            "title": "Expires At"
+          },
+          "owned": {
+            "default": false,
+            "description": "Whether the exploration created the target.",
+            "title": "Owned",
+            "type": "boolean"
+          },
+          "role": {
+            "description": "input, arm, result, strata, comparison, job, temporary, reference, supports or supersedes.",
+            "title": "Role",
+            "type": "string"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The target's footprint.",
+            "title": "Size Bytes"
+          },
+          "target": {
+            "additionalProperties": true,
+            "description": "Exactly one target, e.g. {'prediction_set_id': '...'}; a store key travels with its sha256.",
+            "title": "Target",
+            "type": "object"
+          }
+        },
+        "required": [
+          "role",
+          "target"
+        ],
+        "title": "ExplorationLinkRequest",
+        "type": "object"
+      },
+      "ExplorationRulesRequest": {
+        "description": "A draft's rules, replaced whole.",
+        "properties": {
+          "rules": {
+            "additionalProperties": true,
+            "description": "The rules, whole.",
+            "title": "Rules",
+            "type": "object"
+          }
+        },
+        "required": [
+          "rules"
+        ],
+        "title": "ExplorationRulesRequest",
+        "type": "object"
+      },
       "FeatureDocInfo": {
         "description": "One feature's canonical documentation, mirroring\n:class:`protea_contracts.feature_docs.FeatureDoc`.\n\nEvery field is copied verbatim from the contract; ``status`` is\nlowered to its string value so the frontend can key a badge off it\nwithout importing the Python enum.",
         "properties": {
@@ -7343,6 +7563,982 @@
         "summary": "Update an experiment run",
         "tags": [
           "experiment-runs"
+        ]
+      }
+    },
+    "/v1/explorations": {
+      "get": {
+        "description": "Explorations by number, never sorted by a figure.",
+        "operationId": "list_explorations_v1_explorations_get",
+        "parameters": [
+          {
+            "description": "Only explorations in this state: draft, running, ...",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only explorations in this state: draft, running, ...",
+              "title": "State"
+            }
+          },
+          {
+            "description": "Only explorations answered on this window.",
+            "in": "query",
+            "name": "evaluation_set_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only explorations answered on this window.",
+              "title": "Evaluation Set Id"
+            }
+          },
+          {
+            "description": "Include archived explorations, which are hidden by default.",
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include archived explorations, which are hidden by default.",
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Explorations V1 Explorations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List explorations, by number",
+        "tags": [
+          "explorations"
+        ]
+      },
+      "post": {
+        "description": "A draft, numbered after the last one; the caller is its proposer.",
+        "operationId": "create_exploration_v1_explorations_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplorationCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Exploration V1 Explorations Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create a draft exploration",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
+    "/v1/explorations/{ref}": {
+      "get": {
+        "description": "One exploration, by id or number, with its links and its log, oldest event first.",
+        "operationId": "get_exploration_v1_explorations__ref__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Exploration V1 Explorations  Ref  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "One exploration with its rules, links and log",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
+    "/v1/explorations/{ref}/amendments": {
+      "post": {
+        "description": "Change frozen rules; the log records both fingerprints and the reason.",
+        "operationId": "amend_rules_v1_explorations__ref__amendments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplorationAmendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Amend Rules V1 Explorations  Ref  Amendments Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Amend frozen rules, with a reason",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
+    "/v1/explorations/{ref}/archive": {
+      "post": {
+        "description": "Archive an exploration with its reason. It stays readable; superseded ones struck through.",
+        "operationId": "archive_exploration_v1_explorations__ref__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplorationArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Archive Exploration V1 Explorations  Ref  Archive Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive with a reason; nothing is deleted",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
+    "/v1/explorations/{ref}/decision": {
+      "post": {
+        "description": "Accept or reject a reviewed exploration. Refused to an API key, whatever its role.",
+        "operationId": "decide_exploration_v1_explorations__ref__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplorationDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Exploration V1 Explorations  Ref  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "The author's decision, from a user session only",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
+    "/v1/explorations/{ref}/events": {
+      "post": {
+        "description": "Append an objection, a reply or an answered check to a reported exploration's log.",
+        "operationId": "append_event_v1_explorations__ref__events_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplorationEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Append Event V1 Explorations  Ref  Events Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "An objection, a reply or a check",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
+    "/v1/explorations/{ref}/launch": {
+      "post": {
+        "description": "Freeze the rules with their fingerprint and the database time.\n\nThe launcher must be a principal other than the proposer. The exploration is\nmarked post hoc when an arm already had results in its window.",
+        "operationId": "launch_exploration_v1_explorations__ref__launch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Launch Exploration V1 Explorations  Ref  Launch Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Freeze the rules and start running",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
+    "/v1/explorations/{ref}/links": {
+      "post": {
+        "description": "Link one object to a draft or running exploration; the target cannot then be deleted.",
+        "operationId": "link_object_v1_explorations__ref__links_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplorationLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Link Object V1 Explorations  Ref  Links Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Link one object to the exploration",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
+    "/v1/explorations/{ref}/review": {
+      "post": {
+        "description": "Mark a reported exploration reviewed; its proposer cannot.",
+        "operationId": "review_exploration_v1_explorations__ref__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Review Exploration V1 Explorations  Ref  Review Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "The reviewer's mark, which the decision requires",
+        "tags": [
+          "explorations"
+        ]
+      }
+    },
+    "/v1/explorations/{ref}/rules": {
+      "put": {
+        "description": "Replace a draft's rules whole. Once launched, only an amendment changes them.",
+        "operationId": "edit_rules_v1_explorations__ref__rules_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplorationRulesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Edit Rules V1 Explorations  Ref  Rules Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replace a draft's rules",
+        "tags": [
+          "explorations"
         ]
       }
     },

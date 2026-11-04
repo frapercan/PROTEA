@@ -28,6 +28,7 @@ from protea.infrastructure.orm.models.exploration.exploration import Exploration
 from protea.infrastructure.orm.models.exploration.exploration_event import ExplorationEvent
 from protea.infrastructure.orm.models.exploration.exploration_link import ExplorationLink
 from protea.infrastructure.orm.models.exploration.external_reference import ExternalReference
+from tests.helpers.windows import make_window
 
 TABLES = ("external_reference", "exploration", "exploration_link", "exploration_event")
 
@@ -234,28 +235,7 @@ class TestTheEventAndTheReference:
 
 
 def _seed_window(session: Session) -> uuid.UUID:
-    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-    from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
-    from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
-
-    snapshot = OntologySnapshot(obo_url="file:///none", obo_version="exploration-test")
-    session.add(snapshot)
-    session.flush()
-    old = AnnotationSet(source="goa", source_version="211", ontology_snapshot_id=snapshot.id)
-    new = AnnotationSet(source="goa", source_version="227", ontology_snapshot_id=snapshot.id)
-    session.add_all([old, new])
-    session.flush()
-    window = EvaluationSet(
-        old_annotation_set_id=old.id,
-        new_annotation_set_id=new.id,
-        pivot_snapshot_id=snapshot.id,
-        old_native_snapshot_id=snapshot.id,
-        new_native_snapshot_id=snapshot.id,
-        stats={},
-    )
-    session.add(window)
-    session.flush()
-    return window.id
+    return make_window(session, snapshot_version="exploration-test")
 
 
 @pytest.fixture()

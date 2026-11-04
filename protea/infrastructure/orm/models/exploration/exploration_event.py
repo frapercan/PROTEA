@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     event,
     func,
@@ -60,7 +61,10 @@ class ExplorationEvent(Base):
         CheckConstraint(check_in("event", EVENT_TYPES), name="ck_exploration_event_type"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    #: BIGSERIAL on Postgres; on SQLite only an INTEGER key autoincrements.
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
     exploration_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("exploration.id", ondelete="RESTRICT"),
