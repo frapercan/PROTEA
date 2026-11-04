@@ -16,8 +16,11 @@ FIRST VERSIONS, written down so the review can change them on purpose:
   a blocking check forbids a verdict, ``against`` when the base wins any
   deciding panel, ``for`` when the candidate wins all of them, ``equal`` when
   every one is a null with power, and ``underpowered`` otherwise. An
-  instrument reads its predicate instead: ``for`` when every deciding delta is
-  within the rules' ``tolerance``, zero by default, and ``against`` otherwise.
+  instrument reads its predicate instead, because a repeatability test is an
+  assertion of identity and power does not apply to it: ``for`` when its two
+  runs hold the same rows, with zero tolerance, and every deciding panel's
+  delta is within the rules' ``panel_tolerance``, zero by default; ``against``
+  otherwise, naming the first row that differs.
 * The grade: ``exploratory`` when the rules were frozen post hoc or a blocking
   check fails; ``check`` for an instrument; ``thesis`` on a test window;
   ``development`` on a validation window; ``exploratory`` otherwise. Whether a
@@ -148,19 +151,26 @@ def checklist(
     }
 
 
-def _instrument_verdict(panels: list[dict[str, Any]], tolerance: float) -> str:
-    """An instrument reads its predicate, not its power.
+def _instrument_verdict(
+    identity: dict[str, Any], panels: list[dict[str, Any]], panel_tolerance: float
+) -> str | None:
+    """An instrument reads its predicate: identical rows, panels within their tolerance.
 
-    Two runs that agree byte for byte give a delta of exactly zero in every
-    pair, so the paired bootstrap is degenerate and every panel comes back
-    ``unresolvable``. Read for power that is ``underpowered``, which says the
-    opposite of what happened. An instrument holds when every deciding panel's
-    delta is within the tolerance its rules declare, zero by default.
+    A repeatability test is an assertion of identity, and power does not apply
+    to it: two runs that agree byte for byte give a delta of exactly zero in
+    every pair, the paired bootstrap is degenerate, and every panel comes back
+    ``unresolvable``, which read for power says the opposite of what happened.
+    The rows decide, with zero tolerance (see ``exploration_identity``). The
+    panels only corroborate, because stored metrics are rounded to four
+    decimals: a panel delta beyond the declared tolerance breaks the instrument,
+    and a panel without a delta takes nothing away from identical rows.
     """
+    if identity.get("identical") is None:
+        return None
+    if not identity["identical"]:
+        return "against"
     deltas = [p.get("delta") for p in panels]
-    if any(d is None for d in deltas):
-        return "underpowered"
-    within = all(d is not None and abs(float(d)) <= tolerance for d in deltas)
+    within = all(d is None or abs(float(d)) <= panel_tolerance for d in deltas)
     return "for" if within else "against"
 
 
@@ -169,12 +179,12 @@ def verdict(
     comparisons: list[dict[str, Any]],
     deciding: list[str] | None,
     *,
-    instrument_tolerance: float | None = None,
+    instrument: dict[str, Any] | None = None,
 ) -> str | None:
     """The reading of the deciding panels, or None when nothing was compared.
 
-    ``instrument_tolerance`` is set for an instrument, whose verdict reads its
-    predicate; see :func:`_instrument_verdict`.
+    ``instrument`` carries an instrument's row identity and its panel
+    tolerance; its verdict reads them instead (see :func:`_instrument_verdict`).
     """
     if blocks:
         return "blocked"
@@ -184,10 +194,10 @@ def verdict(
         for key, panel in comparison["panels"].items()
         if not deciding or key in deciding
     ]
+    if instrument is not None:
+        return _instrument_verdict(instrument["identity"], panels, instrument["panel_tolerance"])
     if not panels:
         return None
-    if instrument_tolerance is not None:
-        return _instrument_verdict(panels, instrument_tolerance)
     if any(p.get("verdict") == "b_greater" for p in panels):
         return "against"
     if all(p.get("verdict") == "a_greater" for p in panels):
@@ -195,6 +205,20 @@ def verdict(
     if all(p.get("status") == "null_with_power" for p in panels):
         return "equal"
     return "underpowered"
+
+
+def _identity(session: Session, exploration: Exploration) -> dict[str, Any]:
+    """An instrument's two runs compared row for row, or why they cannot be."""
+    from protea.services.exploration_identity import row_identity
+
+    rows = receipt.arm_rows(session, exploration)
+    if len(rows) != 2:
+        return {
+            "identical": None,
+            "detail": f"an instrument compares two runs with a prediction set each; {len(rows)} linked",
+        }
+    a, b = (str(row["id"]) for row in rows.values())
+    return {"arms": list(rows), **row_identity(session, a, b)}
 
 
 def grade(exploration: Exploration, window_role: str | None, failed_blocking: bool) -> str:
@@ -219,6 +243,14 @@ def build(session: Session, exploration: Exploration) -> tuple[dict[str, Any], s
     comparisons = _comparisons(session, exploration)
     deciding = (exploration.rules or {}).get("deciding_panels")
     blocks = list(computed["blocks_verdict"]) + [f"check failed: {k}" for k in failed]
+    instrument = (
+        {
+            "identity": _identity(session, exploration),
+            "panel_tolerance": float((exploration.rules or {}).get("panel_tolerance", 0.0)),
+        }
+        if exploration.kind == "instrument"
+        else None
+    )
     report = {
         "exploration": {
             "id": str(exploration.id),
@@ -237,16 +269,8 @@ def build(session: Session, exploration: Exploration) -> tuple[dict[str, Any], s
         "deciding_panels": deciding or "every compared panel; none declared",
         "checklist": {"version": CHECKLIST_VERSION, "items": checks},
         "blocks_verdict": blocks,
-        "verdict": verdict(
-            blocks,
-            comparisons,
-            deciding,
-            instrument_tolerance=(
-                float((exploration.rules or {}).get("tolerance", 0.0))
-                if exploration.kind == "instrument"
-                else None
-            ),
-        ),
+        "identity": instrument["identity"] if instrument else None,
+        "verdict": verdict(blocks, comparisons, deciding, instrument=instrument),
         "grade": grade(exploration, window.window_role if window else None, bool(failed)),
     }
     return report, rules_fingerprint(report)

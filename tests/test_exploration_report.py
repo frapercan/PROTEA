@@ -61,31 +61,50 @@ class TestTheVerdict:
 
 
 class TestAnInstrumentReadsItsPredicate:
-    """Identical runs make a degenerate bootstrap; that is the instrument holding."""
+    """A repeatability test asserts identity: the rows decide, the panels corroborate."""
 
-    IDENTICAL = {"status": "unresolvable", "verdict": "not_resolved", "delta": 0.0}
+    IDENTICAL_PANEL = {"status": "unresolvable", "verdict": "not_resolved", "delta": 0.0}
+    SAME = {"identical": True, "rows": {"a": 10, "b": 10}, "first_difference": None}
+    DIFFERENT = {
+        "identical": False,
+        "rows": {"a": 10, "b": 10},
+        "first_difference": {"protein_accession": "P1", "go_term_id": 7, "a": "x", "b": "y"},
+    }
 
-    def test_identical_runs_hold_the_instrument(self) -> None:
-        panels = {"NK:BPO": self.IDENTICAL, "PK:MFO": self.IDENTICAL}
-        assert report.verdict([], _comparison(**panels), None, instrument_tolerance=0.0) == "for"
-
-    def test_any_delta_beyond_the_tolerance_breaks_it(self) -> None:
-        panels = {"NK:BPO": self.IDENTICAL, "PK:MFO": {**self.IDENTICAL, "delta": 0.0004}}
-        assert (
-            report.verdict([], _comparison(**panels), None, instrument_tolerance=0.0) == "against"
+    def _verdict(
+        self, identity: dict[str, Any], panels: dict[str, Any], tolerance: float = 0.0
+    ) -> Any:
+        return report.verdict(
+            [],
+            _comparison(**panels) if panels else [],
+            None,
+            instrument={"identity": identity, "panel_tolerance": tolerance},
         )
-        assert report.verdict([], _comparison(**panels), None, instrument_tolerance=0.001) == "for"
 
-    def test_a_panel_without_a_delta_cannot_hold_it(self) -> None:
-        panels = {"NK:BPO": {"status": "refused", "verdict": "not_computed"}}
-        assert (
-            report.verdict([], _comparison(**panels), None, instrument_tolerance=0.0)
-            == "underpowered"
-        )
+    def test_identical_rows_hold_the_instrument_even_without_panels(self) -> None:
+        assert self._verdict(self.SAME, {}) == "for"
+
+    def test_identical_rows_and_identical_panels_hold_it(self) -> None:
+        assert self._verdict(self.SAME, {"NK:BPO": self.IDENTICAL_PANEL}) == "for"
+
+    def test_rows_that_differ_break_it_whatever_the_panels_say(self) -> None:
+        # The panels are rounded to four decimals: a zero delta there is an
+        # upper bound on equality, and it cannot outvote a row that differs.
+        assert self._verdict(self.DIFFERENT, {"NK:BPO": self.IDENTICAL_PANEL}) == "against"
+
+    def test_a_panel_beyond_its_tolerance_breaks_it(self) -> None:
+        moved = {"NK:BPO": {**self.IDENTICAL_PANEL, "delta": 0.0004}}
+        assert self._verdict(self.SAME, moved) == "against"
+        assert self._verdict(self.SAME, moved, tolerance=0.001) == "for"
+
+    def test_without_two_runs_there_is_no_verdict(self) -> None:
+        assert self._verdict({"identical": None}, {}) is None
 
     def test_read_for_power_the_same_panels_would_say_the_opposite(self) -> None:
-        panels = {"NK:BPO": self.IDENTICAL}
-        assert report.verdict([], _comparison(**panels), None) == "underpowered"
+        assert (
+            report.verdict([], _comparison(**{"NK:BPO": self.IDENTICAL_PANEL}), None)
+            == "underpowered"
+        )
 
 
 def _exploration(**over: Any) -> Any:

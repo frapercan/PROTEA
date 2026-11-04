@@ -178,3 +178,48 @@ def test_the_report_is_built_from_real_rows_and_blocks_an_undeclared_population(
     assert any("membership is not declared" in p for p in items["no_leak"]["problems"])
     assert (row.state, row.verdict, row.grade) == ("reported", "blocked", "exploratory")
     assert len(body["sha256"]) == 64
+
+
+def _set_with_rows(pg: Session, parents: dict[str, Any], rows: dict[tuple[str, int], float]) -> Any:
+    from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+
+    pset = make_prediction_set(pg, parents, {})
+    for (accession, term), distance in rows.items():
+        pg.add(
+            GOPrediction(
+                prediction_set_id=pset,
+                protein_accession=accession,
+                go_term_id=term,
+                ref_protein_accession="R1",
+                distance=distance,
+            )
+        )
+    pg.flush()
+    return pset
+
+
+def test_row_identity_sees_one_double_move(pg: Session) -> None:
+    from protea.infrastructure.orm.models.annotation.go_term import GOTerm
+    from protea.services.exploration_identity import row_identity
+
+    parents = make_parents(pg)
+    terms = [
+        GOTerm(go_id=f"GO:000000{i}", ontology_snapshot_id=parents["snapshot"]) for i in range(3)
+    ]
+    pg.add_all(terms)
+    pg.flush()
+    rows = {("P1", terms[0].id): 0.1, ("P1", terms[1].id): 0.2, ("P2", terms[2].id): 0.3}
+    a = _set_with_rows(pg, parents, rows)
+    b = _set_with_rows(pg, parents, rows)
+    assert row_identity(pg, str(a), str(b)) == {
+        "identical": True,
+        "rows": {"a": 3, "b": 3},
+        "first_difference": None,
+    }
+    # One distance one unit in the last place away: the same panels, a different run.
+    c = _set_with_rows(pg, parents, {**rows, ("P2", terms[2].id): 0.30000000000000004})
+    moved = row_identity(pg, str(a), str(c))
+    assert moved["identical"] is False
+    assert moved["first_difference"]["protein_accession"] == "P2"
+    assert moved["first_difference"]["go_term_id"] == terms[2].id
+    assert moved["first_difference"]["a"] != moved["first_difference"]["b"]
