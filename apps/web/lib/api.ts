@@ -2023,3 +2023,112 @@ export function getFeatureRegistry() {
 export function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+// ---------------------------------------------------------------------------
+// Evaluated explorations (ADR-D55)
+// ---------------------------------------------------------------------------
+
+export const EXPLORATION_STATES = ["draft", "running", "reported", "decided"] as const;
+export type ExplorationState = (typeof EXPLORATION_STATES)[number];
+
+/** One exploration as GET /explorations lists it: never sorted by a figure. */
+export type ExplorationHeadline = {
+  id: string;
+  number: number;
+  title: string;
+  /** The question it answers; the list groups by it. */
+  question: string;
+  kind: "one_axis" | "full_method" | "instrument";
+  state: ExplorationState;
+  archived_reason: string | null;
+  grade: string | null;
+  verdict: string | null;
+  post_hoc: boolean;
+  proposer: string;
+  launcher: string | null;
+  reviewer: string | null;
+  decision: string | null;
+  evaluation_set_id: string;
+  created_at: string | null;
+};
+
+export type ExplorationLink = {
+  id: string;
+  role: string;
+  arm: string | null;
+  owned: boolean;
+  expires_at: string | null;
+  target: Record<string, string>;
+};
+
+export type ExplorationEvent = {
+  at: string | null;
+  actor: string;
+  actor_type: "user" | "api_key" | "server";
+  event: string;
+  body: Record<string, unknown>;
+  link_id: string | null;
+};
+
+/** One exploration with its rules, its links and its log, oldest event first. */
+export type Exploration = ExplorationHeadline & {
+  hypothesis: string;
+  rules: Record<string, unknown>;
+  rules_sha256: string | null;
+  rules_frozen_at: string | null;
+  rules_frozen_by: string | null;
+  decision_text: string | null;
+  decided_at: string | null;
+  decided_by: string | null;
+  archived_at: string | null;
+  report_sha256: string | null;
+  links: ExplorationLink[];
+  events: ExplorationEvent[];
+};
+
+/** The receipt, computed from rows on every read; a layer may say "not recorded". */
+export type ExplorationReceipt = {
+  layers: Record<string, { status: string } & Record<string, unknown>>;
+  blocks_launch: string[];
+  blocks_verdict: string[];
+};
+
+export function listExplorations(includeArchived = false) {
+  const q = includeArchived ? "?include_archived=true" : "";
+  return http<ExplorationHeadline[]>(`/explorations${q}`);
+}
+
+export function getExploration(ref: string) {
+  return http<Exploration>(`/explorations/${encodeURIComponent(ref)}`);
+}
+
+export function getExplorationReceipt(ref: string) {
+  return http<ExplorationReceipt>(`/explorations/${encodeURIComponent(ref)}/receipt`);
+}
+
+/** A move with no body: launch, report or review. */
+export function moveExploration(ref: string, move: "launch" | "report" | "review") {
+  return http<Exploration>(`/explorations/${encodeURIComponent(ref)}/${move}`, { method: "POST" });
+}
+
+/** The author's decision. The server refuses it to anything but a user session. */
+export function decideExploration(ref: string, decision: "accepted" | "rejected", text: string) {
+  return http<Exploration>(`/explorations/${encodeURIComponent(ref)}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision, text }),
+  });
+}
+
+/** An objection, a reply or an answered check, on a reported exploration. */
+export function appendExplorationEvent(
+  ref: string,
+  event: "objection" | "reply" | "check_answered",
+  body: Record<string, unknown>,
+) {
+  return http<Exploration>(`/explorations/${encodeURIComponent(ref)}/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event, body }),
+  });
+}

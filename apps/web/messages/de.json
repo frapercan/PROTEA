@@ -80,7 +80,8 @@
     "apiKeysHint": "Programmatische Zugriffsschlussel erstellen, listen, widerrufen",
     "dlq": "Warteschlange fur fehlerhafte Nachrichten",
     "dlqHint": "Fehlerhafte Nachrichten in der DLQ prufen und bereinigen",
-    "modelWeights": "Modellgewichte"
+    "modelWeights": "Modellgewichte",
+    "explorations": "Explorationen"
   },
   "home": {
     "title": "Pipeline zur Vorhersage von Proteinfunktionen",
@@ -2389,6 +2390,67 @@
       "reader": "Leser",
       "generator": "Generator",
       "method_bundle": "Methodenpaket"
+    }
+  },
+  "explorations": {
+    "title": "Explorationen",
+    "intro": "Eine falsifizierbare Hypothese pro Exploration, beantwortet in einem Fenster unter Regeln, die eingefroren werden, bevor eine Zahl gelesen wird. Gruppiert nach der Frage, die sie beantworten, und nie nach einer Zahl sortiert. Der Beleg wird aus Zeilen berechnet; der Bericht wird aus Zeilen erzeugt und vollständig im Protokoll aufbewahrt; die Entscheidung trifft der Autor.",
+    "includeArchived": "Archivierte Explorationen anzeigen",
+    "empty": "Noch keine Explorationen.",
+    "loading": "Wird geladen…",
+    "number": "Exploration {number}",
+    "postHoc": "Nachträglich: Ein Arm hatte in diesem Fenster bereits Ergebnisse, als die Regeln eingefroren wurden, daher ist die Einstufung explorativ.",
+    "kinds": {
+      "one_axis": "eine Achse",
+      "full_method": "vollständige Methode",
+      "instrument": "Instrument"
+    },
+    "states": {
+      "draft": "Entwurf",
+      "running": "läuft",
+      "reported": "berichtet",
+      "decided": "entschieden"
+    },
+    "blocks": {
+      "rules": "Eingefrorene Regeln",
+      "receipt": "Beleg",
+      "report": "Bericht",
+      "review": "Prüfung und Entscheidung",
+      "links": "Alles, was sie nutzt und erzeugt"
+    },
+    "fields": {
+      "hypothesis": "Hypothese",
+      "window": "Fenster",
+      "proposer": "vorgeschlagen von",
+      "launcher": "gestartet von",
+      "reviewer": "geprüft von"
+    },
+    "receipt": {
+      "blocksVerdict": "Verhindert ein Urteil",
+      "nothingBlocks": "Nichts im Beleg verhindert ein Urteil."
+    },
+    "report": {
+      "none": "Noch kein Bericht: Er wird erzeugt, sobald die Exploration gelaufen ist.",
+      "verdict": "Urteil",
+      "grade": "Einstufung",
+      "noVerdict": "keines",
+      "panel": "Panel",
+      "status": "Status",
+      "reading": "Lesart"
+    },
+    "moves": {
+      "launch": "Regeln einfrieren und starten",
+      "report": "Bericht erzeugen",
+      "review": "Als geprüft markieren"
+    },
+    "decision": {
+      "awaitingReview": "Die Entscheidung wartet auf die Prüfung.",
+      "signIn": "Die Entscheidung trifft der Autor, aus einer angemeldeten Sitzung.",
+      "meaning": "Annehmen heißt, dass die Messung und ihre Lesart tragen, nicht dass die Hypothese wahr ist: Ein angenommenes Ergebnis dagegen ist ein Ergebnis.",
+      "accepted": "Annehmen",
+      "rejected": "Ablehnen",
+      "why": "Warum, in Ihren Worten",
+      "submit": "Entscheidung festhalten"
     }
   }
 }
