@@ -30,6 +30,7 @@ import re
 from protea.core.operations.seal_evaluation_frames import (
     _DIGEST_WIDTH,
     _FRAME_FIELDS,
+    _LATER_FRAME_FIELDS,
     _PAYLOAD_DEFAULTS,
     _ROWS,
     frame_digest,
@@ -119,7 +120,7 @@ def test_every_sealed_field_is_one_the_query_actually_selects() -> None:
     the material but never selected arrives as ``None`` on every row, so it
     would silently contribute a constant and seal nothing apart."""
     selected = set(re.findall(r"AS\s+(\w+)", str(_ROWS)))
-    missing = [field for field in _FRAME_FIELDS if field not in selected]
+    missing = [field for field in (*_FRAME_FIELDS, *_LATER_FRAME_FIELDS) if field not in selected]
     assert not missing, f"sealed but never selected: {missing}"
 
 
@@ -176,3 +177,38 @@ def test_an_unweighted_frame_seals_and_seals_DIFFERENTLY() -> None:
     unweighted = _seal(information_accretion_set_id=None)
     assert unweighted is not None
     assert unweighted != _seal()
+
+
+def test_the_score_reading_seals_two_frames() -> None:
+    """ADR-D55. Reading the scores by percentile rank moves where cafaeval's
+    grid falls, exactly as a different ``th_step`` does, so a result read that
+    way and one read raw are not measurements of the same thing."""
+    assert _seal(score_reading="percentile_rank") != _seal(score_reading="raw")
+
+
+def test_no_seal_minted_before_the_reading_existed_moves() -> None:
+    """Every result sealed before the field joined the frame was read raw,
+    and its seal must stay where it is: the frames on record are filed under
+    those seals. At the historical value the field is left out of the
+    material, so the material, and with it the digest, is what it was."""
+    before = {field: frame_material(_BASE)[field] for field in _FRAME_FIELDS}
+    canonical = json.dumps(before, sort_keys=True, separators=(",", ":"))
+    minted = "f-" + hashlib.sha256(canonical.encode()).hexdigest()[:_DIGEST_WIDTH]
+    assert _seal() == _seal(score_reading=None) == _seal(score_reading="raw") == minted
+    assert "score_reading" not in frame_material({**_BASE, "score_reading": "raw"})
+
+
+def test_a_later_field_away_from_its_history_is_in_the_material() -> None:
+    """The other half: a value no earlier result had is recorded, so the
+    material filed beside the seal says how the scores were read."""
+    material = frame_material({**_BASE, "score_reading": "percentile_rank"})
+    assert material["score_reading"] == "percentile_rank"
+
+
+def test_every_later_field_has_its_history_as_the_payload_default() -> None:
+    """The historical value and the payload default are one statement: a
+    payload that omits the field ran with the default, so it must seal where
+    every earlier result sealed."""
+    for field, historical in _LATER_FRAME_FIELDS.items():
+        assert _PAYLOAD_DEFAULTS[field] == historical
+        assert field not in _FRAME_FIELDS

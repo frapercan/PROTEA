@@ -118,7 +118,24 @@ _PAYLOAD_DEFAULTS: dict[str, Any] = {
     "restrict_gt_to_predicted": True,
     "th_step": 0.01,
     "toi_rule": "pivot_terms",
+    "score_reading": "raw",
 }
+
+#: Fields that joined the frame after results had already been sealed, with the
+#: one value every earlier result had.
+#:
+#: ``score_reading`` decides where cafaeval's grid falls on the scores
+#: (ADR-D55), so it changes the number exactly as ``th_step`` does: a result
+#: read by percentile rank and one read raw are not measurements of the same
+#: thing, and the paired comparison trusts this digest to say so. Every result
+#: before the field existed was read raw.
+#:
+#: At that value the field is LEFT OUT of the material, so no seal minted before
+#: it existed moves and the frames already filed under those seals stay true.
+#: At any other value it is in, so a result read another way seals apart. The
+#: alternative, adding it to :data:`_FRAME_FIELDS`, would have moved every seal
+#: on record to say nothing new about any of them.
+_LATER_FRAME_FIELDS: dict[str, Any] = {"score_reading": "raw"}
 
 #: Fields read out of JSONB as text that name a number.
 #:
@@ -148,6 +165,7 @@ _ROWS = text("""
            j.payload ->> 'th_step'                        AS th_step,
            j.payload ->> 'toi_file'                       AS toi_file,
            j.payload ->> 'toi_rule'                       AS toi_rule,
+           j.payload ->> 'score_reading'                  AS score_reading,
            (j.id IS NOT NULL)                             AS has_job
     FROM evaluation_result r
     LEFT JOIN evaluation_set es ON es.id = r.evaluation_set_id
@@ -225,7 +243,12 @@ def frame_material(row: dict[str, Any]) -> dict[str, Any]:
     under, and the address and its contents disagreeing is the defect storing
     the contents was meant to fix.
     """
-    return {field: _frame_value(field, row.get(field)) for field in _FRAME_FIELDS}
+    material = {field: _frame_value(field, row.get(field)) for field in _FRAME_FIELDS}
+    for later, historical in _LATER_FRAME_FIELDS.items():
+        value = _frame_value(later, row.get(later))
+        if value != historical:
+            material[later] = value
+    return material
 
 
 def frame_digest(row: dict[str, Any]) -> str | None:
