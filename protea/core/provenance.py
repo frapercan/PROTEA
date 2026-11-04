@@ -185,4 +185,21 @@ def stamp_library_provenance(emit: Any) -> None:
     )
 
 
-__all__ = ["capture_provenance", "stamp_library_provenance"]
+def where_it_runs() -> dict[str, Any]:
+    """The machine, the interpreter and the revision this process runs, for ``job.started``.
+
+    ADR-D55's receipt records, for every job, where it ran: the checklist
+    refuses a heavy step on the server, and a worker replaced between two jobs
+    must not leave them indistinguishable. All three answers are free: the
+    hostname from the socket module, the interpreter from ``platform``, and the
+    revision stamped at import, which names the code this process loaded rather
+    than whatever the tree says when asked. Nothing here shells out.
+    """
+    return {
+        "host": _safe_hostname(),
+        "python": _platform.python_version(),
+        "code_revision": code_revision(),
+    }
+
+
+__all__ = ["capture_provenance", "stamp_library_provenance", "where_it_runs"]

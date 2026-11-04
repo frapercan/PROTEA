@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.contracts.operation import OperationResult, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
-from protea.core.provenance import stamp_library_provenance
+from protea.core.provenance import stamp_library_provenance, where_it_runs
 from protea.core.retry import RetryPolicy, is_retryable, with_retry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
@@ -198,7 +198,7 @@ class BaseWorker:
                 job_id,
                 "job.started",
                 None,
-                {"worker": self._config.worker_name},
+                {"worker": self._config.worker_name, **where_it_runs()},
                 level="info",
             )
             session.commit()
