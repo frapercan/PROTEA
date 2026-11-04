@@ -19,7 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from protea.core.embedding_identity import derive_embedding_config_id
+from protea.core.embedding_identity import IDENTITY_FIELDS, derive_embedding_config_id
 from protea.infrastructure.orm.base import Base
 
 #: The closed vocabularies of this table's three recipe columns, here because
@@ -238,6 +238,34 @@ class EmbeddingConfig(Base):
 #: :func:`_derive_id_from_recipe`.
 _DEFAULT_MAX_LENGTH = 1022
 
+#: The chunk fields of a configuration whose rows are never chunked. There
+#: ``chunk_size`` and ``chunk_overlap`` describe nothing, but they are identity
+#: fields, so they still need a value. These are the column defaults, so an
+#: unchunked recipe hashes the same whether a producer states them or the
+#: listener resolves them.
+UNCHUNKED: dict[str, Any] = {"use_chunking": False, "chunk_size": 512, "chunk_overlap": 0}
+
+
+def _what_an_omission_means() -> dict[str, Any]:
+    """The value the row ends up holding for each identity field a caller omits.
+
+    Read off the columns rather than restated, so it cannot drift from the
+    defaults the INSERT would otherwise apply. ``max_length`` has no column
+    default by design and keeps its documented meaning. ``model_name`` and
+    ``layer_indices`` have no default at all: a recipe without them is refused
+    by the NOT NULL constraint, which is the right answer.
+    """
+    meanings: dict[str, Any] = {"max_length": _DEFAULT_MAX_LENGTH}
+    for field in IDENTITY_FIELDS:
+        default = EmbeddingConfig.__table__.c[field].default
+        if default is not None and default.is_scalar:
+            meanings[field] = default.arg
+    return meanings
+
+
+#: Resolved once, at import, from the table definition.
+OMISSION_MEANS: dict[str, Any] = _what_an_omission_means()
+
 
 def _was_not_set(target: EmbeddingConfig, field: str) -> bool:
     """Whether ``field`` was never assigned, as opposed to assigned ``None``.
@@ -270,20 +298,36 @@ def _derive_id_from_recipe(_mapper, _connection, target: EmbeddingConfig) -> Non
     An explicitly supplied id is honoured, so a migration or a repair script can
     still place a row deliberately.
 
-    IT ALSO FILLS ``max_length``, AND THAT IS NOT A SIDE ERRAND. The column
-    used to carry ``default=1022``, which SQLAlchemy applies at INSERT, i.e.
-    AFTER this listener has hashed the recipe. While NULL was impossible that
-    was harmless. Migration ``b4e82f17c9a3`` made NULL mean "no truncation",
-    and the first configuration created that way got an id derived from NULL
-    and a row holding 1022: an id that does not describe its own recipe,
-    which is the one property this derivation exists to provide.
+    IT ALSO RESOLVES EVERY OMITTED IDENTITY FIELD, AND THAT IS NOT A SIDE
+    ERRAND. A column default is applied at INSERT, i.e. AFTER this listener
+    has hashed the recipe, so an identity field a caller leaves out is hashed
+    as None and stored as its default. The id then describes a recipe the row
+    does not hold, which is the one property this derivation exists to
+    provide.
 
-    Resolved here instead, before the hash, by asking whether the attribute
-    was SET rather than whether it is None -- the two are different and the
-    default could not tell them apart. An omitted ``max_length`` still means
-    1022, so every id minted so far stays valid; an explicit NULL survives.
+    It was first fixed for ``max_length`` alone. Migration ``b4e82f17c9a3``
+    made NULL mean "no truncation", and the first configuration created that
+    way got an id derived from NULL and a row holding 1022. The same trap
+    stayed open for the other defaulted fields. Measured 2026-11-04 on the
+    live registry: three configs were minted with ``chunk_size``,
+    ``chunk_overlap`` and ``embedding_scale`` hashed as None and stored as
+    512, 0 and 1.0. Their producers, ``encode_residue_vocabulary`` (22166300)
+    and ``apply_learned_encoder`` (76792dc2, 9d72dc44), left the three out.
+
+    Resolved here, before the hash, for every identity field at once, by
+    asking whether the attribute was SET rather than whether it is None. The
+    two are different and a column default cannot tell them apart. An omitted
+    field means what its column default means, so the id describes what the
+    INSERT stores. An omitted ``max_length`` still means 1022, so every id
+    minted so far stays valid. An explicit NULL survives.
+
+    The producers now state their recipes in full, because a recipe is a
+    decision and an omission hides it. This is the floor under any caller
+    that still leaves a field out: such a caller gets the default it would
+    have stored anyway, and an id that says so.
     """
-    if _was_not_set(target, "max_length"):
-        target.max_length = _DEFAULT_MAX_LENGTH
+    for field, meaning in OMISSION_MEANS.items():
+        if _was_not_set(target, field):
+            setattr(target, field, meaning)
     if target.id is None:
         target.id = derive_embedding_config_id(target)

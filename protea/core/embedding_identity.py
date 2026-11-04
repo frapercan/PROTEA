@@ -57,6 +57,13 @@ def recipe_of(config: Mapping[str, Any] | Any) -> dict[str, Any]:
     Missing fields raise rather than defaulting. A recipe assembled from
     defaults would produce an id for a config nobody described, and that id
     would look exactly as authoritative as a real one.
+
+    That guard only sees a MAPPING. On an ORM instance an attribute nobody
+    set reads as None, so an omission arrives here looking like an explicit
+    NULL and is hashed as one. That is how three producer configs got ids
+    their rows do not derive. The ``before_insert`` listener of
+    ``EmbeddingConfig`` therefore resolves every omitted identity field
+    before it calls this.
     """
     get = config.get if isinstance(config, Mapping) else lambda k, d=None: getattr(config, k, d)
     missing = [f for f in IDENTITY_FIELDS if get(f, _ABSENT) is _ABSENT]

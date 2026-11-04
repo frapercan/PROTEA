@@ -80,7 +80,10 @@ from protea.core.residue_vocabulary import (
     load_residue_vocabulary,
 )
 from protea.core.utils import contract_payload
-from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
+from protea.infrastructure.orm.models.embedding.embedding_config import (
+    UNCHUNKED,
+    EmbeddingConfig,
+)
 from protea.infrastructure.orm.models.embedding.residue_code import ResidueCode as ResidueCodeRow
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -323,7 +326,13 @@ def _ensure_target_config(
         pooling="per-residue",
         normalize_residues=False,
         normalize=False,
-        use_chunking=False,
+        # Full length, and checked rather than assumed: encode_sequences
+        # refuses a sequence whose backend rows do not match its residues.
+        max_length=None,
+        # Never applied on this path: the codes go to shards, not to a
+        # halfvec column with a range to fit.
+        embedding_scale=1.0,
+        **UNCHUNKED,
         description=(
             f"per-residue code of the residue vocabulary {meta.get('name', digest[:16])}: "
             f"{meta['dict_dim']} features over hidden states {meta['hidden_state_indices']}, "

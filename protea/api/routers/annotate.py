@@ -51,6 +51,7 @@ _DEFAULT_CONFIG = {
     "pooling": "mean",
     "normalize_residues": False,
     "normalize": True,
+    "embedding_scale": 1.0,
     "max_length": 1022,
     "use_chunking": False,
     "chunk_size": 512,
