@@ -32,6 +32,7 @@ from protea.core.operations.predict_go_terms._common import (
     _REF_CACHE,
     _UNIFIED_REF_KEY,
 )
+from protea.core.operations.predict_go_terms._reference_binary import fill_from_binary
 from protea.core.operations.predict_go_terms._sparse_bank import (
     bank_bytes,
     bank_is_sparse,
@@ -45,7 +46,6 @@ from protea.infrastructure.orm.models.protein.protein import Protein
 
 if TYPE_CHECKING:
     from protea.core.operations.predict_go_terms._common import _BatchExecCtx  # noqa: F401
-
 
 
 class _PoolRequest(NamedTuple):
@@ -97,9 +97,7 @@ def _find_missing_aspects(request: _PoolRequest, pool: str | None = None) -> lis
     return [asp for asp in _ASPECTS if not usable(asp)]
 
 
-def _recorded_pool(
-    ecid: uuid.UUID, asid: uuid.UUID, aspect: str, discriminator: str
-) -> str | None:
+def _recorded_pool(ecid: uuid.UUID, asid: uuid.UUID, aspect: str, discriminator: str) -> str | None:
     """The fingerprint an aspect index was built against, or None if absent.
 
     Absent means the index predates the fingerprint, so it cannot be told
@@ -416,17 +414,15 @@ class _ReferenceMixin:
         ``need_cos`` / ``need_plain`` control which f32 copies are materialised.
         """
         emit("predict_go_terms_batch.load_references_start", None, {}, "info")
-        accessions, embeddings, source = self._load_ref_pool(session, request, emit)
-        emit(
-            "predict_go_terms_batch.load_references_done",
-            None,
-            {
-                "references": len(accessions),
-                "embeddings_mb": round(bank_bytes(embeddings) / 1024 / 1024),
-                "source": source,
-            },
-            "info",
-        )
+        accessions, embeddings, source, transfer = self._load_ref_pool(session, request, emit)
+        done: dict[str, Any] = {
+            "references": len(accessions),
+            "embeddings_mb": round(bank_bytes(embeddings) / 1024 / 1024),
+            "source": source,
+        }
+        if transfer is not None:
+            done["transfer"] = transfer
+        emit("predict_go_terms_batch.load_references_done", None, done, "info")
         return _derive_reference_views(
             accessions, embeddings, need_cos=need_cos, need_plain=need_plain
         )
@@ -436,13 +432,17 @@ class _ReferenceMixin:
         session: Session,
         request: _PoolRequest,
         emit: EmitFn,
-    ) -> tuple[list[str], np.ndarray, str]:
-        """Fetch ``(accessions, embeddings, source)`` via disk cache or DB.
+    ) -> tuple[list[str], np.ndarray, str, str | None]:
+        """Fetch ``(accessions, embeddings, source, transfer)`` via disk cache or DB.
 
         When the cache files are fresh (mtime within
         ``ref_cache_freshness_seconds``), the COUNT(*)-over-JOIN is skipped
         so the fast path requires zero DB round-trips. ``source`` is
         ``"disk_cache"`` on hit and ``"database"`` on miss.
+
+        ``transfer`` names the route the bank took across the driver, or is
+        ``None`` when a cache answered and nothing crossed. See
+        :mod:`._reference_binary`.
         """
         from protea.config.tuning import get_tuning
         from protea.core.disk_cache import _is_cache_fresh
@@ -450,13 +450,14 @@ class _ReferenceMixin:
         # A sparse bank never reaches the disk cache; ``NO_DISK_CACHE_FOR_SPARSE``
         # says why and what it costs.
         if bank_is_sparse(session, request.embedding_config_id):
-            accessions, codes = self._stream_reference_pool(
+            accessions, codes, _ = self._stream_reference_pool(
                 self._reference_pool_query(session, request), sparse=True
             )
-            return accessions, codes, "database"
+            return accessions, codes, "database", "text"
 
         freshness_sec = get_tuning().operation.ref_cache_freshness_seconds
         source = "disk_cache"
+        transfer: str | None = None
         # The policy decides both WHICH proteins may donate and WHERE the pool
         # is cached. Deriving the key from the same object that filters the
         # query is what stops a restricted pool being stored under, or read
@@ -465,19 +466,18 @@ class _ReferenceMixin:
         accession_q = self._reference_pool_query(session, request)
 
         def _db_loader() -> tuple[list[str], np.ndarray]:
-            nonlocal source
+            nonlocal source, transfer
             source = "database"
-            return self._stream_reference_pool(accession_q)
+            accs, embs, transfer = self._stream_reference_pool(accession_q)
+            return accs, embs
 
-        if freshness_sec > 0 and _is_cache_fresh(
+        fresh = freshness_sec > 0 and _is_cache_fresh(
             request.embedding_config_id,
             request.annotation_set_id,
             freshness_sec,
             request.discriminator,
-        ):
-            expected: int | None = None
-        else:
-            expected = accession_q.count()
+        )
+        expected: int | None = None if fresh else accession_q.count()
 
         accessions, embeddings = _load_reference_pool_cached(
             key,
@@ -486,7 +486,7 @@ class _ReferenceMixin:
             emit=lambda ev, fields: emit(f"predict_go_terms_batch.{ev}", None, fields, "info"),
             freshness_seconds=freshness_sec,
         )
-        return accessions, embeddings, source
+        return accessions, embeddings, source, transfer
 
     def _reference_pool_query(self, session: Session, request: _PoolRequest) -> Any:
         """Return the accession-only query for the reference pool.
@@ -550,9 +550,8 @@ class _ReferenceMixin:
         """
         total = accession_q.count()
         if total == 0:
-            return [], (
-                empty_sparse_bank() if sparse else np.empty((0,), dtype=np.float16)
-            )
+            empty = empty_sparse_bank() if sparse else np.empty((0,), dtype=np.float16)
+            return [], empty, None
         base_q = accession_q.add_columns(SequenceEmbedding.embedding)
         # pgvector HalfVector exposes .dimensions() / .to_numpy() after the
         # 2026-04-11 halfvec migration; pull dimension from the first row.
@@ -561,15 +560,19 @@ class _ReferenceMixin:
 
         stream_chunk = get_tuning().operation.stream_chunk_size
         if sparse:
-            return stream_sparse_pool(
+            accs, codes = stream_sparse_pool(
                 base_q.yield_per(stream_chunk), dim=dim, n_accessions_hint=total
             )
-        accessions: list[str] = []
+            return accs, codes, "text"
         embeddings = np.empty((total, dim), dtype=np.float16)
+        accessions = fill_from_binary(base_q, embeddings, stream_chunk, total)
+        if accessions is not None:
+            return accessions, embeddings, "binary"
+        accessions = []
         for i, (acc, emb) in enumerate(base_q.yield_per(stream_chunk)):
             embeddings[i] = emb.to_numpy()
             accessions.append(acc)
-        return accessions, embeddings
+        return accessions, embeddings, "text"
 
     def _load_reference_data_per_aspect(
         self,
