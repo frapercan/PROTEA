@@ -242,6 +242,19 @@ readings compares a censored edge with another, not two maxima. So:
   preserves each arm's ordering and every threshold metric in principle. What it changes is
   where a uniform grid falls: on the arm's own quantiles, so the grid resolves the curve.
   The raw reading is kept as a secondary check.
+* Two consequences of that reading are fixed here, because each one changes a number:
+
+  * A metric at a fixed threshold becomes relative to the arm. Under the percentile
+    reading, precision at 0.5 is precision at that arm's median score, not at a similarity
+    of 0.5, so two arms compared at one threshold are compared at the same quantile of
+    each.
+  * Ties take the average of the ranks they span. Tied scores then read alike, and a
+    threshold keeps or drops a tie group whole, as it did on the raw scale. Another tie
+    method would be another reading, so the method is written into the receipt.
+
+* The reading is part of the frame seal, like the threshold grid: a result read raw and one
+  read by percentile rank never seal alike. ``raw`` is left out of the sealed material, so
+  no seal minted before the reading existed moves.
 * Both arms use the same scoring, and the receipt records it.
 
 7. Review in two steps, and the grade
@@ -353,14 +366,18 @@ Consequences
   * the artifact store gains ``list(prefix)``;
   * the band registry takes the new length bands;
   * an operation computes per-query identity per window;
-  * evaluation offers the percentile-rank reading of section 6 and reports whether the
-    maximum is interior;
-  * the residue code configuration ``22166300`` is repaired. Its recipe says ``max_length``
-    1022, the default the identity hook applies when the field is omitted, but
-    ``encode_residue_vocabulary`` never truncates: its codes reach 8,259 residues. Its id
-    therefore does not describe its own computation. The repair creates the configuration
-    with an explicit null and moves the rows, and the operation refuses a target whose
-    ``max_length`` is not null.
+  * evaluation offers the percentile-rank reading of section 6 (``score_reading``) and
+    reports, per namespace and F variant, where the maximum sits and whether it is at an
+    edge (``maxima``);
+  * the residue code configuration ``22166300`` is repaired, together with the learned code
+    configurations ``76792dc2`` and ``9d72dc44``. Their producers left ``chunk_size``,
+    ``chunk_overlap`` and ``embedding_scale`` out of the recipe. The identity hook hashed
+    the three as None and the INSERT stored the column defaults, so none of the three ids
+    is the one its own row derives. The hook now resolves every omitted identity field
+    before it hashes, and the producers state their recipes in full. ``22166300`` also
+    records ``max_length`` 1022, which ``encode_residue_vocabulary`` never applies: its
+    codes reach 8,259 residues. Its target, ``43193409``, is derived with an explicit null,
+    and the repair moves its rows onto it.
 
 * **Ordering.** The clean start closes the pipeline with four explorations:
 
