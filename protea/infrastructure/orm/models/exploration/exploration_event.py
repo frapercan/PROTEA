@@ -42,6 +42,17 @@ CREATE TRIGGER exploration_event_append_only
     FOR EACH ROW EXECUTE FUNCTION exploration_event_is_append_only()
 """
 
+#: A row trigger does not fire on TRUNCATE, which empties the table in one
+#: statement; Postgres needs a statement trigger for it. Without this the log
+#: refused an UPDATE and a DELETE and let the whole table go, so "append only"
+#: promised more than the schema held (revision c5e9a1d3f720, after the server
+#: session read the trigger's tgtype on the deployed database).
+NO_TRUNCATE_TRIGGER = """
+CREATE TRIGGER exploration_event_no_truncate
+    BEFORE TRUNCATE ON exploration_event
+    FOR EACH STATEMENT EXECUTE FUNCTION exploration_event_is_append_only()
+"""
+
 
 class ExplorationEvent(Base):
     """One entry in an exploration's log (ADR-D55). Written once, never changed.
@@ -99,3 +110,4 @@ def _make_it_append_only(_table: Any, connection: Any, **_kw: Any) -> None:
         return
     connection.execute(text(APPEND_ONLY_FUNCTION))
     connection.execute(text(APPEND_ONLY_TRIGGER))
+    connection.execute(text(NO_TRUNCATE_TRIGGER))
