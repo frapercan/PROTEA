@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
-    DDL,
     JSON,
     BigInteger,
     CheckConstraint,
@@ -14,6 +13,7 @@ from sqlalchemy import (
     String,
     event,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -82,13 +82,20 @@ class ExplorationEvent(Base):
     body: Mapped[dict[str, Any]] = mapped_column(_JSONB, nullable=False, default=dict)
 
 
-event.listen(
-    ExplorationEvent.__table__,
-    "after_create",
-    DDL(APPEND_ONLY_FUNCTION).execute_if(dialect="postgresql"),
-)
-event.listen(
-    ExplorationEvent.__table__,
-    "after_create",
-    DDL(APPEND_ONLY_TRIGGER).execute_if(dialect="postgresql"),
-)
+@event.listens_for(ExplorationEvent.__table__, "after_create")
+def _make_it_append_only(_table: Any, connection: Any, **_kw: Any) -> None:
+    """Create the function and the trigger after ``create_all``, on Postgres.
+
+    Through ``text`` and not ``sqlalchemy.DDL``, because ``DDL`` runs %-style
+    substitution over its statement with the table's names as the context, and
+    the function's message carries a literal ``% refused``. Measured on the
+    integration run: ``% r`` was read as a repr conversion, the context's repr
+    went into the SQL and its quotes closed the literal, so ``create_all`` on
+    Postgres failed with a syntax error while the migration, whose
+    ``op.execute`` does not substitute, created the right function. ``text``
+    does not substitute either, so both paths run the one SQL kept above.
+    """
+    if connection.dialect.name != "postgresql":
+        return
+    connection.execute(text(APPEND_ONLY_FUNCTION))
+    connection.execute(text(APPEND_ONLY_TRIGGER))

@@ -286,6 +286,15 @@ class TestOnPostgres:
                 pg.execute(text(statement))
             pg.rollback()
 
+    def test_the_function_carries_its_message_as_written(self, pg: Session) -> None:
+        # The failure this pins was invisible on SQLite and silent in the
+        # migration: sqlalchemy.DDL substituted the "% r" of "% refused" and
+        # the function never compiled under create_all.
+        body = pg.execute(
+            text("SELECT prosrc FROM pg_proc WHERE proname = 'exploration_event_is_append_only'")
+        ).scalar_one()
+        assert "% refused" in body
+
     def test_a_linked_window_cannot_be_deleted(self, pg: Session) -> None:
         window = _seed_window(pg)
         pg.add(_exploration(evaluation_set_id=window))
