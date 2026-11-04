@@ -48,6 +48,7 @@ from protea.core.operations._run_cafa_payload import RunCafaEvaluationPayload
 from protea.core.operations._run_cafa_reranker_loader import (
     load_reranker_models_for_payload,
 )
+from protea.core.operations._run_cafa_scale import read_and_report
 from protea.core.operations._run_cafa_setup import (  # noqa: F401
     StagedInputs,
     _emit_evaluation_setup_events,
@@ -409,6 +410,14 @@ class RunCafaEvaluationOperation:
         has_rerankers = bool(ctx.reranker_models)
         if not has_rerankers:
             self._write_shared_prediction_file(session, p, ctx, artifacts_root, delta_proteins)
+            # Read once, here: every setting without a reranker reuses this file.
+            read_and_report(
+                os.path.join(str(artifacts_root), "predictions", "predictions.tsv"),
+                reading=p.score_reading,
+                th_step=p.th_step,
+                label="shared",
+                emit=emit,
+            )
         return bundle_run_context(
             p,
             ctx,
