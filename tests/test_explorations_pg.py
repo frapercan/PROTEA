@@ -229,6 +229,25 @@ def test_row_identity_sees_one_double_move(pg: Session) -> None:
     assert moved["first_difference"]["protein_accession"] == "P2"
     assert moved["first_difference"]["go_term_id"] == terms[2].id
     assert moved["first_difference"]["a"] != moved["first_difference"]["b"]
+    assert moved["first_difference"]["a_exact"] != moved["first_difference"]["b_exact"]
+
+
+def test_the_same_double_is_decided_by_its_bytes_not_by_a_session_setting(pg: Session) -> None:
+    # With extra_float_digits at 0 both doubles print as "0.3"; their bytes
+    # still differ, and the identity claim must not move with a GUC.
+    from sqlalchemy import text as sql_text
+
+    from protea.services.exploration_identity import row_identity
+
+    parents = make_parents(pg)
+    terms = _terms(pg, parents, 1)
+    a = _set_with_rows(pg, parents, {("P1", terms[0].id): 0.3})
+    b = _set_with_rows(pg, parents, {("P1", terms[0].id): 0.30000000000000004})
+    pg.execute(sql_text("SET extra_float_digits = 0"))
+    moved = row_identity(pg, str(a), str(b))
+    assert moved["identical"] is False
+    assert moved["first_difference"]["a"] == moved["first_difference"]["b"]  # same text
+    assert moved["first_difference"]["a_exact"] != moved["first_difference"]["b_exact"]
 
 
 def test_two_proteins_that_swap_their_predictions_are_not_identical(pg: Session) -> None:
