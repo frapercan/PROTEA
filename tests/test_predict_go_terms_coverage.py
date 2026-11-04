@@ -653,7 +653,7 @@ class TestLoadReferenceData:
             patch.object(
                 op,
                 "_stream_reference_pool",
-                return_value=([], np.empty((0,), dtype=np.float16)),
+                return_value=([], np.empty((0,), dtype=np.float16), None),
             ),
         ):
             emit, events = _emit_capture()
@@ -678,7 +678,7 @@ class TestLoadReferenceData:
 
         def _stream(_q):
             stream_calls["n"] += 1
-            return list(accs), emb
+            return list(accs), emb, "binary"
 
         with (
             patch.object(
@@ -700,12 +700,20 @@ class TestStreamReferencePool:
         op = PredictGOTermsBatchOperation()
         accession_q = MagicMock()
         accession_q.count.return_value = 0
-        accs, embeddings = op._stream_reference_pool(accession_q)
+        accs, embeddings, transfer = op._stream_reference_pool(accession_q)
         assert accs == []
         assert embeddings.shape == (0,)
         assert embeddings.dtype == np.float16
+        assert transfer is None, "nothing crossed the driver, so there is no route to name"
 
-    def test_streams_rows_into_matrix(self) -> None:
+    def test_falls_back_to_text_when_the_driver_gives_no_binary_cursor(self) -> None:
+        """A mock connection cannot stream, so the text path fills the bank.
+
+        The same rows and the same dtype, and ``transfer`` says "text" so the
+        job's own record shows which route answered. Before this said
+        "binary" or nothing at all, a bank that quietly went back to text was
+        indistinguishable from a slow link.
+        """
         op = PredictGOTermsBatchOperation()
         # accession_q.count() == 2, base_q.limit(1).one() returns
         # (acc, halfvec), base_q.yield_per() returns (acc, halfvec) pairs.
@@ -717,10 +725,67 @@ class TestStreamReferencePool:
         accession_q.add_columns.return_value = base_q
         base_q.limit.return_value.one.return_value = ("R1", hv0)
         base_q.yield_per.return_value = [("R1", hv0), ("R2", hv1)]
-        accs, embeddings = op._stream_reference_pool(accession_q)
+        accs, embeddings, transfer = op._stream_reference_pool(accession_q)
         assert accs == ["R1", "R2"]
         assert embeddings.shape == (2, 2)
         assert embeddings.dtype == np.float16
+        assert transfer == "text"
+
+    def test_reads_over_a_binary_cursor_when_the_driver_allows_it(self) -> None:
+        """The binary route fills the bank and ``yield_per`` is never asked.
+
+        That last assertion is the point: a test that only checked the values
+        would pass with the text path and prove nothing, since both routes
+        return the same ``HalfVector`` objects.
+        """
+        op = PredictGOTermsBatchOperation()
+        hv0 = _halfvec([1.0, 2.0])
+        hv1 = _halfvec([3.0, 4.0])
+        accession_q = MagicMock()
+        accession_q.count.return_value = 2
+        base_q = MagicMock()
+        accession_q.add_columns.return_value = base_q
+        base_q.limit.return_value.one.return_value = ("R1", hv0)
+        cur = base_q.session.connection().connection.driver_connection.cursor
+        cur.return_value.__enter__.return_value.__iter__.return_value = iter(
+            [("R1", hv0), ("R2", hv1)]
+        )
+
+        accs, embeddings, transfer = op._stream_reference_pool(accession_q)
+
+        assert accs == ["R1", "R2"]
+        assert embeddings.shape == (2, 2)
+        assert transfer == "binary"
+        assert cur.call_args.kwargs["binary"] is True
+        base_q.yield_per.assert_not_called()
+
+    def test_a_short_binary_read_falls_back_instead_of_banking_garbage(self) -> None:
+        """Fewer rows than ``count()`` is refused, not accepted quietly.
+
+        The bank is allocated at ``count()`` and filled by index, so a cursor
+        that stops early leaves the tail as whatever ``np.empty`` found, with an
+        accession list too short to reveal it. Those rows would then be donors
+        with uninitialised coordinates. The guard turns that into the text path.
+        """
+        op = PredictGOTermsBatchOperation()
+        hv0 = _halfvec([1.0, 2.0])
+        hv1 = _halfvec([3.0, 4.0])
+        accession_q = MagicMock()
+        accession_q.count.return_value = 2
+        base_q = MagicMock()
+        accession_q.add_columns.return_value = base_q
+        base_q.limit.return_value.one.return_value = ("R1", hv0)
+        base_q.yield_per.return_value = [("R1", hv0), ("R2", hv1)]
+        cur = base_q.session.connection().connection.driver_connection.cursor
+        cur.return_value.__enter__.return_value.__iter__.return_value = iter(
+            [("R1", hv0)]  # one row where the query counted two
+        )
+
+        accs, embeddings, transfer = op._stream_reference_pool(accession_q)
+
+        assert transfer == "text", "a short binary read must not be banked"
+        assert accs == ["R1", "R2"]
+        assert embeddings[1].tolist() == [3.0, 4.0]
 
 
 class TestLoadReferenceDataPerAspect:
