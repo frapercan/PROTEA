@@ -11,11 +11,14 @@ log, while the broker showed the queue's 40 messages back with no consumer.
 
 A worker in that state is useless and unsafe. Its message is back in the
 queue, so finishing would commit and publish a result that another consumer
-may already be producing. And its IO thread is blocked, so nothing can be
-nacked or closed from here. Ending the process is the only clean exit. The
-watchdog logs why and exits with ``EX_TEMPFAIL``, which the unit's
-``Restart=`` turns into a fresh worker (``EX_CONFIG``, 78, is the one status a
-unit is told not to restart).
+may already be producing; the publisher keeps a connection per thread and
+retries a failed publish on a new one, so the dead channel would not stop it.
+And its IO thread is blocked, so nothing can be nacked or closed from here.
+Ending the process is the only clean exit. The watchdog logs why and exits with
+``EX_TEMPFAIL``, which both the node's units (``Restart=always``, which skips
+only 78, ``EX_CONFIG``) and the server's (``Restart=on-failure``) restart. A
+unit whose ``ExecStartPre`` guard refuses a tree that is not the declared
+revision stays down instead, which is what that guard is for.
 
 An operation that legitimately runs longer belongs on a ``QueueConsumer``
 queue, which pumps the connection while its job runs (``_job_pump``).

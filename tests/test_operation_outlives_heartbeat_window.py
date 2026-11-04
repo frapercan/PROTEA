@@ -108,7 +108,7 @@ def test_the_default_expiry_logs_why_and_exits_for_a_restart(
     with caplog.at_level(logging.ERROR, logger=window.__name__):
         window.exit_after_window("predict_go_terms_batch", 1140.0)
     assert codes == [window.EX_TEMPFAIL] == [75], (
-        "EX_CONFIG (78) is the status a unit does not restart"
+        "a failure status every unit restarts; the node's units skip only 78 (EX_CONFIG)"
     )
     assert "outlived the broker heartbeat window" in caplog.text
     assert "operation=predict_go_terms_batch" in caplog.text
