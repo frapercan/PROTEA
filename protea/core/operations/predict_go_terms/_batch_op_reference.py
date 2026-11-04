@@ -524,6 +524,15 @@ class _ReferenceMixin:
             # spine that quietly included proteins of unknown provenance would
             # not be a reviewed spine.
             query = query.filter(Protein.reviewed.is_(True))
+        admitted_by = getattr(policy, "admitted_by_release", None) if policy is not None else None
+        if admitted_by is not None:
+            # Membership of the corpus at the window's start. A release's
+            # annotation set keeps the annotations of every protein the corpus
+            # holds when it is loaded, so release 211's set carries 30,128
+            # proteins admitted only later (measured 2026-11-04), 29,922 of them
+            # donors in the full length ankh bank. On the indexed column, and a
+            # NULL is not <= anything: a protein no pass admitted is no member.
+            query = query.filter(Protein.first_admitted_release <= int(admitted_by))
         return query.order_by(*_bank_order())
 
     def _stream_reference_pool(

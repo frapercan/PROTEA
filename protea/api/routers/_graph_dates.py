@@ -180,13 +180,15 @@ def _policy_is_empty(row: dict[str, Any]) -> bool:
     """Whether the donor policy in force is the one a field holds unset.
 
     No reviewed-only restriction, no evidence filter, no excluded reference
-    prefixes. That is not a permissive policy somebody chose, it is the absence
-    of a policy, and the difference is the whole of this node's verdict.
+    prefixes, no membership release. That is not a permissive policy somebody
+    chose, it is the absence of a policy, and the difference is the whole of
+    this node's verdict.
     """
     return (
         (row.get("donor_reviewed_only") or "false") == "false"
         and row.get("donor_evidence_codes") is None
         and (row.get("donor_exclusions") or "[]") == "[]"
+        and row.get("donor_admitted_by_release") is None
     )
 
 

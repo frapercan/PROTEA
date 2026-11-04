@@ -39,6 +39,13 @@ class TestDonorRegime:
         assert _donors({"evidence_codes": []})["reviewed_only"] is False
         assert _donors({"evidence_codes": [], "reviewed_only": True})["reviewed_only"] is True
 
+    def test_the_membership_release_is_reported_whatever_the_codes(self):
+        # Absent from every policy recorded before it existed, which reads as
+        # the unrestricted pool.
+        assert _donors(None)["admitted_by_release"] is None
+        assert _donors({"admitted_by_release": 211})["admitted_by_release"] == 211
+        assert _donors({"evidence_codes": [], "admitted_by_release": 211})["admitted_by_release"] == 211
+
 
 class TestTheRunSaysWhetherItFinished:
     """A cancelled run leaves its written batches behind.

@@ -244,6 +244,7 @@ _Q_PREDICTION_SETS = text(
            ps.meta -> 'donor_policy' ->> 'reviewed_only'  AS donor_reviewed_only,
            ps.meta -> 'donor_policy' ->> 'evidence_codes' AS donor_evidence_codes,
            ps.meta -> 'donor_policy' ->> 'exclude_reference_prefixes' AS donor_exclusions,
+           ps.meta -> 'donor_policy' ->> 'admitted_by_release' AS donor_admitted_by_release,
            (SELECT string_agg(f.value, ', ' ORDER BY f.value)
             FROM jsonb_array_elements_text(
                      CASE WHEN jsonb_typeof(ps.meta -> 'features') = 'array'
