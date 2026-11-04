@@ -60,6 +60,34 @@ class TestTheVerdict:
         assert report.verdict([], _comparison(**panels), None) == "underpowered"
 
 
+class TestAnInstrumentReadsItsPredicate:
+    """Identical runs make a degenerate bootstrap; that is the instrument holding."""
+
+    IDENTICAL = {"status": "unresolvable", "verdict": "not_resolved", "delta": 0.0}
+
+    def test_identical_runs_hold_the_instrument(self) -> None:
+        panels = {"NK:BPO": self.IDENTICAL, "PK:MFO": self.IDENTICAL}
+        assert report.verdict([], _comparison(**panels), None, instrument_tolerance=0.0) == "for"
+
+    def test_any_delta_beyond_the_tolerance_breaks_it(self) -> None:
+        panels = {"NK:BPO": self.IDENTICAL, "PK:MFO": {**self.IDENTICAL, "delta": 0.0004}}
+        assert (
+            report.verdict([], _comparison(**panels), None, instrument_tolerance=0.0) == "against"
+        )
+        assert report.verdict([], _comparison(**panels), None, instrument_tolerance=0.001) == "for"
+
+    def test_a_panel_without_a_delta_cannot_hold_it(self) -> None:
+        panels = {"NK:BPO": {"status": "refused", "verdict": "not_computed"}}
+        assert (
+            report.verdict([], _comparison(**panels), None, instrument_tolerance=0.0)
+            == "underpowered"
+        )
+
+    def test_read_for_power_the_same_panels_would_say_the_opposite(self) -> None:
+        panels = {"NK:BPO": self.IDENTICAL}
+        assert report.verdict([], _comparison(**panels), None) == "underpowered"
+
+
 def _exploration(**over: Any) -> Any:
     return SimpleNamespace(**{"kind": "one_axis", "post_hoc": False, **over})
 

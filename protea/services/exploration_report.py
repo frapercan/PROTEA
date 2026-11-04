@@ -15,7 +15,9 @@ FIRST VERSIONS, written down so the review can change them on purpose:
   every compared panel when none are declared: ``blocked`` when the receipt or
   a blocking check forbids a verdict, ``against`` when the base wins any
   deciding panel, ``for`` when the candidate wins all of them, ``equal`` when
-  every one is a null with power, and ``underpowered`` otherwise.
+  every one is a null with power, and ``underpowered`` otherwise. An
+  instrument reads its predicate instead: ``for`` when every deciding delta is
+  within the rules' ``tolerance``, zero by default, and ``against`` otherwise.
 * The grade: ``exploratory`` when the rules were frozen post hoc or a blocking
   check fails; ``check`` for an instrument; ``thesis`` on a test window;
   ``development`` on a validation window; ``exploratory`` otherwise. Whether a
@@ -146,10 +148,34 @@ def checklist(
     }
 
 
+def _instrument_verdict(panels: list[dict[str, Any]], tolerance: float) -> str:
+    """An instrument reads its predicate, not its power.
+
+    Two runs that agree byte for byte give a delta of exactly zero in every
+    pair, so the paired bootstrap is degenerate and every panel comes back
+    ``unresolvable``. Read for power that is ``underpowered``, which says the
+    opposite of what happened. An instrument holds when every deciding panel's
+    delta is within the tolerance its rules declare, zero by default.
+    """
+    deltas = [p.get("delta") for p in panels]
+    if any(d is None for d in deltas):
+        return "underpowered"
+    within = all(d is not None and abs(float(d)) <= tolerance for d in deltas)
+    return "for" if within else "against"
+
+
 def verdict(
-    blocks: list[str], comparisons: list[dict[str, Any]], deciding: list[str] | None
+    blocks: list[str],
+    comparisons: list[dict[str, Any]],
+    deciding: list[str] | None,
+    *,
+    instrument_tolerance: float | None = None,
 ) -> str | None:
-    """The reading of the deciding panels, or None when nothing was compared."""
+    """The reading of the deciding panels, or None when nothing was compared.
+
+    ``instrument_tolerance`` is set for an instrument, whose verdict reads its
+    predicate; see :func:`_instrument_verdict`.
+    """
     if blocks:
         return "blocked"
     panels = [
@@ -160,6 +186,8 @@ def verdict(
     ]
     if not panels:
         return None
+    if instrument_tolerance is not None:
+        return _instrument_verdict(panels, instrument_tolerance)
     if any(p.get("verdict") == "b_greater" for p in panels):
         return "against"
     if all(p.get("verdict") == "a_greater" for p in panels):
@@ -209,7 +237,16 @@ def build(session: Session, exploration: Exploration) -> tuple[dict[str, Any], s
         "deciding_panels": deciding or "every compared panel; none declared",
         "checklist": {"version": CHECKLIST_VERSION, "items": checks},
         "blocks_verdict": blocks,
-        "verdict": verdict(blocks, comparisons, deciding),
+        "verdict": verdict(
+            blocks,
+            comparisons,
+            deciding,
+            instrument_tolerance=(
+                float((exploration.rules or {}).get("tolerance", 0.0))
+                if exploration.kind == "instrument"
+                else None
+            ),
+        ),
         "grade": grade(exploration, window.window_role if window else None, bool(failed)),
     }
     return report, rules_fingerprint(report)
