@@ -572,6 +572,17 @@ class _ReferenceMixin:
         for i, (acc, emb) in enumerate(base_q.yield_per(stream_chunk)):
             embeddings[i] = emb.to_numpy()
             accessions.append(acc)
+        if len(accessions) != total:
+            # The same guard the binary route carries, and for the same reason:
+            # the bank is allocated at ``count()`` and filled by index, so fewer
+            # rows leave the tail as whatever ``np.empty`` found and those rows
+            # become donors with uninitialised coordinates. It RAISES here
+            # because there is no third route behind this one, and a short bank
+            # is worse than no bank.
+            raise RuntimeError(
+                f"the reference pool streamed {len(accessions)} rows where the query "
+                f"counted {total}; the bank would be part uninitialised memory"
+            )
         return accessions, embeddings, "text"
 
     def _load_reference_data_per_aspect(

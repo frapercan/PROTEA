@@ -7,31 +7,34 @@ connection pgvector's binary loaders (see
 ``infrastructure/database/engine.py``), so the only thing missing is a cursor
 that asks for binary, and that has to be the driver's own.
 
-REGISTERING THE ADAPTERS IS NOT THE SAME AS GETTING BINARY, which is the
-mistake that cost this module a day: a connection can hold every adapter and
-still carry text, and checking the TYPE that comes back proves nothing, because
-the ``HalfVector`` is built from the text after it arrives.
+REGISTERING THE ADAPTERS IS NOT THE SAME AS GETTING BINARY. A connection can
+hold every adapter and still carry text, and checking the TYPE that comes back
+proves nothing, because the ``HalfVector`` is built from the text after it
+arrives.
 
-MEASURED 2026-11-04 on 20.000 rows of ``f3a7fe16`` (1.536 dims), loopback:
+MEASURED 2026-11-04 on 20,000 rows of ``f3a7fe16`` (1,536 dims), loopback:
 
-    text    0,307 ms a row
-    binary  0,027 ms a row      a factor of 11,2
+    text    0.307 ms a row
+    binary  0.027 ms a row      a factor of 11.2
 
 and the arrays are IDENTICAL BIT FOR BIT -- ``array_equal`` over the uint16
-views of 30,7 million float16s, maximum absolute difference 0,0 -- with the
+views of 30.7 million float16s, maximum absolute difference 0.0 -- with the
 accessions in the same order. They cannot move: the text form is a lossless
 decimal rendering of the same float16s, so the two agreeing is a property and
 not a lucky sample.
 
-ON THE WIRE it is bytes, not parsing, that decides. A dense 1.536-dim row is
-17.992 bytes as text and 3.076 binary, 5,8x, so a 684.048-row bank is 12,3 GB
-against 2,1. On the compute node, whose link sustains 5,0 MB/s, that is 41
-minutes against 7, and it is why exploration 1's first arm was abandoned after
-three loads were cut mid-stream.
+ON THE WIRE it is bytes, not parsing, that decides. A dense 1,536-dim row is
+17,992 bytes as text and 3,076 binary, 5.8x, so a 684,048-row bank is 12.3 GB
+against 2.1. On the compute node, whose link sustains 5.0 MB/s, that is 41
+minutes against 7, and it is why exploration 1's first arm never ran: four bank
+loads were started and none finished. Two were cut by the heartbeat watchdog at
+18:06:21 and 18:25:53 CET, a third was superseded when the node restarted the
+worker to raise the heartbeat, and the fourth was stopped by the author's
+decision once the ratio above had been measured.
 
-NOT FOR THE SPARSE BANK, deliberately. An 8.192-dim k-WTA row is almost all
-zeros, a zero renders as one character, and its text is 16.985 bytes against
-16.388 binary: nothing to win on the wire. Its PARSE cost is 8.192 floats a row
+NOT FOR THE SPARSE BANK, deliberately. An 8,192-dim k-WTA row is almost all
+zeros, a zero renders as one character, and its text is 16,985 bytes against
+16,388 binary: nothing to win on the wire. Its PARSE cost is 8,192 floats a row
 and would gain, but it goes through ``stream_sparse_pool``, which derives its
 shape from the rows it receives, so routing it belongs in its own change.
 """
@@ -118,7 +121,7 @@ def fill_from_binary(
         logger.warning(
             "the reference pool could not be read over a binary cursor, so it "
             "falls back to text: one float per dimension parsed in Python, and "
-            "5,8x the bytes on the wire for a dense bank. Measured 11,2x slower.",
+            "5.8x the bytes on the wire for a dense bank. Measured 11.2x slower.",
             exc_info=True,
         )
         return None
