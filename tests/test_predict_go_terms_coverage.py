@@ -39,6 +39,7 @@ from protea.core.operations.predict_go_terms._batch_op_reference import (
     _find_missing_aspects,
     _PoolRequest,
 )
+from protea.core.operations.predict_go_terms._reference_aspect import aspect_bank
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
@@ -862,7 +863,7 @@ class TestLoadReferenceDataPerAspect:
             )
         for asp in ASPECT_CODES:
             view = result[asp]
-            assert isinstance(view["embeddings_f32"], np.ndarray)
+            assert isinstance(aspect_bank(view, use_cos=False), np.ndarray)
             assert "anno_gtids" in view
             assert "acc_to_anno_idx" in view
         assert result["P"]["accessions"] == ["R1", "R4"] or sorted(result["P"]["accessions"]) == [
@@ -918,7 +919,7 @@ class TestAssembleAspectView:
         view, n = _assemble_aspect_view("P", unified, _PoolRequest(ec_id, as_id))
         assert n == 2
         assert view["accessions"] == ["R1", "R3"]
-        assert view["embeddings_f32"].shape == (2, 2)
+        assert aspect_bank(view, use_cos=False).shape == (2, 2)
         assert "anno_gtids" in view
         assert view["acc_to_anno_idx"] == {"R1": 0, "R3": 1}
 

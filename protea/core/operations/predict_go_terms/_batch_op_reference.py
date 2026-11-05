@@ -32,6 +32,7 @@ from protea.core.operations.predict_go_terms._common import (
     _REF_CACHE,
     _UNIFIED_REF_KEY,
 )
+from protea.core.operations.predict_go_terms._reference_aspect import _ASPECT_SLICE
 from protea.core.operations.predict_go_terms._reference_binary import fill_from_binary
 from protea.core.operations.predict_go_terms._reference_needs import reference_dtype_needs
 from protea.core.operations.predict_go_terms._sparse_bank import (
@@ -133,14 +134,20 @@ def _assemble_aspect_view(
     aspect_accessions = [unified["accessions"][i] for i in indices]
     unified_f32 = unified.get("embeddings_f32")
     unified_cos = unified.get("embeddings_f32_cos")
+    # The f32 banks are NOT cut here. A fancy-index slice is a full copy, and
+    # the three aspects together are 1,777,762 rows: 10.92 GB at 1536 dims.
+    # Only ONE of them is read at a time when the aspect searches run in
+    # series, so the view carries the pool and the index array and
+    # :func:`aspect_bank` gathers the rows when a search asks for them.
     view: dict[str, Any] = {
         "accessions": aspect_accessions,
         "embeddings": np.empty((0,), dtype=np.float16),
-        "embeddings_f32": (
-            unified_f32[indices] if need_plain and unified_f32 is not None else None
-        ),
-        "embeddings_f32_cos": (
-            unified_cos[indices] if need_cos and unified_cos is not None else None
+        "embeddings_f32": None,
+        "embeddings_f32_cos": None,
+        _ASPECT_SLICE: (
+            indices,
+            unified_f32 if need_plain else None,
+            unified_cos if need_cos else None,
         ),
     }
     anno_csr = _load_anno_csr_from_disk(ecid, asid, aspect, d)
