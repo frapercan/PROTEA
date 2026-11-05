@@ -152,7 +152,10 @@ _BOOLEAN_FRAME_FIELDS: frozenset[str] = frozenset({"restrict_gt_to_predicted"})
 #: Rows and the provenance each one can reach. ``information_accretion_set_id``
 #: lives only in the producing job's payload: no column records it, which is why
 #: a row without a job cannot be sealed however much else survives.
-_ROWS = text("""
+#: The frame material, as one SELECT so the bulk seal and the self seal cannot
+#: read different fields. A content address whose two producers can drift is
+#: not an address.
+_ROW_MATERIAL = """
     SELECT r.id::text                                     AS id,
            r.frame_digest                                 AS frame,
            r.evaluation_set_id::text                       AS evaluation_set_id,
@@ -170,8 +173,13 @@ _ROWS = text("""
     FROM evaluation_result r
     LEFT JOIN evaluation_set es ON es.id = r.evaluation_set_id
     LEFT JOIN job j             ON j.id = r.job_id
-    ORDER BY r.created_at
-""")
+"""
+
+_ROWS = text(_ROW_MATERIAL + "\n    ORDER BY r.created_at\n")
+
+#: The same material for one row, which is what an evaluation sealing the row
+#: it just created needs.
+_ONE_ROW = text(_ROW_MATERIAL + "\n    WHERE r.id = CAST(:id AS uuid)\n")
 
 #: Width of the seal.
 #:
@@ -292,6 +300,88 @@ def frame_digest(row: dict[str, Any]) -> str | None:
     return "f-" + hashlib.sha256(canonical.encode()).hexdigest()[:_DIGEST_WIDTH]
 
 
+def _sealable_digest(row: Any, result_id: Any, emit: EmitFn) -> str | None:
+    """The seal this row takes, or nothing with the reason already reported.
+
+    Three ways to have none and not one of them fails the caller, which is the
+    whole contract: the evaluation this runs inside has already scored, and its
+    numbers are not discarded because a provenance column could not be filled.
+    """
+    try:
+        digest = frame_digest(row)
+    except Exception as exc:  # noqa: BLE001  (the contract above is the point)
+        # Every value here came out of the database as text or null, so nothing
+        # in the digest should raise. If something does, this still must not be
+        # what discards a run that scored: leave the column null, which the
+        # comparability gate already reads as "not comparable yet".
+        emit("seal.one_failed", None, {"id": str(result_id), "error": str(exc)}, "warning")
+        return None
+    if digest is None:
+        emit(
+            "seal.one_unattributable",
+            None,
+            {"id": str(result_id), "why": _why_unsealable(row)},
+            "warning",
+        )
+        return None
+    if row["frame"] is not None and row["frame"] != digest:
+        emit(
+            "seal.one_conflict",
+            None,
+            {"id": str(result_id), "stored": row["frame"], "computed": digest},
+            "warning",
+        )
+        return None
+    return digest
+
+
+def seal_one(session: Session, result_id: Any, emit: EmitFn) -> str | None:
+    """Seal the row an evaluation has just created, and say so.
+
+    Called from ``run_cafa_evaluation`` rather than left to this module's bulk
+    operation, because a result with no seal cannot be compared against
+    anything: the comparability gate refuses an ABSENT digest, and that
+    absence is not waivable by ``allow_frame_mismatch``, which waives a
+    disagreement and not an absence. So an unsealed result is a run whose
+    numbers cannot be used until somebody remembers to go back and stamp it.
+
+    Read back through :data:`_ROW_MATERIAL` rather than hashed from the values
+    the caller has in hand. The seal is a content address, so a row this path
+    sealed and a row the bulk operation sealed have to be byte equal for the
+    same frame; hashing one of them from memory and the other from the table
+    is how the two drift.
+
+    NO DRY RUN, and that is the whole reason this exists.
+    :class:`SealEvaluationFramesPayload` asks to be run twice because it
+    rewrites a provenance column on rows it did not make, and the first answer
+    is a report of what the second would write. Here the row was created a few
+    statements ago in this same transaction: the column is null, there is
+    nothing to overwrite, and nothing to report before overwriting it. Asking
+    twice for it is what left results unsealed until somebody remembered.
+    """
+    row = session.execute(_ONE_ROW, {"id": str(result_id)}).mappings().one_or_none()
+    if row is None:
+        emit("seal.one_missing", None, {"id": str(result_id)}, "warning")
+        return None
+    digest = _sealable_digest(row, result_id, emit)
+    if digest is None:
+        return None
+    session.execute(_SEAL, {"frame": digest, "id": str(result_id)})
+    emit("seal.one_done", None, {"id": str(result_id), "frame_digest": digest}, "info")
+    return digest
+
+
+def _why_unsealable(row: Any) -> str:
+    """Which of the two missing things left this frame unrecoverable.
+
+    One place, because the bulk seal and the self seal both report it and two
+    copies of a reason drift into two different reasons for one condition.
+    """
+    if not row["has_job"]:
+        return "no producing job, so the frame is unrecoverable"
+    return "the evaluation set is missing, so the population is unknown"
+
+
 class SealEvaluationFramesPayload(ProteaPayload, frozen=True):
     """Inputs for the seal.
 
@@ -329,17 +419,7 @@ def _walk(session: Session, rows: list[dict[str, Any]], p: Any) -> _Tally:
         digest = frame_digest(row)
         if digest is None:
             if len(t.unattributable) < p.max_examples:
-                t.unattributable.append(
-                    {
-                        "id": row["id"],
-                        "why": (
-                            "no producing job, so the frame is unrecoverable"
-                            if not row["has_job"]
-                            else "the evaluation set is missing, so the population "
-                            "is unknown"
-                        ),
-                    }
-                )
+                t.unattributable.append({"id": row["id"], "why": _why_unsealable(row)})
             continue
 
         t.digests[digest] = t.digests.get(digest, 0) + 1
