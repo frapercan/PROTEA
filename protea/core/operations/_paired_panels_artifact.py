@@ -79,6 +79,7 @@ from pathlib import Path
 
 import numpy as np
 
+from protea.core.domain.aspect import Aspect
 from protea.core.operations._paired_panels_bootstrap import PanelArrays
 
 #: What the producer writes, per evaluation result, per CAFA setting.
@@ -124,11 +125,9 @@ COMPARABILITY_KEYS: tuple[str, ...] = (
 )
 
 #: cafaeval emits the long namespace; every other table here speaks CAFA codes.
-NAMESPACE_TO_CAFA: dict[str, str] = {
-    "biological_process": "BPO",
-    "molecular_function": "MFO",
-    "cellular_component": "CCO",
-}
+#: Derived from the aspect enum rather than restated, because a second copy of
+#: this mapping is the Primitive Obsession that module was added to remove.
+NAMESPACE_TO_CAFA: dict[str, str] = {a.namespace: a.cafa for a in Aspect}
 
 #: The two variants are not the same numbers with weights of one: the weighted
 #: branch scores ``toi_ia`` and the unweighted branch scores ``toi``, which are
