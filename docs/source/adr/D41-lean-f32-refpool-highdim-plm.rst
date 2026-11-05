@@ -38,9 +38,14 @@ entire reference-loading call chain:
   the embedding-PCA state file for this ``EmbeddingConfig`` is absent
   from disk. The PCA fit consumes the raw float32 pool; once cached the
   artefact is loaded from disk and the plain copy is not needed.
+- *Amended 2026-11-05:* that fit runs only for the v6 features, so under
+  cosine ``need_plain`` is ``True`` only when ``compute_v6_features`` is
+  on **and** the state file is absent. As first written, the rule kept
+  the raw copy, unified and per aspect, in every cosine run of the
+  production recipe, where v6 is off and no state file exists.
 
-The flags are resolved once per batch by the static helper
-``_reference_dtype_needs(p)`` and included in the ``_REF_CACHE`` key so
+The flags are resolved once per batch by ``reference_dtype_needs(p)``
+(``_reference_needs.py``) and included in the ``_REF_CACHE`` key so
 that a cosine run and a non-cosine run on the same worker never share a
 pool that materialised only one metric's copy.
 
@@ -77,7 +82,8 @@ consumer read it.
 - ``protea/core/disk_cache.py`` :: ``_derive_reference_views``
 - ``protea/core/operations/predict_go_terms/_batch_op_reference.py`` ::
   ``_ReferenceMixin._ensure_reference_cache``,
-  ``_reference_dtype_needs``,
   ``_load_reference_data``,
   ``_load_reference_data_per_aspect``,
   ``_assemble_all_aspect_views``
+- ``protea/core/operations/predict_go_terms/_reference_needs.py`` ::
+  ``reference_dtype_needs``

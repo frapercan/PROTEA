@@ -33,6 +33,7 @@ from protea.core.operations.predict_go_terms._common import (
     _UNIFIED_REF_KEY,
 )
 from protea.core.operations.predict_go_terms._reference_binary import fill_from_binary
+from protea.core.operations.predict_go_terms._reference_needs import reference_dtype_needs
 from protea.core.operations.predict_go_terms._sparse_bank import (
     bank_bytes,
     bank_is_sparse,
@@ -317,7 +318,7 @@ class _ReferenceMixin:
         When the cache is full, the oldest entry is evicted to free numpy memory.
         """
         p = ctx.p
-        need_cos, need_plain = self._reference_dtype_needs(p)
+        need_cos, need_plain = reference_dtype_needs(p)
         request = _PoolRequest(
             ctx.embedding_config_id, ctx.annotation_set_id, getattr(p, "donor_policy", None)
         )
@@ -376,25 +377,6 @@ class _ReferenceMixin:
             need_plain,
             request.discriminator,
         )
-
-    @staticmethod
-    def _reference_dtype_needs(p: Any) -> tuple[bool, bool]:
-        """Decide which f32 reference copies this run actually reads.
-
-        ``need_cos`` (the L2-normalised copy) is read by the KNN search when
-        the metric is cosine; ``need_plain`` (the raw f32 copy) is read by the
-        KNN search otherwise, and is also the pool the embedding-PCA fit
-        consumes. The PCA state is cached on disk per embedding config and the
-        fit ignores the pool once cached, so the raw copy is only needed when
-        the PCA artefact is still missing. Skipping the unread copy keeps
-        high-dim PLMs (ESM2-3B, 2560 dims) inside RAM.
-        """
-        from protea.core.pca_cache import _pca_state_path
-
-        need_cos = getattr(p, "metric", "cosine") == "cosine"
-        pca_cached = _pca_state_path(p.embedding_config_id).exists()
-        need_plain = (not need_cos) or (not pca_cached)
-        return need_cos, need_plain
 
     def _load_reference_data(
         self,
