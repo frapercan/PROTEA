@@ -58,6 +58,7 @@ from protea.core.operations._run_cafa_setup import (  # noqa: F401
     bundle_run_context,
 )
 from protea.core.operations.compute_information_accretion import ia_key_for
+from protea.core.operations.seal_evaluation_frames import seal_one
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -208,11 +209,13 @@ class RunCafaEvaluationOperation:
         )
         session.add(eval_result)
         session.flush()
+        frame_seal = seal_one(session, result_id, emit)
         emit(
             "run_cafa_evaluation.done",
             None,
             {
                 "evaluation_result_id": str(result_id),
+                "frame_digest": frame_seal,
                 "settings_evaluated": [k for k in results.keys() if k != "artifacts"],
                 "artifacts_prefix": f"eval_artifacts/{result_id}/",
                 "artifacts_count": len((results.get("artifacts") or {}).get("keys") or []),
