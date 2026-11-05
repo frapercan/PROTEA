@@ -16,13 +16,13 @@ from types import SimpleNamespace
 import pytest
 
 from protea.core import pca_cache
-from protea.core.operations.predict_go_terms._batch_op_reference import _ReferenceMixin
+from protea.core.operations.predict_go_terms._reference_needs import reference_dtype_needs
 
 
 def _needs(state: Path, monkeypatch: pytest.MonkeyPatch, **payload: object) -> tuple[bool, bool]:
     monkeypatch.setattr(pca_cache, "_pca_state_path", lambda _config: state)
     p = SimpleNamespace(embedding_config_id=uuid.uuid4(), **payload)
-    return _ReferenceMixin._reference_dtype_needs(p)
+    return reference_dtype_needs(p)
 
 
 @pytest.mark.parametrize(

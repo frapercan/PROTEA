@@ -1556,7 +1556,11 @@ class TestEnsureReferenceCacheMode:
             annotation_set_id=uuid.uuid4(),
         )
         sentinel = {"cached": True}
-        need_cos, need_plain = op._reference_dtype_needs(ctx.p)
+        from protea.core.operations.predict_go_terms._reference_needs import (
+            reference_dtype_needs,
+        )
+
+        need_cos, need_plain = reference_dtype_needs(ctx.p)
         # Derived, not restated. A key spelled twice is a key that can
         # disagree with itself, and this test existed to catch a cache hit,
         # not to re-implement how the cache is addressed.
