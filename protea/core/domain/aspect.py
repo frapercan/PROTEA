@@ -65,6 +65,16 @@ class Aspect(Enum):
         """
         return _CODE_TO_CAFA[self.value]
 
+    @property
+    def namespace(self) -> str:
+        """Long GO namespace (``"biological_process"`` / ...).
+
+        The form ``cafaeval`` emits, so it is what its own job events carry:
+        a consumer matching a panel against one of those events needs this
+        encoding and not :attr:`cafa`.
+        """
+        return _CODE_TO_NAMESPACE[self.value]
+
     @classmethod
     def from_code(cls, code: str) -> Aspect:
         """Build an Aspect from its single-char wire code."""
@@ -80,6 +90,12 @@ _CODE_TO_CAFA: dict[str, str] = {
     "P": "BPO",
     "F": "MFO",
     "C": "CCO",
+}
+
+_CODE_TO_NAMESPACE: dict[str, str] = {
+    "P": "biological_process",
+    "F": "molecular_function",
+    "C": "cellular_component",
 }
 
 _CAFA_TO_CODE: dict[str, str] = {v: k for k, v in _CODE_TO_CAFA.items()}

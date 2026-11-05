@@ -31,6 +31,7 @@ A_WINS = {"status": "ok", "verdict": "a_greater"}
 B_WINS = {"status": "ok", "verdict": "b_greater"}
 NULL_WITH_POWER = {"status": "null_with_power", "verdict": "not_resolved"}
 UNDERPOWERED = {"status": "underpowered", "verdict": "not_resolved"}
+EMPTY_PANEL = {"status": "empty", "verdict": "not_resolved"}
 
 
 class TestTheVerdict:
@@ -58,6 +59,84 @@ class TestTheVerdict:
     def test_anything_else_is_underpowered(self) -> None:
         panels = {"NK:BPO": A_WINS, "NK:MFO": UNDERPOWERED}
         assert report.verdict([], _comparison(**panels), None) == "underpowered"
+
+
+class TestARefusedPanelIsNotAnUncomputedOne:
+    """Three states, because either pair of them alone gets a real case wrong.
+
+    ``PK:BPO`` cannot be written at all while the weighted and unweighted
+    branches score two populations out of one row per protein, so blocking on
+    absence alone would block that exploration for ever. And
+    :func:`verdict` reads its deciding panels through a comprehension that
+    skips the ones that never arrived, so ignoring absence publishes a verdict
+    over part of its declared evidence without saying which part.
+    """
+
+    PK_BPO = SimpleNamespace(
+        setting="PK", namespace="biological_process", code="variant_populations_differ"
+    )
+    NK_MFO = SimpleNamespace(
+        setting="NK", namespace="molecular_function", code="unmappable_row_numbering"
+    )
+
+    def _coverage(
+        self,
+        panels: dict[str, Any],
+        deciding: list[str] | None = None,
+        refusals: tuple[SimpleNamespace, ...] = (),
+    ) -> tuple[dict[str, Any], list[str]]:
+        session = SimpleNamespace(execute=lambda *_a, **_k: list(refusals))
+        return report._panel_coverage(
+            session, SimpleNamespace(id=uuid.uuid4()), _comparison(**panels), deciding
+        )
+
+    def test_a_panel_the_comparison_read_is_computed(self) -> None:
+        coverage, blockers = self._coverage({"NK:BPO": A_WINS})
+        assert coverage["panels"] == {"NK:BPO": {"state": "computed"}}
+        assert blockers == []
+
+    def test_a_refusal_carries_the_producers_own_code_and_does_not_block(self) -> None:
+        coverage, blockers = self._coverage(
+            {"PK:BPO": EMPTY_PANEL}, refusals=(self.PK_BPO,)
+        )
+        assert coverage["panels"]["PK:BPO"] == {
+            "state": "refused",
+            "code": "variant_populations_differ",
+        }
+        assert blockers == []
+
+    def test_an_absence_with_no_recorded_reason_blocks(self) -> None:
+        coverage, blockers = self._coverage({"PK:BPO": EMPTY_PANEL})
+        assert coverage["panels"]["PK:BPO"] == {"state": "uncomputed"}
+        assert blockers == ["the deciding panel PK:BPO was never computed"]
+
+    def test_a_declared_panel_the_comparison_never_mentions_blocks(self) -> None:
+        """The defect this closes: the verdict's comprehension just skips it."""
+        panels = {"LK:CCO": A_WINS}
+        assert report.verdict([], _comparison(**panels), ["LK:CCO", "NK:MFO"]) == "for"
+        _, blockers = self._coverage(panels, deciding=["LK:CCO", "NK:MFO"])
+        assert blockers == ["the deciding panel NK:MFO was never computed"]
+        assert report.verdict(blockers, _comparison(**panels), ["LK:CCO", "NK:MFO"]) == "blocked"
+
+    def test_a_refusal_for_another_cell_does_not_excuse_this_one(self) -> None:
+        _, blockers = self._coverage({"PK:BPO": EMPTY_PANEL}, refusals=(self.NK_MFO,))
+        assert blockers == ["the deciding panel PK:BPO was never computed"]
+
+    def test_a_deciding_panel_no_aspect_answers_to_blocks(self) -> None:
+        coverage, blockers = self._coverage({}, deciding=["NK:XXO"], refusals=(self.PK_BPO,))
+        assert coverage["panels"]["NK:XXO"] == {"state": "uncomputed"}
+        assert blockers == ["the deciding panel NK:XXO was never computed"]
+
+    def test_with_nothing_declared_the_asked_for_set_stands_in(self) -> None:
+        """Including the empty ones, so the record says why nine became six."""
+        panels = {"LK:CCO": A_WINS, "NK:MFO": EMPTY_PANEL, "PK:BPO": EMPTY_PANEL}
+        coverage, blockers = self._coverage(panels, refusals=(self.PK_BPO, self.NK_MFO))
+        assert coverage["panels"] == {
+            "LK:CCO": {"state": "computed"},
+            "NK:MFO": {"state": "refused", "code": "unmappable_row_numbering"},
+            "PK:BPO": {"state": "refused", "code": "variant_populations_differ"},
+        }
+        assert blockers == []
 
 
 class TestAnInstrumentReadsItsPredicate:

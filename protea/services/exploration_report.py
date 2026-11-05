@@ -40,6 +40,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 import protea.services.exploration_receipt as receipt
+from protea.core.domain.aspect import Aspect
 from protea.core.explorations import rules_fingerprint
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -86,6 +87,94 @@ def _comparisons(session: Session, exploration: Exploration) -> list[dict[str, A
             }
         )
     return out
+
+
+#: The producer's own record of a namespace it refused to write into the
+#: per-protein grid, for every evaluation result this exploration links. Read
+#: over all of them because a panel is comparable only when BOTH arms wrote it:
+#: one arm refusing is enough to leave nothing to pair.
+_REFUSED_SQL = text(
+    """
+    SELECT DISTINCT e.fields ->> 'setting'   AS setting,
+                    e.fields ->> 'namespace' AS namespace,
+                    e.fields ->> 'code'      AS code
+      FROM exploration_link l
+      JOIN evaluation_result r ON r.id = l.evaluation_result_id
+      JOIN job_event e ON e.job_id = r.job_id
+     WHERE l.exploration_id = CAST(:eid AS uuid)
+       AND l.evaluation_result_id IS NOT NULL
+       AND e.event = 'run_cafa_evaluation.per_protein_grid_namespace_dropped'
+"""
+)
+
+
+def _panel_coverage(
+    session: Session,
+    exploration: Exploration,
+    comparisons: list[dict[str, Any]],
+    deciding: list[str] | None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Each deciding panel's state, and the absences that block a verdict.
+
+    THREE STATES AND NOT TWO. A panel the comparison read is ``computed``. A
+    panel it could not read because the evaluation refused to write that
+    namespace is ``refused``, and the producer's own ``code`` says why: a
+    limit recorded at the time, not a run that did not happen. Only a panel
+    that is neither blocks, because then nothing in the record says why its
+    number is missing.
+
+    Both halves of that distinction are load-bearing, and each one alone is
+    wrong. ``PK:BPO`` cannot be written at all while the weighted and
+    unweighted branches score two populations out of one row per protein, so a
+    rule that blocked on absence would block that exploration for ever. And
+    :func:`verdict` reads the deciding panels through a comprehension that
+    simply skips the ones that never arrived, so a rule that ignored absence
+    publishes a verdict over part of its declared evidence without saying
+    which part.
+
+    With nothing declared the asked-for set stands in, which is what
+    ``verdict`` already falls back to, and the refusals then say why nine
+    requested panels became six.
+    """
+    asked = {key for comparison in comparisons for key in comparison["panels"]}
+    read = {
+        key
+        for comparison in comparisons
+        for key, panel in comparison["panels"].items()
+        if panel.get("status") != "empty"
+    }
+    refused = {
+        (row.setting, row.namespace): row.code
+        for row in session.execute(_REFUSED_SQL, {"eid": str(exploration.id)})
+    }
+    panels: dict[str, Any] = {}
+    blockers: list[str] = []
+    for key in list(deciding) if deciding else sorted(asked):
+        if key in read:
+            panels[key] = {"state": "computed"}
+            continue
+        setting, _, cafa = key.partition(":")
+        code = refused.get((setting, _namespace_of(cafa)))
+        if code is not None:
+            panels[key] = {"state": "refused", "code": code}
+            continue
+        panels[key] = {"state": "uncomputed"}
+        blockers.append(f"the deciding panel {key} was never computed")
+    return {"panels": panels}, blockers
+
+
+def _namespace_of(cafa: str) -> str | None:
+    """The long namespace a CAFA code names, or ``None`` when it names none.
+
+    A deciding panel is a string in frozen rules, so it can carry a typo that
+    no aspect answers to. That returns ``None`` rather than raising: the panel
+    then has no recorded refusal, falls through to ``uncomputed`` and blocks,
+    which is the safe direction for a panel nobody can even name.
+    """
+    try:
+        return Aspect.from_cafa(cafa).namespace
+    except KeyError:
+        return None
 
 
 def _release(session: Session, annotation_set_id: Any) -> int | None:
@@ -296,7 +385,8 @@ def build(session: Session, exploration: Exploration) -> tuple[dict[str, Any], s
     failed = [k for k, c in checks.items() if c["blocking"] and c["answer"] == FAIL]
     comparisons = _comparisons(session, exploration)
     deciding = (exploration.rules or {}).get("deciding_panels")
-    blocks = list(computed["blocks_verdict"]) + [f"check failed: {k}" for k in failed]
+    coverage, uncomputed = _panel_coverage(session, exploration, comparisons, deciding)
+    blocks = list(computed["blocks_verdict"]) + [f"check failed: {k}" for k in failed] + uncomputed
     instrument = None
     if exploration.kind == "instrument":
         identity, load_problems = _instrument(session, exploration)
@@ -321,6 +411,7 @@ def build(session: Session, exploration: Exploration) -> tuple[dict[str, Any], s
         "receipt": computed,
         "comparisons": comparisons,
         "deciding_panels": deciding or "every compared panel; none declared",
+        "panel_coverage": coverage,
         "checklist": {"version": CHECKLIST_VERSION, "items": checks},
         "blocks_verdict": blocks,
         "identity": instrument["identity"] if instrument else None,
