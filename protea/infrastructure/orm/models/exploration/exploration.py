@@ -122,8 +122,8 @@ class Exploration(Base):
     decision_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decided_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    #: The sha256 of the report the author accepted, and the checklist version
-    #: it was reviewed against.
+    #: The sha256 of the report the author decided on, whichever way the
+    #: decision went, and the checklist version it was reviewed against.
     report_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     checklist_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

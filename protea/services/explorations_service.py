@@ -434,12 +434,17 @@ def decide(
         raise ExplorationConflict("the exploration has not been reviewed yet")
     # Read before the move: the query autoflushes, and a decided row without its
     # decision is exactly what the table's CHECK refuses.
-    accepted_report = _last_report_sha(session, exploration) if decision == "accepted" else None
+    decided_report = _last_report_sha(session, exploration)
     _move(exploration, "decided")
     exploration.decision = decision
-    if accepted_report is not None:
-        # Accepting fixes the report it accepted, by its fingerprint.
-        exploration.report_sha256 = accepted_report
+    if decided_report is not None:
+        # A decision fixes the report it was taken on, by its fingerprint, and
+        # it does so whichever way the decision went. A rejection that does not
+        # say WHICH report it rejected cannot be checked against anything: the
+        # report is rebuilt from rows that keep moving, so the next build of it
+        # is a different document and nothing records that the rejection was
+        # not about that one.
+        exploration.report_sha256 = decided_report
     exploration.decision_text = text.strip()
     exploration.decided_at = func.now()  # type: ignore[assignment]
     exploration.decided_by = actor.name

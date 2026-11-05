@@ -319,9 +319,15 @@ def test_accepting_fixes_the_fingerprint_of_the_report_it_accepted(session: Sess
     assert row.report_sha256 == "d" * 64
 
 
-def test_rejecting_fixes_no_fingerprint(session: Session) -> None:
+def test_rejecting_fixes_the_fingerprint_of_the_report_it_rejected(session: Session) -> None:
+    """A rejection is evidence too, and evidence names what it was about.
+
+    The report is rebuilt from rows that keep moving, so the next build is a
+    different document; a rejection with no fingerprint cannot be checked
+    against the one it was taken on.
+    """
     row = _running(session)
     svc.report(session, row, SERVER)
     svc.review(session, row, SERVER)
     svc.decide(session, row, "rejected", "the frame moved", AUTHOR)
-    assert row.report_sha256 is None
+    assert row.report_sha256 == "d" * 64
