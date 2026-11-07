@@ -83,6 +83,27 @@ What this costs, where
   catch it if the old end of the series behaves differently landed separately, as
   ``skipped_go_term_unknown``.
 
+And what that same measurement says about the map's anchor
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The "nothing at load time" result above is not only good news: it is also the
+proof that the map cannot be read from the corpus's own snapshot. GOA
+normalises to primary ids against its own GO release, so **every id a corpus
+carries is live in the era that loaded it**. Ask such a snapshot "is this id
+live" and the answer is yes for every annotation in the set, the first clause
+of the rule keeps all of them, and the remapping resolves nothing at all.
+
+So the alias table has to be read from the snapshot that CLOSES the side
+(``old_native_snapshot_id`` or ``new_native_snapshot_id``), which is the only
+graph that can disagree with the corpus about what an id is called. The two
+are the same snapshot when each end closes under its own era, and they are
+not when a window closes two eras under one pivot: there, reading the corpus
+turned this whole ADR into a no-op while every test about the rule kept
+passing, and the ids the pivot cannot name went back to falling out of
+``closure & pivot_go_ids`` exactly as described above, with no counter. That
+anchoring, and the landings of the projection beside it, were corrected
+later; the measurement is in :mod:`protea.core._truth_remap`.
+
 Decision (proposed)
 ~~~~~~~~~~~~~~~~~~~
 

@@ -31,10 +31,11 @@ from protea.core._evaluation_graph import (
     _live_terms_with_aspect,
     _load_children_by_go_id,
     _load_parents_by_go_id,
+    _load_pivot_term_universe,
 )
 from protea.core._truth_projection import Graph
 from protea.core._truth_projection import Request as ProjectionRequest
-from protea.core._truth_remap import Remap, alias_rows, build_remap
+from protea.core._truth_remap import SideFrame, alias_rows, build_remap
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 
 #: How the t1 side's truth is built, by the name a payload asks for it with.
@@ -181,13 +182,20 @@ def _terms_of_interest(session: Session, window: ReconciledWindow) -> set[str]:
     new_live, _ = _live_terms_with_aspect(session, new_snapshot)
     return old_live & new_live
 
-def _remap_of_t0(session: Session, window: ReconciledWindow) -> Remap:
-    """The t0 snapshot's own statements about ids it no longer uses as primary.
+def _frame_of(session: Session, closing_snapshot_id: uuid.UUID) -> SideFrame:
+    """The graph that closes ONE side, and what it says about its synonyms.
 
-    FROM t0 AND ONLY t0, which is the lab's answer and the one that makes
-    sense: the question is what a t1 id is called in the space the window is
-    scored in. t1's own alias statements are about t1's space and would
-    answer a question nobody asked.
+    THE ARGUMENT IS THE SNAPSHOT THAT CLOSES THE SIDE, explicitly and with no
+    default, because the previous version took the window and read the t0
+    CORPUS's snapshot -- and a corpus is always live in its own era, so the
+    whole rule resolved nothing. :mod:`protea.core._truth_remap` carries the
+    measurement. Callers pass ``old_native_snapshot_id`` for the t0 side and
+    ``new_native_snapshot_id`` for the t1 side; when a window closes both
+    ends under one pivot the two calls are the same call, and that is the
+    construction where the old anchoring was a no-op.
+
+    The map, the liveness test and the aspects all come from this one
+    snapshot, which is what :class:`SideFrame` exists to keep true.
 
     REFUSES WITHOUT THE MAP, and that refusal is what keeps the profile name
     honest. ``projected`` means "remapped, then projected"; a build that
@@ -196,18 +204,89 @@ def _remap_of_t0(session: Session, window: ReconciledWindow) -> Remap:
     Load them with ``load_ontology_aliases``, which reads the ARCHIVED OBO
     and verifies its sha256.
     """
-    old_snapshot, _ = _window_end_snapshots(session, window)
-    rows = alias_rows(session, old_snapshot)
+    rows = alias_rows(session, closing_snapshot_id)
     if not rows:
         raise ValueError(
-            f"ontology snapshot {old_snapshot} has no rows in go_term_alias, so a "
-            "term obsolete at t0 with a published successor cannot be told from one "
-            "with none. Run load_ontology_aliases on it: without the map this "
-            "profile would quietly mean 'projected without remapping', which is a "
-            "different truth under the same name"
+            f"ontology snapshot {closing_snapshot_id} closes a side of this window "
+            "and has no rows in go_term_alias, so a term it cannot name with a "
+            "published successor cannot be told from one with none. Run "
+            "load_ontology_aliases on it: without the map this profile would "
+            "quietly mean 'projected without remapping', which is a different "
+            "truth under the same name"
         )
-    live, _ = _live_terms_with_aspect(session, old_snapshot)
-    return build_remap(rows, live)
+    live, _ = _live_terms_with_aspect(session, closing_snapshot_id)
+    # The aspects come from the WHOLE universe of this snapshot and not from
+    # its live set, because the id whose aspect is in question is the one
+    # being remapped -- and that id is obsolete here by construction, which
+    # is exactly why it has no entry among the live. Reading the live map
+    # left every aspect crossing uncounted, which is the shape of counter
+    # this module already got wrong once by reading the wrong snapshot.
+    _, aspect = _load_pivot_term_universe(session, closing_snapshot_id)
+    return SideFrame(
+        snapshot_id=closing_snapshot_id,
+        live=live,
+        remap=build_remap(rows, live, aspect),
+    )
+
+
+class _Side(NamedTuple):
+    """One end of the window: its corpus and the graph that closes it.
+
+    The two travel together through both reconcile steps, and bundling them
+    is what leaves room for the window's rules without passing seven
+    arguments.
+    """
+
+    annotation_set_id: uuid.UUID
+    native_snapshot_id: uuid.UUID
+    #: The remapping of ``native_snapshot_id``, which is the THIRD thing
+    #: that has to come from that one snapshot. ``None`` unless the profile
+    #: remaps. See :mod:`protea.core._truth_remap`.
+    frame: SideFrame | None = None
+
+
+def _sides_of(
+    session: Session, window: ReconciledWindow, project: ProjectionRequest | None
+) -> tuple[_Side, _Side]:
+    """The window's two ends, each carrying the graph that closes it.
+
+    Built in one place so the experimental rule and the NOT rule cannot end
+    up holding different frames for the same side.
+    """
+    frames = _frames_by_snapshot(session, window) if project else {}
+    return (
+        _Side(
+            window.old_annotation_set_id,
+            window.old_native_snapshot_id,
+            frames.get(window.old_native_snapshot_id),
+        ),
+        _Side(
+            window.new_annotation_set_id,
+            window.new_native_snapshot_id,
+            frames.get(window.new_native_snapshot_id),
+        ),
+    )
+
+
+def _frames_by_snapshot(
+    session: Session, window: ReconciledWindow
+) -> dict[uuid.UUID, SideFrame]:
+    """One frame per snapshot that CLOSES a side, built once per window.
+
+    Keyed by snapshot id, which is also how each side finds its own. A window
+    that closes both ends under one pivot makes the two sides share one
+    frame, and that falls out of the key instead of being a case somebody has
+    to remember to write. Called only for a profile that remaps, because
+    :func:`_frame_of` refuses a snapshot with no alias rows and no other
+    profile has any reason to have loaded them.
+    """
+    return {
+        snapshot_id: _frame_of(session, snapshot_id)
+        for snapshot_id in {
+            window.old_native_snapshot_id,
+            window.new_native_snapshot_id,
+        }
+    }
 
 
 def _projection_request(session: Session, window: ReconciledWindow) -> ProjectionRequest:
@@ -237,9 +316,21 @@ def _projection_request(session: Session, window: ReconciledWindow) -> Projectio
     question the native fields were overloaded with. Same reason, same fix
     and same regression test as the terms of interest in
     ``_run_cafa_setup._window_end_snapshots``.
+
+    THE LANDINGS ARE THE ONE THING HERE THAT IS NOT READ FROM THE ENDS, and
+    that is the second half of the anchoring fix. A landing has to be a node
+    the window can still name after ``closure & pivot_go_ids``, so it comes
+    from the graph that CLOSES the t0 side. Read from the t0 corpus's era
+    instead, 1,608 of an early window's 43,435 candidate landings were ids
+    the pivot has no row for: a gain projected onto one of them survived both
+    rules and then vanished at the intersection, which is the same silent
+    death the remapping had, one line further down. Non-obsolete and not the
+    whole pivot universe, for the reason that was already written here: the
+    pivot keeps obsolete terms and cafaeval's graph does not, so landing on
+    one would put the truth on a node the scorer cannot see.
     """
-    old_snapshot, new_snapshot = _window_end_snapshots(session, window)
-    target, _ = _live_terms_with_aspect(session, old_snapshot)
+    _, new_snapshot = _window_end_snapshots(session, window)
+    target, _ = _live_terms_with_aspect(session, window.old_native_snapshot_id)
     live, aspect = _live_terms_with_aspect(session, new_snapshot)
     return ProjectionRequest(
         graph=Graph(
@@ -251,10 +342,9 @@ def _projection_request(session: Session, window: ReconciledWindow) -> Projectio
             ),
         ),
         target=target,
-        remap=_remap_of_t0(session, window),
-        # Resolved here, with the graph and the landings, because all three
-        # come from the SAME two ends and the trap is the same for all three:
-        # the native fields cannot answer which ontologies the window spans.
+        # The remapping is NOT here: it is per side, keyed by the snapshot
+        # that closes that side, and one window can close its two ends under
+        # two graphs. ``_frame_of`` builds it; see :class:`SideFrame`.
     )
 
 
