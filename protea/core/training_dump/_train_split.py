@@ -53,7 +53,7 @@ from protea.core.training_dump._test_split import (
     _compute_test_cat_membership,
     _load_test_sequences_and_taxonomy,
 )
-from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+from protea.core.training_dump._window_choice import resolve_window
 
 
 def _resolve_train_split_eval(
@@ -64,50 +64,22 @@ def _resolve_train_split_eval(
 ) -> Any:
     """Look up the EvaluationSet for a train pair and load its delta.
 
-    Raises ``RuntimeError`` if the eval set is missing, because the dump
-    pipeline assumes the deltas were materialized beforehand.
-
-    WHY THIS NO LONGER USES ``one_or_none``. A pair of annotation sets used to
-    identify exactly one set, enforced by a UNIQUE constraint. It no longer
-    does: the propagation graphs joined the key, because the same pair read
-    under a different graph is a different delta (21 percent of the PK bucket
-    on the 220 -> 227 window). ``one_or_none`` would now raise
-    ``MultipleResultsFound`` from deep inside SQLAlchemy — which is how the
-    LB.1 incident of 2026-05-12 read from the outside, and the reason the
-    constraint was added in the first place. The ambiguity is real and the
-    export payload carries no way to resolve it, so this names the candidates
-    and stops, rather than crashing or silently taking the first row.
+    The choosing lives in :mod:`protea.core.training_dump._window_choice`,
+    with the test path's copy of the same question. It used to live here, and
+    the test path's did not get the repair this one got after the LB.1
+    incident of 2026-05-12: two copies of one rule is how the second one
+    rots.
     """
     old_set_id = ctx.version_to_set[v_old]
     new_set_id = ctx.version_to_set[v_new]
-    candidates = (
-        session.query(EvaluationSet)
-        .filter_by(
-            old_annotation_set_id=old_set_id,
-            new_annotation_set_id=new_set_id,
-        )
-        .all()
+    eset = resolve_window(
+        session,
+        old_set_id,
+        new_set_id,
+        set(getattr(ctx.payload, "evaluation_set_ids", []) or []),
+        getattr(ctx.payload, "ontology_snapshot_id", None),
+        f"train pair ({v_old}->{v_new})",
     )
-    if not candidates:
-        raise RuntimeError(
-            f"EvaluationSet missing for train pair ({v_old}->{v_new}). "
-            "Materialize it via scripts/materialize_lab_intervals.py "
-            "or POST /annotations/evaluation-sets/generate before retrying."
-        )
-    if len(candidates) > 1:
-        listed = "; ".join(
-            f"{e.id} (pivot {str(e.pivot_snapshot_id)[:8]}, "
-            f"natives {str(e.old_native_snapshot_id)[:8]}/{str(e.new_native_snapshot_id)[:8]})"
-            for e in candidates
-        )
-        raise RuntimeError(
-            f"{len(candidates)} EvaluationSets exist for train pair ({v_old}->{v_new}), "
-            f"differing in their propagation graphs: {listed}. They hold different "
-            "deltas, so the pair alone does not say which one this dump should train "
-            "on. Delete the ones this run must not use, or teach the export payload to "
-            "name a propagation graph."
-        )
-    eset = candidates[0]
     eval_data, _ = load_evaluation_data_for_set(session, eset)
     return eval_data
 
