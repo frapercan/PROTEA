@@ -51,8 +51,9 @@ read it at that grain.
      - holds
    * - ``queries``
      - ``(window, query)``
-     - sequence identity, the per-residue vocabulary code's ``(shard_key, position)`` and
-       ``shard_sha256``, the stratum, ``snapshot_pair`` and the horizon in days
+     - sequence identity, the per-residue vocabulary code's
+       ``(shard_key, position)`` and ``shard_sha256``, the residue count, the
+       stratum, ``snapshot_pair`` and the horizon in days
    * - ``query_state``
      - ``(window, query, term, moment)``
      - ``moment`` is ``t`` or ``t'``; term, evidence code, qualifier,
@@ -208,11 +209,60 @@ one window. That is left as it is: the official evaluation remains
 side serves internal selection during training, where held-out proteins inside
 the same windows are enough.
 
+The residue count is denormalised, and that is deliberate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``residue_code`` already holds it, so ``queries`` repeats it. The feature cards
+the loader builds divide by the length to get a relative position, a fraction
+and a span, so without the column it would open a shard to read one integer.
+One int64 against a file open is a trade worth naming rather than discovering.
+
+The population is the gainers, and that is a declared bias
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``queries`` holds the proteins that GAIN annotation between ``t`` and ``t'``:
+the union of NK, LK and PK, which is what ``_training_dump_loaders`` derives
+today and what the evaluator scores. For the reading head that is right, since
+the thing trained on is the thing scored.
+
+For a world model it is a bias, and it is written here rather than left to be
+found. Every example gains something, so the model never sees a protein whose
+knowledge did not change, which in the corpus is the common case. A later
+export adds a declared sample of non-gainers with a column that distinguishes
+them. Until then the manifest says the population is the gainers, because a
+population that lives only in a loader is the same defect
+``export_evaluation_targets`` was written to end: the operation still has no
+field with which to declare one.
+
+The neighbourhood is declared in the manifest
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Not just the rows: the manifest records the embedding configuration, the search
+backend, ``N``, and the rule applied to the query's own sequence. The backend is
+``numpy`` and only ``numpy``, because it is the only member of
+``ORDER_INVARIANT_BACKENDS``; the payload's own default is ``faiss``, which is
+approximate and order dependent, and a neighbourhood that moves between runs
+would carry into the dataset the exact class of defect exploration 3 closed.
+
 Open decisions
 ~~~~~~~~~~~~~~~
 
+- **Whether the query is its own neighbour.** For this dataset the proposal is
+  to exclude it, by sequence, because the query's own state already arrives
+  through ``query_state`` and as a donor it would only arrive twice. **This is
+  not axis C re-opened.** Axis C asked whether the kNN method should count its
+  own vote, measured it over 387 of 387 panels, found that excluding it costs
+  0,048, and is closed: the method keeps it. This asks something else, about a
+  table in which the same information has a column of its own, and it needs the
+  author's word as a new decision rather than as a reading of the old one.
 - **A plural held-out side.** Deferred, for the reason above. It becomes a
   schema change the day internal selection needs several horizons.
+- **Importing the text vectors or referencing them.** The laboratory holds
+  them for the cut's snapshot, 43.558 terms by 2560 in float16, which is that
+  snapshot's non-obsolete term count exactly. The decision here is to reference
+  them by sha256 rather than copy 224 MB into every export, for the same reason
+  the vocabulary code is referenced. It changes the day a dataset has to be
+  self-contained to be published outside.
 - **A second neighbour list by sparse code.** It needs a protein-level grouped
   per-residue vocabulary configuration, which does not exist. The schema leaves room:
   ``neighbourhood`` is keyed by ``(version_t, query, neighbour)`` with the
