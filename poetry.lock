@@ -4021,8 +4021,8 @@ t5 = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@5f
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-method.git"
-reference = "3c9ebb0ac681ee06d15cae94d76df389d0b8b337"
-resolved_reference = "3c9ebb0ac681ee06d15cae94d76df389d0b8b337"
+reference = "75ba91a3c0172dcb34b131e30c1adb3814a1b9bf"
+resolved_reference = "75ba91a3c0172dcb34b131e30c1adb3814a1b9bf"
 
 [[package]]
 name = "protea-reranker-lab"
@@ -7011,4 +7011,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "4d09c3bbc9b0507bf7e1854005be4eb655ee59992881d9503fd16d8a3e3fa6c5"
+content-hash = "d66bd64cf6e5b33afbfe8a64e7b81ae13ef25b892cf4dc8ba23ff90c42a49c44"
