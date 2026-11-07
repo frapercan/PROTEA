@@ -341,11 +341,8 @@ class TestWhichGraphItClimbs:
         monkeypatch.setattr(ev, "_load_parents_by_go_id", lambda _s, snap: {"graph": {snap}})
         monkeypatch.setattr(ev, "_load_children_by_go_id", lambda _s, _snap: {})
         # This test is about WHICH snapshots the graph and the landings come
-        # from. The remap is resolved from the same two ends and has its own
-        # tests; stubbed here so a missing alias table does not mask the
-        # question being asked.
-        monkeypatch.setattr(ev, "_remap_of_t0", lambda _s, _w: None)
-
+        # from. The remapping is no longer resolved here at all: it is per
+        # side, keyed by the snapshot that closes that side.
         request = ev._projection_request(self._session(), self._window())
 
         # One of each, in order: the landings come from t0, the climb from t1.
@@ -376,7 +373,6 @@ class TestWhichGraphItClimbs:
             ev, "_live_terms_with_aspect", lambda _s, snap: (set(), {})
         )
         monkeypatch.setattr(ev, "_load_parents_by_go_id", lambda _s, _snap: {})
-        monkeypatch.setattr(ev, "_remap_of_t0", lambda _s, _w: None)
 
         def _children(_session, snapshot):
             asked.append(snapshot)
