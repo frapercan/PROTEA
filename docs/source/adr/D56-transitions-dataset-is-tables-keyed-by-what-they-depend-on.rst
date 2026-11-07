@@ -238,23 +238,41 @@ The neighbourhood is declared in the manifest
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Not just the rows: the manifest records the embedding configuration, the search
-backend, ``N``, and the rule applied to the query's own sequence. The backend is
-``numpy`` and only ``numpy``, because it is the only member of
-``ORDER_INVARIANT_BACKENDS``; the payload's own default is ``faiss``, which is
-approximate and order dependent, and a neighbourhood that moves between runs
-would carry into the dataset the exact class of defect exploration 3 closed.
+backend, ``N``, and the self-exclusion rule. The backend is ``numpy`` and only
+``numpy``, because it is the only member of ``ORDER_INVARIANT_BACKENDS``; the
+payload's own default is ``faiss``, which is approximate and order dependent,
+and a neighbourhood that moves between runs would carry into the dataset the
+exact class of defect exploration 3 closed.
+
+**The self-exclusion rule is ``accession``**, declared in the manifest as
+``self excluded by accession; twins kept``. The query is not its own donor: its
+state arrives through ``query_state``, and as a neighbour at 100 % identity it
+would be a shortcut to copying itself. Its twins stay, because an accession
+sharing a sequence is a separate entry annotated by other people and its
+annotation is real evidence.
+
+That distinction is a quarter of the corpus and not a corner case. Measured:
+629.895 sequences carry one accession, **54.153 carry more, and 162.640
+accessions are involved**, which is 23,8 % of the 684.048 with a sequence; the
+largest group is 127 accessions over one sequence. Excluding by sequence would
+take, from those queries, two real annotated entries on average.
+
+**The margin and the drop resolve the same rule, and that is load-bearing.**
+The search asks for ``k`` plus a margin so that ``k`` survive the drop. Mixing
+the two rules has already cost this project a measured defect: a pre-search
+asking ``k+1`` and dropping by accession against a method dropping by sequence
+returned short lists for 264 of 14.032 queries, 887 donor slots, and the method
+filled the difference from whatever else its bank held.
+
+**And this rule is not the method's.** ``predict_go_terms`` runs with
+``exclude_self_neighbour`` false, which is ``none``: the kNN method keeps its
+own vote, which is what axis C decided over 387 of 387 panels. The dataset's
+rule is a third value, chosen for a table where the same information has a
+column of its own, and it changes nothing about the method.
 
 Open decisions
 ~~~~~~~~~~~~~~~
 
-- **Whether the query is its own neighbour.** For this dataset the proposal is
-  to exclude it, by sequence, because the query's own state already arrives
-  through ``query_state`` and as a donor it would only arrive twice. **This is
-  not axis C re-opened.** Axis C asked whether the kNN method should count its
-  own vote, measured it over 387 of 387 panels, found that excluding it costs
-  0,048, and is closed: the method keeps it. This asks something else, about a
-  table in which the same information has a column of its own, and it needs the
-  author's word as a new decision rather than as a reading of the old one.
 - **A plural held-out side.** Deferred, for the reason above. It becomes a
   schema change the day internal selection needs several horizons.
 - **Importing the text vectors or referencing them.** The laboratory holds
