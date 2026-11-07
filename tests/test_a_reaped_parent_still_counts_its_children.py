@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from sqlalchemy.dialects import postgresql
 
-from protea.core.contracts.parent_progress import REAPED, _STILL_COUNTS
+from protea.core.contracts.parent_progress import _STILL_COUNTS, REAPED
 
 
 def _sql() -> str:
