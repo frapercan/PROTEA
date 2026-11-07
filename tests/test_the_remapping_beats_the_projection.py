@@ -110,7 +110,14 @@ class TestWhichStatementResolvesAnId:
         # hop GO:DEAD3 takes. The lab's counters are per RESOLVED ID for the
         # same reason, which is why these are worth asserting rather than
         # eyeballing.
-        assert _map().counts == {"remap_alt_id": 3, "remap_replaced_by": 2}
+        # ``remap_aspect_crossed`` is 0 here and not absent: this fixture
+        # carries no aspect map, so the rule resolved the same ids and the
+        # counter has nothing to say. It is not a third kind of outcome.
+        assert _map().counts == {
+            "remap_alt_id": 3,
+            "remap_replaced_by": 2,
+            "remap_aspect_crossed": 0,
+        }
 
 
 class TestWhatItDoesToTheAnnotations:
@@ -177,6 +184,7 @@ class TestWhatItDoesToTheAnnotations:
             "new_exp_replaced_by",
             "new_exp_unmapped",
             "new_exp_remapped_proteins",
+            "new_exp_aspect_crossed",
         }
 
 
@@ -211,7 +219,7 @@ class TestWhereItRuns:
         # four letters would name two different truths.
         import protea.core._truth_rules as rules
 
-        source = inspect.getsource(rules._remap_of_t0)
+        source = inspect.getsource(rules._frame_of)
         assert "load_ontology_aliases" in source
         assert "raise ValueError" in source
 
@@ -268,19 +276,22 @@ class TestTheSeams:
             "corpus-t0", "corpus-t1", "snap-t0", "snap-t0", "snap-t0", profile
         )
 
-    def test_the_request_the_projection_gets_carries_a_remap(self, monkeypatch) -> None:
-        # THE MISSING ASSIGNMENT, in one assertion.
+    def test_each_side_gets_a_frame_carrying_the_map(self, monkeypatch) -> None:
+        # THE MISSING ASSIGNMENT, in one assertion. It used to be a field of
+        # the request; it is per side now, because one window can close its
+        # two ends under two graphs.
         import protea.core._truth_rules as rules
 
         monkeypatch.setattr(
-            rules, "_live_terms_with_aspect", lambda _s, snap: (LIVE, {t: "F" for t in LIVE})
+            rules, "_live_terms_with_aspect", lambda _s, _snap: (LIVE, {t: "F" for t in LIVE})
         )
-        monkeypatch.setattr(rules, "_load_parents_by_go_id", lambda _s, _snap: {})
-        monkeypatch.setattr(rules, "_load_children_by_go_id", lambda _s, _snap: {})
-
-        request = rules._projection_request(self._Session(ROWS), self._window())
-        assert request.remap is not None
-        assert request.remap.by_alias["GO:OLD1"] == ("GO:LIVE1", KIND_ALT_ID)
+        monkeypatch.setattr(
+            rules, "_load_pivot_term_universe", lambda _s, _snap: (LIVE, {t: "F" for t in LIVE})
+        )
+        frame = rules._frame_of(self._Session(ROWS), "snap-t0")
+        assert frame.snapshot_id == "snap-t0"
+        assert frame.live == LIVE
+        assert frame.remap.by_alias["GO:OLD1"] == ("GO:LIVE1", KIND_ALT_ID)
 
     def test_a_snapshot_with_no_alias_rows_is_refused(self, monkeypatch) -> None:
         # The other half of the same seam: the profile cannot silently mean
@@ -291,7 +302,7 @@ class TestTheSeams:
 
         monkeypatch.setattr(rules, "_live_terms_with_aspect", lambda _s, _snap: (LIVE, {}))
         with pytest.raises(ValueError, match="load_ontology_aliases"):
-            rules._remap_of_t0(self._Session([]), self._window())
+            rules._frame_of(self._Session([]), "snap-t0")
 
     def test_the_counters_reach_the_stats_the_operation_writes(self) -> None:
         # The second half of the wiring: a report nobody reads is a report
@@ -312,6 +323,7 @@ class TestTheSeams:
             "new_exp_replaced_by": 9,
             "new_exp_unmapped": 0,
             "new_exp_remapped_proteins": 9,
+            "new_exp_aspect_crossed": 0,
         }
         # And out through the stats the window row stores.
         assert EvaluationData(projection=report).stats()["new_exp_replaced_by"] == 9
@@ -348,16 +360,270 @@ class TestTheSeams:
         from protea.core._truth_projection import Graph
         from protea.core._truth_projection import Request as ProjectionRequest
 
+        from protea.core._truth_remap import SideFrame
+        from protea.core._truth_rules import _Side
+
         request = ProjectionRequest(
             graph=Graph(parents=parents, aspect=aspect, live=live_t1),
             target=LIVE,
-            remap=_map(),
+        )
+        side = _Side(
+            "corpus-t1",
+            "snap-t1",
+            SideFrame(snapshot_id="snap-t1", live=LIVE, remap=_map()),
         )
         out, (projection, remapped) = ev._reconcile_experimental_side(
-            self._Session(ROWS), "corpus-t1", "snap-t1", LIVE, {t: "F" for t in LIVE}, request
+            self._Session(ROWS), side, LIVE, {t: "F" for t in LIVE}, request
         )
         # GO:DEAD1 was remapped to its successor; GO:NEW was projected to its
         # first live ancestor. Neither rule touched the other's term.
         assert remapped is not None and remapped.replaced_by == 1
         assert projection is not None and projection.entries == 1
         assert out["P1"]["F"] == {"GO:LIVE2", "GO:LIVE3"}
+
+
+#: ``go_term_alias`` rows in the shapes the campaign's pivot really carries,
+#: read out of ``releases/2022-07-01`` on 2026-11-07. Named so a reader can
+#: go and check them rather than trust the fixture.
+PIVOT_ROWS: list[tuple[str, str, str]] = [
+    # No row at all in the pivot, and a secondary id of a live term: the
+    # case that made a protein lose its molecular-function side entirely.
+    ("GO:0004004", "GO:0003724", KIND_ALT_ID),
+    # Two ids with no row, both secondary ids of the SAME live term: a merge
+    # chain, and the reason "no entry" cannot be read as "lost".
+    ("GO:0000071", "GO:0007052", KIND_ALT_ID),
+    ("GO:0030472", "GO:0007052", KIND_ALT_ID),
+    # Live in the pivot, and another term lists it: clause one wins.
+    ("GO:0016218", "GO:0034081", KIND_CONSIDER),
+    # Obsolete in the pivot, one live successor, in ANOTHER aspect.
+    ("GO:0003719", "GO:0042994", KIND_REPLACED_BY),
+]
+#: Non-obsolete in the pivot. ``GO:0003789``, ``GO:0003925`` and
+#: ``GO:0016218`` are the three ids GO reinstated after obsoleting them.
+PIVOT_LIVE = {
+    "GO:0003724",
+    "GO:0007052",
+    "GO:0042994",
+    "GO:0003789",
+    "GO:0003925",
+    "GO:0016218",
+}
+#: The WHOLE universe's aspects, obsolete terms included, because the id whose
+#: aspect is in question is the obsolete one being remapped.
+PIVOT_ASPECT = {
+    "GO:0003724": "F",
+    "GO:0007052": "P",
+    "GO:0042994": "P",
+    "GO:0003789": "F",
+    "GO:0003925": "F",
+    "GO:0016218": "F",
+    "GO:0003719": "F",
+}
+
+
+class TestWhichSnapshotTheMapIsReadFrom:
+    """The sibling defect of ``TestTheSeams``, and the same shape.
+
+    There, every clause had a test and the rule was never applied. Here,
+    every clause had a test and the rule was applied against the WRONG
+    SNAPSHOT -- the one the side's corpus was loaded under instead of the one
+    that closes the side -- so it resolved nothing and the tests still
+    passed, because a map that resolves nothing satisfies every clause about
+    what it resolves.
+
+    A corpus is always live in its own era. That one sentence is the whole
+    bug: clause one answered "live, leave it alone" for every annotation,
+    and the ids the window could not name died later at the pivot
+    intersection with no counter. Measured on an early window, 772 terms over
+    13,259 proteins on t0 and 562 over 9,098 on t1.
+    """
+
+    def test_an_anchor_in_which_everything_is_live_resolves_nothing(self) -> None:
+        # The bug, as a property rather than as a window. Same rows, same
+        # rule, and the only difference is which snapshot said what is live.
+        era_live = LIVE | {alias for alias, _, _ in ROWS}
+        assert build_remap(ROWS, era_live).by_alias == {}
+        assert build_remap(ROWS, LIVE).by_alias != {}
+
+    def test_the_frame_reads_one_snapshot_for_all_three_answers(self, monkeypatch) -> None:
+        # The map, the liveness test and the aspects, from one snapshot. A
+        # frame built from two is the defect in a new place.
+        import protea.core._truth_rules as rules
+
+        asked: list[str] = []
+
+        def _record(_session, snapshot):
+            asked.append(snapshot)
+            return PIVOT_LIVE, PIVOT_ASPECT
+
+        monkeypatch.setattr(rules, "_live_terms_with_aspect", _record)
+        monkeypatch.setattr(rules, "_load_pivot_term_universe", _record)
+        monkeypatch.setattr(rules, "alias_rows", lambda _s, _snap: PIVOT_ROWS)
+
+        frame = rules._frame_of(object(), "the-closing-graph")
+        assert asked == ["the-closing-graph", "the-closing-graph"]
+        assert frame.snapshot_id == "the-closing-graph"
+
+    def test_a_window_closing_both_ends_under_one_pivot_shares_one_frame(
+        self, monkeypatch
+    ) -> None:
+        # Construction (A): the two sides are one call, and that falls out of
+        # the key instead of being a case somebody has to remember.
+        import protea.core._truth_rules as rules
+        from protea.core._truth_rules import ReconciledWindow
+
+        built: list[str] = []
+
+        def _one(_session, snapshot):
+            built.append(snapshot)
+            return _frame(snapshot)
+
+        monkeypatch.setattr(rules, "_frame_of", _one)
+        window = ReconciledWindow("c0", "c1", "pivot", "pivot", "pivot", "projected")
+        frames = rules._frames_by_snapshot(object(), window)
+        assert built == ["pivot"]
+        assert set(frames) == {"pivot"}
+
+    def test_two_closing_graphs_give_two_frames(self, monkeypatch) -> None:
+        # Construction (B): each end closes under its own era, so each end
+        # reads its own alias table.
+        import protea.core._truth_rules as rules
+        from protea.core._truth_rules import ReconciledWindow
+
+        monkeypatch.setattr(rules, "_frame_of", lambda _s, snap: _frame(snap))
+        window = ReconciledWindow("c0", "c1", "nat-t0", "nat-t1", "pivot", "projected")
+        frames = rules._frames_by_snapshot(object(), window)
+        assert set(frames) == {"nat-t0", "nat-t1"}
+        assert frames["nat-t0"].snapshot_id == "nat-t0"
+
+    def test_the_default_profile_builds_no_frame_at_all(self, monkeypatch) -> None:
+        # No projection, no remapping, and therefore no refusal over a
+        # snapshot whose aliases nobody had any reason to load. The decision
+        # is ``_sides_of``'s, which is where the two sides are built.
+        import protea.core._truth_rules as rules
+        from protea.core._truth_rules import ReconciledWindow
+
+        monkeypatch.setattr(rules, "_frame_of", lambda _s, _snap: _must_not_be_called())
+        window = ReconciledWindow("c0", "c1", "pivot", "pivot", "pivot", "as_closed")
+        old, new = rules._sides_of(object(), window, None)
+        assert old.frame is None and new.frame is None
+        assert old.native_snapshot_id == "pivot"
+
+    def test_the_landings_come_from_the_graph_that_closes_t0(self, monkeypatch) -> None:
+        # The second half of the anchoring. Read from the t0 corpus's era
+        # instead, 1,608 of an early window's 43,435 candidate landings were
+        # ids the pivot has no row for, so a gain projected onto one of them
+        # survived both rules and then vanished at the intersection.
+        import protea.core._truth_rules as rules
+
+        asked: list[str] = []
+
+        def _live(_session, snapshot):
+            asked.append(snapshot)
+            return {f"live-of-{snapshot}"}, {f"live-of-{snapshot}": "F"}
+
+        class _Set:
+            def __init__(self, snapshot: str) -> None:
+                self.ontology_snapshot_id = snapshot
+
+        class _Session:
+            def get(self, _model, ident):
+                return {"c0": _Set("era-t0"), "c1": _Set("era-t1")}[ident]
+
+        monkeypatch.setattr(rules, "_live_terms_with_aspect", _live)
+        monkeypatch.setattr(rules, "_load_parents_by_go_id", lambda _s, _snap: {})
+        monkeypatch.setattr(rules, "_load_children_by_go_id", lambda _s, _snap: {})
+
+        from protea.core._truth_rules import ReconciledWindow
+
+        window = ReconciledWindow("c0", "c1", "nat-t0", "nat-t1", "pivot", "projected")
+        request = rules._projection_request(_Session(), window)
+
+        # The landings are the closing graph's, the climb is still the t1
+        # CORPUS's era, and "era-t0" is asked for by nobody.
+        assert request.target == {"live-of-nat-t0"}
+        assert request.graph.live == {"live-of-era-t1"}
+        assert "era-t0" not in asked
+
+
+def _frame(snapshot: str):
+    from protea.core._truth_remap import Remap, SideFrame
+
+    return SideFrame(snapshot_id=snapshot, live=set(), remap=Remap({}, {}, {}))
+
+
+def _must_not_be_called():
+    raise AssertionError("_frame_of must not be called without a projection")
+
+
+class TestTheRealCasesFromThePivot:
+    """The five shapes the campaign's own pivot has, as the rule sees them."""
+
+    def _map(self) -> Remap:
+        return build_remap(PIVOT_ROWS, PIVOT_LIVE, PIVOT_ASPECT)
+
+    def test_an_id_with_no_row_resolves_to_its_live_primary(self) -> None:
+        # GO:0004004 has no row in the pivot and is a secondary id of
+        # GO:0003724, which is live. Under the corpus-era anchor it was left
+        # alone and then dropped, which is how a protein lost its whole F
+        # side while keeping its P one.
+        assert self._map().by_alias["GO:0004004"] == ("GO:0003724", KIND_ALT_ID)
+
+    def test_two_ids_merged_into_one_live_term_both_resolve_to_it(self) -> None:
+        # GO:0000071 and GO:0030472 both alias to GO:0007052. Neither has a
+        # row of its own, so "no entry" here would be a loss and is not.
+        mapped = self._map().by_alias
+        assert mapped["GO:0000071"] == ("GO:0007052", KIND_ALT_ID)
+        assert mapped["GO:0030472"] == ("GO:0007052", KIND_ALT_ID)
+
+    def test_the_reinstated_ids_are_left_exactly_as_they_are(self) -> None:
+        # GO:0003789, GO:0003925 and GO:0016218 are live in the pivot: GO
+        # obsoleted them and then brought them back. Clause one applies and
+        # no later clause may touch them, which is why rewriting a live id
+        # is a bug and not a conservative choice.
+        mapped = self._map().by_alias
+        for go_id in ("GO:0003789", "GO:0003925", "GO:0016218"):
+            assert go_id not in mapped
+
+    def test_consider_is_ignored_even_for_a_live_id(self) -> None:
+        # GO:0016218's only row is a ``consider``. Following it would invent
+        # the decision the ontology declined to make, and it is live anyway.
+        assert "GO:0016218" not in self._map().by_alias
+
+    def test_a_successor_in_another_aspect_is_followed_and_counted(self) -> None:
+        # GO:0003719 is obsolete in the pivot with one live successor,
+        # GO:0042994, and F does not equal P. The ontology named it, so the
+        # substitution happens; the counter is what lets the alternative be
+        # decided later rather than assumed now.
+        remap = self._map()
+        assert remap.by_alias["GO:0003719"] == ("GO:0042994", KIND_REPLACED_BY)
+        assert remap.crossed_aspect == frozenset({"GO:0003719"})
+        assert remap.counts["remap_aspect_crossed"] == 1
+
+    def test_the_crossing_counter_reaches_the_side_report(self) -> None:
+        # And out through the per-side counters the window row stores.
+        raw = {"P1": {"GO:0003719"}, "P2": {"GO:0004004"}}
+        applied = apply_remap(raw, self._map(), PIVOT_LIVE)
+        assert applied.aspect_crossed == 1
+        assert applied.alt_id == 1 and applied.replaced_by == 1
+        assert applied.as_dict("new_exp")["new_exp_aspect_crossed"] == 1
+
+    def test_an_id_the_graph_cannot_place_is_discarded_and_counted(self) -> None:
+        # The counter the old anchoring never reached: nothing ever failed to
+        # resolve when nothing was resolved. 6,354 entries of one early
+        # window's t0 side land here.
+        raw = {"P1": {"GO:NOTHING-KNOWS-THIS"}}
+        applied = apply_remap(raw, self._map(), PIVOT_LIVE)
+        assert applied.unmapped == 1
+        assert raw["P1"] == set()
+
+    def test_this_fixture_has_no_double_successor_and_neither_has_the_pivot(self) -> None:
+        # Stated so nobody goes looking for a real case: the clause that
+        # refuses two successors has NO instance in this pivot. Zero rows,
+        # queried. Its test is the synthetic GO:DEAD2 above, on purpose, and
+        # a fixture that quietly acquired a real double would make the two
+        # tests say they cover the same thing when they do not.
+        from collections import Counter
+
+        per_alias = Counter(a for a, _, kind in PIVOT_ROWS if kind == KIND_REPLACED_BY)
+        assert max(per_alias.values()) == 1

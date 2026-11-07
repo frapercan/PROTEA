@@ -36,21 +36,22 @@ protein already had at t0: the delta subtracts the two sides afterwards, and
 a term present at both ends vanishes there. Writing that case here would
 duplicate the subtraction in a second place.
 
-WHAT IT CANNOT DO, AND IT IS MEASURED. The lab also REMAPS obsolete terms
-through ``alt_id`` and ``replaced_by`` before asking whether a node exists at
-t0, and PROTEA records neither: ``go_term`` carries ``go_id``, ``name``,
-``aspect``, ``definition`` and ``is_obsolete``, and nothing else. On the
-211 -> 227 window their own counters say ``new_exp_replaced_by`` is 9, so the
-residue is 9 entries this projection will treat as having no node when the
-lab finds one through a successor. That is a declared difference, not a
-hidden one, and closing it needs the two columns.
+WHAT RUNS BEFORE IT. The lab REMAPS obsolete terms through ``alt_id`` and
+``replaced_by`` before asking whether a node exists at t0, and so does
+PROTEA now: :mod:`protea.core._truth_remap` owns that rule, runs first and
+WINS, so a term the ontology itself renamed never reaches this projection to
+be generalised. On the 211 -> 227 window the lab's ``new_exp_replaced_by``
+is 9 and ours is 9.
+
+Both rules answer "can the window still name this id", so both read the
+graph that CLOSES the side -- which is why ``target`` is not the t0 corpus's
+own era. Anchoring either one to the corpus makes it quietly do nothing: the
+module above carries that measurement.
 """
 
 from __future__ import annotations
 
 from typing import NamedTuple
-
-from protea.core._truth_remap import Remap
 
 
 class Graph(NamedTuple):
@@ -82,12 +83,11 @@ class Request(NamedTuple):
 
     #: The t1 side's own ontology.
     graph: Graph
-    #: The t0 side's live ids: the landings.
+    #: The landings: the non-obsolete ids of the graph that CLOSES the t0
+    #: side, which is what the window can still name after the pivot
+    #: intersection. Not the t0 corpus's own era, which is a different
+    #: snapshot whenever the window closes both ends under one pivot.
     target: set[str]
-    #: What t0 says about ids it no longer uses as primary. Applied BEFORE
-    #: the projection and winning over it: a term the ontology itself
-    #: renamed is not a term to be generalised.
-    remap: Remap | None = None
 
 
 class Projection(NamedTuple):

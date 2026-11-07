@@ -165,7 +165,9 @@ class TestTheSeams:
                 not_codes=rule,
             )
             with patch.object(ev, "_load_children_by_go_id", return_value={}):
-                ev._union_of_negatives(session, window, set(), {}, None)
+                ev._union_of_negatives(
+                session, window, ev._sides_of(session, window, None), set(), {}, None
+            )
             clauses = [s for s in session.statements if "evidence_code" in s]
             assert bool(clauses) is expected, rule
 
@@ -182,7 +184,9 @@ class TestTheSeams:
             not_codes="experimental",
         )
         with patch.object(ev, "_load_children_by_go_id", return_value={}):
-            ev._union_of_negatives(session, window, set(), {}, None)
+            ev._union_of_negatives(
+                    session, window, ev._sides_of(session, window, None), set(), {}, None
+                )
         not_queries = [s for s in session.statements if "qualifier LIKE" in s]
         assert len(not_queries) == 2
         assert all("evidence_code = ANY(:exp_codes)" in s for s in not_queries)
