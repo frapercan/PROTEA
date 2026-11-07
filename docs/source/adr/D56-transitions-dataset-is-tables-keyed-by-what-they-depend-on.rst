@@ -44,7 +44,7 @@ One ``Dataset`` row, one manifest, eight parquets.
 **The principle is one sentence: a table is stored by what it depends on.** It
 came up three times before it was named. A protein's neighbours at ``t`` do not
 depend on ``t'``. Neither does a neighbour's state at ``t``. Nor does a feature
-card depend on the window at all, only on the sequence and the vocabulary. Key
+token depend on the window at all, only on the sequence and the vocabulary. Key
 any of those by the window and the rows are copied once per horizon; key them
 by what they are a function of and they are written once and read by every
 horizon that reaches them. Every table below is keyed that way, and the volume
@@ -61,39 +61,59 @@ read it at that grain.
      - holds
    * - ``queries``
      - ``(window, query)``
-     - sequence identity, the per-residue vocabulary code's
-       ``(shard_key, position)`` and ``shard_sha256``, the residue count, the
-       stratum, ``snapshot_pair`` and the horizon in days
+     - ``sequence_id``, the per-residue vocabulary code's ``shard_key``,
+       ``position`` and ``shard_sha256``, ``length``, ``stratum``,
+       ``version_t``, ``snapshot_pair`` and ``horizon_days``
    * - ``query_state``
-     - ``(window, query, term, moment)``
-     - ``moment`` is ``t`` or ``t'``; term, evidence code, qualifier,
+     - ``(window, query, go_id, moment)``
+     - ``moment`` is ``t`` or ``t'``; ``evidence_code``, ``qualifier``,
        ``assigned_by``. At ``t'`` the non-experimental annotations go in too
    * - ``neighbourhood``
      - ``(version_t, query, neighbour)``
-     - distance, identity, similarity, coverage, taxonomy, rank
+     - ``rank``, then ``distance``, ``similarity``, ``identity``, ``coverage``
+       and ``taxonomy_distance``
    * - ``neighbour_state``
-     - ``(version_t, neighbour, term)``
-     - term, evidence code, qualifier, ``assigned_by``. **No moment column**
+     - ``(version_t, neighbour, go_id)``
+     - ``evidence_code``, ``qualifier``, ``assigned_by``.
+       **No moment column**
    * - ``gains``
-     - ``(window, query, aspect, term)``
-     - the platform's truth as the evaluator uses it: the per-side closure,
-       the stratum, and in PK the already-known excluded. **Which closure**
-       is a column, not an assumption
-   * - ``feature_cards``
+     - ``(window, query, aspect, go_id)``
+     - the platform's truth as the evaluator uses it: ``closure``, ``stratum``,
+       and in PK the already-known excluded. **Which closure** is a column,
+       not an assumption
+   * - ``feature_tokens``
      - ``(embedding_config_id, sequence_id, feature)``
-     - one card per distinct vocabulary feature a sequence lights: the
-       de-scaled maximum activation, and three descriptors RELATIVE TO THE
-       LENGTH, in [0, 1], plus the feature's rarity in the corpus
+     - one row per distinct vocabulary feature a sequence lights:
+       ``max_value`` de-scaled, then ``max_position``, ``fraction`` and
+       ``span`` RELATIVE TO THE LENGTH, in [0, 1], and ``rarity`` in the
+       corpus
    * - ``terms``
-     - ``(cut, term)``
-     - aspect and the text vector
+     - ``(cut, go_id)``
+     - ``aspect``, and the text vectors BY REFERENCE: ``vector_uri`` and
+       ``vector_sha256``, never the 2560 floats themselves
    * - ``term_ancestors``
-     - ``(cut, term, ancestor)``
+     - ``(cut, go_id, ancestor)``
      - the relation to each strict ancestor
 
 The keys are the whole decision. A protein's neighbours at ``t`` and a
 protein's state at ``t`` do not depend on ``t'``, so neither table is keyed by
 the window. One write per ``t``, read by every horizon that starts there.
+
+**``version_t`` is why ``queries`` carries two version columns.**
+``snapshot_pair`` names the window, and ``version_t`` is the column that joins
+to ``neighbourhood`` and ``neighbour_state``, which are keyed by it and not by
+the window. Deriving one from the other at load time would mean reconstructing
+a join key from a label, so both are stored.
+
+**Three keys name a field that varies, and that is the point of them.**
+``feature_tokens`` carries ``embedding_config_id`` because two configurations
+summarise the same sequence differently; ``terms`` and ``term_ancestors`` carry
+``cut`` because two cuts disagree about which terms exist, by 10,4 % between
+this campaign's validation and test pivots; and ``gains`` carries ``closure``
+because the same window under two closures is two different truths. Drop any
+one of the three and rows from two levels occupy one key, which is the defect
+class this project keeps paying for: a level must be named by every field that
+varies.
 
 The truth is exported, never re-derived
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -197,11 +217,11 @@ tables, and ``term_ancestors`` holds the strict ancestors only: a term is not
 its own ancestor, and a table that admitted the reflexive pair would make every
 consumer decide whether to filter it.
 
-The feature cards are summarised where the shards are
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The feature tokens are summarised where the shards are
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The model does not read the per-residue code. It reads, per query protein, one
-card per distinct vocabulary feature that protein lights. The shards hold the
+token per distinct vocabulary feature that protein lights. The shards hold the
 code and nothing else can: 5.344 of them, 16,9 MB each, 90,6 GB over
 296.944.034 residues and 43.240.843.072 entries, and they live in this
 machine's object store. Reading them from the compute node over its wifi is
@@ -210,15 +230,16 @@ operation summarises them where they are, and the dataset names its table by
 sha.
 
 **Every descriptor is relative, and that is a correctness requirement.** Three
-of the five are ratios in [0, 1]: the position of the maximum as
-``index / (length - 1)``, the fraction of residues where the feature fires, and
-the span over the length. The other two are the de-scaled maximum activation
-and the feature's rarity, also in [0, 1]. **None is an absolute residue
-count**, because the cards ship as float16, and float16 represents integers
-exactly only to 2048: 2049 becomes 2048 and 8259 becomes 8256. The corpus holds
+of the five are ratios in [0, 1]: ``max_position``, the position of the maximum
+as ``index / (length - 1)``; ``fraction``, the share of residues where the
+feature fires; and ``span`` over the length. The other two are ``max_value``,
+the de-scaled maximum activation, and ``rarity``, the feature's share of the
+corpus, also in [0, 1]. **None is an absolute residue count**, because the rows
+ship as float16, and float16 represents integers exactly only to 2048: 2049
+becomes 2048 and 8259 becomes 8256. The corpus holds
 sequences past 8.000 residues, so an absolute position stored this way would
 give a plausible wrong answer for a long protein and nothing would say so. The
-length itself is an integer, in ``queries``.
+length itself is an integer, ``length`` in ``queries``.
 
 **The de-scaling is verified, not assumed.** The maximum must be the value the
 quantiser means, not the raw level, because a level is a bin index and is not
@@ -235,16 +256,18 @@ and becomes impossible.
 distinct features per protein on average**, 40 % of the 8.192, with quantiles
 1.490 / 2.318 / 2.888 / 3.336 / 3.771 / 4.112 / 4.712 and a maximum of 5.644,
 rising with length from a median of 1.760 below 100 residues to 4.264 above
-2.000. That is 131,5 million cards for those sequences, about 1,3 GB with the
+2.000. That is 131,5 million rows for those sequences, about 1,3 GB with the
 feature as int16 and the five values as float16.
 
 And 2.924 features appear in more than half of all proteins, 1.329 in more than
 90 % and **489 in more than 99 %**: six per cent of the vocabulary is a nearly
 constant background. Dropping them would raise the signal and lose the
-derivation's fidelity, so the platform keeps them and the rarity descriptor
-says which they are. A frequency filter is a modelling choice and belongs in
-the loader as a declared ablation, where it can be turned off; baked into the
-export it could not be ablated without producing the dataset again.
+derivation's fidelity, so the platform keeps them and ``rarity`` says which
+they are. It is the feature's share of the CORPUS and never of the exported
+population, so the same feature carries the same rarity in every dataset. A
+frequency filter is a modelling choice and belongs in the loader as a declared
+ablation, where it can be turned off; baked into the export it could not be
+ablated without producing the dataset again.
 
 The vocabulary code is referenced, never copied
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -276,9 +299,10 @@ the same windows are enough.
 The residue count is denormalised, and that is deliberate
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``residue_code`` already holds it, so ``queries`` repeats it. The feature cards
-the loader builds divide by the length to get a relative position, a fraction
-and a span, so without the column it would open a shard to read one integer.
+``residue_code`` already holds it, so ``queries`` repeats it as ``length``. The
+feature tokens the loader builds divide by it to get a relative position, a
+fraction and a span, so without the column it would open a shard to read one
+integer.
 One int64 against a file open is a trade worth naming rather than discovering.
 
 The population is the gainers, and that is a declared bias
@@ -297,6 +321,80 @@ them. Until then the manifest says the population is the gainers, because a
 population that lives only in a loader is the same defect
 ``export_evaluation_targets`` was written to end: the operation still has no
 field with which to declare one.
+
+The term axis is one pivot, and it is not the test windows'
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Every window in this dataset pivots on one snapshot, ``releases/2022-07-01``,
+and that is what ``cut`` names in ``terms`` and ``term_ancestors``. One pivot
+is what makes 53 windows comparable to each other: the 130 evaluation sets
+already in the database use 62 distinct pivots, each window closing on one of
+its own two ends, and a delta read under a different graph is a different
+delta.
+
+**The pivot predates the cut, which is the property that matters.** Release 211
+was published 2022-09-16 and the pivot's OBO is 2022-07-01, so a model cut at
+211 is entitled to that graph: it is anachronistic for the old side of an early
+window, never a graph from the model's future. And it is the construction the
+validation window uses. ``evaluation_set ea0f4334``, the long window that
+reproduces all ten of the laboratory's counters, carries the pivot and BOTH
+native snapshots at ``releases/2022-07-01``.
+
+**What one pivot costs, measured.** The share of each era's live terms that has
+no non-obsolete row in the pivot, which is the share a native-era closure would
+lose on intersection:
+
+.. list-table::
+   :header-rows: 1
+
+   * - era
+     - CCO
+     - MFO
+     - BPO
+     - all
+   * - 2016-05
+     - 4,8 %
+     - 5,3 %
+     - 8,9 %
+     - 7,7 %
+   * - 2018-04
+     - 3,9 %
+     - 4,1 %
+     - 7,2 %
+     - 6,1 %
+   * - 2021-10
+     - 0,2 %
+     - 0,6 %
+     - 1,4 %
+     - 1,1 %
+   * - 2022-07
+     - 0 %
+     - 0 %
+     - 0 %
+     - 0 %
+   * - 2025-10
+     - 2,8 %
+     - 4,3 %
+     - 1,4 %
+     - 2,3 %
+
+It is not uniform and it does not point the same way on both sides. Before the
+pivot the loss concentrates in BPO, twice what it is in CCO, which is the same
+thinning recorded elsewhere: BPO lost 26 % of its edges over the series while
+raw annotations grew. After the pivot it inverts and MFO is the aspect that
+suffers. A window's thinning depends on which side of 2022-07 it sits.
+
+**And the largest discontinuity is not inside this dataset.** Of the pivot's
+43.558 live terms, **10,4 % have no non-obsolete row in the test window's own
+pivot** ``releases/2025-07-22``, 13,4 % of them in MFO; against the prospective
+band's ``releases/2026-01-23`` it is 13,3 %, and 14,0 % in MFO. That gap is
+larger than anything between the training windows and the validation window,
+it is closed because rebuilding a held-out window on another pivot would spend
+a pass that is spent, and it applies to any future confirmation window for a
+model cut at 211, whose axis is 2022's for good. The manifest records each
+window's survival against the pivot per aspect, three numbers a window, so the
+asymmetry is a covariate a declared ablation can weigh or exclude on rather
+than a bias nobody can see.
 
 The neighbourhood is declared in the manifest
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -337,14 +435,48 @@ column of its own, and it changes nothing about the method.
 Open decisions
 ~~~~~~~~~~~~~~~
 
+- **Which closure the training windows use.** OPEN, and the measurements
+  above are what it turns on. Two constructions reach the same code path,
+  since ``_compute_delta`` takes both natives and the pivot separately: give
+  every window the pivot as both natives, as ``ea0f4334`` does, and nothing is
+  lost on intersection but a 2016 old side is closed under a 2022 graph, so
+  ancestors the graph added later count as already known and the delta shrinks;
+  or give each side its own era's snapshot, which is faithful to the era and
+  pays the loss in the table above. The first matches the validation window and
+  isolates annotation dynamics from graph dynamics, which is worth something
+  given the 28.333 graph-only gain entries measured in PK. The second keeps the
+  old side honest about what its era could express. One early window generated
+  both ways settles it on ``delta_proteins`` and the strata instead of on
+  mechanism, and until it is settled ``gains`` carries ``closure`` so a dataset
+  says which one it is.
 - **A plural held-out side.** Deferred, for the reason above. It becomes a
   schema change the day internal selection needs several horizons.
-- **Importing the text vectors or referencing them.** The laboratory holds
-  them for the cut's snapshot, 43.558 terms by 2560 in float16, which is that
-  snapshot's non-obsolete term count exactly. The decision here is to reference
-  them by sha256 rather than copy 224 MB into every export, for the same reason
-  the vocabulary code is referenced. It changes the day a dataset has to be
-  self-contained to be published outside.
+- **Importing the text vectors or referencing them.** SETTLED: by reference.
+  The laboratory holds them for the cut's snapshot, 43.558 terms by 2560 in
+  float16, which is that snapshot's non-obsolete term count exactly. ``terms``
+  carries ``vector_uri`` and ``vector_sha256`` and never the floats, so the
+  224 MB are not copied into every export, for the same reason the vocabulary
+  code is referenced. A loader therefore fetches the table once and aligns it
+  on ``go_id``, which is also why the vectors are not part of this dataset's
+  row count. It changes the day a dataset has to be self-contained to be
+  published outside.
+
+  **The sha256 is the identity and the uri is only a locator**, the same split
+  as ``obo_sha256`` against ``obo_uri``: a loader must refuse a file whose
+  hash is not the one ``terms`` declares, and must refuse one missing any term
+  of the axis, because a vector table silently short of the axis trains on a
+  smaller vocabulary than the dataset says. ``vector_uri`` is an artifact-store
+  URI when the file has been published there and NULL until it has, never a
+  machine-local path: a path that resolves on one machine and not on the next
+  is a column that promises what it cannot deliver, and the sha travels while
+  the path does not.
+
+  **One file per cut, and a loader may refuse a second.** ``vector_sha256``
+  repeats down a cut's rows and every row of one cut must name the same file,
+  because the cut IS the term axis: two files for one axis would be two
+  vocabularies behind one key, which is the defect the three keys above exist
+  to prevent. A cut whose rows name two shas is malformed, not a choice, and
+  the loader that rejects it is right to.
 - **A second neighbour list by sparse code.** It needs a protein-level grouped
   per-residue vocabulary configuration, which does not exist. The schema leaves room:
   ``neighbourhood`` is keyed by ``(version_t, query, neighbour)`` with the
