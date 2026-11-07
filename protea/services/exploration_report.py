@@ -249,8 +249,8 @@ def _instrument_verdict(
     """An instrument reads its predicate: identical rows, panels within their tolerance.
 
     A repeatability test is an assertion of identity, and power does not apply
-    to it: two runs that agree byte for byte give a delta of exactly zero in
-    every pair, the paired bootstrap is degenerate, and every panel comes back
+    to it: runs that agree byte for byte give a delta of exactly zero in every
+    pair, the paired bootstrap is degenerate, and every panel comes back
     ``unresolvable``, which read for power says the opposite of what happened.
     The rows decide, with zero tolerance (see ``exploration_identity``). The
     panels only corroborate, because stored metrics are rounded to four
@@ -327,11 +327,12 @@ def _bank_loads(session: Session, rows: dict[str, dict[str, Any]]) -> dict[str, 
 
 
 def bank_load_problems(loads: dict[str, dict[str, Any]], declared: str | None) -> list[str]:
-    """What forbids reading two runs as the same pipeline: their banks' sources.
+    """What forbids reading an instrument's runs as one pipeline: their banks' sources.
 
     Each arm must record its bank load, from one source, the one the rules
-    declare in ``bank_load`` when they declare one, and the same in both arms.
-    A cold run against a warm run compares two pipelines, not one twice.
+    declare in ``bank_load`` when they declare one, and the same across every
+    arm. A cold run against a warm run compares two pipelines, not one twice,
+    and that holds for the third and fourth arm as much as for the second.
     """
     problems = []
     for arm, load in loads.items():
@@ -349,18 +350,102 @@ def bank_load_problems(loads: dict[str, dict[str, Any]], declared: str | None) -
     return problems
 
 
+def _identity_classes(
+    session: Session,
+    rows: dict[str, dict[str, Any]],
+    reference: str,
+    pairs: dict[str, dict[str, Any]],
+) -> tuple[list[list[str]], list[str] | None]:
+    """Group the arms into classes of identical rows, and name the ones that moved.
+
+    **Comparisons against one reference give the verdict but not the blame.**
+    Equality is transitive, so N-1 comparisons decide whether every arm agrees.
+    They cannot say WHO disagrees when the arm that moved is the reference
+    itself: then all N-1 pairs read ``identical`` false, and a report that
+    stopped there would accuse every other arm. With four arms that is one case
+    in four, and it is the case an instrument exists to catch.
+
+    So on failure the arms that differ from the reference are compared among
+    themselves, which costs nothing when nothing moved. The largest class is
+    taken as the unmoved one and the rest as moved, but only when it is
+    STRICTLY largest: two arms that differ, or two against two, leave no
+    majority and ``moved`` is None, because the rows cannot say which side is
+    the anomaly and a guess would read as a measurement.
+    """
+    from protea.services.exploration_identity import row_identity
+
+    classes: list[list[str]] = [[reference]]
+    for arm in sorted(pairs):
+        if pairs[arm]["identical"]:
+            classes[0].append(arm)
+            continue
+        for cls in classes[1:]:
+            same = row_identity(session, str(rows[cls[0]]["id"]), str(rows[arm]["id"]))
+            if same["identical"]:
+                cls.append(arm)
+                break
+        else:
+            classes.append([arm])
+    classes.sort(key=lambda c: (-len(c), c[0]))
+    decided = len(classes) == 1 or len(classes[0]) > len(classes[1])
+    moved = sorted(a for c in classes[1:] for a in c) if decided else None
+    return classes, moved
+
+
 def _instrument(session: Session, exploration: Exploration) -> tuple[dict[str, Any], list[str]]:
-    """An instrument's two runs: their row identity, their bank loads, and what blocks."""
+    """An instrument's runs: their row identity, their bank loads, and what blocks.
+
+    **Two arms used to be the only shape this read, and that cost a verdict.**
+    Exploration 3 ran four arms on one revision; ``len(rows) != 2`` refused
+    them, the report came back with no predicate at all, and its reading had to
+    be written by hand as a job event. A figure whose predicate is an event
+    somebody wrote is not the same object as one an operation computed, and the
+    first cannot be re-derived from the database.
+
+    **N arms need N-1 comparisons, not N(N-1)/2.** ``row_identity`` is exact
+    equality, which is transitive, so every arm identical to one reference arm
+    means every arm identical to every other. The reference is the first in
+    sorted arm order, so which pairs a report names does not depend on dict
+    order, and ``pairs`` carries every comparison rather than only its
+    conclusion. Naming the arm that moved needs more than those pairs, and
+    :func:`_identity_classes` says why and does it.
+
+    A report built here for a two-arm instrument carries more keys than it did
+    before, so its sha256 differs from one stored earlier. The structure
+    changed, not the measurement.
+    """
     from protea.services.exploration_identity import row_identity
 
     rules = exploration.rules or {}
     rows = receipt.arm_rows(session, exploration)
-    if len(rows) != 2:
-        detail = f"an instrument compares two runs with a prediction set each; {len(rows)} linked"
+    if len(rows) < 2:
+        detail = (
+            "an instrument compares at least two runs with a prediction set each; "
+            f"{len(rows)} linked"
+        )
         return {"identical": None, "detail": detail}, []
-    a, b = (str(row["id"]) for row in rows.values())
+    arms = sorted(rows)
+    reference, others = arms[0], arms[1:]
+    ref_id = str(rows[reference]["id"])
+    pairs = {arm: row_identity(session, ref_id, str(rows[arm]["id"])) for arm in others}
+    first = next((p["first_difference"] for p in pairs.values() if not p["identical"]), None)
+    classes, moved = _identity_classes(session, rows, reference, pairs)
     loads = _bank_loads(session, rows)
-    identity = {"arms": list(rows), "bank_loads": loads, **row_identity(session, a, b)}
+    identity = {
+        "arms": arms,
+        "reference": reference,
+        "bank_loads": loads,
+        "identical": all(p["identical"] for p in pairs.values()),
+        "rows": {reference: next(iter(pairs.values()))["rows"]["a"]}
+        | {arm: p["rows"]["b"] for arm, p in pairs.items()},
+        "pairs": {
+            arm: {"identical": p["identical"], "first_difference": p["first_difference"]}
+            for arm, p in pairs.items()
+        },
+        "classes": classes,
+        "moved": moved,
+        "first_difference": first,
+    }
     return identity, bank_load_problems(loads, rules.get("bank_load"))
 
 

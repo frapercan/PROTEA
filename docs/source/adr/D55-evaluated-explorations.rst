@@ -64,7 +64,10 @@ It has one of three kinds:
 * ``one_axis``: two arms that differ only in the declared field;
 * ``full_method``: two different methods, declared by the author and marked as not
   attributable to any component;
-* ``instrument``: a check of the platform itself, against a predicate written beforehand.
+* ``instrument``: a check of the platform itself, against a predicate written beforehand,
+  over ANY number of arms from two up. The other two kinds name their arm count and this
+  one does not, which is how the first implementation came to refuse anything but two:
+  exploration 3 ran four and its reading had to be written by hand as an event.
 
 Repeating an exploration on another window is another exploration, which records that it
 builds on the first. An exploration is never deleted; it is archived.
