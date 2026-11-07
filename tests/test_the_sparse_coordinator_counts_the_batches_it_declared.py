@@ -44,8 +44,8 @@ from pydantic import ValidationError
 
 from protea.core.operations import encode_residue_sparse as mod
 from protea.core.operations.encode_residue_sparse import (
-    EncodeResidueSparseBatchPayload,
     EncodeResidueSparseBatchOperation,
+    EncodeResidueSparseBatchPayload,
     _dispatch_result,
 )
 from protea.infrastructure.orm.models.job import JobStatus

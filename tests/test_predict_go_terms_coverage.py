@@ -43,7 +43,8 @@ from protea.core.operations.predict_go_terms._reference_aspect import aspect_ban
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
-from protea.infrastructure.orm.models.query.query_set import QuerySet
+from protea.infrastructure.orm.models.protein.protein import Protein
+from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 
 _noop_emit = lambda *_a, **_k: None  # noqa: E731
 
@@ -248,9 +249,13 @@ class TestLoadQueryAccessions:
         session = MagicMock()
         session.get.return_value = MagicMock(spec=QuerySet)
         chain = session.query.return_value.join.return_value.filter.return_value
-        chain.all.return_value = [("Q1",), ("Q2",)]
+        chain.order_by.return_value.all.return_value = [("Q1",), ("Q2",)]
         accs = op._load_query_accessions(session, p, uuid.uuid4(), _noop_emit)
         assert accs == ["Q1", "Q2"]
+        # Ordered for the same reason the bank is: without it the plan decides
+        # which batch a query rides in, and the batch is then a property of the
+        # plan and not of the query set.
+        assert chain.order_by.call_args.args == (QuerySetEntry.accession,)
 
     def test_query_set_missing_raises(self) -> None:
         op = PredictGOTermsOperation()
@@ -266,20 +271,22 @@ class TestLoadQueryAccessions:
         p = self._payload_obj(query_accessions=["P1", "P2"])
         session = MagicMock()
         filtered_q = MagicMock()
-        filtered_q.all.return_value = [("P1",)]
+        filtered_q.order_by.return_value.all.return_value = [("P1",)]
         q_chain = session.query.return_value.join.return_value.join.return_value
         q_chain.filter.return_value = filtered_q
         accs = op._load_query_accessions(session, p, uuid.uuid4(), _noop_emit)
         assert accs == ["P1"]
+        assert filtered_q.order_by.call_args.args == (Protein.accession,)
 
     def test_all_accessions_when_no_filter(self) -> None:
         op = PredictGOTermsOperation()
         p = self._payload_obj()  # no query_set_id, no explicit accessions
         session = MagicMock()
         q_chain = session.query.return_value.join.return_value.join.return_value
-        q_chain.all.return_value = [("X1",), ("X2",), ("X3",)]
+        q_chain.order_by.return_value.all.return_value = [("X1",), ("X2",), ("X3",)]
         accs = op._load_query_accessions(session, p, uuid.uuid4(), _noop_emit)
         assert accs == ["X1", "X2", "X3"]
+        assert q_chain.order_by.call_args.args == (Protein.accession,)
 
 
 class TestBuildBatchMessageRerankerNulls:

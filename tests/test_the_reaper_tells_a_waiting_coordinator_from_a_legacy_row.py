@@ -23,7 +23,7 @@ for any event name other than ``job.dispatched``.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -36,7 +36,7 @@ from protea.workers.stale_job_reaper import (
     StaleJobReaperConfig,
 )
 
-NOW = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)
 
 
 class _OneAnswer:
