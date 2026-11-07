@@ -89,7 +89,8 @@ read it at that grain.
        corpus
    * - ``terms``
      - ``(cut, go_id)``
-     - ``aspect`` and the text vector
+     - ``aspect``, and the text vectors BY REFERENCE: ``vector_uri`` and
+       ``vector_sha256``, never the 2560 floats themselves
    * - ``term_ancestors``
      - ``(cut, go_id, ancestor)``
      - the relation to each strict ancestor
@@ -450,12 +451,15 @@ Open decisions
   says which one it is.
 - **A plural held-out side.** Deferred, for the reason above. It becomes a
   schema change the day internal selection needs several horizons.
-- **Importing the text vectors or referencing them.** The laboratory holds
-  them for the cut's snapshot, 43.558 terms by 2560 in float16, which is that
-  snapshot's non-obsolete term count exactly. The decision here is to reference
-  them by sha256 rather than copy 224 MB into every export, for the same reason
-  the vocabulary code is referenced. It changes the day a dataset has to be
-  self-contained to be published outside.
+- **Importing the text vectors or referencing them.** SETTLED: by reference.
+  The laboratory holds them for the cut's snapshot, 43.558 terms by 2560 in
+  float16, which is that snapshot's non-obsolete term count exactly. ``terms``
+  carries ``vector_uri`` and ``vector_sha256`` and never the floats, so the
+  224 MB are not copied into every export, for the same reason the vocabulary
+  code is referenced. A loader therefore fetches the table once and aligns it
+  on ``go_id``, which is also why the vectors are not part of this dataset's
+  row count. It changes the day a dataset has to be self-contained to be
+  published outside.
 - **A second neighbour list by sparse code.** It needs a protein-level grouped
   per-residue vocabulary configuration, which does not exist. The schema leaves room:
   ``neighbourhood`` is keyed by ``(version_t, query, neighbour)`` with the
