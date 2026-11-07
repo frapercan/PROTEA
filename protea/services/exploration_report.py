@@ -350,6 +350,48 @@ def bank_load_problems(loads: dict[str, dict[str, Any]], declared: str | None) -
     return problems
 
 
+def _identity_classes(
+    session: Session,
+    rows: dict[str, dict[str, Any]],
+    reference: str,
+    pairs: dict[str, dict[str, Any]],
+) -> tuple[list[list[str]], list[str] | None]:
+    """Group the arms into classes of identical rows, and name the ones that moved.
+
+    **Comparisons against one reference give the verdict but not the blame.**
+    Equality is transitive, so N-1 comparisons decide whether every arm agrees.
+    They cannot say WHO disagrees when the arm that moved is the reference
+    itself: then all N-1 pairs read ``identical`` false, and a report that
+    stopped there would accuse every other arm. With four arms that is one case
+    in four, and it is the case an instrument exists to catch.
+
+    So on failure the arms that differ from the reference are compared among
+    themselves, which costs nothing when nothing moved. The largest class is
+    taken as the unmoved one and the rest as moved, but only when it is
+    STRICTLY largest: two arms that differ, or two against two, leave no
+    majority and ``moved`` is None, because the rows cannot say which side is
+    the anomaly and a guess would read as a measurement.
+    """
+    from protea.services.exploration_identity import row_identity
+
+    classes: list[list[str]] = [[reference]]
+    for arm in sorted(pairs):
+        if pairs[arm]["identical"]:
+            classes[0].append(arm)
+            continue
+        for cls in classes[1:]:
+            same = row_identity(session, str(rows[cls[0]]["id"]), str(rows[arm]["id"]))
+            if same["identical"]:
+                cls.append(arm)
+                break
+        else:
+            classes.append([arm])
+    classes.sort(key=lambda c: (-len(c), c[0]))
+    decided = len(classes) == 1 or len(classes[0]) > len(classes[1])
+    moved = sorted(a for c in classes[1:] for a in c) if decided else None
+    return classes, moved
+
+
 def _instrument(session: Session, exploration: Exploration) -> tuple[dict[str, Any], list[str]]:
     """An instrument's runs: their row identity, their bank loads, and what blocks.
 
@@ -365,7 +407,8 @@ def _instrument(session: Session, exploration: Exploration) -> tuple[dict[str, A
     means every arm identical to every other. The reference is the first in
     sorted arm order, so which pairs a report names does not depend on dict
     order, and ``pairs`` carries every comparison rather than only its
-    conclusion: an instrument that fails should say which arm moved.
+    conclusion. Naming the arm that moved needs more than those pairs, and
+    :func:`_identity_classes` says why and does it.
 
     A report built here for a two-arm instrument carries more keys than it did
     before, so its sha256 differs from one stored earlier. The structure
@@ -386,6 +429,7 @@ def _instrument(session: Session, exploration: Exploration) -> tuple[dict[str, A
     ref_id = str(rows[reference]["id"])
     pairs = {arm: row_identity(session, ref_id, str(rows[arm]["id"])) for arm in others}
     first = next((p["first_difference"] for p in pairs.values() if not p["identical"]), None)
+    classes, moved = _identity_classes(session, rows, reference, pairs)
     loads = _bank_loads(session, rows)
     identity = {
         "arms": arms,
@@ -398,6 +442,8 @@ def _instrument(session: Session, exploration: Exploration) -> tuple[dict[str, A
             arm: {"identical": p["identical"], "first_difference": p["first_difference"]}
             for arm, p in pairs.items()
         },
+        "classes": classes,
+        "moved": moved,
         "first_difference": first,
     }
     return identity, bank_load_problems(loads, rules.get("bank_load"))

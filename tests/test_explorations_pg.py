@@ -366,6 +366,9 @@ def test_an_instrument_reads_four_arms_and_not_only_two(pg: Session) -> None:
     assert sorted(identity["pairs"]) == ["b", "c", "d"]
     assert identity["rows"] == {"a": 1, "b": 1, "c": 1, "d": 1}
     assert identity["first_difference"] is None
+    # Nothing moved, so there is one class and no blame to apportion.
+    assert identity["classes"] == [["a", "b", "c", "d"]]
+    assert identity["moved"] == []
     assert row.verdict == "for"
 
 
@@ -390,6 +393,74 @@ def test_an_instrument_names_which_of_four_arms_moved(pg: Session) -> None:
     assert identity["pairs"]["d"]["identical"] is True
     # The conclusion alone would not say which arm to go and look at.
     assert identity["pairs"]["c"]["first_difference"]["protein_accession"] == "P1"
+    assert identity["classes"] == [["a", "b", "d"], ["c"]]
+    assert identity["moved"] == ["c"]
+    assert row.verdict == "against"
+
+
+def test_an_instrument_blames_the_reference_when_it_is_the_one_that_moved(pg: Session) -> None:
+    # The reference is the first arm in sorted order. Comparisons against it
+    # read "every other arm differs" when it is the reference that moved, which
+    # with four arms is one case in four, and it is the case to catch.
+    window = make_window(pg)
+    parents = make_parents(pg)
+    terms = _terms(pg, parents, 1)
+    same = {("P1", terms[0].id): 0.1}
+    arms = {
+        "a": _set_with_rows(pg, parents, {("P1", terms[0].id): 0.2}),
+        "b": _set_with_rows(pg, parents, same),
+        "c": _set_with_rows(pg, parents, same),
+        "d": _set_with_rows(pg, parents, same),
+    }
+
+    row, body = _instrument_of(pg, window, arms)
+
+    identity = body["identity"]
+    assert identity["reference"] == "a"
+    # Every pair against the reference differs, and still only one arm moved.
+    assert [p["identical"] for p in identity["pairs"].values()] == [False, False, False]
+    assert identity["classes"] == [["b", "c", "d"], ["a"]]
+    assert identity["moved"] == ["a"]
+    assert row.verdict == "against"
+
+
+def test_two_arms_that_differ_cannot_say_which_one_moved(pg: Session) -> None:
+    window = make_window(pg)
+    parents = make_parents(pg)
+    terms = _terms(pg, parents, 1)
+    arms = {
+        "a": _set_with_rows(pg, parents, {("P1", terms[0].id): 0.1}),
+        "b": _set_with_rows(pg, parents, {("P1", terms[0].id): 0.2}),
+    }
+
+    row, body = _instrument_of(pg, window, arms)
+
+    identity = body["identity"]
+    assert identity["identical"] is False
+    # No majority, so no anomaly: a guess here would read as a measurement.
+    assert identity["classes"] == [["a"], ["b"]]
+    assert identity["moved"] is None
+    assert row.verdict == "against"
+
+
+def test_two_against_two_leaves_no_majority_either(pg: Session) -> None:
+    window = make_window(pg)
+    parents = make_parents(pg)
+    terms = _terms(pg, parents, 1)
+    one = {("P1", terms[0].id): 0.1}
+    other = {("P1", terms[0].id): 0.2}
+    arms = {
+        "a": _set_with_rows(pg, parents, one),
+        "b": _set_with_rows(pg, parents, one),
+        "c": _set_with_rows(pg, parents, other),
+        "d": _set_with_rows(pg, parents, other),
+    }
+
+    row, body = _instrument_of(pg, window, arms)
+
+    identity = body["identity"]
+    assert identity["classes"] == [["a", "b"], ["c", "d"]]
+    assert identity["moved"] is None
     assert row.verdict == "against"
 
 
