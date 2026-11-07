@@ -36,10 +36,20 @@ already exists, so it cannot add a grain.** A query's own state is N rows per
 query, a neighbour's state is N by M, and a vocabulary key is one per sequence.
 None of the three is a column on a pair.
 
-Decision: seven tables, each keyed by what it actually depends on
+Decision: eight tables, each keyed by what it actually depends on
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-One ``Dataset`` row, one manifest, seven parquets. The existing pair table stays
+One ``Dataset`` row, one manifest, eight parquets.
+
+**The principle is one sentence: a table is stored by what it depends on.** It
+came up three times before it was named. A protein's neighbours at ``t`` do not
+depend on ``t'``. Neither does a neighbour's state at ``t``. Nor does a feature
+card depend on the window at all, only on the sequence and the vocabulary. Key
+any of those by the window and the rows are copied once per horizon; key them
+by what they are a function of and they are written once and read by every
+horizon that reaches them. Every table below is keyed that way, and the volume
+of a cut then grows with its number of ``t`` values rather than with its number
+of windows. The existing pair table stays
 as it is and is not extended: it is good for what it is, and the model does not
 read it at that grain.
 
@@ -69,6 +79,11 @@ read it at that grain.
      - the platform's truth as the evaluator uses it: the per-side closure,
        the stratum, and in PK the already-known excluded. **Which closure**
        is a column, not an assumption
+   * - ``feature_cards``
+     - ``(embedding_config_id, sequence_id, feature)``
+     - one card per distinct vocabulary feature a sequence lights: the
+       de-scaled maximum activation, and three descriptors RELATIVE TO THE
+       LENGTH, in [0, 1], plus the feature's rarity in the corpus
    * - ``terms``
      - ``(cut, term)``
      - aspect and the text vector
@@ -181,6 +196,55 @@ an ancestor is a property of a PAIR. Those are two grains, so they are two
 tables, and ``term_ancestors`` holds the strict ancestors only: a term is not
 its own ancestor, and a table that admitted the reflexive pair would make every
 consumer decide whether to filter it.
+
+The feature cards are summarised where the shards are
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The model does not read the per-residue code. It reads, per query protein, one
+card per distinct vocabulary feature that protein lights. The shards hold the
+code and nothing else can: 5.344 of them, 16,9 MB each, 90,6 GB over
+296.944.034 residues and 43.240.843.072 entries, and they live in this
+machine's object store. Reading them from the compute node over its wifi is
+hours; recomputing the vocabulary pass there duplicates the work. So a platform
+operation summarises them where they are, and the dataset names its table by
+sha.
+
+**Every descriptor is relative, and that is a correctness requirement.** Three
+of the five are ratios in [0, 1]: the position of the maximum as
+``index / (length - 1)``, the fraction of residues where the feature fires, and
+the span over the length. The other two are the de-scaled maximum activation
+and the feature's rarity, also in [0, 1]. **None is an absolute residue
+count**, because the cards ship as float16, and float16 represents integers
+exactly only to 2048: 2049 becomes 2048 and 8259 becomes 8256. The corpus holds
+sequences past 8.000 residues, so an absolute position stored this way would
+give a plausible wrong answer for a long protein and nothing would say so. The
+length itself is an integer, in ``queries``.
+
+**The de-scaling is verified, not assumed.** The maximum must be the value the
+quantiser means, not the raw level, because a level is a bin index and is not
+comparable across features. That table is a laboratory artefact, but its
+fingerprint is already in the platform: the configuration's ``model_name`` is
+``residue-vocabulary:06fed75ca76d17be:f3a7fe16``, and ``model_name`` is one of
+the twelve identity fields of an embedding configuration's uuid5. So the
+operation takes the quantiser as a declared input and REFUSES unless its
+fingerprint is that one. Summarising with the wrong table stops being unlikely
+and becomes impossible.
+
+**Nothing is filtered.** All distinct features are stored. Measured over the
+40.016 sequences of the 211 to 227 window with this vocabulary: **3.287
+distinct features per protein on average**, 40 % of the 8.192, with quantiles
+1.490 / 2.318 / 2.888 / 3.336 / 3.771 / 4.112 / 4.712 and a maximum of 5.644,
+rising with length from a median of 1.760 below 100 residues to 4.264 above
+2.000. That is 131,5 million cards for those sequences, about 1,3 GB with the
+feature as int16 and the five values as float16.
+
+And 2.924 features appear in more than half of all proteins, 1.329 in more than
+90 % and **489 in more than 99 %**: six per cent of the vocabulary is a nearly
+constant background. Dropping them would raise the signal and lose the
+derivation's fidelity, so the platform keeps them and the rarity descriptor
+says which they are. A frequency filter is a modelling choice and belongs in
+the loader as a declared ablation, where it can be turned off; baked into the
+export it could not be ablated without producing the dataset again.
 
 The vocabulary code is referenced, never copied
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
