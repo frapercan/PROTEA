@@ -460,6 +460,16 @@ Open decisions
   on ``go_id``, which is also why the vectors are not part of this dataset's
   row count. It changes the day a dataset has to be self-contained to be
   published outside.
+
+  **The sha256 is the identity and the uri is only a locator**, the same split
+  as ``obo_sha256`` against ``obo_uri``: a loader must refuse a file whose
+  hash is not the one ``terms`` declares, and must refuse one missing any term
+  of the axis, because a vector table silently short of the axis trains on a
+  smaller vocabulary than the dataset says. ``vector_uri`` is an artifact-store
+  URI when the file has been published there and NULL until it has, never a
+  machine-local path: a path that resolves on one machine and not on the next
+  is a column that promises what it cannot deliver, and the sha travels while
+  the path does not.
 - **A second neighbour list by sparse code.** It needs a protein-level grouped
   per-residue vocabulary configuration, which does not exist. The schema leaves room:
   ``neighbourhood`` is keyed by ``(version_t, query, neighbour)`` with the
