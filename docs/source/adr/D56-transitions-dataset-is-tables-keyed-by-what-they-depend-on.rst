@@ -36,10 +36,10 @@ already exists, so it cannot add a grain.** A query's own state is N rows per
 query, a neighbour's state is N by M, and a vocabulary key is one per sequence.
 None of the three is a column on a pair.
 
-Decision: five tables, each keyed by what it actually depends on
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Decision: seven tables, each keyed by what it actually depends on
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-One ``Dataset`` row, one manifest, five parquets. The existing pair table stays
+One ``Dataset`` row, one manifest, seven parquets. The existing pair table stays
 as it is and is not extended: it is good for what it is, and the model does not
 read it at that grain.
 
@@ -63,13 +63,37 @@ read it at that grain.
    * - ``neighbour_state``
      - ``(version_t, neighbour, term)``
      - term, evidence code, qualifier, ``assigned_by``. **No moment column**
+   * - ``gains``
+     - ``(window, query, aspect, term)``
+     - the platform's truth as the evaluator uses it: the per-side closure,
+       the stratum, and in PK the already-known excluded. **Which closure**
+       is a column, not an assumption
    * - ``terms``
      - ``(cut, term)``
-     - ontology position, text, vector
+     - aspect and the text vector
+   * - ``term_ancestors``
+     - ``(cut, term, ancestor)``
+     - the relation to each strict ancestor
 
 The keys are the whole decision. A protein's neighbours at ``t`` and a
 protein's state at ``t`` do not depend on ``t'``, so neither table is keyed by
 the window. One write per ``t``, read by every horizon that starts there.
+
+The truth is exported, never re-derived
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``gains`` carries the label the reading head trains against, and it is the
+platform's own: the per-side closure, the stratum, and in PK the exclusion of
+what ``t`` already knew. It would be derivable in the laboratory from the two
+states, and that is exactly why it is exported instead. Two derivations of one
+truth mean a model trained against one label and scored against another, and
+the difference would not announce itself.
+
+**Which closure is a column.** The two frames do not agree everywhere: NK and
+LK coincide, and PK differs by graph-only gain, 28.333 entries that gain an
+ancestor without gaining an annotation. A ``gains`` table that said only
+"truth" would hide that PK's truth depends on the graph it is closed in, so the
+frame is recorded per row.
 
 The leak is a missing column, not a rule
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -148,6 +172,15 @@ So the normalisation that matters is by version, which the rejected option also
 offered. What this decision adds is that the saving does not cost the
 guarantee: splitting state by ROLE gets both.
 
+The term tables are two for the same reason as the state
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A term's aspect and its text vector are properties of the term. Its relation to
+an ancestor is a property of a PAIR. Those are two grains, so they are two
+tables, and ``term_ancestors`` holds the strict ancestors only: a term is not
+its own ancestor, and a table that admitted the reflexive pair would make every
+consumer decide whether to filter it.
+
 The vocabulary code is referenced, never copied
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -185,7 +218,10 @@ Open decisions
   ``neighbourhood`` is keyed by ``(version_t, query, neighbour)`` with the
   source of the ranking as a column, so a second list is more rows and not a
   new shape.
-- **``assigned_by`` in the pair table.** ``annotation_meta`` has three columns
+- **``assigned_by``.** It travels in ``query_state`` and
+  ``neighbour_state`` although the minimal model does not read it yet,
+  because a column nobody asked for is cheaper to carry than an export to
+  re-run. In the PAIR table it stays missing, where it is a family change. ``annotation_meta`` has three columns
   and this is a fourth. It is a family change, unlike everything else here.
 
 Before building on it: this path has never run here
