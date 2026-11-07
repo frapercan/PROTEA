@@ -131,6 +131,34 @@ ancestor without gaining an annotation. A ``gains`` table that said only
 "truth" would hide that PK's truth depends on the graph it is closed in, so the
 frame is recorded per row.
 
+**``closure`` takes two values, ``pivot`` and ``native``, and it is DERIVED.**
+``pivot`` is a window whose two native snapshots are both the pivot, so both
+ends close under one graph. ``native`` is a window whose ends close under their
+own eras. The value comes from comparing the window's two natives against its
+pivot and is never a field anybody writes, for the same reason the frame digest
+is computed rather than declared: a written value can disagree with the row it
+describes and nothing would see it. Measured over the 131 evaluation sets in
+the database, two values are enough and a third is not needed: **122 are
+``native`` and 9 are ``pivot``**.
+
+**It is NOT ``truth_profile``.** That field says how the truth is derived,
+``projected`` or ``as_closed``; ``closure`` says which graphs the two ends
+close in. They vary independently, and the probe that settles the open decision
+below is the proof: both of its windows are ``projected`` and they differ only
+in ``closure``. Copying one into the other would leave the column unable to
+record the one distinction it exists for.
+
+**And ``closure`` alone does not make two ``native`` windows comparable.** Of
+the 122, every one pivots on ONE OF ITS OWN TWO ENDS, which loses almost
+nothing on intersection. A window that closes natively and pivots on a distant
+third snapshot loses 7,6 % of its old end's terms and 8,9 % in BPO, by the
+table below. Same ``closure``, different objects. Comparability needs
+``closure`` AND
+``pivot_snapshot_id``, which is already a column of its own, and this is the
+defect class the three keys above exist to prevent: a level must be named by
+every field that varies. **No window of that third shape existed before this
+design**, which is worth knowing when its first numbers look unfamiliar.
+
 The leak is a missing column, not a rule
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
