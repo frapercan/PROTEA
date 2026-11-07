@@ -221,6 +221,8 @@ def _frame_of(session: Session, closing_snapshot_id: uuid.UUID) -> SideFrame:
     # is exactly why it has no entry among the live. Reading the live map
     # left every aspect crossing uncounted, which is the shape of counter
     # this module already got wrong once by reading the wrong snapshot.
+    # (Its name says pivot because that is its usual argument; what it
+    # returns is every term of the snapshot it is given that has an aspect.)
     _, aspect = _load_pivot_term_universe(session, closing_snapshot_id)
     return SideFrame(
         snapshot_id=closing_snapshot_id,
@@ -230,11 +232,13 @@ def _frame_of(session: Session, closing_snapshot_id: uuid.UUID) -> SideFrame:
 
 
 class _Side(NamedTuple):
-    """One end of the window: its corpus and the graph that closes it.
+    """One end of the window: its corpus, the graph that closes it, and what
+    that graph says about ids it no longer uses as primary.
 
-    The two travel together through both reconcile steps, and bundling them
+    The THREE travel together through both reconcile steps, and bundling them
     is what leaves room for the window's rules without passing seven
-    arguments.
+    arguments. The third joined them with the anchoring fix: a side holding
+    the graph but somebody else's map is the defect that fix removed.
     """
 
     annotation_set_id: uuid.UUID
@@ -292,9 +296,15 @@ def _frames_by_snapshot(
 def _projection_request(session: Session, window: ReconciledWindow) -> ProjectionRequest:
     """Which graph the projection climbs, and which terms it may land on.
 
-    READ FROM THE ANNOTATION SETS, NOT FROM THE WINDOW'S NATIVE FIELDS, and
-    this is not a stylistic preference: it is the defect this function exists
-    to avoid, measured.
+    THE TWO COME FROM DIFFERENT PLACES, and reading this docstring as though
+    they came from one is how both halves got anchored wrong in turn:
+
+    * THE CLIMB is read FROM THE ANNOTATION SETS, never from the window's
+      native fields. That is the defect described just below, measured;
+    * THE LANDINGS are read from a native field, ``old_native_snapshot_id``,
+      and that is the second defect, described at the end. A landing has to
+      be a node the window can still name, which is a question about the
+      graph that closes t0 and not about the era that loaded its corpus.
 
     ``old_native_snapshot_id`` and ``new_native_snapshot_id`` do two jobs.
     They say which graph closes each side, and they are the only other record
@@ -317,17 +327,12 @@ def _projection_request(session: Session, window: ReconciledWindow) -> Projectio
     and same regression test as the terms of interest in
     ``_run_cafa_setup._window_end_snapshots``.
 
-    THE LANDINGS ARE THE ONE THING HERE THAT IS NOT READ FROM THE ENDS, and
-    that is the second half of the anchoring fix. A landing has to be a node
-    the window can still name after ``closure & pivot_go_ids``, so it comes
-    from the graph that CLOSES the t0 side. Read from the t0 corpus's era
-    instead, 1,608 of an early window's 43,435 candidate landings were ids
-    the pivot has no row for: a gain projected onto one of them survived both
-    rules and then vanished at the intersection, which is the same silent
-    death the remapping had, one line further down. Non-obsolete and not the
-    whole pivot universe, for the reason that was already written here: the
-    pivot keeps obsolete terms and cafaeval's graph does not, so landing on
-    one would put the truth on a node the scorer cannot see.
+    THE LANDINGS, the second half of the anchoring fix. Read from the t0
+    corpus's era, 1,608 of an early window's 43,435 candidate landings were
+    ids the pivot has no row for: a gain that landed on one survived both
+    rules and vanished at the intersection anyway. Non-obsolete and not the
+    pivot's whole universe, for the reason already written here: the pivot
+    keeps obsolete terms and cafaeval's graph does not.
     """
     _, new_snapshot = _window_end_snapshots(session, window)
     target, _ = _live_terms_with_aspect(session, window.old_native_snapshot_id)

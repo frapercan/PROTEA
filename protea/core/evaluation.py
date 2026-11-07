@@ -547,7 +547,8 @@ def _reconcile_not_side(
     # The same remapping as the experimental side, and NEVER a projection: a
     # NOT denies the term and everything under it, so climbing to an ancestor
     # would assert the protein lacks something it may well have. No ``spare``
-    # for the same reason -- what has no map at t0 is dropped and counted.
+    # for the same reason: what the graph that closes THIS side cannot
+    # name is dropped and counted.
     remapped = None
     if project is not None and side.frame is not None:
         remapped = apply_remap(raw, side.frame.remap, side.frame.live)
