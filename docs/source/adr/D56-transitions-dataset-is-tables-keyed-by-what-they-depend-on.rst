@@ -470,6 +470,13 @@ Open decisions
   machine-local path: a path that resolves on one machine and not on the next
   is a column that promises what it cannot deliver, and the sha travels while
   the path does not.
+
+  **One file per cut, and a loader may refuse a second.** ``vector_sha256``
+  repeats down a cut's rows and every row of one cut must name the same file,
+  because the cut IS the term axis: two files for one axis would be two
+  vocabularies behind one key, which is the defect the three keys above exist
+  to prevent. A cut whose rows name two shas is malformed, not a choice, and
+  the loader that rejects it is right to.
 - **A second neighbour list by sparse code.** It needs a protein-level grouped
   per-residue vocabulary configuration, which does not exist. The schema leaves room:
   ``neighbourhood`` is keyed by ``(version_t, query, neighbour)`` with the
