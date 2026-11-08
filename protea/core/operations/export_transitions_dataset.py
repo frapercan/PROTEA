@@ -461,7 +461,37 @@ def _streamed(
     )
 
 
-def _emit_state(st: WindowState, emit: EmitFn) -> WindowState:
+# WHAT `discarded_off_axis` IS, BECAUSE A COMMENT INSIDE THIS FUNCTION SAID THE
+# OPPOSITE UNTIL IT WAS MEASURED.
+#
+# It said the figure was expected to be zero while the axis is release 211's own
+# corpus ontology, and that it was the first thing to read before trusting a
+# bundle. Over the 65 published windows it is 689,055 rows, 1.54 per cent of the
+# raw cards, and it is zero in neither.
+#
+# The reasoning behind the wrong comment was a real measurement applied to the
+# wrong half: release 211 does drop nothing, because the pivot IS the ontology
+# that release's corpus was loaded under. But this table reads BOTH ends of a
+# window, and the end at t is an earlier release whose corpus named terms the
+# 2022 ontology no longer has and cannot rename through an alias. So the drop
+# tracks the window's distance from the axis's era: 0.02 per cent on 205 -> 211,
+# 0.84 on 174 -> 202, 1.66 on 160 -> 177, 4.54 on 170 -> 171.
+#
+# TWO CONSEQUENCES, and the second is the one that leaves this file.
+#
+# It is not a signal to trust a bundle by. The signals that are:
+# `remapped_across_aspects` and `discarded_without_evidence`, both zero, and
+# both about a row the writer could have placed and chose not to.
+#
+# And the state at t is systematically THINNER for old windows than for recent
+# ones, by up to four and a half per cent, because the axis is a 2022 ontology.
+# That is a difference correlated with a window's age, which a model trained
+# across mixed horizons can see. Which is why the event carries the split per
+# moment AND both eras: a total cannot be crossed against "the end at t drops
+# more than the end at t'", and a drop cannot be read without the age it tracks.
+# The axis's own era is in the run's result as `cut_version`, once, because it
+# does not vary per window.
+def _emit_state(st: WindowState, facts: WindowFacts, emit: EmitFn) -> WindowState:
     emit(
         "transitions.query_state",
         f"{st.window[:8]}: {st.rows} cards, {st.collapse.gaf} collapsed by the GAF "
@@ -480,15 +510,14 @@ def _emit_state(st: WindowState, emit: EmitFn) -> WindowState:
             # synonym map changed.
             "collapsed_by_gaf": st.collapse.gaf,
             "collapsed_by_remap": st.collapse.remap,
-            # Expected to be zero while the axis is release 211's own corpus
-            # ontology. It is the first thing to read before trusting a bundle.
+            # Not zero. See the block above this function.
             "discarded_off_axis": st.discards.off_axis,
-            # Split per moment, because the whole explanation of this figure is
-            # that the two ends sit at different distances from the axis's era.
             **{
                 f"off_axis_{k.replace(chr(39), '_prime')}": v
                 for k, v in st.off_axis_by_moment.items()
             },
+            "version_t": facts.version_t,
+            "version_t_prime": facts.version_t_prime,
             "remapped_across_aspects": st.discards.crossed_aspect,
             # The column is NULLABLE in the schema, so this branch is reachable
             # even though the live data does not take it. Dropped rather than
@@ -682,7 +711,7 @@ class ExportTransitionsDatasetOperation(Operation):
                     )
                 tabla, st = state_of(session, facts, [r.query for r in q.rows], run.frame)
                 run.state.write(tabla)
-                hecho.state.append(_emit_state(st, emit))
+                hecho.state.append(_emit_state(st, facts, emit))
             if q is not None and "gains" in p.tables and axis is not None:
                 poblacion = {r.query for r in q.rows}
                 hecho.gains.append(
