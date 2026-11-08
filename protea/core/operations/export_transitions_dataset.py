@@ -483,6 +483,12 @@ def _emit_state(st: WindowState, emit: EmitFn) -> WindowState:
             # Expected to be zero while the axis is release 211's own corpus
             # ontology. It is the first thing to read before trusting a bundle.
             "discarded_off_axis": st.discards.off_axis,
+            # Split per moment, because the whole explanation of this figure is
+            # that the two ends sit at different distances from the axis's era.
+            **{
+                f"off_axis_{k.replace(chr(39), '_prime')}": v
+                for k, v in st.off_axis_by_moment.items()
+            },
             "remapped_across_aspects": st.discards.crossed_aspect,
             # The column is NULLABLE in the schema, so this branch is reachable
             # even though the live data does not take it. Dropped rather than

@@ -132,12 +132,34 @@ class Collapse(NamedTuple):
 
 
 class Discards(NamedTuple):
-    """Rows this table does not write, by reason. ``off_axis`` should be zero."""
+    """Rows this table does not write, by reason."""
 
-    #: No live id on the axis and no published successor that has one. On the
-    #: 65 windows published so far the axis IS release 211's own corpus
-    #: ontology, so this is expected to be zero and a non-zero value is the
-    #: thing to read before trusting the bundle.
+    #: No live id on the axis and no published successor that has one.
+    #:
+    #: THIS IS NOT EXPECTED TO BE ZERO, and an earlier version of this comment
+    #: said it was. That was a reasoning error: it generalised a measurement
+    #: taken at the CUT to both ends of every window. A window's ``t`` end is
+    #: an earlier release, and a term its corpus named in 2016 that the 2022
+    #: ontology no longer has, and cannot rename through an alias, has no id on
+    #: the axis. Dropping it is the only option, because a row the loader
+    #: cannot join to ``terms`` is worse than a row that is not there.
+    #:
+    #: MEASURED over the 65 windows on 2026-11-08: 689.055 of 44.744.324 raw
+    #: rows, 1,54 per cent, and **it tracks the distance from the window to the
+    #: pivot's era** rather than anything about the window's quality:
+    #:
+    #:     205->211     685   (0,02 %)
+    #:     204->211   1.167
+    #:     174->202  20.632   (0,84 %)
+    #:     160->177  19.257   (1,66 %)
+    #:     170->171  15.110   (4,54 %)
+    #:     159->160  15.109   (4,16 %)
+    #:
+    #: So what deserves attention is a window whose figure is far from its
+    #: neighbours of the same era, not a non-zero total. The consequence for
+    #: whoever trains on this: **the state at t is systematically thinner for
+    #: old windows than for recent ones**, by up to four and a half per cent,
+    #: because the axis is a 2022 ontology.
     off_axis: int
     #: Rewritten to a successor the ontology named in a DIFFERENT aspect. Not a
     #: discard: the substitution happens, because the ontology said so. Counted
@@ -167,6 +189,11 @@ class WindowState(NamedTuple):
     negated: int
     collapse: Collapse
     discards: Discards
+    #: ``off_axis`` split per moment, which the total cannot show. The whole
+    #: explanation of the figure is that the two ends sit at different
+    #: distances from the axis's era, so a total that cannot be split is a
+    #: number nobody can check that explanation against.
+    off_axis_by_moment: dict[str, int]
 
 
 def state_of(
@@ -185,6 +212,7 @@ def state_of(
     por_momento: dict[str, int] = {}
     evidencia: dict[str, dict[str, int]] = {}
     gaf = remapeo = fuera = cruzado = sin_evidencia = 0
+    fuera_por_momento: dict[str, int] = {}
     ends = (
         (MOMENTS[0], facts.eset.old_annotation_set_id),
         (MOMENTS[1], facts.eset.new_annotation_set_id),
@@ -198,6 +226,7 @@ def state_of(
         puestas, vivas, d = _onto_axis(antes, axis)
         remapeo += vivas - len(puestas)
         fuera += d.off_axis
+        fuera_por_momento[momento] = d.off_axis
         cruzado += d.crossed_aspect
         por_momento[momento] = len(puestas)
         evidencia[momento] = dict(Counter(f[3] for f in puestas))
@@ -206,7 +235,7 @@ def state_of(
         Collapse(gaf=gaf, remap=remapeo),
         Discards(off_axis=fuera, crossed_aspect=cruzado, no_evidence=sin_evidencia),
     )
-    return _as_table(facts, sorted(cartas), por_momento, evidencia, cuentas)
+    return _as_table(facts, sorted(cartas), por_momento, evidencia, cuentas, fuera_por_momento)
 
 
 def _onto_axis(antes: set[_Row], axis: SideFrame) -> tuple[set[_Row], int, Discards]:
@@ -242,6 +271,7 @@ def _as_table(
     por_momento: dict[str, int],
     evidencia: dict[str, dict[str, int]],
     cuentas: tuple[Collapse, Discards],
+    fuera_por_momento: dict[str, int],
 ) -> tuple[pa.Table, WindowState]:
     """The six parallel columns, built directly from the sorted cards."""
     tabla = pa.table(
@@ -267,6 +297,7 @@ def _as_table(
         negated=sum(1 for f in filas if "NOT" in f[4]),
         collapse=colapso,
         discards=descartes,
+        off_axis_by_moment=fuera_por_momento,
     )
 
 
