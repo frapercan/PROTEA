@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -78,6 +79,7 @@ from protea.api.routers.proteins import (
     prewarm_protein_stats,
 )
 from protea.api.routers.proteins_stats import prewarm_all as prewarm_protein_stats_sections
+from protea.core.code_revision import code_revision, is_identifying
 from protea.core.operation_catalog import build_operation_registry
 from protea.infrastructure.benchmark_config import load_benchmark_config
 from protea.infrastructure.session import build_session_factory
@@ -279,11 +281,81 @@ def _register_middlewares(app: FastAPI, allowed_origins: tuple[str, ...]) -> Non
     app.add_middleware(HttpMetricsMiddleware)
 
 
+def _declared_revision() -> str | None:
+    """The coordinator sha the farm declares, or ``None`` if unanswerable.
+
+    THE FAILURE THIS CLOSES was not an API that started on undeclared code.
+    It was an API that served FIVE DAYS stale while the screen said nothing:
+    the tree had moved, the process had not reloaded, and ``{"status": "ok"}``
+    was true and useless. Staleness was invisible from outside, so nothing
+    could alarm on it.
+
+    WHY A REPORT AND NOT THE GUARD. The obvious fix is the revision guard the
+    eight worker units carry in ``ExecStartPre``, and it was considered and
+    left out: that guard refuses on a tree that is BEHIND, AHEAD, or merely
+    DIRTY, and this fleet runs directly out of a working tree that is edited
+    between runs. On the API it would mean that a reboot with uncommitted
+    changes brings the public surface down, and with it the site, the
+    frontend's data and the only way to enqueue a job. That trades an
+    invisible fault for one that removes the platform. The reason is written
+    here rather than in a commit message because the next person to reach for
+    the guard should find it first.
+
+    Read the way ``deploy/systemd/protea-guard-revision.sh`` reads it, from
+    ``origin/main:plans/DECLARED-REVISION.txt`` of the agent-farm clone, so
+    the two cannot disagree about what "declared" means. That ref is LOCAL
+    and nothing in this process fetches it: a declaration merged seconds ago
+    is not visible here until something fetches, which is why a mismatch is
+    reported and never enforced.
+
+    Returns ``None`` rather than raising or guessing: no clone, no git, no
+    declaration line. The endpoint reports that as "cannot say", which is not
+    agreement.
+    """
+    import subprocess
+
+    farm = os.environ.get("AGENT_FARM_ROOT")
+    if not farm:
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "-C", farm, "show", "origin/main:plans/DECLARED-REVISION.txt"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    for line in out.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == "coordinator" and len(parts[1]) == 40:
+            return parts[1]
+    return None
+
+
 def _register_health_endpoints(app: FastAPI, factory, settings) -> None:
     @app.get("/health", tags=["health"])
-    def health_check() -> dict[str, str]:
-        """Liveness probe — returns 200 if the API process is up."""
-        return {"status": "ok"}
+    def health_check() -> dict[str, str | bool | None]:
+        """Liveness, and WHICH REVISION THIS PROCESS SERVES.
+
+        ``revision_matches_declaration`` is ``None`` when the question cannot
+        be answered, which is NOT ``True``. See :func:`_declared_revision`
+        for why this reports and never enforces.
+        """
+        served = code_revision()
+        declared = _declared_revision()
+        matches: bool | None = None
+        if declared is not None and is_identifying(served):
+            matches = served == declared
+        return {
+            "status": "ok",
+            "code_revision": served,
+            "declared_revision": declared,
+            "revision_matches_declaration": matches,
+        }
 
     @app.get("/health/ready", tags=["health"])
     def readiness_check() -> dict[str, str]:
