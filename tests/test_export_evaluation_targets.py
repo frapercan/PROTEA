@@ -393,19 +393,23 @@ def test_the_entries_point_at_the_sequence_the_protein_already_has():
     assert [e for e, _ in eventos] == ["targets.query_set_declared"]
 
 
-def test_a_target_with_no_sequence_row_is_left_out_and_not_guessed():
-    """The entry needs a ``sequence_id``, and inventing one would be a lie.
+def test_a_target_with_no_protein_row_is_REFUSED_and_not_skipped():
+    """It wrote the entries it could and dropped the rest, which is worse.
 
-    ``_report_missing`` already emits these as a warning, so they are visible;
-    what must not happen is an entry pointing at some other protein's
-    sequence.
+    The description it writes says ``len(records)`` targets, so skipping made
+    the declared set disagree with the bytes its own sha names -- the exact
+    defect this operation exists to close, reintroduced one level down. The
+    desktop session caught it.
+
+    Every record reaching here came from a join on ``Protein.sequence_id``, so
+    a gap means the population moved between the two queries. That is worth
+    raising over, not working around.
     """
     import uuid
 
     from protea.core.operations.export_evaluation_targets import _declare
 
     session = _DeclareSession(existing=None, ids={"P1": 11})
-    _declare(session, _dec(uuid.uuid4()), _pub(), lambda *_a: None)
 
-    entradas = [o for o in session.added if hasattr(o, "accession")]
-    assert [e.accession for e in entradas] == ["P1"]
+    with pytest.raises(ValueError, match="no protein row"):
+        _declare(session, _dec(uuid.uuid4()), _pub(), lambda *_a: None)

@@ -283,3 +283,41 @@ def test_a_window_with_a_query_set_cannot_be_deleted_quietly(pg_session):
             text("DELETE FROM evaluation_set WHERE id = :v"), {"v": qs.evaluation_set_id}
         )
         pg_session.flush()
+
+
+def test_a_dirty_revision_fits_in_the_column(pg_session):
+    """``code_revision()`` returns ``"<40 hex>+dirty"``, which is 46 characters.
+
+    A ``String(40)`` column refuses the INSERT in exactly the case the column
+    exists to record: a set built from a tree that was not committed. So the
+    column is 64, matching ``evaluation_set.code_revision``, and this test is
+    what keeps it that way. The desktop session caught the original.
+    """
+    sucia = "beafbd4f2e4141d59fa89e7587ab74355191b955+dirty"
+    assert len(sucia) == 46
+
+    qs = _derivado(pg_session, code_revision=sucia)
+    pg_session.flush()
+
+    assert qs.code_revision == sucia
+
+
+def test_the_job_that_built_a_declared_set_cannot_be_deleted_quietly(pg_session):
+    """RESTRICT and not SET NULL, which is a composition bug the peer found.
+
+    The CHECK requires ``job_id`` for a derived set. With SET NULL, deleting
+    that job would null the column, trip the CHECK, and fail with a message
+    naming a constraint and explaining nothing. RESTRICT fails on the foreign
+    key instead, which says what actually happened.
+    """
+    from sqlalchemy import text
+
+    qs = _derivado(pg_session)
+    pg_session.flush()
+
+    with pytest.raises(IntegrityError) as exc:
+        pg_session.execute(text("DELETE FROM job WHERE id = :v"), {"v": qs.job_id})
+        pg_session.flush()
+
+    # The error is about the reference, not about the CHECK.
+    assert "fk_query_set_job_id" in str(exc.value) or "foreign key" in str(exc.value).lower()

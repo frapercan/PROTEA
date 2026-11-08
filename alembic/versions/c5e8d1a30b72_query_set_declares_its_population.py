@@ -59,7 +59,10 @@ def upgrade() -> None:
     op.add_column("query_set", sa.Column("artifact_uri", sa.String(length=512), nullable=True))
     op.add_column("query_set", sa.Column("content_sha256", sa.String(length=64), nullable=True))
     op.add_column("query_set", sa.Column("job_id", sa.dialects.postgresql.UUID(), nullable=True))
-    op.add_column("query_set", sa.Column("code_revision", sa.String(length=40), nullable=True))
+    # 64 and not 40: ``code_revision()`` appends "+dirty" to the sha, which is
+    # 46 characters, and a 40-char column would refuse the INSERT in exactly
+    # the case the column exists to record.
+    op.add_column("query_set", sa.Column("code_revision", sa.String(length=64), nullable=True))
 
     op.create_index("ix_query_set_evaluation_set_id", "query_set", ["evaluation_set_id"])
     op.create_index("ix_query_set_job_id", "query_set", ["job_id"])
@@ -71,8 +74,11 @@ def upgrade() -> None:
         ["id"],
         ondelete="RESTRICT",
     )
+    # RESTRICT and not SET NULL: the CHECK below requires job_id for a derived
+    # set, so nulling it on delete would make the job's deletion fail with a
+    # CHECK violation that explains nothing.
     op.create_foreign_key(
-        "fk_query_set_job_id", "query_set", "job", ["job_id"], ["id"], ondelete="SET NULL"
+        "fk_query_set_job_id", "query_set", "job", ["job_id"], ["id"], ondelete="RESTRICT"
     )
 
     listed = ", ".join(f"'{v}'" for v in SOURCES)

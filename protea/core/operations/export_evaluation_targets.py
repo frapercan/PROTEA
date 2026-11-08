@@ -208,6 +208,32 @@ class _Declaration(NamedTuple):
     job_id: uuid.UUID | None
 
 
+def _sequence_ids_or_refuse(session: Session, records: list[tuple[str, str]]) -> dict[str, int]:
+    """The sequence id of every published accession, or a refusal naming the gaps.
+
+    IT REFUSES INSTEAD OF SKIPPING. The first version wrote the entries it
+    could and dropped the rest, while the description it wrote said
+    ``len(records)`` targets: a declared set that does not match the bytes its
+    own sha names, which is the defect this whole operation is closing,
+    reintroduced one level down. The desktop session caught it.
+
+    Every record reaching here came from a join on ``Protein.sequence_id``, so
+    a gap means the population moved between the two queries. The file is
+    already in the store with its digest by this point, and that is fine: the
+    artifact is true, and only the declaration is refused.
+    """
+    ids = _sequence_ids(session, [a for a, _ in records])
+    sin_fila = sorted(a for a, _ in records if a not in ids)
+    if sin_fila:
+        raise ValueError(
+            f"{len(sin_fila)} of {len(records)} published accessions have no protein "
+            f"row to take a sequence_id from: {sin_fila[:5]}. The file is already in "
+            "the store with its sha, but declaring a query set with fewer entries "
+            "than the bytes it names would make the set disagree with its own digest"
+        )
+    return ids
+
+
 def _declaration_for(
     eval_set: EvaluationSet,
     p: ExportEvaluationTargetsPayload,
@@ -258,7 +284,7 @@ def _declare(session: Session, dec: _Declaration, pub: _Published, emit: EmitFn)
         )
         return ya.id
 
-    ids = _sequence_ids(session, [a for a, _ in pub.records])
+    ids = _sequence_ids_or_refuse(session, pub.records)
     qs = QuerySet(
         name=dec.name,
         description=dec.description,
@@ -275,9 +301,7 @@ def _declare(session: Session, dec: _Declaration, pub: _Published, emit: EmitFn)
     # design, so there is nothing to parse them from, and inventing them from
     # the protein row would make the entry say something the file does not.
     session.add_all(
-        QuerySetEntry(query_set_id=qs.id, sequence_id=ids[a], accession=a)
-        for a, _ in pub.records
-        if a in ids
+        QuerySetEntry(query_set_id=qs.id, sequence_id=ids[a], accession=a) for a, _ in pub.records
     )
     session.flush()
     emit(

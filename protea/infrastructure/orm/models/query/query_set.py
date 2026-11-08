@@ -86,7 +86,9 @@ class QuerySet(Base):
     __table_args__ = (
         # T3.5: list endpoints order by ``created_at DESC``.
         Index("ix_query_set_created_at", "created_at"),
-        CheckConstraint(check_in("source_kind", QUERY_SET_SOURCES), name="ck_query_set_source_kind"),
+        CheckConstraint(
+            check_in("source_kind", QUERY_SET_SOURCES), name="ck_query_set_source_kind"
+        ),
         # The kind decides what must be there. A derived set with no window is
         # the defect this table had, so it cannot be written any more.
         CheckConstraint(
@@ -106,9 +108,7 @@ class QuerySet(Base):
         ),
         # Idempotence: one window plus one set of bytes is ONE population. A
         # re-export of the same delta must find this row, not make a second.
-        UniqueConstraint(
-            "evaluation_set_id", "content_sha256", name="uq_query_set_window_content"
-        ),
+        UniqueConstraint("evaluation_set_id", "content_sha256", name="uq_query_set_window_content"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -140,9 +140,15 @@ class QuerySet(Base):
     #: ``--query_file`` of these bytes and this set are the same population,
     #: and anything else is two populations that happen to agree.
     content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: The job that built it. RESTRICT and not SET NULL, which is the desktop
+    #: session's catch: the CHECK below requires this for a derived set, so a
+    #: SET NULL would make deleting that job fail with a CHECK violation that
+    #: names a constraint and explains nothing. RESTRICT says what happened.
+    #: The job IS the provenance of a declared set, so it is not a row to
+    #: delete under one.
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("job.id", ondelete="SET NULL"),
+        ForeignKey("job.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )
@@ -150,7 +156,12 @@ class QuerySet(Base):
     #: set IS and the revision says what was RUN, and those are different
     #: quantities: on 2026-11-07 a fix to the synonym map moved the delta of a
     #: whole class of windows with every identity field untouched.
-    code_revision: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    #:
+    #: 64 and not 40, matching ``evaluation_set.code_revision``:
+    #: ``code_revision()`` returns ``"<40 hex>+dirty"`` when the tree it ran
+    #: from is dirty, which is 46 characters. A 40-char column would refuse
+    #: the INSERT in exactly the case the column exists to record.
+    code_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     entries: Mapped[list[QuerySetEntry]] = relationship(
         "QuerySetEntry", back_populates="query_set", cascade="all, delete-orphan"
