@@ -39,17 +39,24 @@ without an event once the job is past its hard limit) never reads a long upload 
 The scratch folder is the node's ``operation.method_scratch_dir`` tuning, because a TSV of
 several GB in a tmpfs sits in memory beside the database.
 
-WHY THE CARD IS CHECKED, NOT LOCKED. The node has one card, and another consumer (the embedding
-batches) uses it. The operation will not start while the card has less free memory than the
-payload asks for: it raises ``RetryLaterError`` and the job comes back later instead of failing.
-It does not stop or pause the other consumers, because an operation does not manage workers.
+WHY THE CARD IS CHECKED, NOT LOCKED. The node has one card, and the embedding and residue
+passes use it too. The operation asks the job table first (``_card_guard``): while another
+operation holds the card (a pass with batches in flight, or another method run) it raises
+``RetryLaterError`` and the job comes back later instead of failing. The passes ask the same
+guard, so a pass dispatched while a method runs waits for it. Then it reads the card's free
+memory, which also sees a process the job table does not know, and waits the same way when
+there is less than the payload asks for. It does not stop or pause the other consumers,
+because an operation does not manage workers.
 
 Before the card is spent, the arm is checked as the evaluator will check it: the configuration
 must be an ingested method's, it must declare the cut the payload asks the image for, and the
 window the predictions go into must start at or after that cut.
 
-It trains nothing, and it reads no bundle it was not given: the bundle path is the node's, named
-in the payload and mounted read only where the image expects it.
+It trains nothing, and it reads no bundle it was not given. The payload names the bundle, so the
+node bounds it: the path must lie inside the node's ``operation.method_bundle_root`` once its
+symlinks are resolved, the resolved path is the one mounted, read only, where the image expects
+it, and no run starts on a node that sets no root. Without that bound a payload could mount any
+folder of the node into a container whose output the platform stores.
 """
 
 from __future__ import annotations
@@ -57,6 +64,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import posixpath
 import socket
 import subprocess
 import tempfile
@@ -69,7 +77,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import Field
+from pydantic import AfterValidator, Field
 from sqlalchemy.orm import Session
 
 from protea.core._evaluation_leakage import _release
@@ -79,6 +87,7 @@ from protea.core.contracts.operation import (
     ProteaPayload,
     RetryLaterError,
 )
+from protea.core.operations import _card_guard
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import (
     INGESTED_METHOD_BACKEND,
@@ -101,14 +110,32 @@ Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 PositiveInt = Annotated[int, Field(gt=0)]
 
 
+def mount_path(value: str) -> str:
+    """One side of a mount: an absolute, normalized path other than ``/``, with no colon.
+
+    ``podman run -v SOURCE:TARGET:ro`` splits on the colon, so a colon in either path would
+    move the rest of it into the target or the mount's options.
+    """
+    if not value.startswith("/") or value.startswith("//") or posixpath.normpath(value) != value:
+        raise ValueError(f"{value!r} is not an absolute, normalized path")
+    if value == "/":
+        raise ValueError("the root folder cannot be a bundle or where one is mounted")
+    if ":" in value:
+        raise ValueError(f"{value!r} holds a colon, which podman reads as the end of the path")
+    return value
+
+
+MountPath = Annotated[str, AfterValidator(mount_path)]
+
+
 class RunLabMethodPayload(ProteaPayload, frozen=True):
     """Which method, from which image, at which cut, on which queries, into which window."""
 
     method_name: str = Field(min_length=1)
     image: str = Field(min_length=1)
     image_id: Sha256
-    bundle_path: str = Field(min_length=1)
-    bundle_mount: str = Field(min_length=1)
+    bundle_path: MountPath
+    bundle_mount: MountPath
     cut: PositiveInt
     queries_fasta_uri: str = Field(min_length=1)
     queries_fasta_sha256: Sha256
@@ -220,6 +247,40 @@ def free_card_mib() -> int:
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
         raise ValueError(f"this node cannot read a card with nvidia-smi: {exc}") from exc
     return min(int(line) for line in proc.stdout.split())
+
+
+def bundle_root() -> str | None:
+    """The folder every bundle must lie in: the node's ``operation.method_bundle_root``."""
+    from protea.config.tuning import get_tuning
+
+    return get_tuning().operation.method_bundle_root
+
+
+def checked_bundle(bundle_path: str, root: str | None) -> Path:
+    """The bundle as the node resolves it, refused unless it lies inside ``root``.
+
+    Symlinks are resolved on both sides before the comparison, so a link inside the root
+    that points out of it is refused, and the caller mounts the resolved path, so what is
+    mounted is what was checked.
+    """
+    if not root:
+        raise ValueError(
+            "this node sets no operation.method_bundle_root, so it mounts no bundle; set "
+            "PROTEA_TUNING__operation__method_bundle_root to the folder that holds the "
+            "methods' bundles"
+        )
+    try:
+        base = Path(root).resolve(strict=True)
+        bundle = Path(bundle_path).resolve(strict=True)
+    except (OSError, RuntimeError) as exc:  # missing, unreadable, or a symlink loop
+        raise ValueError(f"the bundle or the node's bundle root cannot be resolved: {exc}") from exc
+    if base == Path(base.anchor):
+        raise ValueError(f"the node's bundle root {root} resolves to {base}, which bounds nothing")
+    if not bundle.is_relative_to(base):
+        raise ValueError(
+            f"the bundle {bundle_path} resolves to {bundle}, outside the node's bundle root {base}"
+        )
+    return bundle
 
 
 def scratch_root() -> str | None:
@@ -462,6 +523,8 @@ class RunLabMethodOperation:
         job_id = payload.get("_job_id")
         p = RunLabMethodPayload.model_validate(contract_payload(payload))
         check_arm(session, p)
+        bundle = checked_bundle(p.bundle_path, bundle_root())
+        p = p.model_copy(update={"bundle_path": str(bundle)})
         held = image_id_on_node(p.image)
         if held != p.image_id:
             raise ValueError(
@@ -469,6 +532,11 @@ class RunLabMethodOperation:
             )
         name = f"protea-method-{job_id or uuid.uuid4().hex[:12]}"
         clear_previous_attempt(name)
+        holder = _card_guard.card_busy(session, uuid.UUID(job_id) if job_id else None)
+        if holder is not None:
+            raise RetryLaterError(
+                f"the card is busy: {holder}", delay_seconds=CARD_BUSY_RETRY_SECONDS
+            )
         free = free_card_mib()
         if free < p.min_free_card_mib:
             raise RetryLaterError(
@@ -483,6 +551,7 @@ class RunLabMethodOperation:
             "node": socket.gethostname(),
             "image": p.image,
             "image_id": p.image_id,
+            "bundle_path": p.bundle_path,
             "queries_fasta_uri": p.queries_fasta_uri,
             "queries_fasta_sha256": p.queries_fasta_sha256,
             "provenance_key": out.provenance_key,

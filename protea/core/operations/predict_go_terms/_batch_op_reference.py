@@ -32,6 +32,9 @@ from protea.core.operations.predict_go_terms._common import (
     _REF_CACHE,
     _UNIFIED_REF_KEY,
 )
+from protea.core.operations.predict_go_terms._reference_aspect import _ASPECT_SLICE
+from protea.core.operations.predict_go_terms._reference_binary import fill_from_binary
+from protea.core.operations.predict_go_terms._reference_needs import reference_dtype_needs
 from protea.core.operations.predict_go_terms._sparse_bank import (
     bank_bytes,
     bank_is_sparse,
@@ -45,7 +48,6 @@ from protea.infrastructure.orm.models.protein.protein import Protein
 
 if TYPE_CHECKING:
     from protea.core.operations.predict_go_terms._common import _BatchExecCtx  # noqa: F401
-
 
 
 class _PoolRequest(NamedTuple):
@@ -97,9 +99,7 @@ def _find_missing_aspects(request: _PoolRequest, pool: str | None = None) -> lis
     return [asp for asp in _ASPECTS if not usable(asp)]
 
 
-def _recorded_pool(
-    ecid: uuid.UUID, asid: uuid.UUID, aspect: str, discriminator: str
-) -> str | None:
+def _recorded_pool(ecid: uuid.UUID, asid: uuid.UUID, aspect: str, discriminator: str) -> str | None:
     """The fingerprint an aspect index was built against, or None if absent.
 
     Absent means the index predates the fingerprint, so it cannot be told
@@ -134,14 +134,20 @@ def _assemble_aspect_view(
     aspect_accessions = [unified["accessions"][i] for i in indices]
     unified_f32 = unified.get("embeddings_f32")
     unified_cos = unified.get("embeddings_f32_cos")
+    # The f32 banks are NOT cut here. A fancy-index slice is a full copy, and
+    # the three aspects together are 1,777,762 rows: 10.92 GB at 1536 dims.
+    # Only ONE of them is read at a time when the aspect searches run in
+    # series, so the view carries the pool and the index array and
+    # :func:`aspect_bank` gathers the rows when a search asks for them.
     view: dict[str, Any] = {
         "accessions": aspect_accessions,
         "embeddings": np.empty((0,), dtype=np.float16),
-        "embeddings_f32": (
-            unified_f32[indices] if need_plain and unified_f32 is not None else None
-        ),
-        "embeddings_f32_cos": (
-            unified_cos[indices] if need_cos and unified_cos is not None else None
+        "embeddings_f32": None,
+        "embeddings_f32_cos": None,
+        _ASPECT_SLICE: (
+            indices,
+            unified_f32 if need_plain else None,
+            unified_cos if need_cos else None,
         ),
     }
     anno_csr = _load_anno_csr_from_disk(ecid, asid, aspect, d)
@@ -319,7 +325,7 @@ class _ReferenceMixin:
         When the cache is full, the oldest entry is evicted to free numpy memory.
         """
         p = ctx.p
-        need_cos, need_plain = self._reference_dtype_needs(p)
+        need_cos, need_plain = reference_dtype_needs(p)
         request = _PoolRequest(
             ctx.embedding_config_id, ctx.annotation_set_id, getattr(p, "donor_policy", None)
         )
@@ -379,25 +385,6 @@ class _ReferenceMixin:
             request.discriminator,
         )
 
-    @staticmethod
-    def _reference_dtype_needs(p: Any) -> tuple[bool, bool]:
-        """Decide which f32 reference copies this run actually reads.
-
-        ``need_cos`` (the L2-normalised copy) is read by the KNN search when
-        the metric is cosine; ``need_plain`` (the raw f32 copy) is read by the
-        KNN search otherwise, and is also the pool the embedding-PCA fit
-        consumes. The PCA state is cached on disk per embedding config and the
-        fit ignores the pool once cached, so the raw copy is only needed when
-        the PCA artefact is still missing. Skipping the unread copy keeps
-        high-dim PLMs (ESM2-3B, 2560 dims) inside RAM.
-        """
-        from protea.core.pca_cache import _pca_state_path
-
-        need_cos = getattr(p, "metric", "cosine") == "cosine"
-        pca_cached = _pca_state_path(p.embedding_config_id).exists()
-        need_plain = (not need_cos) or (not pca_cached)
-        return need_cos, need_plain
-
     def _load_reference_data(
         self,
         session: Session,
@@ -416,17 +403,15 @@ class _ReferenceMixin:
         ``need_cos`` / ``need_plain`` control which f32 copies are materialised.
         """
         emit("predict_go_terms_batch.load_references_start", None, {}, "info")
-        accessions, embeddings, source = self._load_ref_pool(session, request, emit)
-        emit(
-            "predict_go_terms_batch.load_references_done",
-            None,
-            {
-                "references": len(accessions),
-                "embeddings_mb": round(bank_bytes(embeddings) / 1024 / 1024),
-                "source": source,
-            },
-            "info",
-        )
+        accessions, embeddings, source, transfer = self._load_ref_pool(session, request, emit)
+        done: dict[str, Any] = {
+            "references": len(accessions),
+            "embeddings_mb": round(bank_bytes(embeddings) / 1024 / 1024),
+            "source": source,
+        }
+        if transfer is not None:
+            done["transfer"] = transfer
+        emit("predict_go_terms_batch.load_references_done", None, done, "info")
         return _derive_reference_views(
             accessions, embeddings, need_cos=need_cos, need_plain=need_plain
         )
@@ -436,13 +421,17 @@ class _ReferenceMixin:
         session: Session,
         request: _PoolRequest,
         emit: EmitFn,
-    ) -> tuple[list[str], np.ndarray, str]:
-        """Fetch ``(accessions, embeddings, source)`` via disk cache or DB.
+    ) -> tuple[list[str], np.ndarray, str, str | None]:
+        """Fetch ``(accessions, embeddings, source, transfer)`` via disk cache or DB.
 
         When the cache files are fresh (mtime within
         ``ref_cache_freshness_seconds``), the COUNT(*)-over-JOIN is skipped
         so the fast path requires zero DB round-trips. ``source`` is
         ``"disk_cache"`` on hit and ``"database"`` on miss.
+
+        ``transfer`` names the route the bank took across the driver, or is
+        ``None`` when a cache answered and nothing crossed. See
+        :mod:`._reference_binary`.
         """
         from protea.config.tuning import get_tuning
         from protea.core.disk_cache import _is_cache_fresh
@@ -450,13 +439,14 @@ class _ReferenceMixin:
         # A sparse bank never reaches the disk cache; ``NO_DISK_CACHE_FOR_SPARSE``
         # says why and what it costs.
         if bank_is_sparse(session, request.embedding_config_id):
-            accessions, codes = self._stream_reference_pool(
+            accessions, codes, _ = self._stream_reference_pool(
                 self._reference_pool_query(session, request), sparse=True
             )
-            return accessions, codes, "database"
+            return accessions, codes, "database", "text"
 
         freshness_sec = get_tuning().operation.ref_cache_freshness_seconds
         source = "disk_cache"
+        transfer: str | None = None
         # The policy decides both WHICH proteins may donate and WHERE the pool
         # is cached. Deriving the key from the same object that filters the
         # query is what stops a restricted pool being stored under, or read
@@ -465,19 +455,18 @@ class _ReferenceMixin:
         accession_q = self._reference_pool_query(session, request)
 
         def _db_loader() -> tuple[list[str], np.ndarray]:
-            nonlocal source
+            nonlocal source, transfer
             source = "database"
-            return self._stream_reference_pool(accession_q)
+            accs, embs, transfer = self._stream_reference_pool(accession_q)
+            return accs, embs
 
-        if freshness_sec > 0 and _is_cache_fresh(
+        fresh = freshness_sec > 0 and _is_cache_fresh(
             request.embedding_config_id,
             request.annotation_set_id,
             freshness_sec,
             request.discriminator,
-        ):
-            expected: int | None = None
-        else:
-            expected = accession_q.count()
+        )
+        expected: int | None = None if fresh else accession_q.count()
 
         accessions, embeddings = _load_reference_pool_cached(
             key,
@@ -486,7 +475,7 @@ class _ReferenceMixin:
             emit=lambda ev, fields: emit(f"predict_go_terms_batch.{ev}", None, fields, "info"),
             freshness_seconds=freshness_sec,
         )
-        return accessions, embeddings, source
+        return accessions, embeddings, source, transfer
 
     def _reference_pool_query(self, session: Session, request: _PoolRequest) -> Any:
         """Return the accession-only query for the reference pool.
@@ -524,6 +513,15 @@ class _ReferenceMixin:
             # spine that quietly included proteins of unknown provenance would
             # not be a reviewed spine.
             query = query.filter(Protein.reviewed.is_(True))
+        admitted_by = getattr(policy, "admitted_by_release", None) if policy is not None else None
+        if admitted_by is not None:
+            # Membership of the corpus at the window's start. A release's
+            # annotation set keeps the annotations of every protein the corpus
+            # holds when it is loaded, so release 211's set carries 30,128
+            # proteins admitted only later (measured 2026-11-04), 29,922 of them
+            # donors in the full length ankh bank. On the indexed column, and a
+            # NULL is not <= anything: a protein no pass admitted is no member.
+            query = query.filter(Protein.first_admitted_release <= int(admitted_by))
         return query.order_by(*_bank_order())
 
     def _stream_reference_pool(
@@ -541,9 +539,8 @@ class _ReferenceMixin:
         """
         total = accession_q.count()
         if total == 0:
-            return [], (
-                empty_sparse_bank() if sparse else np.empty((0,), dtype=np.float16)
-            )
+            empty = empty_sparse_bank() if sparse else np.empty((0,), dtype=np.float16)
+            return [], empty, None
         base_q = accession_q.add_columns(SequenceEmbedding.embedding)
         # pgvector HalfVector exposes .dimensions() / .to_numpy() after the
         # 2026-04-11 halfvec migration; pull dimension from the first row.
@@ -552,15 +549,30 @@ class _ReferenceMixin:
 
         stream_chunk = get_tuning().operation.stream_chunk_size
         if sparse:
-            return stream_sparse_pool(
+            accs, codes = stream_sparse_pool(
                 base_q.yield_per(stream_chunk), dim=dim, n_accessions_hint=total
             )
-        accessions: list[str] = []
+            return accs, codes, "text"
         embeddings = np.empty((total, dim), dtype=np.float16)
+        accessions = fill_from_binary(base_q, embeddings, stream_chunk, total)
+        if accessions is not None:
+            return accessions, embeddings, "binary"
+        accessions = []
         for i, (acc, emb) in enumerate(base_q.yield_per(stream_chunk)):
             embeddings[i] = emb.to_numpy()
             accessions.append(acc)
-        return accessions, embeddings
+        if len(accessions) != total:
+            # The same guard the binary route carries, and for the same reason:
+            # the bank is allocated at ``count()`` and filled by index, so fewer
+            # rows leave the tail as whatever ``np.empty`` found and those rows
+            # become donors with uninitialised coordinates. It RAISES here
+            # because there is no third route behind this one, and a short bank
+            # is worse than no bank.
+            raise RuntimeError(
+                f"the reference pool streamed {len(accessions)} rows where the query "
+                f"counted {total}; the bank would be part uninitialised memory"
+            )
+        return accessions, embeddings, "text"
 
     def _load_reference_data_per_aspect(
         self,

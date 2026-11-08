@@ -31,6 +31,7 @@ from protea.core.operations.predict_go_terms._common import (
     AspectSeparatedKnnContext,
     PredictGOTermsBatchPayload,
 )
+from protea.core.operations.predict_go_terms._reference_aspect import aspect_bank
 from protea.core.operations.predict_go_terms._sequence_identity import (
     load_sequence_identities,
 )
@@ -66,7 +67,9 @@ class _AspectKnnPreSearch:
         aspect_refs = ref_data_by_aspect[aspect]
         if not aspect_refs["accessions"]:
             return aspect, [[] for _ in queries.accessions]
-        ref_f32 = aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
+        # Cut here and let it go when this returns: on the serial path that is
+        # one aspect's bank resident instead of three.
+        ref_f32 = aspect_bank(aspect_refs, use_cos=use_cos)
         # Per aspect, the same rule as the unified path: ask for one more when
         # the query may not be its own neighbour, then drop it. Aspect-separated
         # retrieval hits this harder, because a protein present in all three

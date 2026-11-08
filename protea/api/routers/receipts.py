@@ -97,9 +97,12 @@ def _donors(policy: dict[str, Any] | None) -> dict[str, Any]:
     that is the difference between two entirely different claims.
     """
     policy = policy or {}
+    # Absent on every policy recorded before the field existed, which is the
+    # unrestricted pool: the dump leaves the key out at None.
+    membership = {"admitted_by_release": policy.get("admitted_by_release")}
     codes = policy.get("evidence_codes")
     if codes is None:
-        return {"regime": "every annotation in the bank", "evidence_codes": None}
+        return {"regime": "every annotation in the bank", "evidence_codes": None, **membership}
     codes = list(codes)
     electronic = "IEA" in codes
     return {
@@ -110,6 +113,7 @@ def _donors(policy: dict[str, Any] | None) -> dict[str, Any]:
         ),
         "evidence_codes": codes,
         "reviewed_only": bool(policy.get("reviewed_only")),
+        **membership,
     }
 
 

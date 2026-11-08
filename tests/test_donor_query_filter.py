@@ -145,3 +145,40 @@ class TestTheRequestCarriesOneIdentity:
         """The property that stops a filtered pool being served as unfiltered."""
         assert _PoolRequest(CFG, ANN, policy).discriminator != ""
         assert _sql(_PoolRequest(CFG, ANN, policy)) != _sql(_PoolRequest(CFG, ANN))
+
+
+class TestMembershipAtTheWindowStart:
+    """``admitted_by_release``: a donor must be a corpus member at the window's start.
+
+    A release's annotation set keeps the annotations of every protein the corpus
+    holds when it is loaded. Measured 2026-11-04: release 211's set carries
+    30,128 proteins admitted only later, 29,922 of them donors in the full
+    length ankh bank.
+    """
+
+    def test_an_unset_membership_adds_no_predicate(self) -> None:
+        sql = _sql(_PoolRequest(CFG, ANN, DonorPolicy())).lower()
+        assert "first_admitted_release" not in sql
+
+    def test_the_release_reaches_the_query_on_the_indexed_column(self) -> None:
+        sql = _sql(_PoolRequest(CFG, ANN, DonorPolicy(admitted_by_release=211))).lower()
+        assert "protein.first_admitted_release <= 211" in sql
+
+    def test_a_protein_no_pass_admitted_is_not_a_member(self) -> None:
+        # NULL <= 211 is unknown, so the row drops. Nothing may coalesce it
+        # into a member.
+        sql = _sql(_PoolRequest(CFG, ANN, DonorPolicy(admitted_by_release=211))).lower()
+        assert "coalesce" not in sql
+        assert "first_admitted_release is null" not in sql
+
+    def test_it_composes_with_the_review_status(self) -> None:
+        policy = DonorPolicy(reviewed_only=True, admitted_by_release=211)
+        sql = _sql(_PoolRequest(CFG, ANN, policy)).lower()
+        assert "protein.first_admitted_release <= 211" in sql
+        assert "protein.reviewed is true" in sql
+
+    def test_it_keys_its_own_pool(self) -> None:
+        request = _PoolRequest(CFG, ANN, DonorPolicy(admitted_by_release=211))
+        assert request.cache_key == RefPoolKey(
+            CFG, ANN, "reviewed=0|codes=*|norefs=*|admitted<=211"
+        )

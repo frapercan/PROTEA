@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn
 from protea.core.evaluation import EvaluationData
 from protea.core.operations import _run_cafa_artifacts as _artifacts
+from protea.core.operations._run_cafa_scale import annotate_maxima, read_and_report
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 
 # The frame literals, named once. They are arguments to the cafaeval call AND
@@ -95,6 +96,10 @@ class CafaEvalRunContext:
     #: there is no weighted variant either.
     information_accretion_frame: str | None = None
     th_step: float = 0.01
+    #: How the prediction files are read before thresholding (ADR-D55). Applied
+    #: once per file: the shared file at staging, a per-setting file here,
+    #: after the arms that rewrite it.
+    score_reading: str = "raw"
     max_terms: int | None = None
     max_k_position: int | None = None
     #: The same depth counted in distinct sequences. Exactly one of the two
@@ -459,6 +464,14 @@ def _run_cafaeval_for_setting(
             ctx=ctx, pred_dir=pred_dir, gt_file=gt_file, known_file=known_file
         )
         result = _artifacts.parse_results(dfs_best)
+        censored = annotate_maxima(df, result)
+        if censored:
+            emit(
+                "run_cafa_evaluation.censored_maximum",
+                None,
+                {"setting": setting, "edges": censored, "score_reading": ctx.score_reading},
+                "warning",
+            )
         _persist_setting_artifacts(ctx, setting, df, dfs_best)
         _persist_per_protein(ctx, setting, sink, result, emit)
         _persist_per_protein_grid(ctx, setting, sink, emit)
@@ -519,6 +532,13 @@ def _resolve_setting_pred_dir(
             ctx.interpro_graft_weight,
             emit,
         )
+    read_and_report(
+        os.path.join(pred_dir, "predictions.tsv"),
+        reading=ctx.score_reading,
+        th_step=ctx.th_step,
+        label=setting,
+        emit=emit,
+    )
     return pred_dir
 
 

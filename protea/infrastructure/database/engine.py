@@ -22,6 +22,25 @@ dense float16 array, so nothing meaningful is saved by not parsing it. What
 holds a whole bank in memory is a client-side buffered result set, which is a
 cursor question and still open.
 
+AND THAT PARAGRAPH DOES NOT GENERALISE, corrected 2026-11-04. Those two numbers
+are the 8,192-dimension learned-code bank, which is k-WTA and therefore almost
+all zeros: a zero renders as one character, so its text is barely larger than
+its binary. A DENSE bank is nothing like it. Measured on 300 rows of
+``f3a7fe16`` (1,536 dims, every coordinate a decimal number): 17,992 bytes as
+text against 3,076 binary, a factor of 5.8, so a full 684,048-row bank is
+12.3 GB on the wire where binary needs 2.1. Read as written, this paragraph
+says the wire cost of text is negligible, and that is false for every dense
+bank; on 2026-11-04 the compute node started four bank loads and finished none
+before the ratio was measured.
+
+REGISTERING THE ADAPTERS IS NOT THE SAME AS GETTING BINARY, which is the other
+half and was mistaken in the same session. psycopg 3 sends binary only when the
+cursor asks for it, and SQLAlchemy asks for text; the loaders registered here
+then build the ``HalfVector`` from that text. So a connection can have every
+adapter and still carry text, and checking the returned TYPE proves nothing
+about the wire. The reference pool reads over a cursor of its own for that
+reason: see ``core/operations/predict_go_terms/_reference_binary.py``.
+
 Values do not move. Verified on five rows of that bank: the ORM typed column
 returns ``HalfVector`` either way and the arrays are equal bit for bit, because
 the text form is a lossless decimal rendering of the same float16s.

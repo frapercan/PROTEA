@@ -46,10 +46,20 @@ ingestion.
 4. **The container is confined.** No network, the bundle mounted read only where the image
    expects it, a memory ceiling (40 GB by default) and a wall-clock limit (12 h by
    default). Its name is derived from the job, so a retried job removes what an
-   interrupted attempt left running before it starts a second run on the card.
-5. **The card is checked, not locked.** When the card has less free memory than the
-   payload asks for, the job raises ``RetryLaterError`` and comes back ten minutes later.
-   The operation does not stop or pause other consumers.
+   interrupted attempt left running before it starts a second run on the card. The
+   payload names the bundle, so the node bounds it: ``bundle_path`` must lie inside the
+   node's ``operation.method_bundle_root`` once its symlinks are resolved, the resolved
+   path is the one mounted, and a node that sets no root starts no run. Both sides of the
+   mount must be absolute, normalized paths other than ``/``, with no colon, which
+   ``podman`` would read as the end of the path. Without the bound a payload could mount
+   any folder of the node into a container whose output the platform stores.
+5. **The card is checked, not locked.** The job table is asked first, through the guard
+   the embedding and residue passes share (``_card_guard``): while one of them has batches
+   in flight, or another method run is RUNNING, the job raises ``RetryLaterError`` and
+   comes back ten minutes later, and a pass dispatched during a method run waits for it
+   the same way. Then the card's free memory, which also sees a process the job table
+   does not know: when it is less than the payload asks for, the job comes back the same
+   way. The operation does not stop or pause other consumers.
 6. **The outputs are stored by content.** The TSV and the JSON go to the store under keys
    that carry their hash (``method-runs/<name>/cut<C>/predictions-<hash16>.tsv``), and so
    does the container's log, on success and on failure: when a run dies after hours it is
@@ -62,8 +72,9 @@ ingestion.
    provenance, not a gate.)
 8. **The ingestion is a child job.** ``ingest_method_predictions`` is enqueued on
    ``protea.methods.write`` with ``parent_job_id`` set. Its ``method`` block is the
-   method's record plus ``platform_run`` (job, node, image, image id, query file and its
-   hash, seconds), and every gate of the ingestion still applies.
+   method's record plus ``platform_run`` (job, node, image, image id, the bundle path it
+   mounted, query file and its hash, seconds), and every gate of the ingestion still
+   applies.
 
 Before the card is spent the arm is checked as the evaluator will check it: the
 configuration's backend is ``ingested-method``, it declares the cut the payload asks the
@@ -80,10 +91,11 @@ What this does not decide
 * **Whether the platform rebuilds the method's inputs itself.** The bundle is a laboratory
   artifact. This operation records which bundle and which image ran; it does not reproduce
   them.
-* **A card lock shared by every consumer of the node.** Checking the free memory before
-  the start does not stop an embedding batch from starting during the run. Until a shared
-  lock exists, a method run and a corpus pass are not scheduled on the same node at the
-  same time.
+* **A card lock shared by every consumer of the node.** The guard makes a method run and
+  the passes wait for each other when they start; it is a check at the start, not a lock.
+  ``apply_learned_encoder``, which uses a card inline, does not ask it, and a method run
+  the reaper failed holds no claim in the job table (its container, if its worker died
+  without stopping it, shows only in the card's free memory).
 
 The scratch folder where a run writes its queries, its output and its log is the node's
 ``operation.method_scratch_dir`` tuning. A method's TSV can be several GB, and in a tmpfs it
@@ -93,10 +105,13 @@ Consequences
 ~~~~~~~~~~~~
 
 * The node needs a worker on ``protea.methods``. The worker declares the queue, with the
-  dead letter exchange, when it starts, so it starts before the first dispatch.
+  dead letter exchange, when it starts, so it starts before the first dispatch, and the
+  node sets ``operation.method_bundle_root`` (and ``operation.method_scratch_dir``, on disk)
+  before it.
 * A method's result becomes a platform job with its inputs pinned: the query file and its
-  hash, the image and its id, and the bundle path are in the job's payload, and the
-  outputs are in the store by hash.
+  hash, the image and its id, and the bundle path are in the job's payload, the bundle
+  path the node resolved and mounted is in ``platform_run``, and the outputs are in the
+  store by hash.
 * The ingestion's provenance block gains ``platform_run``. It is a record, not a gate, as
   the rest of the block is.
 

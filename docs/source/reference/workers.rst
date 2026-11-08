@@ -99,6 +99,8 @@ selected by the queue configuration in ``scripts/worker.py``:
 
    - ``protea.embeddings.batch``: GPU inference per batch
    - ``protea.embeddings.write``: bulk pgvector insert
+   - ``protea.embeddings.upload``: on the node with the card, puts the residue-code
+     shards its batches spooled in the artifact store (``upload_residue_shard``)
    - ``protea.predictions.batch``: KNN search + GO transfer
    - ``protea.predictions.write``: bulk GOPrediction insert
 

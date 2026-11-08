@@ -9,6 +9,16 @@ written on the server: the batch publishes one message to ``protea.embeddings.wr
 where ``store_residue_codes`` checks the shard and inserts one ``residue_code`` row per
 sequence, as ``store_embeddings`` does for ``compute_embeddings``.
 
+WHERE THE SHARD GOES FIRST
+
+A node that sets ``operation.residue_shard_spool_dir`` does not put the shard in the store
+from the card's loop. The batch writes it to that folder on its own disk and publishes the
+message to ``upload_residue_shard`` on ``protea.embeddings.upload``, a second worker of the
+same node, which puts it in the store and only then publishes the message to
+``store_residue_codes``. On 2026-11-03 the inline put took 35 % of every batch over the
+node's link, with the card idle throughout; with the spool the card encodes the next batch
+while the shard goes out. A node that sets no spool keeps the inline put.
+
 WHY THE STATES ARE NOT POOLED OR AVERAGED ANYWHERE
 
 The vocabulary standardises each layer separately and rounds afterwards, and its code is
@@ -39,6 +49,7 @@ from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import (
     EmitFn,
     Operation,
@@ -52,6 +63,14 @@ from protea.core.operations._encoder_artifact import (
     resolve_training_cut,
 )
 from protea.core.operations._parent_guard import parent_cancelled
+from protea.core.operations._residue_shard_spool import (
+    UPLOAD_QUEUE,
+    refuse_without_room,
+    spool_backlog,
+    spool_root,
+    spooled_path,
+    write_spooled,
+)
 from protea.core.operations.store_residue_codes import WRITE_QUEUE
 from protea.core.residue_code_shards import pack_shard
 from protea.core.residue_vocabulary import (
@@ -61,7 +80,10 @@ from protea.core.residue_vocabulary import (
     load_residue_vocabulary,
 )
 from protea.core.utils import contract_payload
-from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
+from protea.infrastructure.orm.models.embedding.embedding_config import (
+    UNCHUNKED,
+    EmbeddingConfig,
+)
 from protea.infrastructure.orm.models.embedding.residue_code import ResidueCode as ResidueCodeRow
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -304,7 +326,13 @@ def _ensure_target_config(
         pooling="per-residue",
         normalize_residues=False,
         normalize=False,
-        use_chunking=False,
+        # Full length, and checked rather than assumed: encode_sequences
+        # refuses a sequence whose backend rows do not match its residues.
+        max_length=None,
+        # Never applied on this path: the codes go to shards, not to a
+        # halfvec column with a range to fit.
+        embedding_scale=1.0,
+        **UNCHUNKED,
         description=(
             f"per-residue code of the residue vocabulary {meta.get('name', digest[:16])}: "
             f"{meta['dict_dim']} features over hidden states {meta['hidden_state_indices']}, "
@@ -481,6 +509,72 @@ def upload_shard(
     return key, sha, len(blob)
 
 
+def shard_header(
+    vocabulary: ResidueVocabulary,
+    local: str,
+    source_id: str,
+    target_id: uuid.UUID,
+    parent_job_id: str,
+) -> dict[str, Any]:
+    """What a shard declares about its writer: the vocabulary, its hash, the configs and the job."""
+    return {
+        "vocabulary": vocabulary.meta.get("name"),
+        "vocabulary_sha256": file_sha256(local),
+        "hidden_state_indices": vocabulary.meta["hidden_state_indices"],
+        "precision_policy": vocabulary.meta.get("precision_policy"),
+        "source_embedding_config_id": source_id,
+        "target_embedding_config_id": str(target_id),
+        "parent_job_id": parent_job_id,
+    }
+
+
+def spool_shard(
+    root: Path, target_id: uuid.UUID, codes: list[tuple[int, ResidueCode]], header: dict[str, Any]
+) -> tuple[str, str, int]:
+    """Write one shard to the node's spool, on the disk, for the upload worker to put in the store."""
+    blob, sha = pack_shard(codes, header)
+    key = shard_key(target_id, codes, sha)
+    write_spooled(spooled_path(root, key), blob)
+    return key, sha, len(blob)
+
+
+def build_upload_message(
+    parent_job_id: str, key: str, sha: str, store_message: tuple[str, dict[str, Any]]
+) -> tuple[str, dict[str, Any]]:
+    """The upload-queue message of a spooled shard: which shard, and what to publish after the put."""
+    _queue, store = store_message
+    return (
+        UPLOAD_QUEUE,
+        {
+            "operation": "upload_residue_shard",
+            "job_id": parent_job_id,
+            "payload": {"shard_key": key, "shard_sha256": sha, "store": store["payload"]},
+        },
+    )
+
+
+def hand_off(
+    root: Path | None,
+    target_id: uuid.UUID,
+    codes: list[tuple[int, ResidueCode]],
+    header: dict[str, Any],
+    parent_job_id: str,
+) -> tuple[str, str, int, tuple[str, dict[str, Any]]]:
+    """Put the shard where the next stage reads it, and return that stage's message.
+
+    With no spool the card puts the shard in the store and the message goes to
+    ``store_residue_codes``. With a spool the shard goes to the node's disk and the message
+    to ``upload_residue_shard``, which carries the same message for ``store_residue_codes``
+    and publishes it once the shard is in the store.
+    """
+    if root is None:
+        key, sha, nbytes = upload_shard(_artifact_store(), target_id, codes, header)
+        return key, sha, nbytes, build_store_message(parent_job_id, target_id, key, sha, codes)
+    key, sha, nbytes = spool_shard(root, target_id, codes, header)
+    store_message = build_store_message(parent_job_id, target_id, key, sha, codes)
+    return key, sha, nbytes, build_upload_message(parent_job_id, key, sha, store_message)
+
+
 def build_store_message(
     parent_job_id: str,
     target_id: uuid.UUID,
@@ -545,6 +639,10 @@ class EncodeResidueVocabularyBatchOperation(Operation):
                 result={"encoded": 0, "note": "every sequence already had a code"}
             )
 
+        root = spool_root()
+        if root is not None:
+            refuse_without_room(root, get_tuning().operation.residue_shard_spool_min_free_gib)
+
         from protea.core.operations.compute_embeddings import _get_or_load_model, _resolve_backend
 
         backend = _resolve_backend(source.model_backend)
@@ -559,23 +657,18 @@ class EncodeResidueVocabularyBatchOperation(Operation):
             emit=emit,
             residues_per_call=p.residues_per_call,
         )
-        header = {
-            "vocabulary": vocabulary.meta.get("name"),
-            "vocabulary_sha256": file_sha256(local),
-            "hidden_state_indices": vocabulary.meta["hidden_state_indices"],
-            "precision_policy": vocabulary.meta.get("precision_policy"),
-            "source_embedding_config_id": str(source.id),
-            "target_embedding_config_id": str(target_id),
-            "parent_job_id": p.parent_job_id,
-        }
-        key, sha, nbytes = upload_shard(_artifact_store(), target_id, codes, header)
+        header = shard_header(vocabulary, local, str(source.id), target_id, p.parent_job_id)
+        key, sha, nbytes, message = hand_off(root, target_id, codes, header, p.parent_job_id)
         residues = sum(c.residues for _i, c in codes)
         entries = sum(c.entries for _i, c in codes)
         stats = {"encoded": len(codes), "residues": residues, "entries": entries, "shard_key": key}
-        emit("encode.done", f"{len(codes)} sequences, shard of {nbytes} bytes", stats, "info")
+        fields: dict[str, Any] = {**stats, "shard_to": "store" if root is None else "spool"}
+        if root is not None:
+            fields["spool_waiting"], fields["spool_waiting_bytes"] = spool_backlog(root)
+        emit("encode.done", f"{len(codes)} sequences, shard of {nbytes} bytes", fields, "info")
         return OperationResult(
             result={**stats, "shard_sha256": sha, "embedding_config_id": str(target_id)},
-            publish_operations=[build_store_message(p.parent_job_id, target_id, key, sha, codes)],
+            publish_operations=[message],
         )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:

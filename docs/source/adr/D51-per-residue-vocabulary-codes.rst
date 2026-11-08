@@ -242,6 +242,31 @@ Consequences
 * zlib is a placeholder. The sequence context coder the lab measured would bring a
   residue near 166 bytes, and a later record may adopt it without changing the index.
 
+Amendment (2026-11-03): the shard upload leaves the card's loop
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The first corpus pass ran at 306 batches an hour, about 4,660 residues a second, half the
+rate the lab measured. Its log over 305 batches and a sampling of the card and the node's
+link every 250 ms showed why: a batch spent 58 % of its time on the card and 35 % putting
+its shard (about 25 MB; zlib at level 1 barely compresses the codes) in the artifact store
+over a link that carries about 50 Mbit/s, one after the other. The card was idle in 124 of
+the 125 samples taken while a shard went out.
+
+A node that sets ``operation.residue_shard_spool_dir`` now writes each shard to that folder
+on its own disk, whole and flushed, and publishes its message to ``upload_residue_shard`` on
+``protea.embeddings.upload``, a second worker of the same node with no card. That worker
+puts the shard in the store and only then publishes the batch's message to
+``store_residue_codes``, carried unchanged inside its own. The orders the inline put
+guaranteed hold: a batch is acknowledged only once its shard is on disk and its message
+published, and the server indexes only shards the store holds. The card encodes the next
+batch while the shard goes out, so the time per batch should fall toward the card's own
+share, 58 % of what it was.
+
+A node that sets no spool keeps the inline put, so the change is the node's choice. A batch
+that finds less than ``operation.residue_shard_spool_min_free_gib`` free on the spool's
+file system fails before it spends the card: the spool only grows when its upload worker
+stopped, and the batch's sequences stay pending for the next run of the pass.
+
 Alternatives considered
 ~~~~~~~~~~~~~~~~~~~~~~~
 

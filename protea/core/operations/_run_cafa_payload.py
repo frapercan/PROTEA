@@ -160,6 +160,23 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "for LAFA-comparable runs. See docs/EVAL_LAFA_PARITY.md."
         ),
     )
+    score_reading: str = Field(
+        default="raw",
+        description=(
+            "How the written scores are read before cafaeval thresholds them "
+            "(ADR-D55). 'raw' (the default, and every run before it) keeps them as "
+            "computed. 'percentile_rank' replaces each score by its percentile rank "
+            "among the rows its prediction file scores, tied scores at the average "
+            "of their ranks, so the uniform grid falls on the arm's own quantiles "
+            "instead of on a scale the bank's anisotropy compressed: in the full "
+            "length ankh bank two unrelated proteins already score 0.975, which "
+            "leaves the 0.01 grid two steps. The reading is monotone, so it keeps "
+            "the arm's ordering; what moves is where the grid falls, and with it any "
+            "metric at a fixed threshold, which becomes relative to the arm. Part of "
+            "the frame seal, so results read two ways never seal alike. LAFA reads "
+            "raw scores; keep 'raw' for LAFA-comparable runs."
+        ),
+    )
     max_terms: int | None = Field(
         default=None,
         ge=1,
@@ -282,6 +299,15 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         # the loader does not know.
         if v not in TOI_RULES:
             raise ValueError(f"toi_rule must be one of {TOI_RULES}")
+        return v
+
+    @field_validator("score_reading")
+    @classmethod
+    def _score_reading_vocab(cls, v: str) -> str:
+        from protea.core.operations._run_cafa_scale import SCORE_READINGS
+
+        if v not in SCORE_READINGS:
+            raise ValueError(f"score_reading must be one of {SCORE_READINGS}")
         return v
 
     @field_validator("frame")

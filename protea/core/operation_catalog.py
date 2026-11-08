@@ -109,18 +109,20 @@ from protea.core.operations.seal_evaluation_frames import (
 )
 from protea.core.operations.store_residue_codes import StoreResidueCodesOperation
 from protea.core.operations.stratify_evaluation import StratifyEvaluationOperation
+from protea.core.operations.upload_residue_shard import UploadResidueShardOperation
 from protea.core.operations.verify_window_against_reference import (
     VerifyWindowAgainstReferenceOperation,
 )
 
 
 def _register_residue_encoders(registry: OperationRegistry) -> None:
-    """The operations that run the language model per residue, coordinator and card batch."""
+    """The per-residue operations: coordinators, card batches, the node's upload and the write."""
     registry.register(EncodeResidueSparseOperation())
     registry.register(EncodeResidueSparseBatchOperation())
     registry.register(EncodeResidueVocabularyOperation())
     registry.register(EncodeResidueVocabularyBatchOperation())
     registry.register(StoreResidueCodesOperation())
+    registry.register(UploadResidueShardOperation())
 
 
 def build_operation_registry() -> OperationRegistry:

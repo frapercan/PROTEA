@@ -1918,6 +1918,16 @@ sequence and advances the parent job, as ``store_embeddings`` does for
 ``compute_embeddings``. :func:`protea.core.residue_codes.load_residue_codes` reads the
 codes back.
 
+**Where the shard goes first.** A node that sets ``operation.residue_shard_spool_dir``
+does not put the shard in the store from the card's loop: the batch writes it to that
+folder on the node's disk (whole, flushed, renamed into place) and publishes its message to
+``upload_residue_shard`` on ``protea.embeddings.upload`` instead, so the card encodes the
+next batch while the shard goes out. On 2026-11-03 the inline put took 35 % of every batch
+of the corpus pass, with the card idle throughout. A batch that finds less than
+``operation.residue_shard_spool_min_free_gib`` free on the spool's file system fails before
+it spends the card, because the spool only grows when nothing uploads it. A node that sets
+no spool keeps the inline put.
+
 **The card is one resource.** ``compute_embeddings``, ``encode_residue_vocabulary`` and
 ``encode_residue_sparse`` all send their batches to ``protea.embeddings.batch``, which the
 same card consumes, and each coordinator checks the card before it dispatches
@@ -1949,6 +1959,42 @@ Payload fields
      - Optional cap on the sequences encoded, for trials.
 
 
+upload_residue_shard
+--------------------
+
+The upload stage of a node that spools its residue-code shards (ADR-D51, amended on
+2026-11-03). A second worker of the node with the card, on ``protea.embeddings.upload``
+and with no card, reads a shard that ``encode_residue_vocabulary_batch`` wrote to the
+node's ``operation.residue_shard_spool_dir``, checks its sha256, puts it in the artifact
+store, removes the file, and only then publishes the message to ``store_residue_codes``
+that the batch built and carried inside its own. The server therefore never indexes a shard
+the store does not hold, as with the inline put.
+
+A delivery that finds no file belongs to an earlier one that put the shard and died before
+its acknowledgement: when the store holds bytes with the shard's sha256 under its key, the
+message to the server is published again; otherwise the shard is lost, the delivery fails,
+and the batch's sequences stay pending for the next run of the pass. A key that could name
+a file outside the spool is refused, and the message to the server must name the same shard
+and validate against ``store_residue_codes``'s own payload model before anything is put.
+
+Both workers of the node must see the same spool folder. A node whose upload worker does
+not set it refuses every upload.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``shard_key`` and ``shard_sha256``
+     - The shard's key in the store (under ``residue-codes/``) and the sha256 of its bytes.
+   * - ``store``
+     - The ``store_residue_codes`` payload, published unchanged once the shard is in the store.
+
+
 run_lab_method
 --------------
 
@@ -1959,11 +2005,16 @@ alive while it works, where ``OperationConsumer`` would lose the connection and 
 
 Before the card is spent it checks the arm as the evaluator will (an ``ingested-method``
 configuration that declares the cut the payload asks for, and a window that starts at or
-after it), that the tag the payload names resolves on the node to the image id it pins, and
-that the card has the free memory the payload asks for (otherwise ``RetryLaterError``, and
-the job comes back ten minutes later). It then fetches the query FASTA by key and sha256,
-removes any container an interrupted attempt of the same job left running, and runs the
-image by id with no network, the bundle read only and a memory ceiling, emitting
+after it), that the bundle lies inside the node's ``operation.method_bundle_root`` once its
+symlinks are resolved (a node that sets no root starts no run), that the tag the payload
+names resolves on the node to the image id it pins, that no other operation holds the card
+in the job table (a pass with batches in flight, or another method run), and that the card
+has the free memory the payload asks for. A held or full card is not a failure: the job
+raises ``RetryLaterError`` and comes back ten minutes later, and the passes ask the same
+guard, so one dispatched during a method run waits for it. It then fetches the query FASTA
+by key and sha256, removes any container an interrupted attempt of the same job left
+running, and runs the image by id with no network, the bundle (as resolved) read only and a
+memory ceiling, emitting
 ``run_lab_method.running`` every ten minutes, and keeps the container's log in the store
 whatever the outcome. The JSON beside the TSV is required: it must state the method's name,
 the cut, the hash of the query file and the hash of the TSV, each equal to what the platform
@@ -1972,8 +2023,8 @@ event every ten minutes while that lasts. The run writes in the node's
 ``operation.method_scratch_dir`` (a folder on disk where the temporary folder is a tmpfs).
 Last, it creates an
 ``ingest_method_predictions`` child job on ``protea.methods.write`` whose ``method`` block
-is the method's record plus ``platform_run`` (job, node, image, image id, query file and
-its hash, seconds).
+is the method's record plus ``platform_run`` (job, node, image, image id, the bundle path
+it mounted, query file and its hash, seconds).
 
 Payload fields
 ~~~~~~~~~~~~~~
@@ -1989,7 +2040,10 @@ Payload fields
    * - ``image`` and ``image_id``
      - The tag, for the record, and the 64 hex content id the node must hold under it.
    * - ``bundle_path`` and ``bundle_mount``
-     - The node's data bundle and where the image expects it, mounted read only.
+     - The node's data bundle and where the image expects it, mounted read only. Both are
+       absolute, normalized paths other than ``/`` with no colon, and ``bundle_path`` must
+       lie inside the node's ``operation.method_bundle_root`` once its symlinks are
+       resolved.
    * - ``cut``
      - The release the method was fitted at; the configuration must declare it.
    * - ``queries_fasta_uri`` and ``queries_fasta_sha256``

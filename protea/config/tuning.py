@@ -338,6 +338,36 @@ class OperationTuning(BaseModel):
             "temporary folder. Override: PROTEA_TUNING__operation__method_scratch_dir."
         ),
     )
+    residue_shard_spool_dir: str | None = Field(
+        default=None,
+        description=(
+            "Folder on the node with the card where encode_residue_vocabulary_batch writes "
+            "each shard for upload_residue_shard, a worker of the same node on "
+            "protea.embeddings.upload, to put in the artifact store while the card encodes the "
+            "next batch. None puts the shard in the store from the card's own loop, as before "
+            "the spool existed. The batch and upload workers of the node must see the same "
+            "folder, on disk. Override: PROTEA_TUNING__operation__residue_shard_spool_dir."
+        ),
+    )
+    residue_shard_spool_min_free_gib: float = Field(
+        default=20.0,
+        gt=0,
+        description=(
+            "Free space, in GiB, the spool's file system keeps: a batch that finds less fails "
+            "before it spends the card, because the spool only grows when its upload worker "
+            "stopped. Override: PROTEA_TUNING__operation__residue_shard_spool_min_free_gib."
+        ),
+    )
+    method_bundle_root: str | None = Field(
+        default=None,
+        description=(
+            "Folder that holds the data bundles run_lab_method may mount into a method's "
+            "container. A payload's bundle_path must lie inside it once its symlinks are "
+            "resolved, and the resolved path is what is mounted. While it is None no run "
+            "starts, because the payload could otherwise name any folder of the node. "
+            "Override: PROTEA_TUNING__operation__method_bundle_root."
+        ),
+    )
     gpu_busy_retry_seconds: int = Field(
         default=8,
         ge=1,

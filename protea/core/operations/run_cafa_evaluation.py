@@ -48,6 +48,7 @@ from protea.core.operations._run_cafa_payload import RunCafaEvaluationPayload
 from protea.core.operations._run_cafa_reranker_loader import (
     load_reranker_models_for_payload,
 )
+from protea.core.operations._run_cafa_scale import read_and_report
 from protea.core.operations._run_cafa_setup import (  # noqa: F401
     StagedInputs,
     _emit_evaluation_setup_events,
@@ -57,6 +58,7 @@ from protea.core.operations._run_cafa_setup import (  # noqa: F401
     bundle_run_context,
 )
 from protea.core.operations.compute_information_accretion import ia_key_for
+from protea.core.operations.seal_evaluation_frames import seal_one
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -207,11 +209,13 @@ class RunCafaEvaluationOperation:
         )
         session.add(eval_result)
         session.flush()
+        frame_seal = seal_one(session, result_id, emit)
         emit(
             "run_cafa_evaluation.done",
             None,
             {
                 "evaluation_result_id": str(result_id),
+                "frame_digest": frame_seal,
                 "settings_evaluated": [k for k in results.keys() if k != "artifacts"],
                 "artifacts_prefix": f"eval_artifacts/{result_id}/",
                 "artifacts_count": len((results.get("artifacts") or {}).get("keys") or []),
@@ -409,6 +413,14 @@ class RunCafaEvaluationOperation:
         has_rerankers = bool(ctx.reranker_models)
         if not has_rerankers:
             self._write_shared_prediction_file(session, p, ctx, artifacts_root, delta_proteins)
+            # Read once, here: every setting without a reranker reuses this file.
+            read_and_report(
+                os.path.join(str(artifacts_root), "predictions", "predictions.tsv"),
+                reading=p.score_reading,
+                th_step=p.th_step,
+                label="shared",
+                emit=emit,
+            )
         return bundle_run_context(
             p,
             ctx,

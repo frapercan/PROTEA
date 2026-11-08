@@ -44,6 +44,7 @@ arguments:
 | `toi` | release `groundtruth_terms_of_interest.txt` | payload `toi_file`, else snapshot terms | see below |
 | `th_step` | `0.01` (default) | `0.01` (was `0.001`) | dominant gap |
 | `max_terms` | unlimited (default) | `None` (was `500`) | inert for KNN-style predictions |
+| score reading | raw scores | `score_reading`, `raw` by default | keep `raw`; see below |
 
 ### `th_step` (the dominant gap)
 
@@ -64,6 +65,17 @@ inert and removing it changed nothing on the validated prediction. It was
 still removed (`max_terms=None` by default, payload-controlled) so the two
 pipelines are mechanically identical and no future dense prediction is
 silently truncated.
+
+### `score_reading` (keep `raw` for parity)
+
+LAFA thresholds the scores a submission wrote. PROTEA can instead read them
+by percentile rank within the prediction file before cafaeval thresholds them
+(`score_reading: percentile_rank`, ADR-D55), so that the 0.01 grid falls on
+the arm's own quantiles. That is for comparing arms whose banks compress the
+score scale differently, not for parity: the reading is monotone, but it
+moves where the grid falls, and so it moves the reported maximum. A run meant
+to be LAFA-comparable keeps the default, `raw`. The two readings never share
+a frame seal.
 
 ### `toi` (terms of interest)
 

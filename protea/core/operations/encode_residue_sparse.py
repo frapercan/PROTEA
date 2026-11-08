@@ -405,6 +405,10 @@ def _ensure_target_config(
         pooling="residue-sparse-mean",
         normalize_residues=False,
         normalize=False,
+        # Full length, checked per sequence by assert_one_row_per_residue.
+        max_length=None,
+        # The divisor each head applies before the halfvec store.
+        embedding_scale=1.0,
         use_chunking=bool(source.use_chunking),
         chunk_size=source.chunk_size,
         chunk_overlap=source.chunk_overlap,

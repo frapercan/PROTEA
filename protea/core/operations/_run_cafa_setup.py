@@ -253,6 +253,7 @@ def bundle_run_context(
         evaluation_set_id=str(inputs.eval_set_id),
         information_accretion_frame=ia_frame(p, staged.ia_path, emit),
         th_step=p.th_step,
+        score_reading=p.score_reading,
         max_terms=p.max_terms,
         softprop=p.softprop,
         interpro_graft=p.interpro_graft,

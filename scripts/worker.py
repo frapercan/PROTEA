@@ -83,6 +83,8 @@ def main() -> None:
     _OPERATION_QUEUES = {
         "protea.embeddings.batch",
         "protea.embeddings.write",
+        # The node's own upload stage: shards a card batch spooled on this disk (ADR-D51).
+        "protea.embeddings.upload",
         "protea.predictions.batch",
         "protea.predictions.write",
         # Export minijob pipeline sub-queues (PROTEA_EXPORT_MINIJOBS=1).
@@ -139,6 +141,36 @@ def main() -> None:
             options=options,
         )
 
+    # The revision goes on the startup line beside the queue, so grep over the
+    # logs answers "what was this process actually running" with no database
+    # round trip. Its absence is why a tree that moved under two live arms on
+    # 2026-08-30 went unnoticed until the labels were read back out of the
+    # database hours later.
+    #
+    # AND IT IS STAMPED BEFORE THE WARM-UP, which is the order and not an
+    # accident. What this line claims is settled at import: a process cannot
+    # reload its modules because a file changed underneath it, so the revision
+    # is known before any work is done. Behind the warm-up it waited on a
+    # ~100 MB download and 2.9 million parsed nodes for three queues, and a
+    # node without the cached dump would publish its identity minutes late or,
+    # if the download hung, never. The compute node's deploy sync reads this
+    # exact line as the only witness that a worker came back on the declared
+    # revision, with a bounded wait; measured on that node the warm-up costs
+    # under 1 ms because the dump is already local, so nothing there was
+    # failing. The coupling is what is wrong: the proof of what a process
+    # loaded must not depend on a network.
+    #
+    # It does NOT claim the worker is consuming. The consumer starts below,
+    # after the warm-up, and this line never said otherwise.
+    from protea.core.code_revision import code_revision, tree_revision_now
+
+    stamped, tree = code_revision(), tree_revision_now()
+    logging.info(
+        "Worker started. queue=%s revision=%s%s",
+        args.queue,
+        stamped,
+        "" if stamped == tree else f" TREE_HAS_MOVED_TO={tree}",
+    )
     # Pre-warm taxonomy DB for prediction workers that may need it.
     #
     # PROTEA_SKIP_TAXONOMY_WARMUP exists for the deploy smoke. The warm-up
@@ -164,20 +196,6 @@ def main() -> None:
         except Exception as exc:
             logging.warning("Taxonomy DB warmup skipped: %s", exc)
 
-    # The revision goes on the startup line beside the queue, so grep over the
-    # logs answers "what was this process actually running" with no database
-    # round trip. Its absence is why a tree that moved under two live arms on
-    # 2026-08-30 went unnoticed until the labels were read back out of the
-    # database hours later.
-    from protea.core.code_revision import code_revision, tree_revision_now
-
-    stamped, tree = code_revision(), tree_revision_now()
-    logging.info(
-        "Worker started. queue=%s revision=%s%s",
-        args.queue,
-        stamped,
-        "" if stamped == tree else f" TREE_HAS_MOVED_TO={tree}",
-    )
     while True:
         try:
             consumer.run()
