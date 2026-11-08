@@ -559,46 +559,42 @@ def _resolve_test_eval_inputs(
     train_versions: list[int],
     test_versions: list[int],
     version_to_set: dict[int, uuid.UUID],
+    named_ids: set[str] | None = None,
+    pivot_must_be: uuid.UUID | str | None = None,
 ) -> tuple[Any, Any, int, int]:
     """Resolve and load the test-pair ``EvaluationSet`` + its ``EvaluationData``.
 
-    Picks the last training version as the "old" side of the test pair
-    (all train splits up to and including that version are seen during
-    training) and the first test version as the "new" side. Looks up
-    the persisted ``EvaluationSet`` row keyed by the
-    ``(old_set_id, new_set_id)`` pair; raises ``RuntimeError`` if it is
-    missing because the dump pipeline assumes the eval set was
-    materialized beforehand (``scripts/materialize_lab_intervals.py`` or
-    ``POST /annotations/evaluation-sets/generate``).
+    Picks the last training version as the "old" side of the test pair (all
+    train splits up to and including that version are seen during training)
+    and the first test version as the "new" side.
 
-    Returns ``(test_eset, test_eval_data, test_old_v, test_new_v)`` so
-    the caller has both the ORM row (for downstream FK lookups, e.g.
-    ``test_old_set_id = version_to_set[test_old_v]``) and the eagerly-
-    loaded delta data.
+    THIS USED TO CALL ``one_or_none()`` AND THAT WAS A LANDMINE. The train
+    path hit exactly that on 2026-05-12, the LB.1 incident: a pair of
+    annotation sets stopped identifying one window when the propagation
+    graphs and the truth rules joined the key, so ``one_or_none`` raised
+    ``MultipleResultsFound`` from deep inside SQLAlchemy, unreadable from the
+    outside. The train path was repaired to collect candidates and name them.
+    This one was left, and on this campaign's database 62 of 69 distinct pairs
+    carry more than one window, so it was one test pair away from the same
+    failure. Both now go through
+    :func:`protea.core.training_dump._window_choice.resolve_window`.
+
+    Returns ``(test_eset, test_eval_data, test_old_v, test_new_v)`` so the
+    caller has both the ORM row (for downstream FK lookups) and the eagerly
+    loaded delta.
     """
     from protea.core.evaluation import load_evaluation_data_for_set
-    from protea.infrastructure.orm.models.annotation.evaluation_set import (
-        EvaluationSet,
-    )
+    from protea.core.training_dump._window_choice import resolve_window
 
     test_old_v = train_versions[-1]
     test_new_v = test_versions[0]
-    test_old_set_id = version_to_set[test_old_v]
-    test_new_set_id = version_to_set[test_new_v]
-
-    test_eset = (
-        session.query(EvaluationSet)
-        .filter_by(
-            old_annotation_set_id=test_old_set_id,
-            new_annotation_set_id=test_new_set_id,
-        )
-        .one_or_none()
+    test_eset = resolve_window(
+        session,
+        version_to_set[test_old_v],
+        version_to_set[test_new_v],
+        named_ids or set(),
+        pivot_must_be,
+        f"test pair ({test_old_v}->{test_new_v})",
     )
-    if test_eset is None:
-        raise RuntimeError(
-            f"EvaluationSet missing for test pair ({test_old_v}->{test_new_v}). "
-            "Materialize it via scripts/materialize_lab_intervals.py "
-            "or POST /annotations/evaluation-sets/generate before retrying."
-        )
     test_eval_data, _ = load_evaluation_data_for_set(session, test_eset)
     return test_eset, test_eval_data, test_old_v, test_new_v

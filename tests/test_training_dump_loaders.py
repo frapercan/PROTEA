@@ -414,7 +414,9 @@ class TestResolveTestEvalInputs:
         eval_data = MagicMock()
 
         session = MagicMock()
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = eset
+        # The resolver collects candidates now: the pair stopped being
+        # an identity. See tests/test_the_export_names_its_window.py.
+        session.query.return_value.filter_by.return_value.all.return_value = [eset]
 
         with patch(
             "protea.core.evaluation.load_evaluation_data_for_set",
@@ -439,7 +441,7 @@ class TestResolveTestEvalInputs:
         version_to_set = {170: old_id, 230: new_id}
 
         session = MagicMock()
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.all.return_value = []
 
         with pytest.raises(RuntimeError, match="EvaluationSet missing for test pair"):
             _resolve_test_eval_inputs(
