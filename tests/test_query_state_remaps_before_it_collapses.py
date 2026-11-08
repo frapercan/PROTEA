@@ -196,3 +196,31 @@ def test_a_negation_is_contains_NOT_and_the_qualifier_goes_through_raw():
 
     assert sorted(tabla.column("qualifier").to_pylist()) == ["NOT|enables", "involved_in"]
     assert st.negated == 1
+
+
+def test_the_off_axis_count_is_split_per_moment():
+    """The split the total cannot show, and that carries the explanation.
+
+    MEASURED over the 65 windows: 689.055 off-axis rows of 44.744.324, and the
+    figure tracks the distance from the window to the pivot's era, not anything
+    about the window. ``205->211`` discards 685 and ``170->171`` discards
+    15.110, which is 4,54 per cent of its rows. The cause is that a window's
+    ``t`` end is an earlier release whose corpus named terms the 2022 ontology
+    no longer has.
+
+    A total cannot be checked against that explanation. A split can: the t end
+    should discard more than the t' end for every window that is not at the
+    cut.
+    """
+    filas_t = [("P1", VIVO, "IDA", ""), ("P1", FUERA, "IEA", "")]
+    filas_t_prima = [("P1", VIVO, "IDA", "")]
+    _, st = Q.state_of(
+        _Session({"aset-t": filas_t, "aset-t-prime": filas_t_prima}),
+        _facts(),
+        ["P1"],
+        _axis(),
+    )
+
+    assert st.off_axis_by_moment == {"t": 1, "t'": 0}
+    assert st.discards.off_axis == 1
+    assert sum(st.off_axis_by_moment.values()) == st.discards.off_axis
