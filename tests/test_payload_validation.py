@@ -105,6 +105,9 @@ from protea.core.operations.export_minijobs.export_coordinator import (
 from protea.core.operations.export_research_dataset import (
     ExportResearchDatasetPayload,
 )
+from protea.core.operations.export_transitions_dataset import (
+    ExportTransitionsDatasetPayload,
+)
 from protea.core.operations.extract_goa_universe import ExtractGoaUniversePayload
 from protea.core.operations.fetch_uniprot_metadata import (
     FetchUniProtMetadataPayload,
@@ -148,9 +151,6 @@ from protea.core.operations.register_ingested_method import (
 )
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesPayload,
-)
-from protea.core.operations.export_transitions_dataset import (
-    ExportTransitionsDatasetPayload,
 )
 from protea.core.operations.retire_evaluation_sets import (
     RetireEvaluationSetsPayload,
@@ -611,12 +611,16 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ("query_set_ids",),
     ),
     (
-        # invariant: el alcance de un conjunto de entrenamiento no se deja a un
-        # valor por defecto. Y el par de versiones dejo de identificar una
-        # ventana -- 62 de 69 llevan mas de una -- asi que se nombran por id.
+        # invariant: el par de versiones dejo de identificar una ventana -- 62
+        # de 69 llevan mas de una -- asi que se nombran por id, y una repetida
+        # escribiria sus terminos dos veces y el recuento dejaria de contar.
+        # (Que la lista pueda estar VACIA depende de las tablas, asi que esa
+        # negativa es del MODELO y no de este campo: vive en
+        # tests/test_the_queries_a_window_asks_about.py, donde se puede
+        # afirmar su mensaje.)
         "export_transitions_dataset",
         ExportTransitionsDatasetPayload,
-        {"windows": [], "cut": "x", "cut_version": "211"},
+        {"windows": ["w", "w"], "cut": "x", "cut_version": "211"},
         ("windows",),
     ),
     (

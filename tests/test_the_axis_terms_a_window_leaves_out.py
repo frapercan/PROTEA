@@ -121,11 +121,17 @@ def test_an_axis_with_no_live_terms_is_refused(monkeypatch):
 
     Which reads as "the loader may use the whole axis as negatives": a table
     that is complete, consistent and about nothing.
+
+    The question moved to ``axis_of``, which answers it once for the three
+    tables that need the axis. ``axis_live_terms`` used to ask it again here
+    and was a second query for the same answer.
     """
-    monkeypatch.setattr(W, "_live_terms_with_aspect", lambda _s, _c: (set(), {}))
+    from protea.core.transitions_export import _terms as T
+
+    monkeypatch.setattr(T, "_live_terms_with_aspect", lambda _s, _c: (set(), {}))
 
     with pytest.raises(ValueError, match="no live terms"):
-        W.axis_live_terms(object(), uuid.uuid4())
+        T.axis_of(object(), uuid.uuid4())
 
 
 # --------------------------------------------------------------- los mismos bytes
@@ -215,14 +221,14 @@ class TestWhatTheOperationRefuses:
         assert not hasattr(ExportTransitionsDatasetPayload, "accept_any_revision")
 
 
-def test_the_ten_tables_are_declared_and_two_are_written():
+def test_the_ten_tables_are_declared_and_four_are_written():
     """The gap between the two lists is the honest state of this operation.
 
     Hard-coded on purpose: a table landing has to come with a line here, so
     the list cannot drift into claiming more than is written.
     """
     assert len(TABLES) == 10
-    assert IMPLEMENTED == {"window_terms_out", "queries"}
+    assert IMPLEMENTED == {"window_terms_out", "queries", "terms", "term_ancestors"}
     assert IMPLEMENTED <= set(TABLES)
 
 

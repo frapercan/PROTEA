@@ -35,7 +35,7 @@ import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from protea.core.code_revision import code_revision, is_identifying, revisions_conflict
@@ -49,6 +49,13 @@ from protea.core.operations.export_evaluation_targets import SCORED_CATEGORIES
 from protea.core.training_dump._window_choice import _refuse_wrong_pivot, window_identity
 from protea.core.transitions_export._queries import WindowQueries, queries_of
 from protea.core.transitions_export._queries import write_table as write_queries
+from protea.core.transitions_export._terms import (
+    Axis,
+    axis_of,
+    verified_vectors,
+    write_ancestors,
+    write_terms,
+)
 from protea.core.transitions_export._window_facts import (
     WindowFacts,
     facts_of,
@@ -56,7 +63,6 @@ from protea.core.transitions_export._window_facts import (
 )
 from protea.core.transitions_export._window_terms_out import (
     WindowTerms,
-    axis_live_terms,
     terms_out,
     write_table,
 )
@@ -82,7 +88,17 @@ TABLES: tuple[str, ...] = (
 #: What this revision can actually write. Named separately from ``TABLES`` so
 #: the refusal can say "declared but not written yet" instead of "unknown",
 #: which are different answers for whoever reads the error.
-IMPLEMENTED: frozenset[str] = frozenset({"window_terms_out", "queries"})
+IMPLEMENTED: frozenset[str] = frozenset({"window_terms_out", "queries", "terms", "term_ancestors"})
+
+#: Tables keyed by ``cut`` alone. They depend on no window, so a run asking
+#: only for these needs no window list: the axis IS their scope, and demanding
+#: ids would be asking for a scope the table does not use.
+AXIS_ONLY: frozenset[str] = frozenset({"terms", "term_ancestors"})
+
+#: Tables that need the axis read. ``window_terms_out`` is keyed by a window
+#: and still needs it, which is why this is not the complement of
+#: :data:`AXIS_ONLY`.
+_NEEDS_AXIS: frozenset[str] = frozenset({"window_terms_out", "terms", "term_ancestors"})
 
 
 class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
@@ -95,21 +111,13 @@ class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
     categories: list[str] = list(SCORED_CATEGORIES)
     output_name: str = "transitions"
     accept_revisions: list[str] = []
+    term_vectors_key: str | None = None
+    term_vectors_sha256: str | None = None
 
     @field_validator("windows")
     @classmethod
     def _named_and_distinct(cls, value: list[str]) -> list[str]:
-        """Refuse an empty list and refuse repeats.
-
-        There is no "all the windows" mode. A scope living in a default is a
-        scope nobody declared, and this one decides which transitions a model
-        is trained on.
-        """
-        if not value:
-            raise ValueError(
-                "windows cannot be empty and has no 'all' mode: the scope of a "
-                "training set is not something to leave to a default"
-            )
+        """Refuse repeats. Whether it may be EMPTY depends on the tables."""
         repetidas = sorted({w for w in value if value.count(w) > 1})
         if repetidas:
             raise ValueError(
@@ -117,6 +125,36 @@ class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
                 "its terms twice and the row count would stop being a count"
             )
         return value
+
+    @model_validator(mode="after")
+    def _scope_and_vectors_match_the_tables(self) -> ExportTransitionsDatasetPayload:
+        """What a run must declare depends on which tables it asks for.
+
+        Window-keyed tables need their window list named: there is no "all the
+        windows" mode, because a scope living in a default is a scope nobody
+        declared and this one decides which transitions a model is trained on.
+        The axis-keyed tables need no windows at all, and demanding them would
+        be asking for a scope the table does not use.
+
+        And ``terms`` needs the vectors NAMED, because its two vector columns
+        are published only after those bytes are fetched and their digest
+        checked. A sha from a message would be a locator for bytes nobody
+        verified.
+        """
+        por_ventana = sorted(set(self.tables) - AXIS_ONLY)
+        if por_ventana and not self.windows:
+            raise ValueError(
+                f"tables {por_ventana} are keyed by a window, so windows cannot be "
+                "empty and there is no 'all' mode for it"
+            )
+        if "terms" in self.tables and not (self.term_vectors_key and self.term_vectors_sha256):
+            raise ValueError(
+                "terms carries vector_uri and vector_sha256, so term_vectors_key and "
+                "term_vectors_sha256 have to be named. They are fetched and their "
+                "digest checked before either column is written: a sha nobody "
+                "verified is worse in a table than absent from one"
+            )
+        return self
 
     @field_validator("categories")
     @classmethod
@@ -212,6 +250,13 @@ def _refuse_unstamped(eset: EvaluationSet, accepted: list[str], running: str) ->
             f"{running[:12]}. Name {recorded[:12]} in accept_revisions if the "
             "difference is known to be irrelevant to its truth"
         )
+
+
+class _Bundle(NamedTuple):
+    """What one run computed: the per-window lists, and the axis if it read one."""
+
+    hecho: _Computed
+    axis: Axis | None
 
 
 class _Computed(NamedTuple):
@@ -315,18 +360,26 @@ class ExportTransitionsDatasetOperation(Operation):
     ) -> OperationResult:
         p = ExportTransitionsDatasetPayload.model_validate(contract_payload(payload))
         running = code_revision()
-        axis = (
-            axis_live_terms(session, uuid.UUID(p.cut)) if "window_terms_out" in p.tables else set()
-        )
-        emit(
-            "transitions.axis",
-            f"{len(axis)} live terms on the declared axis",
-            {"cut": p.cut, "cut_version": p.cut_version, "axis_live_terms": len(axis)},
-            "info",
-        )
-        hecho = self._per_window(session, p, axis, running, emit)
+        # ONE read of the axis for the three tables that use it.
+        # ``window_terms_out`` used to ask for the live set on its own, which
+        # was a second query answering the same question.
+        axis = axis_of(session, uuid.UUID(p.cut)) if _NEEDS_AXIS & set(p.tables) else None
+        if axis is not None:
+            emit(
+                "transitions.axis",
+                f"{len(axis.aspect)} live terms on the declared axis",
+                {
+                    "cut": p.cut,
+                    "cut_version": p.cut_version,
+                    "axis_live_terms": len(axis.aspect),
+                    "direct_edges": len(axis.edges),
+                },
+                "info",
+            )
+        vivos = set(axis.aspect) if axis is not None else set()
+        hecho = self._per_window(session, p, vivos, running, emit)
         _refuse_disagreeing_windows(hecho, p, emit)
-        return self._publish(p, hecho, running, payload, emit)
+        return self._publish(p, _Bundle(hecho=hecho, axis=axis), running, payload, emit)
 
     def _per_window(
         self,
@@ -358,14 +411,23 @@ class ExportTransitionsDatasetOperation(Operation):
     def _publish(
         self,
         p: ExportTransitionsDatasetPayload,
-        hecho: _Computed,
+        lote: _Bundle,
         running: str,
         payload: dict[str, Any],
         emit: EmitFn,
     ) -> OperationResult:
         """Write every requested table, publish it, and report its digest."""
         store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
+        hecho, axis = lote.hecho, lote.axis
         tablas: dict[str, dict[str, Any]] = {}
+        # Verified BEFORE anything is written: those two columns are the reason
+        # the vectors are carried by reference at all, and a sha nobody checked
+        # is worse in a table than absent from one.
+        vector_uri = (
+            verified_vectors(store, p.term_vectors_key, p.term_vectors_sha256)
+            if "terms" in p.tables and p.term_vectors_key and p.term_vectors_sha256
+            else None
+        )
         with tempfile.TemporaryDirectory(prefix="transitions-") as tmp:
             if "window_terms_out" in p.tables:
                 tablas["window_terms_out"] = _write_one(
@@ -374,6 +436,15 @@ class ExportTransitionsDatasetOperation(Operation):
             if "queries" in p.tables:
                 tablas["queries"] = _write_one(
                     store, p, tmp, "queries", lambda path: write_queries(hecho.queries, path)
+                )
+            if "terms" in p.tables and axis is not None and vector_uri is not None:
+                sha = p.term_vectors_sha256 or ""
+                tablas["terms"] = _write_one(
+                    store, p, tmp, "terms", lambda path: write_terms(axis, vector_uri, sha, path)
+                )
+            if "term_ancestors" in p.tables and axis is not None:
+                tablas["term_ancestors"] = _write_one(
+                    store, p, tmp, "term_ancestors", lambda path: write_ancestors(axis, path)
                 )
         result = {
             "tables": tablas,
