@@ -317,6 +317,8 @@ later revision) or *Superseded* (a named later decision replaces it).
      - :doc:`Evaluated explorations, one unit for a hypothesis, its rules, its arms, its report and its review <D55-evaluated-explorations>`
    * - D56
      - :doc:`The transitions dataset is tables keyed by what they depend on <D56-transitions-dataset-is-tables-keyed-by-what-they-depend-on>`
+   * - D57
+     - :doc:`The vocabulary exams run inside the platform, on the codes it stores <D57-vocabulary-exams-inside-the-platform>`
      - Proposed
      - T-PLATFORM
 
@@ -387,3 +389,4 @@ later revision) or *Superseded* (a named later decision replaces it).
    D54-model-weights-registry
    D55-evaluated-explorations
    D56-transitions-dataset-is-tables-keyed-by-what-they-depend-on
+   D57-vocabulary-exams-inside-the-platform
