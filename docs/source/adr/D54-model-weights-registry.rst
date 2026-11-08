@@ -1,7 +1,8 @@
 ADR-D54: Model weights in one registry, uploaded or registered, and used from the instrument
 =========================================================================================
 
-:Status: Proposed (draft for the author's review)
+:Status: Accepted
+:Accepted: 2026-11-08
 :Date: 2026-11-03
 :Author: Francisco Miguel Pérez Canales
 :Phase: platform consolidation (the lab's research enters the platform)
@@ -23,8 +24,19 @@ them. The author asked for the same for every kind of weight, on 2026-11-03: "ne
 UI/UX total, las operaciones en Panel de control, los pesos almacenados y listado que se
 puedan subir... parecido a las representaciones aprendidas o mejor".
 
-Decision (proposed)
-~~~~~~~~~~~~~~~~~~~
+Decision
+~~~~~~~~
+
+Accepted on 2026-11-08. The author asked for the registry on 2026-11-03, in the words
+quoted above. He approved this record together with the four other open points of that
+day: in the GPU node's session, reported there as "vale. Vamos a 1-5" and kept in the
+lab as decision D34, and in this machine's session when asked directly whether the
+status should move.
+
+What made the question concrete is the kind added last: the lab's per-term text vectors
+have to reach the platform before ADR-D56's ``terms`` table can be written, and the
+author chose the route when asked in this machine's session, "Que los suba el por la
+API", with the operator credential he gives the GPU node.
 
 1. One table for every kind of weight
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -32,7 +44,7 @@ Decision (proposed)
 ``model_weights`` has one row per file:
 
 * kind: ``residue_vocabulary``, ``learned_encoder``, ``world_model``, ``reader``,
-  ``generator`` or ``method_bundle``;
+  ``generator``, ``method_bundle`` or ``term_text_vectors``;
 * name, description and format;
 * the artifact store key, which is unique;
 * sha256 and size;
@@ -49,6 +61,17 @@ The re-ranker keeps its own registry, and the weights page links to it.
   vocabulary at a key of the form ``residue-vocabulary/vocabulary-<name>-<sha256[:16]>.npz``,
   is registered with its key and the sha256 its producer recorded. The API reads the object and refuses the row if the
   hash differs.
+* **A kind for the term vectors.** ``term_text_vectors`` is one vector per GO term of an
+  ontology axis, from a text embedding of the term's name and definition. ADR-D56's
+  ``terms`` table carries them by reference, through its ``vector_uri`` and
+  ``vector_sha256``, because one vector per term over a whole axis is a file and not a
+  column, so the file needs a row that gives its digest and this is the registry that
+  holds one. It is a new kind and not one of the six: none of them describes it, and
+  registering it under a name that does not fit would make ``kind`` stop answering the
+  one question it exists for, which is what this file is. The bytes are in the lab's own
+  store and not in the platform's, so ``terms`` refuses to be written until the row
+  exists, and a digest quoted in a message is a locator for bytes nobody on this side
+  can check.
 * **Uploaded in parts.** The web proxy caps a request at 100 MB, and the deployed residue
   vocabulary alone is 260 MB. A dialog therefore sends the file in parts: create an upload, send numbered
   parts, then complete. The server joins the parts on disk, hashes the result, puts it in
@@ -74,6 +97,33 @@ offers "Encode a corpus" (``encode_residue_vocabulary``, choosing the source con
 and the device). A learned encoder offers ``apply_learned_encoder``. A method bundle
 offers ``run_lab_method`` once ADR-D53 is in. Each dialog creates the job through
 ``POST /jobs`` and links to it.
+
+4. The registry is written without a job, and that is the exception
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This project's rule is that every operation goes through ``POST /v1/jobs`` and never a
+direct call, because a job leaves a row, an event log and the revision it ran under, and
+a direct call leaves rows that nothing accounts for. **The two writes of this registry
+are an exception to that rule**, and the exception is stated here so that it is a
+decision and not a hole: the multi-part upload and the registration by reference are
+endpoints, authenticated with an operator credential, and no job is created for either.
+
+The reason is mechanical. A job's input travels in its payload through the broker, and an
+operation message is bounded at twice 600 seconds with nothing pumping the heartbeat, so
+a file of hundreds of megabytes cannot be delivered that way. Registering bytes is also
+not an operation on the data: it adds no annotation, no vector and no measurement, and
+it is the step that makes a later operation attributable.
+
+What replaces the job's guarantees is in the row and in the server, not in the caller.
+The key is content addressed, so the same bytes give the same key and the same row and a
+second upload answers 409 with the existing id. A registration by reference reads the
+object and refuses the row when the hash differs, so the identity of the bytes is
+checked here and not asserted by whoever sends them. The row records who registered it
+and when, next to the sha256 and the size.
+
+**The exception covers writing the registry and nothing else.** Every operation that
+reads a weight is still launched through ``POST /v1/jobs``, with the key in its payload,
+which is what section 3 describes.
 
 What stays outside
 ~~~~~~~~~~~~~~~~~~
