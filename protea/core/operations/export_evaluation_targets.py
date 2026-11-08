@@ -15,10 +15,24 @@ contribution being claimed is an environment where the local measurement and the
 submitted one are the same measurement.
 
 So this exports one artifact with two consumers. The file it writes is the LAFA
-``--query_file``; the same bytes register as a ``QuerySet`` through the existing
-FASTA endpoint, and the grid dispatches against that. Both sides can quote the
-same sha256, which proves the populations are identical rather than intended to
-be.
+``--query_file``, and the same bytes are declared here as a ``QuerySet`` that the
+grid dispatches against. Both sides quote the same sha256, which proves the
+populations are identical rather than intended to be.
+
+THE QUERY SET USED TO BE REGISTERED BY HAND, and that is what changed. The
+operation wrote the file and a person then uploaded those bytes through the
+FASTA endpoint, typing the provenance into the free-text description: the
+window as an id prefix, the job as a word, the sha as a string nothing compares
+against. The derivation of the population every number is measured over lived
+in prose, which is the one place a gate cannot read.
+
+And the hand route had a trap that had not sprung. The file carries
+``canonical_residues``, so re-hashing those bytes at the endpoint hashes the
+CANONICALISED sequence; where that differs from the stored one it inserts a
+second ``sequence`` row and the entries point at sequences with no embedding.
+Measured on 2026-11-08: 0 of 138.297 entries, because the canonicalisation was
+a no-op for this population. Declaring here reuses the stored ``sequence_id``,
+so the trap is disarmed rather than left waiting.
 
 The population is the delta: proteins that GAINED annotation between the two cuts,
 taken from the no-knowledge, limited-knowledge and prior-knowledge maps. Proteins
@@ -32,7 +46,9 @@ whitespace and, if it contains at least two pipes, the field between the first
 two; a bare accession round-trips through that unchanged, so no convention has to
 be agreed twice.
 
-It writes no rows. The only side effect is the artifact.
+It writes the artifact and ONE declared ``QuerySet`` with its entries. Writing
+the same delta twice finds that row by ``(window, sha256)`` and does not make a
+second: one window plus one set of bytes is one population.
 """
 
 from __future__ import annotations
@@ -40,12 +56,13 @@ from __future__ import annotations
 import hashlib
 import uuid
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from pydantic import Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import (
     EmitFn,
     Operation,
@@ -53,9 +70,10 @@ from protea.core.contracts.operation import (
     ProteaPayload,
 )
 from protea.core.evaluation import load_evaluation_data_for_set
-from protea.core.utils import contract_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.protein.protein import Protein
+from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.storage import get_artifact_store
 
@@ -85,6 +103,7 @@ def canonical_residues(sequence: str) -> str:
     caller, so the transformation is visible rather than silent.
     """
     return sequence.upper().replace("-", "")
+
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
@@ -155,9 +174,152 @@ def _load_sequences(session: Session, accessions: list[str]) -> dict[str, str]:
     return {accession: sequence for accession, sequence in rows}
 
 
-def _report_missing(
-    accessions: list[str], sequences: dict[str, str], emit: EmitFn
-) -> list[str]:
+def _sequence_ids(session: Session, accessions: list[str]) -> dict[str, int]:
+    """Accession to the id of the sequence row the PROTEIN already points at.
+
+    Taken from the row and never re-hashed from the published bytes. The bytes
+    are canonicalised and the stored sequence is not, so hashing them again can
+    name a different sequence, which is how the hand-registration route could
+    have pointed a query set at sequences with no embedding.
+    """
+    rows = session.execute(
+        select(Protein.accession, Protein.sequence_id).where(Protein.accession.in_(accessions))
+    ).all()
+    return {accession: sequence_id for accession, sequence_id in rows}
+
+
+class _Published(NamedTuple):
+    """What the artifact write produced, so declaring it re-derives nothing."""
+
+    uri: str
+    key: str
+    digest: str
+    records: list[tuple[str, str]]
+    missing: int
+    altered: int
+
+
+class _Declaration(NamedTuple):
+    """What the row has to say about itself, built where it is all known."""
+
+    window: uuid.UUID
+    name: str
+    description: str
+    job_id: uuid.UUID | None
+
+
+def _sequence_ids_or_refuse(session: Session, records: list[tuple[str, str]]) -> dict[str, int]:
+    """The sequence id of every published accession, or a refusal naming the gaps.
+
+    IT REFUSES INSTEAD OF SKIPPING. The first version wrote the entries it
+    could and dropped the rest, while the description it wrote said
+    ``len(records)`` targets: a declared set that does not match the bytes its
+    own sha names, which is the defect this whole operation is closing,
+    reintroduced one level down. The desktop session caught it.
+
+    Every record reaching here came from a join on ``Protein.sequence_id``, so
+    a gap means the population moved between the two queries. The file is
+    already in the store with its digest by this point, and that is fine: the
+    artifact is true, and only the declaration is refused.
+    """
+    ids = _sequence_ids(session, [a for a, _ in records])
+    sin_fila = sorted(a for a, _ in records if a not in ids)
+    if sin_fila:
+        raise ValueError(
+            f"{len(sin_fila)} of {len(records)} published accessions have no protein "
+            f"row to take a sequence_id from: {sin_fila[:5]}. The file is already in "
+            "the store with its sha, but declaring a query set with fewer entries "
+            "than the bytes it names would make the set disagree with its own digest"
+        )
+    return ids
+
+
+def _declaration_for(
+    eval_set: EvaluationSet,
+    p: ExportEvaluationTargetsPayload,
+    pub: _Published,
+    job_id: uuid.UUID | None,
+) -> _Declaration:
+    """What the row says about itself, built from what was actually written.
+
+    DECLARED AFTER EXTRACTION, never before. The name carries the sha of the
+    bytes that exist, so it cannot be a scope asserted in a payload and
+    contradicted by the file, and the description names the window's own rules
+    rather than repeating a label.
+    """
+    return _Declaration(
+        window=eval_set.id,
+        name=f"{p.output_name}-{str(eval_set.id)[:8]}-{pub.digest[:12]}",
+        description=(
+            f"The {len(pub.records)} delta targets of evaluation set {eval_set.id} "
+            f"({eval_set.truth_profile}, {eval_set.toi_rule}, not_codes="
+            f"{eval_set.not_codes}) over categories {p.categories}, written by "
+            f"export_evaluation_targets with sha256 {pub.digest}. "
+            f"{pub.missing} delta proteins had no stored sequence and "
+            f"{pub.altered} sequences were canonicalised."
+        ),
+        job_id=job_id,
+    )
+
+
+def _declare(session: Session, dec: _Declaration, pub: _Published, emit: EmitFn) -> uuid.UUID:
+    """Register the exported population as a declared ``QuerySet``.
+
+    Idempotent on ``(window, sha256)``, which is the identity of a population:
+    the same delta exported twice is the same set, and a second row would make
+    two names for one thing, which is the defect this table already had.
+    """
+    ya = session.execute(
+        select(QuerySet).where(
+            QuerySet.evaluation_set_id == dec.window,
+            QuerySet.content_sha256 == pub.digest,
+        )
+    ).scalar_one_or_none()
+    if ya is not None:
+        emit(
+            "targets.query_set_reused",
+            f"this population is already declared as {ya.id}",
+            {"query_set_id": str(ya.id), "name": ya.name, "sha256": pub.digest},
+            "info",
+        )
+        return ya.id
+
+    ids = _sequence_ids_or_refuse(session, pub.records)
+    qs = QuerySet(
+        name=dec.name,
+        description=dec.description,
+        source_kind="evaluation_targets",
+        evaluation_set_id=dec.window,
+        artifact_uri=pub.uri,
+        content_sha256=pub.digest,
+        job_id=dec.job_id,
+        code_revision=code_revision(),
+    )
+    session.add(qs)
+    session.flush()
+    # Taxonomy and species are left unset: the headers are bare accessions by
+    # design, so there is nothing to parse them from, and inventing them from
+    # the protein row would make the entry say something the file does not.
+    session.add_all(
+        QuerySetEntry(query_set_id=qs.id, sequence_id=ids[a], accession=a) for a, _ in pub.records
+    )
+    session.flush()
+    emit(
+        "targets.query_set_declared",
+        f"declared as query set {qs.id} with {len(pub.records)} entries",
+        {
+            "query_set_id": str(qs.id),
+            "name": qs.name,
+            "evaluation_set_id": str(dec.window),
+            "sha256": pub.digest,
+            "entries": len(pub.records),
+        },
+        "info",
+    )
+    return qs.id
+
+
+def _report_missing(accessions: list[str], sequences: dict[str, str], emit: EmitFn) -> list[str]:
     """Say which targets have no stored sequence, rather than letting them vanish.
 
     A target set that quietly shrank is a population nobody can reconstruct
@@ -169,8 +331,7 @@ def _report_missing(
     if missing:
         emit(
             "targets.missing_sequence",
-            f"{len(missing)} delta proteins have no stored sequence and are absent "
-            "from the file",
+            f"{len(missing)} delta proteins have no stored sequence and are absent from the file",
             {"missing": len(missing), "examples": missing[:10]},
             "warning",
         )
@@ -204,7 +365,9 @@ class ExportEvaluationTargetsOperation(Operation):
         "QuerySet the internal grid dispatches against. Targets are the proteins "
         "that gained annotation over the window; proteins that only lost "
         "annotation are reported by the evaluation and never scored, so they are "
-        "excluded. Writes no rows."
+        "excluded. Declares the exported population as a QuerySet with its "
+        "window, its sha256 and the job that built it, idempotent on (window, "
+        "sha256), instead of leaving it to be registered by hand."
     )
 
     def execute(
@@ -235,7 +398,31 @@ class ExportEvaluationTargetsOperation(Operation):
             )
 
         sequences = _load_sequences(session, accessions)
-        return self._publish(p, accessions, sequences, emit)
+        pub = self._publish(p, accessions, sequences, emit)
+        dec = _declaration_for(eval_set, p, pub, job_id_from_payload(payload))
+        query_set_id = _declare(session, dec, pub, emit)
+        return OperationResult(
+            result={
+                "uri": pub.uri,
+                "key": pub.key,
+                "sha256": pub.digest,
+                "targets": len(pub.records),
+                "missing_sequence": pub.missing,
+                "canonicalised": pub.altered,
+                "categories": p.categories,
+                "query_set_id": str(query_set_id),
+                # The sha256 is the point, so it is said rather than left to be
+                # noticed: it is what lets the grid and the submission prove
+                # they scored one population instead of asserting it. It no
+                # longer has to be carried across by hand, which is what the
+                # caveat used to ask for.
+                "caveat": (
+                    "the QuerySet above and a LAFA --query_file of these bytes are "
+                    "the same population, and the sha256 is what proves it rather "
+                    "than two sides agreeing to intend it"
+                ),
+            }
+        )
 
     def _publish(
         self,
@@ -243,7 +430,7 @@ class ExportEvaluationTargetsOperation(Operation):
         accessions: list[str],
         sequences: dict[str, str],
         emit: EmitFn,
-    ) -> OperationResult:
+    ) -> _Published:
         """Write the file, publish it, and say what did not make it in.
 
         The missing list is emitted rather than inferred because a target set that
@@ -271,25 +458,13 @@ class ExportEvaluationTargetsOperation(Operation):
             {"uri": uri, "targets": len(written), "sha256": digest},
             "info",
         )
-        return OperationResult(
-            result={
-                "uri": uri,
-                "key": key,
-                "sha256": digest,
-                "targets": len(written),
-                "missing_sequence": len(missing),
-                "canonicalised": len(altered),
-                "categories": p.categories,
-                # The sha256 is the point, so it is said rather than left to be
-                # noticed: it is what lets the grid and the submission prove they
-                # scored one population instead of asserting it.
-                "caveat": (
-                    "quote this sha256 on both sides. A QuerySet registered from "
-                    "these bytes and a LAFA --query_file of these bytes are the "
-                    "same population; anything else is two populations that happen "
-                    "to agree"
-                ),
-            }
+        return _Published(
+            uri=uri,
+            key=key,
+            digest=digest,
+            records=written,
+            missing=len(missing),
+            altered=len(altered),
         )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:

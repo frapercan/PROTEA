@@ -25,11 +25,22 @@ rule that depends on somebody remembering produces the sixth. So this walks
 the ORM metadata and reports, in the same shape as the other thirteen lint
 gates.
 
-REPORT MODE IS THE DEFAULT, ON PURPOSE. Six set tables fail at least one
-criterion today and one of them, ``dataset``, is the only one that passes all
-four. Failing CI now would block every unrelated change until a dozen
-migrations land, so this prints the gap and exits 0. Pass ``--strict`` to make
-it block, which is what the last of those migrations should turn on.
+REPORT MODE IS THE DEFAULT, ON PURPOSE. When this gate landed, ZERO of the six
+set tables passed all four criteria -- an earlier draft of this docstring said
+``dataset`` was the only one that did, which contradicted the gate's own output
+two screens below it. ``dataset`` fails two: it has no description column, and
+``train_uri`` and ``eval_uri`` carry no digest while only the manifest does.
+
+``query_set`` is the first to pass, and it was the WORST of the six when this
+was written: no outgoing foreign key at all, with the window, the job and the
+sha typed into the free-text description by hand. Migration
+``c5e8d1a30b72`` gave it the columns and the CHECK constraints that make an
+undeclared derived set unexpressible, so "declared" stopped depending on
+whoever registered it.
+
+Failing CI now would still block every unrelated change until the remaining
+five land, so this prints the gap and exits 0. Pass ``--strict`` to make it
+block, which is what the last of those migrations should turn on.
 
 A NEW SET TABLE IS A FAILURE UNTIL IT IS DECLARED HERE. ``EXPECTED`` drives
 the audit and the ``_set`` suffix only drives DETECTION of additions, because
