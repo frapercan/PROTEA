@@ -146,6 +146,9 @@ from protea.core.operations.register_ingested_method import (
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesPayload,
 )
+from protea.core.operations.export_transitions_dataset import (
+    ExportTransitionsDatasetPayload,
+)
 from protea.core.operations.retire_evaluation_sets import (
     RetireEvaluationSetsPayload,
 )
@@ -595,6 +598,24 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ("categories",),
     ),
     (
+        # invariant: el alcance de un conjunto de entrenamiento no se deja a un
+        # valor por defecto. Y el par de versiones dejo de identificar una
+        # ventana -- 62 de 69 llevan mas de una -- asi que se nombran por id.
+        "export_transitions_dataset",
+        ExportTransitionsDatasetPayload,
+        {"windows": [], "cut": "x", "cut_version": "211"},
+        ("windows",),
+    ),
+    (
+        # invariant: pedir una tabla que esta declarada en el ADR y todavia no
+        # se escribe se rehusa, no se salta: un lote al que le falta una tabla
+        # que se pidio no se distingue de uno completo.
+        "export_transitions_dataset",
+        ExportTransitionsDatasetPayload,
+        {"windows": ["w"], "cut": "x", "cut_version": "211", "tables": ["gains"]},
+        ("tables",),
+    ),
+    (
         # Un borrado cuyo alcance es un predicado es un borrado que nadie leyo
         # antes de correr. La lista se deriva, se mira y se pasa.
         "retire_evaluation_sets",
@@ -609,7 +630,7 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         "seal_evaluation_groundtruth",
         SealEvaluationGroundtruthPayload,
         {"evaluation_set_ids": []},
-        ("evaluation_set_ids",)
+        ("evaluation_set_ids",),
     ),
     # invariant: a method's prediction set has to say what produced it. The
     # name identifies the arm and is written on every row, and prediction_set
