@@ -15,18 +15,25 @@ wrong unit, which is exactly what happened the afternoon it was written.
 from __future__ import annotations
 
 import hashlib
+import uuid
 
 import pytest
 
 from protea.core.operations.declare_corpus_population import (
     POPULATION_RULE,
+    DeclareCorpusPopulationPayload,
+    _declare,
     _Extracted,
+    _Published,
     _refuse_a_second_row,
     _serialise,
     population_key_for,
 )
-from protea.infrastructure.orm.models.query.query_set import QUERY_SET_SOURCES
-
+from protea.infrastructure.orm.models.query.query_set import (
+    QUERY_SET_SOURCES,
+    QuerySet,
+    QuerySetEntry,
+)
 
 # ------------------------------------------------- la serializacion y su huella
 
@@ -172,3 +179,74 @@ def test_accessions_and_sequences_are_counted_apart():
 
     assert len(got.accessions) == 3
     assert len(set(got.sequence_of.values())) == 2
+
+
+# ------------------------------------------- la fila llega al flush con su job
+
+
+class _SesionQueRecuerda:
+    """Records what the row looked like AT THE MOMENT of each flush.
+
+    A snapshot and not the object, because assigning ``row.job_id`` after the
+    flush leaves the object looking correct at the end of the function while
+    the INSERT already went in without it. The defect only exists between those
+    two lines, so the test has to look there.
+    """
+
+    def __init__(self) -> None:
+        self.anadidos: list[object] = []
+        self.al_flush: list[tuple[str, object]] = []
+
+    def add(self, obj: object) -> None:
+        self.anadidos.append(obj)
+
+    def add_all(self, objs: object) -> None:
+        self.anadidos.extend(list(objs))  # type: ignore[arg-type]
+
+    def flush(self) -> None:
+        for o in self.anadidos:
+            if isinstance(o, QuerySet):
+                o.id = o.id or uuid.uuid4()
+                self.al_flush.append((o.name, o.job_id))
+
+
+def test_the_row_reaches_its_flush_already_carrying_its_job():
+    """What ``ck_query_set_corpus_is_declared`` refused on the first real run.
+
+    The first version built the row, flushed it, and set ``row.job_id``
+    afterwards. The INSERT therefore went in without it and the CHECK refused
+    the whole row, because that constraint requires the job for this kind. The
+    constraint caught it in production on the first run, which is the
+    constraint doing its job and this test failing to do mine until now.
+
+    Asserted on the value AT FLUSH TIME, because at the end of the function the
+    object looked right either way.
+    """
+    trabajo = uuid.uuid4()
+    sesion = _SesionQueRecuerda()
+    got = _Extracted(accessions=["P1", "P2"], sequence_of={"P1": 1, "P2": 2})
+    pub = _Published(raw=b"P1\nP2\n", digest="d" * 64, key="k", uri="s3://b/k")
+
+    _declare(sesion, DeclareCorpusPopulationPayload(), got, pub, trabajo)  # type: ignore[arg-type]
+
+    assert sesion.al_flush, "nada llego a un flush"
+    for nombre, job_id in sesion.al_flush:
+        assert job_id == trabajo, nombre
+
+
+def test_an_entry_takes_its_sequence_from_the_protein_row():
+    """Never re-hashed from the published bytes, which is the measured hazard.
+
+    The exported bytes are canonicalised and the stored sequence is not, so
+    hashing them again can name a different sequence. That is how the
+    hand-registration route could point a declared set at sequences with no
+    embedding.
+    """
+    sesion = _SesionQueRecuerda()
+    got = _Extracted(accessions=["P1", "P2"], sequence_of={"P1": 11, "P2": 22})
+    pub = _Published(raw=b"P1\nP2\n", digest="e" * 64, key="k", uri="s3://b/k")
+
+    _declare(sesion, DeclareCorpusPopulationPayload(), got, pub, uuid.uuid4())  # type: ignore[arg-type]
+
+    entradas = {e.accession: e.sequence_id for e in sesion.anadidos if isinstance(e, QuerySetEntry)}
+    assert entradas == {"P1": 11, "P2": 22}
