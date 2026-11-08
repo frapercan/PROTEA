@@ -148,14 +148,26 @@ class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
     @field_validator("windows")
     @classmethod
     def _named_and_distinct(cls, value: list[str]) -> list[str]:
-        """Refuse repeats. Whether it may be EMPTY depends on the tables."""
+        """Refuse repeats, and SORT, which is load-bearing and was not here.
+
+        ``gains`` builds its rows per window as the pass walks them and never
+        sorts 9,6 million rows afterwards, so its bytes were a function of the
+        order the CALLER listed the windows in: the same 65 windows in a
+        different payload order gave a different sha. My own docstring for that
+        writer claimed "the caller walks the windows sorted" while the pass
+        iterated the payload as given.
+
+        Sorting here makes the canonical order a property of the RUN rather
+        than of whoever wrote the list, which is what the sha has to be about.
+        It changes nothing semantically: the field declares a SET of windows.
+        """
         repetidas = sorted({w for w in value if value.count(w) > 1})
         if repetidas:
             raise ValueError(
                 f"windows repeats {repetidas}. A window exported twice would write "
                 "its terms twice and the row count would stop being a count"
             )
-        return value
+        return sorted(value)
 
     @model_validator(mode="after")
     def _scope_and_vectors_match_the_tables(self) -> ExportTransitionsDatasetPayload:

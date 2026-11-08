@@ -175,11 +175,17 @@ def new_columns() -> dict[str, list]:
 def write_table(columns: dict[str, list], path: str) -> int:
     """Write the accumulated columns, already in a stable order.
 
-    The order is stable by construction and not by a final sort: the caller
-    walks the windows sorted, and within a window the strata in their declared
-    order, each query sorted and each term sorted. Sorting 9,6 million rows
-    again at the end would cost more than the property is worth when the
+    The order is stable by construction and not by a final sort: the payload's
+    windows are SORTED BY ITS OWN VALIDATOR, and within a window the strata go
+    in their declared order with each query and each term sorted. Sorting 9,6
+    million rows again here would cost more than the property is worth when the
     property is already there.
+
+    THE SORT IN THE VALIDATOR IS WHAT MAKES THAT TRUE, and it was not there
+    when this docstring first claimed it: the pass walked ``p.windows`` as
+    given, so the same 65 windows listed in a different order produced a
+    different sha. The property a digest has to have is about the run, not
+    about whoever wrote the list.
     """
     pq.write_table(pa.table(columns, schema=SCHEMA), path)
     return len(columns["window"])

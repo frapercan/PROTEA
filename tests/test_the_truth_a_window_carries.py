@@ -229,3 +229,53 @@ def test_an_empty_run_writes_an_empty_table_rather_than_failing(tmp_path: Path):
 
     assert G.write_table(G.new_columns(), str(destino)) == 0
     assert pq.read_table(destino).num_rows == 0
+
+
+def test_the_same_windows_in_any_payload_order_give_the_same_sha(tmp_path: Path):
+    """THE PROPERTY THE SORT IN THE VALIDATOR EXISTS FOR.
+
+    ``gains`` never sorts its rows at the end, so without a canonical window
+    order its bytes were a function of how the caller listed them. My own
+    docstring claimed "the caller walks the windows sorted" while the pass
+    iterated the payload as given, which is the same shape of mistake as a test
+    written from the implementation: the sentence was about what should happen.
+    """
+    import hashlib
+
+    from protea.core.operations.export_transitions_dataset import (
+        ExportTransitionsDatasetPayload,
+    )
+
+    a, b, c = (str(uuid.uuid4()) for _ in range(3))
+    uno = ExportTransitionsDatasetPayload(
+        windows=[c, a, b], cut="x", cut_version="211", tables=["gains"]
+    )
+    otro = ExportTransitionsDatasetPayload(
+        windows=[b, c, a], cut="x", cut_version="211", tables=["gains"]
+    )
+
+    assert uno.windows == otro.windows == sorted([a, b, c])
+
+    # Y los bytes, con la misma poblacion escrita en los dos ordenes.
+    def escribe(orden, destino):
+        cols = G.new_columns()
+        for nombre in orden:
+            e = _Eset()
+            e.id = nombre
+            facts = WindowFacts(
+                eset=e,
+                window=str(nombre),
+                data=_Data(nk={"P1": {"GO:1"}}),
+                version_t="200",
+                version_t_prime="201",
+                horizon_days=31,
+                old_end_snapshot=CORPUS_T,
+                new_end_snapshot=CORPUS_T1,
+            )
+            G.gains_of(facts, ASPECTO, {"P1"}, cols)
+        G.write_table(cols, str(destino))
+        return hashlib.sha256(destino.read_bytes()).hexdigest()
+
+    assert escribe(uno.windows, tmp_path / "a.parquet") == (
+        escribe(otro.windows, tmp_path / "b.parquet")
+    )
