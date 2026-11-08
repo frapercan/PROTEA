@@ -40,6 +40,9 @@ from protea.core.operations.compute_information_accretion import (
 from protea.core.operations.count_backend_parameters import (
     CountBackendParametersOperation,
 )
+from protea.core.operations.declare_corpus_population import (
+    DeclareCorpusPopulationOperation,
+)
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenanceOperation,
 )
@@ -136,6 +139,7 @@ def _register_window_maintenance(registry: OperationRegistry) -> None:
     give it the digest it never had and one to retire it, and both leave a job
     precisely because they change what a row says about itself.
     """
+    registry.register(DeclareCorpusPopulationOperation())
     registry.register(DeclareQuerySetProvenanceOperation())
     registry.register(ExportTransitionsDatasetOperation())
     registry.register(RetireEvaluationSetsOperation())
