@@ -40,6 +40,7 @@ class _Data:
 
 # --------------------------------------------------------------------------- population
 
+
 def test_the_targets_are_the_union_of_the_scored_categories():
     data = _Data(nk={"P1": {"GO:1"}}, lk={"P2": {"GO:2"}}, pk={"P3": {"GO:3"}})
 
@@ -85,6 +86,7 @@ def test_a_single_category_can_be_taken_alone():
 
 
 # --------------------------------------------------------------------------- bytes
+
 
 def test_the_order_is_sorted_rather_than_map_order():
     """A dict's order reflects how the delta happened to be built, so the same
@@ -135,11 +137,26 @@ def test_the_file_ends_with_a_newline():
 
 # --------------------------------------------------------------------------- the operation
 
-def test_the_operation_declares_that_it_writes_no_rows():
+
+def test_the_operation_declares_what_it_writes():
+    """It used to say "writes no rows", and that was the problem.
+
+    The operation wrote the FASTA and a PERSON registered those bytes as a
+    QuerySet through the upload endpoint, typing the provenance into the free
+    text: the window as an id prefix, the job as a word, the sha as a string
+    nothing compares against. So this assertion is inverted on purpose, and
+    this comment is why: a reader who finds "writes no rows" in a later
+    version is looking at a regression, not at a simplification.
+    """
     op = ExportEvaluationTargetsOperation()
 
     assert op.name == "export_evaluation_targets"
-    assert "writes no rows" in op.description.lower()
+    assert "writes no rows" not in op.description.lower()
+    # The three things that make the set attributable are named in the
+    # description, because the description is what a dispatcher reads.
+    assert "QuerySet" in op.description
+    assert "sha256" in op.description
+    assert "window" in op.description
 
 
 def test_the_description_says_which_proteins_are_excluded():
@@ -164,6 +181,7 @@ def test_it_is_registered_so_it_can_be_dispatched():
 
 
 # ------------------------------------------------------- the round trip through LAFA
+
 
 def _lafa_parser():
     """LAFA's own parser, imported from the image source rather than reimplemented.
@@ -246,3 +264,148 @@ def test_wrapping_counts_canonical_residues_not_raw_ones():
     without = format_fasta([("P1", "A" * 60)])
 
     assert with_gap == without
+
+
+# ------------------------------------------------- la declaracion del conjunto
+
+
+class _FakeQuerySet:
+    def __init__(self, qid, name) -> None:
+        self.id, self.name = qid, name
+
+
+class _DeclareSession:
+    """Answers the two statements ``_declare`` issues, and records the adds."""
+
+    def __init__(self, existing=None, ids=None) -> None:
+        self.existing = existing
+        self.ids = ids or {}
+        self.added: list = []
+        self.flushes = 0
+
+    def execute(self, statement):
+        sql = " ".join(str(statement).split())
+        if "FROM query_set" in sql:
+            return _Scalar(self.existing)
+        # _sequence_ids
+        return _Rows([(a, i) for a, i in self.ids.items()])
+
+    def add(self, obj):
+        import uuid as _uuid
+
+        obj.id = _uuid.uuid4()
+        self.added.append(obj)
+
+    def add_all(self, objs):
+        self.added.extend(objs)
+
+    def flush(self):
+        self.flushes += 1
+
+
+class _Scalar:
+    def __init__(self, value) -> None:
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
+class _Rows:
+    def __init__(self, rows) -> None:
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+def _pub(digest="a" * 64):
+    from protea.core.operations.export_evaluation_targets import _Published
+
+    return _Published(
+        uri=f"s3://protea/eval_targets/w/targets-{digest[:12]}.fasta",
+        key="eval_targets/w/targets.fasta",
+        digest=digest,
+        records=[("P1", "MKV"), ("P2", "MKA")],
+        missing=0,
+        altered=0,
+    )
+
+
+def _dec(window):
+    from protea.core.operations.export_evaluation_targets import _Declaration
+
+    return _Declaration(
+        window=window, name="targets-w-aaaa", description="the delta of w", job_id=None
+    )
+
+
+def test_declaring_the_same_population_twice_finds_the_first_row():
+    """One window plus one set of bytes is ONE population.
+
+    Without this a re-export makes a second row for the same delta, which is
+    two names for one thing: exactly what ``dianas-valid-211-227`` and its
+    titular already were.
+    """
+    import uuid
+
+    from protea.core.operations.export_evaluation_targets import _declare
+
+    ya = _FakeQuerySet(uuid.uuid4(), "el-que-ya-estaba")
+    session = _DeclareSession(existing=ya)
+    eventos: list[tuple[str, dict]] = []
+
+    devuelto = _declare(
+        session, _dec(uuid.uuid4()), _pub(), lambda e, _m, f, _l: eventos.append((e, f)) or f
+    )
+
+    assert devuelto == ya.id
+    assert session.added == []
+    assert [e for e, _ in eventos] == ["targets.query_set_reused"]
+
+
+def test_the_entries_point_at_the_sequence_the_protein_already_has():
+    """NOT at a re-hash of the published bytes, and this is the trap it disarms.
+
+    The file carries ``canonical_residues``, so re-hashing those bytes hashes
+    the CANONICALISED sequence; where that differs from the stored one the
+    upload endpoint inserts a SECOND ``sequence`` row and the entries point at
+    sequences with no embedding. Measured on 2026-11-08: 0 of 138.297 entries
+    had sprung it, because the canonicalisation was a no-op for this
+    population. A trap that has not sprung is still armed.
+    """
+    import uuid
+
+    from protea.core.operations.export_evaluation_targets import _declare
+
+    window = uuid.uuid4()
+    session = _DeclareSession(existing=None, ids={"P1": 11, "P2": 22})
+    eventos: list[tuple[str, dict]] = []
+
+    _declare(session, _dec(window), _pub(), lambda e, _m, f, _l: eventos.append((e, f)) or f)
+
+    entradas = [o for o in session.added if hasattr(o, "accession")]
+    assert {(e.accession, e.sequence_id) for e in entradas} == {("P1", 11), ("P2", 22)}
+    declarado = next(o for o in session.added if hasattr(o, "source_kind"))
+    assert declarado.source_kind == "evaluation_targets"
+    assert declarado.evaluation_set_id == window
+    assert declarado.content_sha256 == "a" * 64
+    assert [e for e, _ in eventos] == ["targets.query_set_declared"]
+
+
+def test_a_target_with_no_sequence_row_is_left_out_and_not_guessed():
+    """The entry needs a ``sequence_id``, and inventing one would be a lie.
+
+    ``_report_missing`` already emits these as a warning, so they are visible;
+    what must not happen is an entry pointing at some other protein's
+    sequence.
+    """
+    import uuid
+
+    from protea.core.operations.export_evaluation_targets import _declare
+
+    session = _DeclareSession(existing=None, ids={"P1": 11})
+    _declare(session, _dec(uuid.uuid4()), _pub(), lambda *_a: None)
+
+    entradas = [o for o in session.added if hasattr(o, "accession")]
+    assert [e.accession for e in entradas] == ["P1"]
