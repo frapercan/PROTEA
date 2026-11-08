@@ -228,6 +228,21 @@ the loader draws from ``terms`` and an ancestor it cannot name is a row that
 joins to nothing. On this axis there are none, and the filter is what keeps
 that a fact rather than an assumption.
 
+The closure follows the same relations that closed the gains
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Asked by the laboratory on 2026-11-08, because the model's ontology smoothing
+must use the same graph the truth was closed under or it would smooth over a
+subsumption the truth never used.
+
+It does, and by sharing the function rather than agreeing on a list.
+``_load_children_by_go_id`` filters ``relation_type IN ('is_a', 'part_of')``,
+and it is the function ``compute_evaluation_data_reconciled`` calls on the
+pivot: ``_load_children_by_go_id(session, window.pivot_snapshot_id)``, where
+``cut`` IS that pivot. A test asserts the identity of the function rather than
+re-reading the relation list, for the reason the terms-of-interest test does: a
+second copy of the filter would agree until it did not.
+
 The vectors are verified, never quoted
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

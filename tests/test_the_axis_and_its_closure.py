@@ -25,6 +25,7 @@ sha for bytes nobody here can check.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import uuid
 from pathlib import Path
 
@@ -87,6 +88,29 @@ class TestWhatTheAxisRefuses:
 
         with pytest.raises(ValueError, match="have no aspect"):
             T.axis_of(object(), uuid.uuid4())
+
+    def test_the_closure_follows_THE_SAME_relations_that_closed_the_gains(self):
+        """The laboratory asked, and the answer had to be read rather than assumed.
+
+        The model's ontology smoothing must use the same graph that closed the
+        gains, or it would smooth over a subsumption the truth never used.
+
+        ``_load_children_by_go_id`` filters ``relation_type IN ('is_a',
+        'part_of')`` and is the SAME function ``compute_evaluation_data_reconciled``
+        calls, on the SAME snapshot: ``_load_children_by_go_id(session,
+        window.pivot_snapshot_id)``, and ``cut`` IS that pivot. So this asserts
+        the identity of the function rather than re-reading the relation list,
+        for the reason the terms-of-interest test does: a second copy of the
+        filter would agree until it did not.
+        """
+        from protea.core import _evaluation_graph as G
+        from protea.core import evaluation as ev
+
+        assert T._load_children_by_go_id is G._load_children_by_go_id
+        assert ev._load_children_by_go_id is G._load_children_by_go_id
+        # And the relation list lives in exactly one place.
+        fuente = inspect.getsource(G._load_children_by_go_id)
+        assert "'is_a', 'part_of'" in fuente
 
     def test_the_aspect_comes_from_the_evaluation_s_own_function(self):
         """So a term's namespace here is the one the truth was classified under."""
