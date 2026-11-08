@@ -62,6 +62,31 @@ def test_an_unknown_kind_is_refused() -> None:
         svc.validate_kind("booster")
 
 
+def test_the_term_text_vectors_kind_is_accepted() -> None:
+    """ADR-D56's ``terms`` carries its vectors by reference, so the file needs a home.
+
+    It was NOT one of the six, which is why this line exists: the upload
+    refused with "unknown kind" when the laboratory went to register the
+    axis's text embeddings. None of the others describes them, and putting
+    them under a name that does not fit would make ``kind`` stop answering
+    "what is this", which is the one question it exists for.
+    """
+    from protea.infrastructure.orm.models.embedding.model_weights import WEIGHT_KINDS
+
+    svc.validate_kind("term_text_vectors")
+
+    assert "term_text_vectors" in WEIGHT_KINDS
+    # Added rather than substituted: the six that were there still are.
+    assert {
+        "residue_vocabulary",
+        "learned_encoder",
+        "world_model",
+        "reader",
+        "generator",
+        "method_bundle",
+    } <= set(WEIGHT_KINDS)
+
+
 @pytest.mark.parametrize(
     ("filename", "expected"),
     [
