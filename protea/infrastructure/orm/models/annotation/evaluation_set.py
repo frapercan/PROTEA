@@ -240,11 +240,18 @@ class EvaluationSet(Base):
     #: NOT IN THE IDENTITY ABOVE, and that is a known limitation rather than a
     #: judgement. It belongs there by the project's own rule, since it decides
     #: the delta; it is kept out because putting it there would let every
-    #: deploy mint a duplicate of every window. The consequence to know: a
-    #: window built by superseded code CANNOT be rebuilt in place. The unique
-    #: constraint refuses it as a duplicate, so correcting one means deleting
-    #: the stale row first, which is a destructive act and needs the
-    #: researcher to say so knowing it.
+    #: deploy mint a duplicate of every window.
+    #:
+    #: THE CONSEQUENCE, AND I FIRST WROTE IT WRONG. I said the unique
+    #: constraint "refuses it as a duplicate". It never gets the chance:
+    #: ``_maybe_reuse_existing`` SERVES the existing row before the operation
+    #: reaches an insert. So asking for a window whose identity already exists
+    #: does not give a new one and does not fail either. It gives the old
+    #: truth back, and until 2026-11-08 it did so under an ``info`` event.
+    #: That function now says which revision built what it serves, and rises
+    #: to ``warning`` when the two are known to differ or when the row cannot
+    #: say. Correcting such a row still means deleting it first, which is
+    #: destructive and needs the researcher to say so knowing it.
     #:
     #: ``+dirty`` or ``unknown`` are recorded verbatim when that is the truth.
     #: :func:`protea.core.code_revision.revisions_conflict` is the only right
