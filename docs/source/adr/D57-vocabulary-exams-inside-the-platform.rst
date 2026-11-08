@@ -225,6 +225,16 @@ concept set):
 
 * the vocabulary (``model_weights``, ``RESTRICT``) and the exam, one of
   ``domains``, ``sites``, ``domains_group``, ``sites_group``;
+* ``recipe``, the name of the recipe the vocabulary is a seed of, and
+  ``seed``. **A reference is a recipe with its seeds and not a model**, which is
+  not a preference but a measurement: the first vocabulary is the WEAKEST of the
+  three seeds of its own recipe in domains, 0.604 against 0.630 and 0.631, and a
+  sibling seed meets the lab's D37 rule against it. A comparison that names one
+  model as the reference can therefore pick a weak seed and report a difference
+  that is seed noise, which is the same error this project has already paid for
+  when it compared two banks that differed in six axes at once. So the runs of
+  one recipe group, and a contrast between recipes is a contrast between their
+  seed sets;
 * ``n`` and ``n_source`` for the group exams, null for the other two, so a curve
   over six sizes is six runs and not one row with six numbers;
 * the exam population (``query_set``), the concept set, ``chosen_on``,
@@ -364,8 +374,24 @@ same codes:
 A tolerance chosen by hand would be a number with no population behind it, which
 is the error this project has paid for more than once.
 
-The runs of the lab's D37 and D38 do not serve as the criterion as they stand:
-they include the 50 and they are continuous, not quantised.
+The runs of the lab's D37 and D38 do not serve as the criterion as they stand,
+for three reasons and not two. They include the 50 and they are continuous rather
+than quantised, which are properties of their form. The third is about their
+content: **the vocabulary those runs called the first one was a different
+vocabulary**, a stage-one arm trained on the 5k scale (weights ``4d12a051``) and
+not ``capas20k-todas-global-anidado-k32-ancho8192-semilla0`` (weights
+``9d0f2a2f``, artifact ``06fed75c``). The laboratory found it on 2026-11-08 and
+resampled against the real one from the dumps it already had, without examining
+anything again.
+
+Nothing in the acceptance above moves, because it compares one exam's AP against
+another exam's AP over the SAME codes, and a reference vocabulary is not part of
+that comparison. What does move is every DIFFERENCE those runs reported, and the
+figures a first platform run would be sanity-checked against. Measured on the
+real first vocabulary, with 128 active features and unquantised, on the selection
+set with the 50 included: 0.6044 in domains, 0.1331 in sites and 0.8265 in
+domains in a group. Those are orienting figures and not the acceptance, which
+runs without the 50 and on quantised codes.
 
 What this record does not decide
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
