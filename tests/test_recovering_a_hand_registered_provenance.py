@@ -92,14 +92,18 @@ class _Store:
         return self.objetos[key]
 
 
-def _cand(window=VENTANA, digest=SHA, targets=2, job=None):
+def _cand(window=VENTANA, digest=SHA, targets=2, job=None, nombre="targets", uri=None):
+    clave = targets_key_for(window, nombre, digest)
     return _Candidate(
         job_id=job or str(uuid.uuid4()),
         window=window,
-        output_name="targets",
+        output_name=nombre,
         digest=digest,
         targets=targets,
-        code_revision="beafbd4f2e4141d59fa89e7587ab74355191b955",
+        uri=f"s3://protea/{clave}" if uri is None else uri,
+        # Measured: no export recorded one. The tests that care about the
+        # column say so explicitly instead of relying on this default.
+        code_revision=None,
     )
 
 
@@ -182,7 +186,11 @@ def test_a_verified_set_is_declared_with_what_was_checked(tmp_path):
     assert str(qs.evaluation_set_id) == VENTANA
     assert qs.content_sha256 == SHA
     assert str(qs.job_id) == cand.job_id
-    assert qs.code_revision == cand.code_revision
+    # The uri is the one ``put`` returned, bucket included, and NOT one built
+    # here: a locator whose first path segment reads as the bucket is the shape
+    # the ground truth's second door had.
+    assert qs.artifact_uri == f"s3://protea/{targets_key_for(VENTANA, 'targets', SHA)}"
+    assert qs.artifact_uri.startswith("s3://protea/eval_targets/")
     # La descripcion dice que se COMPROBO, no a que conclusion se llego.
     assert "matched these entries exactly" in qs.description
     assert [e for e, _ in eventos][0] == "declare_query_set_provenance.declared"
@@ -253,3 +261,70 @@ def test_a_description_somebody_wrote_is_kept():
 def test_there_is_no_all_the_undeclared_ones_mode():
     with pytest.raises(ValueError, match="cannot be empty"):
         DeclareQuerySetProvenancePayload(query_set_ids=[])
+
+
+# ------------------------------------------------ lo que el sobremesa encontro
+
+
+def test_a_recorded_uri_that_does_not_end_in_the_derived_key_is_not_a_match():
+    """Two spellings of one location have to agree before either is believed.
+
+    One is derived from what the job declared and the other is what ``put``
+    returned. Neither is parsed, and that is the point: checking that one ends
+    in the other keeps them from drifting apart in silence.
+    """
+    qs = _Qs()
+    store = _Store({targets_key_for(VENTANA, "targets", SHA): FASTA})
+    torcido = _cand(uri="s3://otro-bucket/eval_targets/otra-cosa.fasta")
+    session = _Session(qs, {"P1", "P2"}, [torcido])
+
+    result, _ = _run(session, store)
+
+    assert result["declared"] == 0
+    assert qs.source_kind == "legacy_undeclared"
+    # Y NI SE PIDIO: se descarto antes de traer bytes.
+    assert store.pedidos == []
+
+
+def test_the_surviving_key_answers_when_the_same_bytes_live_under_two():
+    """THE DATA FORCES THIS ORDER, and it is why collapsing happens last.
+
+    Two jobs published the same digest for the same window under different
+    ``output_name`` values, so the same bytes live under two keys. Collapsing
+    before verifying keeps one of them arbitrarily, and if that is the object
+    that no longer exists the set is left undeclared for no reason.
+    """
+    qs = _Qs()
+    primero = _cand(nombre="targets-valid-211-227", job=str(uuid.uuid4()))
+    segundo = _cand(nombre="targets-211-227-por-lado", job=str(uuid.uuid4()))
+    # Solo el SEGUNDO objeto sigue en el almacen.
+    store = _Store({targets_key_for(VENTANA, "targets-211-227-por-lado", SHA): FASTA})
+    session = _Session(qs, {"P1", "P2"}, [primero, segundo])
+
+    result, _ = _run(session, store)
+
+    assert result["declared"] == 1
+    assert str(qs.evaluation_set_id) == VENTANA
+    assert qs.artifact_uri.endswith("targets-211-227-por-lado-" + SHA[:12] + ".fasta")
+    # Los dos se miraron: no se eligio uno antes de comprobar.
+    assert len(store.pedidos) == 2
+
+
+def test_an_unrecoverable_revision_is_reported_and_not_left_quiet():
+    """No export recorded one, measured, so the row must not imply otherwise.
+
+    ``code_revision`` NULL is the honest answer and the event says it was not
+    recovered, because the set guard counts the column's existence and not
+    whether anybody filled it.
+    """
+    qs = _Qs()
+    store = _Store({targets_key_for(VENTANA, "targets", SHA): FASTA})
+    session = _Session(qs, {"P1", "P2"}, [_cand()])
+
+    result, eventos = _run(session, store)
+
+    assert result["declared"] == 1
+    assert qs.code_revision is None
+    campos = next(f for e, f in eventos if e.endswith(".declared"))
+    assert campos["code_revision"] is None
+    assert campos["code_revision_recovered"] is False

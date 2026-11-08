@@ -149,6 +149,9 @@ from protea.core.operations.register_ingested_method import (
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesPayload,
 )
+from protea.core.operations.export_transitions_dataset import (
+    ExportTransitionsDatasetPayload,
+)
 from protea.core.operations.retire_evaluation_sets import (
     RetireEvaluationSetsPayload,
 )
@@ -606,6 +609,24 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         DeclareQuerySetProvenancePayload,
         {"query_set_ids": []},
         ("query_set_ids",),
+    ),
+    (
+        # invariant: el alcance de un conjunto de entrenamiento no se deja a un
+        # valor por defecto. Y el par de versiones dejo de identificar una
+        # ventana -- 62 de 69 llevan mas de una -- asi que se nombran por id.
+        "export_transitions_dataset",
+        ExportTransitionsDatasetPayload,
+        {"windows": [], "cut": "x", "cut_version": "211"},
+        ("windows",),
+    ),
+    (
+        # invariant: pedir una tabla que esta declarada en el ADR y todavia no
+        # se escribe se rehusa, no se salta: un lote al que le falta una tabla
+        # que se pidio no se distingue de uno completo.
+        "export_transitions_dataset",
+        ExportTransitionsDatasetPayload,
+        {"windows": ["w"], "cut": "x", "cut_version": "211", "tables": ["gains"]},
+        ("tables",),
     ),
     (
         # Un borrado cuyo alcance es un predicado es un borrado que nadie leyo

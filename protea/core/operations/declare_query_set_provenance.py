@@ -52,18 +52,39 @@ from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetE
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
 
-#: Every SUCCEEDED export, with the window its payload declared, the digest and
-#: count its event recorded, and the revision its provenance event carried.
-#: Read from the job's own rows and never from a description.
+#: Every SUCCEEDED export, read from the job's own rows and never from a
+#: description: the window its payload declared, and the digest, count and uri
+#: its publication event recorded.
+#:
+#: THE URI IS CARRIED AND NOT BUILT. ``store.put`` returns
+#: ``s3://{bucket}/{key}`` and the event recorded exactly that, so this takes
+#: it and ``_verified`` checks that it ENDS in the derived key. Building one
+#: here would mean guessing the bucket, and a uri whose first path segment
+#: gets read as the bucket is the shape the ground truth's second door had.
+#:
+#: AND THE REVISION IS NOT PICKED. A requeued job has more than one start, so
+#: a ``LIMIT 1`` without an ``ORDER BY`` returns whichever row the plan
+#: reached first, which is the defect the bank's tie order already cost us.
+#: Ordering would still choose one of two disagreeing values, and for a
+#: provenance field "cannot say" beats "the earlier one", so this counts the
+#: DISTINCT values and leaves NULL unless there is exactly one.
+#:
+#: Measured 2026-11-08: NO export job carries that field at all, in any event.
+#: ``provenance.libraries`` holds ``numpy``, ``tokenizers``, ``torch`` and
+#: ``transformers`` and no revision. So all four recoveries get NULL here, and
+#: the operation reports it instead of writing a quiet one.
 _EXPORTS = text("""
     SELECT j.id::text            AS job_id,
            j.payload->>'evaluation_set_id' AS window,
            COALESCE(j.payload->>'output_name', 'targets') AS output_name,
            e.fields->>'sha256'   AS digest,
            (e.fields->>'targets')::int AS targets,
-           (SELECT p.fields->>'code_revision' FROM job_event p
-             WHERE p.job_id = j.id AND p.fields ? 'code_revision' LIMIT 1) AS code_revision
-      FROM job j JOIN job_event e ON e.job_id = j.id AND e.fields ? 'sha256'
+           e.fields->>'uri'      AS uri,
+           (SELECT CASE WHEN count(DISTINCT p.fields->>'code_revision') = 1
+                        THEN min(p.fields->>'code_revision') END
+              FROM job_event p
+             WHERE p.job_id = j.id AND p.fields ? 'code_revision') AS code_revision
+      FROM job j JOIN job_event e ON e.job_id = j.id AND e.event = 'targets.published'
      WHERE j.operation = 'export_evaluation_targets' AND j.status = 'SUCCEEDED'
      ORDER BY j.created_at
 """)
@@ -77,6 +98,8 @@ class _Candidate(NamedTuple):
     output_name: str
     digest: str
     targets: int
+    #: What ``store.put`` returned, taken from the event rather than rebuilt.
+    uri: str | None
     code_revision: str | None
 
 
@@ -146,6 +169,11 @@ def _verified(store: Any, cand: _Candidate, esperadas: set[str]) -> bool:
     parsed out of a stored uri.
     """
     key = targets_key_for(cand.window, cand.output_name, cand.digest)
+    # The recorded uri must END in the derived key. Neither is parsed: one is
+    # derived from what the job declared and the other is what ``put``
+    # returned, and this is what keeps them from drifting apart in silence.
+    if cand.uri is not None and not cand.uri.endswith(key):
+        return False
     try:
         raw = fetch_and_verify(store, key, cand.digest, f"targets of job {cand.job_id[:8]}")
     except (ArtifactMismatch, OSError, ValueError):
@@ -154,7 +182,17 @@ def _verified(store: Any, cand: _Candidate, esperadas: set[str]) -> bool:
 
 
 def _collapse(candidatos: list[_Candidate]) -> list[_Candidate]:
-    """One entry per (window, digest): the same bytes exported twice are one export."""
+    """One entry per (window, digest): the same bytes exported twice are one export.
+
+    IT RUNS AFTER VERIFICATION AND NOT BEFORE, which the data forces. Two jobs
+    published the same digest for the same window under DIFFERENT
+    ``output_name`` values, so the same bytes live under two keys:
+    ``targets-valid-211-227`` and ``targets-211-227-por-lado`` for one window,
+    ``targets-230-235`` and ``dianas-test-230-235`` for another. Collapsing
+    first keeps one key arbitrarily, and if that is the object that no longer
+    exists the set is left undeclared for no reason. Verifying first means any
+    surviving key answers.
+    """
     vistos: dict[tuple[str, str], _Candidate] = {}
     for c in candidatos:
         vistos.setdefault((c.window, c.digest), c)
@@ -217,13 +255,13 @@ class DeclareQuerySetProvenanceOperation(Operation):
         if qs is None:
             raise ValueError(f"QuerySet {raw_id} does not exist, and it is named in the payload")
         esperadas = _accessions_of(session, qs.id)
-        por_cuenta = _collapse([c for c in run.exports if c.targets == len(esperadas)])
-        verificados = [c for c in por_cuenta if _verified(run.store, c, esperadas)]
+        por_cuenta = [c for c in run.exports if c.targets == len(esperadas)]
+        verificados = _collapse([c for c in por_cuenta if _verified(run.store, c, esperadas)])
         veredicto: dict[str, Any] = {
             "query_set_id": raw_id,
             "name": qs.name,
             "entries": len(esperadas),
-            "candidates_by_count": len(por_cuenta),
+            "candidates_by_count": len(_collapse(por_cuenta)),
             "verified": len(verificados),
             "declared": False,
         }
@@ -239,7 +277,16 @@ class DeclareQuerySetProvenanceOperation(Operation):
 
         cand = verificados[0]
         veredicto.update(
-            {"declared": True, "evaluation_set_id": cand.window, "sha256": cand.digest}
+            {
+                "declared": True,
+                "evaluation_set_id": cand.window,
+                "sha256": cand.digest,
+                # Said out loud rather than left as a quiet NULL: no export
+                # recorded a revision, so "which code built it" stays
+                # unanswerable and the row must not imply otherwise.
+                "code_revision": cand.code_revision,
+                "code_revision_recovered": cand.code_revision is not None,
+            }
         )
         if not run.dry:
             self._write(qs, cand, len(esperadas))
@@ -262,7 +309,10 @@ class DeclareQuerySetProvenanceOperation(Operation):
         """
         qs.source_kind = "evaluation_targets"
         qs.evaluation_set_id = uuid.UUID(cand.window)
-        qs.artifact_uri = f"s3://{targets_key_for(cand.window, cand.output_name, cand.digest)}"
+        # The uri the export's own ``put`` returned, already checked to end in
+        # the derived key. Built here it would have to guess the bucket, which
+        # is how a locator starts disagreeing with what it locates.
+        qs.artifact_uri = cand.uri
         qs.content_sha256 = cand.digest
         qs.job_id = uuid.UUID(cand.job_id)
         qs.code_revision = cand.code_revision
