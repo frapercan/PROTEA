@@ -75,6 +75,9 @@ from protea.core.operations.compute_information_accretion import (
 from protea.core.operations.count_backend_parameters import (
     CountBackendParametersPayload,
 )
+from protea.core.operations.declare_query_set_provenance import (
+    DeclareQuerySetProvenancePayload,
+)
 from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
@@ -595,6 +598,16 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ("categories",),
     ),
     (
+        # invariant: una derivacion que nadie nombro es una que nadie comprobo.
+        # Sin modo "todas las que estan sin declarar": esta operacion ESCRIBE
+        # la procedencia, y ahi un alcance por defecto es lo contrario de una
+        # declaracion.
+        "declare_query_set_provenance",
+        DeclareQuerySetProvenancePayload,
+        {"query_set_ids": []},
+        ("query_set_ids",),
+    ),
+    (
         # Un borrado cuyo alcance es un predicado es un borrado que nadie leyo
         # antes de correr. La lista se deriva, se mira y se pasa.
         "retire_evaluation_sets",
@@ -609,7 +622,7 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         "seal_evaluation_groundtruth",
         SealEvaluationGroundtruthPayload,
         {"evaluation_set_ids": []},
-        ("evaluation_set_ids",)
+        ("evaluation_set_ids",),
     ),
     # invariant: a method's prediction set has to say what produced it. The
     # name identifies the arm and is written on every row, and prediction_set
