@@ -298,6 +298,11 @@ def dispatched_result(
             "embedding_config_id": str(target_id),
             "vocabulary_sha256": digest,
         },
+        # Zero and not left NULL: a NULL progress reads as 'no
+        # information' where the truth is 'none done yet', and until
+        # 2026-11-08 it also meant the counter could never advance,
+        # because NULL + 1 is NULL.
+        progress_current=0,
         progress_total=len(messages),
         publish_operations=messages,
         deferred=True,

@@ -331,6 +331,7 @@ def _dispatch_result(
                 "unchanged; only what they retrieve on differs"
             ),
         },
+        progress_current=0,
         progress_total=len(operations),
         publish_operations=operations,
         deferred=True,

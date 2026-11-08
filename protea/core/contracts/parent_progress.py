@@ -73,6 +73,25 @@ def in_flight(now: datetime) -> ColumnElement[bool]:
     )
 
 
+# WHY THE INCREMENT COALESCES, and why the fix is here rather than only in the
+# callers. ``update_parent_progress`` used to increment with
+# ``Job.progress_current + 1``, and in SQL **NULL + 1 is NULL**. A coordinator
+# that dispatched without initialising its counter could therefore never
+# advance it: every child incremented NULL to NULL, the equality that closes
+# the parent was never true, and the job stayed RUNNING for ever over work that
+# had fully landed.
+#
+# Measured on 2026-11-08 on job ``608af098``: both children encoded and stored
+# their shards, 128 and 33 sequences and 537 MB between them, nothing was left
+# uncoded and nothing died, and the parent never closed. Two of the five
+# deferred coordinators were missing ``progress_current=0``, so the guard lives
+# in the mechanism: a rule that depends on the next caller remembering produces
+# a third one that forgets.
+#
+# The reaper does not rescue it either. A deferred coordinator is recognised by
+# its ``job.dispatched`` event and gets a six hour silence window, after which
+# it is marked FAILED: a failed job over verified work, which is the mirror of
+# the job that reports success over work that never landed.
 def update_parent_progress(
     session: Session,
     parent_job_id: UUID,
@@ -95,7 +114,7 @@ def update_parent_progress(
     row = session.execute(
         sa_update(Job)
         .where(Job.id == parent_job_id, _STILL_COUNTS)
-        .values(progress_current=Job.progress_current + 1)
+        .values(progress_current=func.coalesce(Job.progress_current, 0) + 1)
         .returning(Job.progress_current, Job.progress_total, Job.status)
     ).fetchone()
 
