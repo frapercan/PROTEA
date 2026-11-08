@@ -69,6 +69,29 @@ class _Eset:
         self.code_revision = SHA
 
 
+def _facts(eset=None, data=None, version_t="200", version_t_prime="201", dias=30):
+    from protea.core.transitions_export._window_facts import WindowFacts
+
+    e = eset or _Eset()
+    return WindowFacts(
+        eset=e,
+        window=str(e.id),
+        data=data if data is not None else _Data(set()),
+        version_t=version_t,
+        version_t_prime=version_t_prime,
+        horizon_days=dias,
+    )
+
+
+class _Data:
+    """The three scored maps, which is all any table reads from the truth."""
+
+    def __init__(self, terms, proteinas=("P1", "P2")) -> None:
+        self.nk = {p: set(terms) for p in proteinas}
+        self.lk: dict[str, set[str]] = {}
+        self.pk: dict[str, set[str]] = {}
+
+
 def test_the_counters_separate_the_two_directions(monkeypatch):
     """The off-axis part of the TOI is reported, not inferred.
 
@@ -79,9 +102,9 @@ def test_the_counters_separate_the_two_directions(monkeypatch):
     eje = {"GO:1", "GO:2", "GO:3", "GO:4"}
     toi = {"GO:3", "GO:4", "GO:9", "GO:8", "GO:7"}  # tres fuera del eje
     monkeypatch.setattr(W, "_terms_of_interest", lambda _s, _w: toi)
-    monkeypatch.setattr(W, "_refuse_gains_outside_toi", lambda _s, _e, _o: 7)
+    monkeypatch.setattr(W, "_refuse_gains_outside_toi", lambda _f, _o: 7)
 
-    r = W.terms_out(object(), _Eset(), eje)
+    r = W.terms_out(object(), _facts(), eje)
 
     assert r.out == ["GO:1", "GO:2"]
     assert r.axis_size == 4
@@ -192,10 +215,14 @@ class TestWhatTheOperationRefuses:
         assert not hasattr(ExportTransitionsDatasetPayload, "accept_any_revision")
 
 
-def test_the_ten_tables_are_declared_and_one_is_written():
-    """The gap between the two lists is the honest state of this operation."""
+def test_the_ten_tables_are_declared_and_two_are_written():
+    """The gap between the two lists is the honest state of this operation.
+
+    Hard-coded on purpose: a table landing has to come with a line here, so
+    the list cannot drift into claiming more than is written.
+    """
     assert len(TABLES) == 10
-    assert IMPLEMENTED == {"window_terms_out"}
+    assert IMPLEMENTED == {"window_terms_out", "queries"}
     assert IMPLEMENTED <= set(TABLES)
 
 
@@ -223,9 +250,9 @@ def test_a_rule_that_does_not_trim_gets_an_empty_table(monkeypatch):
     eset = _Eset()
     eset.toi_rule = "pivot_terms"
     monkeypatch.setattr(W, "_terms_of_interest", lambda _s, _w: {"GO:3"})
-    monkeypatch.setattr(W, "_refuse_gains_outside_toi", lambda _s, _e, _o: 0)
+    monkeypatch.setattr(W, "_refuse_gains_outside_toi", lambda _f, _o: 0)
 
-    r = W.terms_out(object(), eset, {"GO:1", "GO:2", "GO:3"})
+    r = W.terms_out(object(), _facts(eset=eset), {"GO:1", "GO:2", "GO:3"})
 
     assert r.out == []
     assert r.restricts is False
@@ -264,29 +291,27 @@ class TestTheCrossTableInvariant:
     if the two rules ever differ, the function identity test still passes.
 
     Measured on 2026-11-08 over four windows: 0 violations against 3.346 to
-    5.241 gained terms each.
+    5.241 gained terms each, and then over all 64 in one run: 64 of 64 with
+    their gain read and zero violations.
     """
 
-    class _Data:
-        def __init__(self, terms: set[str]) -> None:
-            self.nk = {"P1": set(terms)}
-            self.lk: dict[str, set[str]] = {}
-            self.pk: dict[str, set[str]] = {}
-
-    def _load(self, monkeypatch, terms: set[str]):
-        import protea.core.evaluation as ev
-
-        monkeypatch.setattr(
-            ev, "load_evaluation_data_for_set", lambda _s, _e: (self._Data(terms), None)
-        )
-
-    def test_a_gain_inside_the_excluded_set_is_refused(self, monkeypatch):
-        self._load(monkeypatch, {"GO:1", "GO:9"})
-
+    def test_a_gain_inside_the_excluded_set_is_refused(self):
         with pytest.raises(ValueError, match="not the same rule"):
-            W._refuse_gains_outside_toi(object(), _Eset(), {"GO:9"})
+            W._refuse_gains_outside_toi(_facts(data=_Data({"GO:1", "GO:9"})), {"GO:9"})
 
-    def test_a_clean_window_reports_its_gained_terms(self, monkeypatch):
-        self._load(monkeypatch, {"GO:1", "GO:2"})
+    def test_a_clean_window_reports_its_gained_terms(self):
+        assert W._refuse_gains_outside_toi(_facts(data=_Data({"GO:1", "GO:2"})), {"GO:9"}) == 2
 
-        assert W._refuse_gains_outside_toi(object(), _Eset(), {"GO:9"}) == 2
+    def test_it_reads_the_truth_from_the_facts_and_loads_nothing(self):
+        """One read per window, which is why the facts object exists.
+
+        Two loads mean two fetches of the same parquet, two digest
+        verifications, and two chances for one bundle's tables to be about
+        slightly different reads.
+        """
+        import inspect
+
+        fuente = inspect.getsource(W._refuse_gains_outside_toi)
+
+        assert "load_evaluation_data_for_set" not in fuente
+        assert "facts.data" in fuente

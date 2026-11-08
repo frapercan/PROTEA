@@ -204,6 +204,48 @@ one would be the step that makes a number stop being attributable: a bundle
 whose leakage rule was evaluated against a release nobody declared cannot say
 what it is leak-free with respect to.
 
+The leakage rule is applied when the bundle is BUILT
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Added 2026-11-08, after it was needed. A window whose ``t'`` is after
+``cut_version`` cannot train a model cut there: its gain is in the model's
+future. The laboratory's loader checks that rule and refuses the whole bundle,
+so this is not the only guard. It is the one that stops the bundle existing.
+
+**It is not hypothetical.** The first run of the writer declared
+``cut_version`` 211 over 64 windows, and **fifteen of them ended after 211**:
+every transition from 211 to 212 through 225 to 226. All fifteen fall INSIDE
+the span of the long validation window, 211 to 227, so their gains are part of
+the truth that window scores. The table that run published holds ontology terms
+rather than annotations, so nothing leaked; but the bundle declared a scope
+that was not its own, and the next table written for those windows would have
+leaked the validation truth into a training set.
+
+So the writer refuses the window, the way it already refuses one on another
+pivot, and for the same reason: a manifest that is wrong about its own scope is
+worse than a run that fails.
+
+Which windows train the model is a separate question and not this record's. The
+constraint this section states is only the bound: for a bundle that must not
+leak into the long validation window, ``cut_version`` has to be at or before
+the release that window opens on.
+
+The window is the join key, and it is the full id
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The loader joins ``window_terms_out`` to ``queries`` on ``window`` as text. If
+one table carried the full ``evaluation_set_id`` and the other a semantic name
+or an eight-character prefix, the negatives restriction would simply not apply
+and **nothing would fail**: no error, no empty result, just a model trained
+against negatives that were never excluded.
+
+So both tables write the full id, and the writer asserts that the two tables
+agree about their window set before publishing either. Both are built from one
+payload in one pass, so the assertion should be trivially true, which is
+exactly why it is cheap to keep for the day one table is written from a
+different list. The loader counts ``windows_with_terms_out`` on its side, so a
+disagreement is visible from both ends.
+
 The truth is exported, never re-derived
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

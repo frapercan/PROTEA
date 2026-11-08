@@ -46,7 +46,7 @@ from protea.core._truth_rules import (
     _terms_of_interest,
     toi_restricts_the_gain,
 )
-from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+from protea.core.transitions_export._window_facts import WindowFacts
 
 #: ``(window, go_id)``, the two columns the laboratory's loader reads.
 SCHEMA = pa.schema([("window", pa.string()), ("go_id", pa.string())])
@@ -87,7 +87,7 @@ def axis_live_terms(session: Session, cut: uuid.UUID) -> set[str]:
     return live
 
 
-def _refuse_gains_outside_toi(session: Session, eset: EvaluationSet, out: set[str]) -> int:
+def _refuse_gains_outside_toi(facts: WindowFacts, out: set[str]) -> int:
     """No term of a gain may be in its own window's ``window_terms_out``.
 
     THE CROSS-TABLE INVARIANT, and the only check that can see in the DATA
@@ -98,24 +98,21 @@ def _refuse_gains_outside_toi(session: Session, eset: EvaluationSet, out: set[st
     gain and the rule that wrote this table are not the same rule, and
     importing the same function would not have told us.
 
-    Read through the one door the truth has, so this cannot drift from the
-    verified read. Measured on 2026-11-08 over four windows: 0 violations
+    The truth comes from ``WindowFacts``, read ONCE per window through the one
+    verified door, so this cannot drift from what the other tables saw. Measured on 2026-11-08 over four windows: 0 violations
     against 3.346 to 5.241 gained terms each.
 
     Returns the number of distinct gained terms, which is also the number that
     makes a silent empty gain visible.
     """
-    from protea.core.evaluation import load_evaluation_data_for_set
-
-    data, _ = load_evaluation_data_for_set(session, eset)
     ganados: set[str] = set()
     for categoria in ("nk", "lk", "pk"):
-        for por_proteina in (getattr(data, categoria, {}) or {}).values():
+        for por_proteina in (getattr(facts.data, categoria, {}) or {}).values():
             ganados |= set(por_proteina)
     violan = sorted(ganados & out)
     if violan:
         raise ValueError(
-            f"window {eset.id} has {len(violan)} gained terms inside its own "
+            f"window {facts.window} has {len(violan)} gained terms inside its own "
             f"window_terms_out: {violan[:5]}. A gained term is not in the old side, "
             "so it can only come from the terms of interest. The rule that trimmed "
             "this gain and the rule writing this table are not the same rule"
@@ -123,7 +120,7 @@ def _refuse_gains_outside_toi(session: Session, eset: EvaluationSet, out: set[st
     return len(ganados)
 
 
-def terms_out(session: Session, eset: EvaluationSet, axis: set[str]) -> WindowTerms:
+def terms_out(session: Session, facts: WindowFacts, axis: set[str]) -> WindowTerms:
     """The axis terms this window's rule leaves out, with its counts.
 
     A WINDOW WHOSE RULE DOES NOT TRIM GETS AN EMPTY TABLE, not the
@@ -133,6 +130,7 @@ def terms_out(session: Session, eset: EvaluationSet, axis: set[str]) -> WindowTe
     loader's negatives that its gain never excluded. The 64 windows of this
     campaign are all ``live_in_both_ends``, so nothing would have shown it.
     """
+    eset = facts.eset
     window = ReconciledWindow(
         eset.old_annotation_set_id,
         eset.new_annotation_set_id,
@@ -153,7 +151,7 @@ def terms_out(session: Session, eset: EvaluationSet, axis: set[str]) -> WindowTe
         toi_size=len(toi),
         toi_off_axis=len(toi - axis),
         restricts=restringe,
-        gain_terms=_refuse_gains_outside_toi(session, eset, fuera),
+        gain_terms=_refuse_gains_outside_toi(facts, fuera),
     )
 
 
