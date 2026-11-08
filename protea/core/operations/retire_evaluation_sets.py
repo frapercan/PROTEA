@@ -49,12 +49,13 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core._artifact_identity import fetch_and_verify
 from protea.core.contracts.operation import (
     EmitFn,
     Operation,
@@ -209,6 +210,63 @@ def _tombstone(eset: EvaluationSet, blob: bytes, archivo: str) -> dict[str, Any]
     }
 
 
+class _Plan(NamedTuple):
+    """What does not change between windows, bundled.
+
+    Same reason as ``_Side`` and ``EvalContext``: a signature that took them
+    loose is a signature somebody can call with six of the seven, and the
+    smell budget counts the seventh.
+    """
+
+    store: Any
+    tablas: list[tuple[str, str]]
+    dry: bool
+
+
+def _archive_one(
+    plan: _Plan,
+    session: Session,
+    eset: EvaluationSet,
+    live: dict[str, str],
+) -> dict[str, Any]:
+    """Check one window and, unless dry, archive its parquet verified.
+
+    THE DRY PASS DOES NOT WRITE. The first version archived unconditionally
+    and the dry run called it, so the pass that "touches nothing" left copies
+    under ``retired/`` beside rows that were still alive. The test meant to
+    cover that checked deletes and commits and NOT writes, so it gave
+    assurance it had not earned.
+
+    THE COPY IS VERIFIED BEFORE ANY ROW GOES. A ``put`` taken on faith may be
+    partial or in another bucket, and the later purge would then destroy the
+    only one. It is re-read through the same door the truth is read by.
+    """
+    from protea.core.evaluation import groundtruth_key_for
+
+    counts = {
+        tabla: session.execute(
+            text(f"SELECT count(*) FROM {tabla} WHERE {col} = :v"), {"v": eset.id}
+        ).scalar_one()
+        for tabla, col in plan.tablas
+    }
+    motivo = _refusal(eset, counts, live)
+    if motivo is not None:
+        raise ValueError(f"refusing to retire {eset.id}: {motivo}")
+
+    key = groundtruth_key_for(eset.id)
+    blob = plan.store.get(key)
+    digest = hashlib.sha256(blob).hexdigest()
+    archivo = f"{RETIRED_PREFIX}/{eset.id}-{digest[:16]}.parquet"
+    if not plan.dry:
+        plan.store.put(archivo, blob)
+        fetch_and_verify(
+            plan.store, archivo, digest, f"the archived copy of {eset.id}"
+        )
+    lapida = _tombstone(eset, blob, archivo)
+    lapida["original_key"] = key
+    return lapida
+
+
 class RetireEvaluationSetsOperation(Operation):
     name = "retire_evaluation_sets"
     description = (
@@ -238,7 +296,9 @@ class RetireEvaluationSetsOperation(Operation):
             {"derived_from_pg_constraint": [f"{t}.{c}" for t, c in tablas]},
             "info",
         )
-        lapidas = self._check_all(session, store, ids, tablas, emit)
+        lapidas = self._check_all(
+            session, ids, _Plan(store=store, tablas=tablas, dry=p.dry_run), emit
+        )
 
         if p.dry_run:
             emit(
@@ -256,20 +316,17 @@ class RetireEvaluationSetsOperation(Operation):
     def _check_all(
         self,
         session: Session,
-        store: Any,
         ids: list[uuid.UUID],
-        tablas: list[tuple[str, str]],
+        plan: _Plan,
         emit: EmitFn,
     ) -> list[dict[str, Any]]:
-        """Lock and check EVERY window, and archive each parquet, before any delete.
+        """Lock and check EVERY window before any delete.
 
         ``FOR UPDATE`` is what makes the check mean anything for the length of
-        the transaction: it takes a row lock that a foreign-key insert into any
-        referring table has to wait for, so a reference cannot appear between
-        the check and the delete.
+        the transaction: it takes a row lock that a foreign-key insert into
+        any referring table has to wait for, so a reference cannot appear
+        between the check and the delete.
         """
-        from protea.core.evaluation import groundtruth_key_for
-
         session.execute(
             text("SELECT id FROM evaluation_set WHERE id = ANY(:v) FOR UPDATE"),
             {"v": [str(i) for i in ids]},
@@ -280,23 +337,15 @@ class RetireEvaluationSetsOperation(Operation):
             eset = session.get(EvaluationSet, vid)
             if eset is None:
                 raise ValueError(f"EvaluationSet {vid} does not exist")
-            counts = {
-                tabla: session.execute(
-                    text(f"SELECT count(*) FROM {tabla} WHERE {col} = :v"), {"v": vid}
-                ).scalar_one()
-                for tabla, col in tablas
-            }
-            motivo = _refusal(eset, counts, live)
-            if motivo is not None:
-                raise ValueError(f"refusing to retire {vid}: {motivo}")
-            key = groundtruth_key_for(vid)
-            blob = store.get(key)
-            archivo = f"{RETIRED_PREFIX}/{vid}-{hashlib.sha256(blob).hexdigest()[:16]}.parquet"
-            store.put(archivo, blob)
-            lapida = _tombstone(eset, blob, archivo)
-            lapida["original_key"] = key
+            lapida = _archive_one(plan, session, eset, live)
             lapidas.append(lapida)
-            emit("retire_evaluation_sets.archived", None, lapida, "info")
+            emit(
+                "retire_evaluation_sets.would_archive" if plan.dry
+                else "retire_evaluation_sets.archived",
+                None,
+                lapida,
+                "info",
+            )
         return lapidas
 
     def _retire(
@@ -323,10 +372,14 @@ class RetireEvaluationSetsOperation(Operation):
             "warning",
         )
 
+        # ``delete`` returns False when the key was not there, and the MinIO
+        # backend also returns False on any S3Error from its stat. Ignoring
+        # the return counted every one of those as purged.
         no_purgados = 0
         for lapida in lapidas:
             try:
-                store.delete(lapida["original_key"])
+                if not store.delete(lapida["original_key"]):
+                    no_purgados += 1
             except Exception:  # noqa: BLE001 -- the copy is already in retired/
                 no_purgados += 1
         result = {

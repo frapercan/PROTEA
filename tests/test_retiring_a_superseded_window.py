@@ -98,25 +98,37 @@ class _Res:
 
 
 class _Store:
-    def __init__(self, falla_en: int | None = None) -> None:
+    def __init__(
+        self,
+        falla_en: int | None = None,
+        copia_mala: bool = False,
+        borra_false: bool = False,
+    ) -> None:
         self.objetos: dict[str, bytes] = {}
+        self.puts: list[str] = []
         self.borrados: list[str] = []
         self.gets = 0
         self.falla_en = falla_en
+        self.copia_mala = copia_mala
+        self.borra_false = borra_false
 
     def get(self, key: str) -> bytes:
         self.gets += 1
         if self.falla_en is not None and self.gets > self.falla_en:
             raise OSError("el almacen se cayo")
+        if key.startswith(RETIRED_PREFIX) and self.copia_mala:
+            # Una escritura parcial: el put dijo que si y los bytes no son.
+            return b"PAR1-a-medias"
         return BLOB
 
     def put(self, key: str, src) -> str:
+        self.puts.append(key)
         self.objetos[key] = src if isinstance(src, bytes) else b""
         return f"s3://protea/{key}"
 
     def delete(self, key: str) -> bool:
         self.borrados.append(key)
-        return True
+        return not self.borra_false
 
 
 def _run(session, store, ids, monkeypatch, dry=False):
@@ -248,14 +260,51 @@ class TestWhatItRefuses:
         assert session.bloqueo
 
 
+class TestTheCopyIsVerifiedAndThePurgeIsRead:
+    def test_a_copy_that_does_not_verify_stops_the_run_before_any_delete(
+        self, monkeypatch
+    ) -> None:
+        # A put taken on faith plus a purge is a lost original: the write may
+        # be partial or in another bucket. The copy is re-read through the
+        # same door the truth is read by, and a mismatch stops everything
+        # BEFORE a single DELETE.
+        from protea.core._artifact_identity import ArtifactMismatch
+
+        e = _Eset()
+        session = _Session([e])
+        with pytest.raises(ArtifactMismatch):
+            _run(session, _Store(copia_mala=True), [str(e.id)], monkeypatch)
+        assert session.borradas == [] and session.commits == 0
+
+    def test_a_delete_that_returns_false_is_counted_as_left_behind(
+        self, monkeypatch
+    ) -> None:
+        # ``delete`` returns False when the key was not there, and the MinIO
+        # backend also returns False on any S3Error from its stat. Ignoring
+        # the return counted every one of those as purged.
+        e = _Eset()
+        res, _ = _run(_Session([e]), _Store(borra_false=True), [str(e.id)], monkeypatch)
+        assert res["originals_left_behind"] == 1
+        assert res["retired"] == 1
+
+
 class TestTheDryRunAndTheTombstone:
     def test_a_dry_run_checks_everything_and_touches_nothing(self, monkeypatch) -> None:
+        # AND "NOTHING" INCLUDES WRITES. The first version archived inside the
+        # check, so the dry pass left a copy under retired/ beside a row that
+        # was still alive. This test checked deletes and commits and NOT
+        # puts, so it passed while the operation did exactly that.
         e = _Eset()
         session, store = _Session([e]), _Store()
-        res, _ = _run(session, store, [str(e.id)], monkeypatch, dry=True)
+        res, eventos = _run(session, store, [str(e.id)], monkeypatch, dry=True)
         assert res == {"would_retire": 1, "asked": 1, "dry_run": True}
         assert session.borradas == [] and session.commits == 0
         assert store.borrados == []
+        assert store.puts == [], "el seco escribio en retired/"
+        assert store.objetos == {}
+        # Y dice la clave que escribiria, con el sha, para poder mirarla.
+        lapida = dict(eventos)["retire_evaluation_sets.would_archive"]
+        assert lapida["archived_key"] == f"{RETIRED_PREFIX}/{e.id}-{SHA16}.parquet"
 
     def test_a_dry_run_still_refuses_what_the_real_run_would(self, monkeypatch) -> None:
         e = _Eset(role="valid")
