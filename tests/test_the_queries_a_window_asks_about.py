@@ -281,6 +281,9 @@ class TestTheTwoTablesAgreeAboutTheirWindows:
 
         return _Computed(
             gains=[],
+            # ``query_state`` is streamed one row group per window, so its list
+            # holds the per-window counts and not its rows.
+            state=[],
             gain_columns=new_columns(),
             terms=[
                 WindowTerms(

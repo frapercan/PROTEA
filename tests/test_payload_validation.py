@@ -638,7 +638,7 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         # que se pidio no se distingue de uno completo.
         "export_transitions_dataset",
         ExportTransitionsDatasetPayload,
-        {"windows": ["w"], "cut": "x", "cut_version": "211", "tables": ["query_state"]},
+        {"windows": ["w"], "cut": "x", "cut_version": "211", "tables": ["neighbour_state"]},
         ("tables",),
     ),
     (

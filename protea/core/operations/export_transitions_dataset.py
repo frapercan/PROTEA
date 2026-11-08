@@ -35,9 +35,12 @@ import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
 
+import pyarrow.parquet as pq
 from pydantic import field_validator, model_validator
 from sqlalchemy.orm import Session
 
+from protea.core._truth_remap import SideFrame
+from protea.core._truth_rules import _frame_of
 from protea.core.code_revision import code_revision, is_identifying, revisions_conflict
 from protea.core.contracts.operation import (
     EmitFn,
@@ -51,6 +54,8 @@ from protea.core.transitions_export._gains import WindowGains, gains_of, new_col
 from protea.core.transitions_export._gains import write_table as write_gains
 from protea.core.transitions_export._queries import WindowQueries, queries_of
 from protea.core.transitions_export._queries import write_table as write_queries
+from protea.core.transitions_export._query_state import WindowState, state_of
+from protea.core.transitions_export._query_state import Writer as StateWriter
 from protea.core.transitions_export._residue_refs import refs_of
 from protea.core.transitions_export._residue_refs import write_table as write_refs
 from protea.core.transitions_export._terms import (
@@ -93,7 +98,15 @@ TABLES: tuple[str, ...] = (
 #: the refusal can say "declared but not written yet" instead of "unknown",
 #: which are different answers for whoever reads the error.
 IMPLEMENTED: frozenset[str] = frozenset(
-    {"window_terms_out", "queries", "terms", "term_ancestors", "residue_refs", "gains"}
+    {
+        "window_terms_out",
+        "queries",
+        "gains",
+        "query_state",
+        "terms",
+        "term_ancestors",
+        "residue_refs",
+    }
 )
 
 #: Tables that depend on NO window, so a run asking only for these needs no
@@ -112,7 +125,7 @@ _NEEDS_AXIS: frozenset[str] = frozenset({"window_terms_out", "terms", "term_ance
 #: it worth computing once. ``gains`` does not write ``queries`` and still
 #: needs its population: a gain for a protein ``queries`` excludes would be a
 #: gain for a query the loader does not know.
-_NEEDS_QUERIES: frozenset[str] = frozenset({"queries", "gains"})
+_NEEDS_QUERIES: frozenset[str] = frozenset({"queries", "gains", "query_state"})
 
 
 class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
@@ -246,6 +259,22 @@ class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
         return value
 
 
+def _publish_one(
+    store: Any, p: ExportTransitionsDatasetPayload, tmp: str, nombre: str
+) -> dict[str, Any]:
+    """Hash and publish a file the pass already wrote, without rewriting it."""
+    local = Path(tmp) / f"{nombre}.parquet"
+    raw = local.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    key = f"transitions/{p.output_name}/{p.cut[:8]}/{nombre}-{digest[:12]}.parquet"
+    return {
+        "uri": store.put(key, raw),
+        "key": key,
+        "sha256": digest,
+        "rows": pq.ParquetFile(str(local)).metadata.num_rows,
+    }
+
+
 def _write_one(
     store: Any, p: ExportTransitionsDatasetPayload, tmp: str, nombre: str, escribir: Any
 ) -> dict[str, Any]:
@@ -303,6 +332,26 @@ def _refuse_unstamped(eset: EvaluationSet, accepted: list[str], running: str) ->
         )
 
 
+class _Run(NamedTuple):
+    """What does not change between windows, bundled.
+
+    Same reason as the retirement's ``_Plan``: a signature that took them
+    loose is one somebody can call with five of the six, and ``query_state``
+    added a sixth -- its writer, which has to outlive the loop because the
+    table is streamed one row group per window rather than accumulated.
+    """
+
+    p: ExportTransitionsDatasetPayload
+    axis: Axis | None
+    running: str
+    state: Any
+    #: The AXIS's own frame: its live ids and its synonym map, read once from
+    #: the snapshot ``cut`` names. ``query_state`` rewrites every card into
+    #: this id space BEFORE collapsing equal cards, so the two have to come
+    #: from one snapshot, which is what :class:`SideFrame` is for.
+    frame: SideFrame | None
+
+
 class _Bundle(NamedTuple):
     """What one run computed: the per-window lists, and the axis if it read one."""
 
@@ -317,6 +366,7 @@ class _Computed(NamedTuple):
     terms: list[WindowTerms]
     queries: list[WindowQueries]
     gains: list[WindowGains]
+    state: list[WindowState]
     #: The six parallel lists ``gains`` accumulates into. Built once and
     #: appended per window, because a tuple per row over 9,6 million rows is
     #: the one avoidable cost in that table.
@@ -388,6 +438,66 @@ def _emit_gains(g: WindowGains, emit: EmitFn) -> WindowGains:
     return g
 
 
+def _streamed(
+    session: Session, p: ExportTransitionsDatasetPayload, tmp: str
+) -> tuple[Any, SideFrame | None]:
+    """The streamed writer and the axis frame, which only ``query_state`` needs.
+
+    THE TWO ARE RETURNED TOGETHER so that "a writer with no frame" cannot be
+    built: every card has to be rewritten into the axis before equal cards are
+    collapsed, and a writer that ran without the frame would publish a table
+    whose ``go_id`` lives in each snapshot's own id space, which the loader
+    joins to nothing and nothing would raise.
+
+    The frame comes from the SAME snapshot ``axis_of`` read, and ``_frame_of``
+    refuses one with no alias rows: without the map, "rewritten into the axis"
+    would quietly mean "not rewritten".
+    """
+    if "query_state" not in p.tables:
+        return None, None
+    return (
+        StateWriter(str(Path(tmp) / "query_state.parquet")),
+        _frame_of(session, uuid.UUID(p.cut)),
+    )
+
+
+def _emit_state(st: WindowState, emit: EmitFn) -> WindowState:
+    emit(
+        "transitions.query_state",
+        f"{st.window[:8]}: {st.rows} cards, {st.collapse.gaf} collapsed by the GAF "
+        f"and {st.collapse.remap} by the remap, {st.discards.off_axis} off the axis",
+        {
+            "window": st.window,
+            "state_rows": st.rows,
+            **{f"state_{k.replace(chr(39), '_prime')}": v for k, v in st.by_moment.items()},
+            "distinct_terms": st.distinct_terms,
+            # Per moment, per code, because the point of this table is that it
+            # is NOT the truth: a moment with thirteen codes or fewer is
+            # carrying only the experimental ones and somebody narrowed it.
+            **{f"evidence_{k.replace(chr(39), '_prime')}": v for k, v in st.evidence.items()},
+            # The two collapses APART. One number for both would print the same
+            # digit for a bundle whose GAF duplication changed and one whose
+            # synonym map changed.
+            "collapsed_by_gaf": st.collapse.gaf,
+            "collapsed_by_remap": st.collapse.remap,
+            # Expected to be zero while the axis is release 211's own corpus
+            # ontology. It is the first thing to read before trusting a bundle.
+            "discarded_off_axis": st.discards.off_axis,
+            "remapped_across_aspects": st.discards.crossed_aspect,
+            # The column is NULLABLE in the schema, so this branch is reachable
+            # even though the live data does not take it. Dropped rather than
+            # written: the model reads an evidence CLASS and an empty class is
+            # not one.
+            "discarded_without_evidence": st.discards.no_evidence,
+            # A negation is "contains NOT", because the qualifier is a relation
+            # and the regime changes at release 202.
+            "negated_rows": st.negated,
+        },
+        "info",
+    )
+    return st
+
+
 def _refuse_disagreeing_windows(
     hecho: _Computed, p: ExportTransitionsDatasetPayload, emit: EmitFn
 ) -> None:
@@ -457,6 +567,10 @@ def _write_all(
         tablas["term_ancestors"] = _write_one(
             store, p, tmp, "term_ancestors", lambda path: write_ancestors(axis, path)
         )
+    if "query_state" in p.tables:
+        # Already written row group by row group during the pass; here it is
+        # only hashed and published, like any other file.
+        tablas["query_state"] = _publish_one(store, p, tmp, "query_state")
     if "residue_refs" in p.tables and lote.refs is not None:
         refs = lote.refs
         tablas["residue_refs"] = _write_one(
@@ -517,20 +631,24 @@ class ExportTransitionsDatasetOperation(Operation):
                 },
                 "info",
             )
-        hecho = self._per_window(session, p, axis, running, emit)
-        _refuse_disagreeing_windows(hecho, p, emit)
-        return self._publish(p, _Bundle(hecho=hecho, axis=axis, refs=refs), running, payload, emit)
+        # The temp dir spans the pass, because ``query_state`` is written
+        # DURING it: at 44,7 million rows the alternative is holding every
+        # column until the end. The file only becomes an artifact at the
+        # ``put``, so a pass that fails halfway publishes nothing.
+        with tempfile.TemporaryDirectory(prefix="transitions-") as tmp:
+            estado, marco = _streamed(session, p, tmp)
+            run = _Run(p=p, axis=axis, running=running, state=estado, frame=marco)
+            hecho = self._per_window(session, run, emit)
+            _refuse_disagreeing_windows(hecho, p, emit)
+            if estado is not None:
+                estado.close()
+            lote = _Bundle(hecho=hecho, axis=axis, refs=refs)
+            return self._publish(run, lote, payload, emit, tmp)
 
-    def _per_window(
-        self,
-        session: Session,
-        p: ExportTransitionsDatasetPayload,
-        axis: Axis | None,
-        running: str,
-        emit: EmitFn,
-    ) -> _Computed:
-        """Check and compute every window before anything is written."""
-        hecho = _Computed(terms=[], queries=[], gains=[], gain_columns=new_columns())
+    def _per_window(self, session: Session, run: _Run, emit: EmitFn) -> _Computed:
+        """Check and compute every window, streaming the big table as it goes."""
+        p, axis, running = run.p, run.axis, run.running
+        hecho = _Computed(terms=[], queries=[], gains=[], state=[], gain_columns=new_columns())
         for raw in p.windows:
             eset = _window_or_refuse(session, raw)
             _refuse_wrong_pivot(eset, p.cut, f"window {raw}")
@@ -547,6 +665,18 @@ class ExportTransitionsDatasetOperation(Operation):
             q = queries_of(session, facts, p.categories) if _NEEDS_QUERIES & set(p.tables) else None
             if q is not None and "queries" in p.tables:
                 hecho.queries.append(_emit_queries(q, facts, emit))
+            if q is not None and run.state is not None:
+                if run.frame is None:
+                    raise ValueError(
+                        "query_state is in this run and the axis frame is not, so every "
+                        "card would be written in its own snapshot's id space. This "
+                        "cannot happen through the payload and is a refusal rather than "
+                        "a skip, because a skip here publishes a table the loader joins "
+                        "to nothing"
+                    )
+                tabla, st = state_of(session, facts, [r.query for r in q.rows], run.frame)
+                run.state.write(tabla)
+                hecho.state.append(_emit_state(st, emit))
             if q is not None and "gains" in p.tables and axis is not None:
                 poblacion = {r.query for r in q.rows}
                 hecho.gains.append(
@@ -556,13 +686,19 @@ class ExportTransitionsDatasetOperation(Operation):
 
     def _publish(
         self,
-        p: ExportTransitionsDatasetPayload,
+        run: _Run,
         lote: _Bundle,
-        running: str,
         payload: dict[str, Any],
         emit: EmitFn,
+        tmp: str,
     ) -> OperationResult:
-        """Write every requested table, publish it, and report its digest."""
+        """Write every requested table, publish it, and report its digest.
+
+        Takes the ``_Run`` rather than its payload and its revision loose,
+        which is the same reason that tuple exists: seven arguments is where
+        the next field gets passed in the wrong position.
+        """
+        p, running = run.p, run.running
         store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
         # Verified BEFORE anything is written: those two columns are the reason
         # the vectors are carried by reference at all, and a sha nobody checked
@@ -572,8 +708,7 @@ class ExportTransitionsDatasetOperation(Operation):
             if "terms" in p.tables and p.term_vectors_key and p.term_vectors_sha256
             else None
         )
-        with tempfile.TemporaryDirectory(prefix="transitions-") as tmp:
-            tablas = _write_all(store, p, tmp, lote, vector_uri)
+        tablas = _write_all(store, p, tmp, lote, vector_uri)
         result = {
             "tables": tablas,
             "windows": len(p.windows),
