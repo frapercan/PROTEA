@@ -139,9 +139,8 @@ class EvaluationData:
     projection: dict[str, int] | None = None
     #: Proteins whose ENTIRE F side the binding rule emptied, per side: some
     #: 26,000 a window, computed on every build and recorded by nothing until
-    #: this field. SEPARATE from ``projection`` because that one's ``None``
-    #: claims "no profile rule ran", and the binding rule runs on every
-    #: window. Build time only, like ``projection``.
+    #: this field. SEPARATE from ``projection``, whose ``None`` claims "no
+    #: profile rule ran" while this rule runs on every window.
     binding_dropped: dict[str, int] | None = None
 
     @property
@@ -709,9 +708,8 @@ def _build_report(sides: _BothSides) -> dict[str, int] | None:
     numbers only mean something next to the remapping's. ``None`` when
     neither rule ran, which is the default profile and every stored window.
 
-    ``*_aspect_crossed`` is OURS and has no counterpart in the lab's. Which
-    snapshot each side's map was read from is NOT in here: that is the
-    window's own ``*_native_snapshot_id``, by construction.
+    ``*_aspect_crossed`` is OURS, with no counterpart in the lab's. Which
+    snapshot each map read is the window's own ``*_native_snapshot_id``.
     """
     report: dict[str, int] = {}
     if sides.projection is not None:
@@ -781,6 +779,7 @@ from protea.core._evaluation_groundtruth import (  # noqa: E402
     deserialize_evaluation_data_from_bytes,
     groundtruth_key_for,
     load_evaluation_data_for_set,
+    read_groundtruth,
     serialize_evaluation_data_to_parquet,
 )
 
@@ -796,5 +795,6 @@ __all__ = [
     "deserialize_evaluation_data_from_bytes",
     "groundtruth_key_for",
     "load_evaluation_data_for_set",
+    "read_groundtruth",
     "serialize_evaluation_data_to_parquet",
 ]

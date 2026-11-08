@@ -176,6 +176,34 @@ def _terms_of_interest(session: Session, window: ReconciledWindow) -> set[str]:
     classified: a protein whose only gain is a term obsolete by t1 is not a
     target, and classifying first would have made it one. On 211 -> 227 this
     is 39,028 terms against the pivot's 47,328.
+
+    IT ASKS FOR THE ID AND NOT FOR THE IDENTITY, AND THAT IS A DECLARED
+    LIMITATION. The two live sets are compared as ids, so a term GO renamed
+    between the eras fails the test under one spelling while its identity was
+    alive in both. After the anchoring fix of 2026-11-07 the gain is written
+    in the ids of the graph that CLOSES each side, and this rule still reads
+    the ids of the eras that LOADED each corpus, so a remapped destination can
+    be trimmed out of the gain and nothing counts it.
+
+    MEASURED, 2026-11-08, on the window furthest from the pivot: 156 -> 157,
+    six years out from ``releases/2022-07-01``. A version by identity (each
+    era's live set passed through the closing graph's map, then intersected)
+    would recover **3 terms over 11 proteins**, out of a total trim of 109
+    terms over 928. Since that is the furthest window, the rest are that order
+    or smaller.
+
+    SO IT IS DECLARED AND NOT CHANGED. And the other direction was checked
+    too, because "a bigger set" was the wrong way to think about it: the
+    identity version is SMALLER, 39,575 against 42,819, and the 3,286 ids it
+    drops cannot appear in any gain at all. Verified on the same window: of
+    the 6,796 distinct ids across NK, LK and PK, **zero** are absent from the
+    pivot's live set, because the map leaves a live id alone and discards what
+    the closing graph cannot name. So the identity version is strictly better
+    exactly where it matters and the improvement is those 3 terms, which is
+    not worth re-generating a campaign for.
+
+    Found by the desktop session reading the anchoring fix, and its sentence
+    is the one to quote.
     """
     old_snapshot, new_snapshot = _window_end_snapshots(session, window)
     old_live, _ = _live_terms_with_aspect(session, old_snapshot)
