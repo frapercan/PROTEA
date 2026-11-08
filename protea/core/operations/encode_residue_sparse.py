@@ -331,6 +331,11 @@ def _dispatch_result(
                 "unchanged; only what they retrieve on differs"
             ),
         },
+        # Zero and not left NULL: a NULL progress reads as 'no
+        # information' where the truth is 'none done yet', and until
+        # 2026-11-08 it also meant the counter could never advance,
+        # because NULL + 1 is NULL.
+        progress_current=0,
         progress_total=len(operations),
         publish_operations=operations,
         deferred=True,

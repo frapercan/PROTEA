@@ -95,7 +95,18 @@ def update_parent_progress(
     row = session.execute(
         sa_update(Job)
         .where(Job.id == parent_job_id, _STILL_COUNTS)
-        .values(progress_current=Job.progress_current + 1)
+        # ``coalesce`` AND NOT ``Job.progress_current + 1``, which is the defect
+        # this line is fixing. In SQL ``NULL + 1`` is NULL, so a coordinator
+        # that dispatched without initialising its counter could never advance
+        # it: every child incremented NULL to NULL, the comparison below
+        # returned early, and the parent stayed RUNNING for ever over work that
+        # had fully landed. Measured on 2026-11-08 on job 608af098, where both
+        # children stored their shards and the parent never closed.
+        #
+        # Fixed HERE and not only in the callers on purpose. Two of the five
+        # deferred coordinators were missing ``progress_current=0``, and a rule
+        # that depends on the next one remembering produces a third.
+        .values(progress_current=func.coalesce(Job.progress_current, 0) + 1)
         .returning(Job.progress_current, Job.progress_total, Job.status)
     ).fetchone()
 
