@@ -49,6 +49,8 @@ from protea.core.operations.export_evaluation_targets import SCORED_CATEGORIES
 from protea.core.training_dump._window_choice import _refuse_wrong_pivot, window_identity
 from protea.core.transitions_export._queries import WindowQueries, queries_of
 from protea.core.transitions_export._queries import write_table as write_queries
+from protea.core.transitions_export._residue_refs import refs_of
+from protea.core.transitions_export._residue_refs import write_table as write_refs
 from protea.core.transitions_export._terms import (
     Axis,
     axis_of,
@@ -88,12 +90,16 @@ TABLES: tuple[str, ...] = (
 #: What this revision can actually write. Named separately from ``TABLES`` so
 #: the refusal can say "declared but not written yet" instead of "unknown",
 #: which are different answers for whoever reads the error.
-IMPLEMENTED: frozenset[str] = frozenset({"window_terms_out", "queries", "terms", "term_ancestors"})
+IMPLEMENTED: frozenset[str] = frozenset(
+    {"window_terms_out", "queries", "terms", "term_ancestors", "residue_refs"}
+)
 
-#: Tables keyed by ``cut`` alone. They depend on no window, so a run asking
-#: only for these needs no window list: the axis IS their scope, and demanding
-#: ids would be asking for a scope the table does not use.
-AXIS_ONLY: frozenset[str] = frozenset({"terms", "term_ancestors"})
+#: Tables that depend on NO window, so a run asking only for these needs no
+#: window list: demanding ids would be asking for a scope the table does not
+#: use. ``terms`` and ``term_ancestors`` are keyed by the axis;
+#: ``residue_refs`` by an embedding config, and it covers the WHOLE bank, which
+#: is a superset of any selection a bundle could make.
+WINDOWLESS: frozenset[str] = frozenset({"terms", "term_ancestors", "residue_refs"})
 
 #: Tables that need the axis read. ``window_terms_out`` is keyed by a window
 #: and still needs it, which is why this is not the complement of
@@ -113,6 +119,23 @@ class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
     accept_revisions: list[str] = []
     term_vectors_key: str | None = None
     term_vectors_sha256: str | None = None
+    #: The config whose per-residue CODES index ``residue_refs`` and, later,
+    #: ``feature_tokens``: the VOCABULARY config, not the model one it was
+    #: derived from.
+    #:
+    #: NOT called ``embedding_config_id``, which is what it was called for one
+    #: commit. There are two configs in this dataset and neither derives from
+    #: the other: the codes config indexes the reference tables, and the kNN
+    #: config gives the neighbourhood. One field named for both invites
+    #: putting one where the other goes, which is the ``cut`` and
+    #: ``cut_version`` mistake again. ``knn_config_id`` arrives with
+    #: ``neighbourhood`` and not before, because a field that does nothing
+    #: lies about what the run declared.
+    #:
+    #: The COLUMN inside ``residue_refs`` stays ``embedding_config_id``,
+    #: because that is the laboratory loader's contract and inside one table
+    #: there is only one config to mean.
+    codes_config_id: str | None = None
 
     @field_validator("windows")
     @classmethod
@@ -141,11 +164,19 @@ class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
         checked. A sha from a message would be a locator for bytes nobody
         verified.
         """
-        por_ventana = sorted(set(self.tables) - AXIS_ONLY)
+        por_ventana = sorted(set(self.tables) - WINDOWLESS)
         if por_ventana and not self.windows:
             raise ValueError(
                 f"tables {por_ventana} are keyed by a window, so windows cannot be "
                 "empty and there is no 'all' mode for it"
+            )
+        if "residue_refs" in self.tables and not self.codes_config_id:
+            raise ValueError(
+                "residue_refs is keyed by an embedding config, so "
+                "codes_config_id has to be named. And it is the VOCABULARY "
+                "config that keys those rows, not the model config the vocabulary "
+                "was derived from: the second has zero rows, and an empty "
+                "residue_refs is indistinguishable from a bank with no codes"
             )
         if "terms" in self.tables and not (self.term_vectors_key and self.term_vectors_sha256):
             raise ValueError(
@@ -257,6 +288,7 @@ class _Bundle(NamedTuple):
 
     hecho: _Computed
     axis: Axis | None
+    refs: Any
 
 
 class _Computed(NamedTuple):
@@ -377,9 +409,29 @@ class ExportTransitionsDatasetOperation(Operation):
                 "info",
             )
         vivos = set(axis.aspect) if axis is not None else set()
+        refs = (
+            refs_of(session, uuid.UUID(p.codes_config_id))
+            if "residue_refs" in p.tables and p.codes_config_id
+            else None
+        )
+        if refs is not None:
+            emit(
+                "transitions.residue_refs",
+                f"{len(refs.rows)} references over {refs.shards} shards",
+                {
+                    "embedding_config_id": refs.embedding_config_id,
+                    # Emitted because the id that KEYS these rows is not the one
+                    # they are named after: the ankh config the vocabulary was
+                    # derived from has zero rows.
+                    "model_name": refs.model_name,
+                    "references": len(refs.rows),
+                    "shards": refs.shards,
+                },
+                "info",
+            )
         hecho = self._per_window(session, p, vivos, running, emit)
         _refuse_disagreeing_windows(hecho, p, emit)
-        return self._publish(p, _Bundle(hecho=hecho, axis=axis), running, payload, emit)
+        return self._publish(p, _Bundle(hecho=hecho, axis=axis, refs=refs), running, payload, emit)
 
     def _per_window(
         self,
@@ -445,6 +497,11 @@ class ExportTransitionsDatasetOperation(Operation):
             if "term_ancestors" in p.tables and axis is not None:
                 tablas["term_ancestors"] = _write_one(
                     store, p, tmp, "term_ancestors", lambda path: write_ancestors(axis, path)
+                )
+            if "residue_refs" in p.tables and lote.refs is not None:
+                refs = lote.refs
+                tablas["residue_refs"] = _write_one(
+                    store, p, tmp, "residue_refs", lambda path: write_refs(refs, path)
                 )
         result = {
             "tables": tablas,

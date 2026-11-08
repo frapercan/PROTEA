@@ -221,14 +221,20 @@ class TestWhatTheOperationRefuses:
         assert not hasattr(ExportTransitionsDatasetPayload, "accept_any_revision")
 
 
-def test_the_ten_tables_are_declared_and_four_are_written():
+def test_the_ten_tables_are_declared_and_five_are_written():
     """The gap between the two lists is the honest state of this operation.
 
     Hard-coded on purpose: a table landing has to come with a line here, so
     the list cannot drift into claiming more than is written.
     """
     assert len(TABLES) == 10
-    assert IMPLEMENTED == {"window_terms_out", "queries", "terms", "term_ancestors"}
+    assert IMPLEMENTED == {
+        "window_terms_out",
+        "queries",
+        "terms",
+        "term_ancestors",
+        "residue_refs",
+    }
     assert IMPLEMENTED <= set(TABLES)
 
 
