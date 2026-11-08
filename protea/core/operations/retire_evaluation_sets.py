@@ -1,36 +1,53 @@
-"""Retire a window of a superseded frame, leaving a job behind.
+"""Retire a window of a superseded frame: archive it, then delete, leaving a job.
 
-WHY AN OPERATION AND NOT A SCRIPT, which is the whole point of this file. A
-raw ``DELETE`` against the database is how 124 campaign rows disappear with
-nothing recording that they did, who asked, or what they were. This project's
-rule is that every operation goes through ``POST /v1/jobs``, and the reason
-given for it is that a direct ``execute()`` writes rows and leaves no job. A
-DELETE is the case where that matters most: afterwards there is no row left to
-ask.
+WHY AN OPERATION AND NOT A SCRIPT. A raw ``DELETE`` is how 124 campaign rows
+disappear with nothing recording that they did, who asked, or what they were.
+The project's rule is that every operation goes through ``POST /v1/jobs``
+because a direct ``execute()`` leaves no job, and a delete is the case where
+that matters most: afterwards there is no row left to ask.
 
-WHAT IT REFUSES, structurally rather than by care:
+THE ORDER IS ARCHIVE, DELETE, PURGE, and the first version got it wrong. It
+deleted each row and each file inside the loop, with the commit left to the
+worker at the end. A failure halfway -- a reference appearing between the
+check and the delete, a dropped connection, a killed job -- rolled the rows
+back and left the earlier parquets gone: rows pointing at nothing, which is
+the exact thing its own docstring claimed to avoid. The test that was supposed
+to cover it simulated a STORE failure, not a transaction failure, so it gave
+assurance it had not earned. The desktop session found it by reading.
+
+So now: every parquet is copied to ``retired/`` FIRST, which is additive and
+destroys nothing; then the rows go in one transaction that is committed; only
+then are the originals purged. A failure at any point leaves archives (
+harmless), rows (recoverable) and originals (intact), in that order of
+appearance.
+
+AND ARCHIVING RATHER THAN DELETING IS THE POINT. These truths cannot be
+rebuilt the same way: they were computed in October by code that has since
+changed, under a frame the campaign has left. Deleting them is irreversible
+and archiving them costs a few MB each. Purging ``retired/`` is a separate
+decision for a later day, and it will have the tombstones to decide with.
+
+WHAT IT REFUSES, structurally:
 
 * a window carrying a ``window_role``. That is the holdout and the two
-  declared bands, and ``cb46395a`` has ZERO results in PROTEA because its
-  single declared look was spent in the laboratory, so a "no results" filter
-  would have swept it up. The role is the protection, not the result count;
-* a window any ``evaluation_result``, ``exploration``,
-  ``reference_reproduction`` or ``reranker_model`` points at. Those are
-  evidence, and evidence is not retired;
-* a window of the LIVE frame. This operation exists for the superseded one,
-  and naming a campaign window here is far more likely to be a mistake than
-  an intention.
+  declared bands, and ``holdout-227-230`` has ZERO results in PROTEA because
+  its single declared look was spent in the laboratory. A "no results" filter
+  would have swept it up, and I wrote such a filter once;
+* a window of the LIVE frame;
+* a window anything points at. THE REFERRERS ARE DERIVED FROM
+  ``pg_constraint`` AT RUN TIME and never from a list in this file: the first
+  version hard-coded four tables, and ``evaluation_result`` carries
+  ``ON DELETE CASCADE``, so a future table with CASCADE that nobody added to
+  the list would have been emptied in silence by the delete;
+* a window named in the payload of a job that is QUEUED or RUNNING.
 
-Each refusal names the window and the reason, and the run stops: a partial
-retirement of a named list leaves nobody able to say which half went.
-
-THE ARTEFACT GOES WITH THE ROW. A parquet whose row is gone is a file nobody
-can attribute, and the store has no other index. It is deleted after the row,
-so a failure leaves an orphan file rather than a row pointing at nothing.
+``dry_run`` does every check and emits exactly what it would retire, touching
+nothing. Run that first, read it, then run the real one with the same ids.
 """
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Any
 
@@ -52,27 +69,36 @@ from protea.infrastructure.storage import get_artifact_store
 #: The frame this operation is for. Anything else is refused.
 SUPERSEDED = ("as_closed", "pivot_terms", "any")
 
-#: Everything that can point at a window. Each one means evidence.
-REFERRERS = (
-    "evaluation_result",
-    "exploration",
-    "reference_reproduction",
-    "reranker_model",
-)
+#: Where an archived parquet lands. The sha is in the name so a tombstone and
+#: an object can be matched without opening either.
+RETIRED_PREFIX = "retired"
+
+_REFERRERS_SQL = """
+SELECT DISTINCT c.conrelid::regclass::text AS tabla, a.attname AS columna
+FROM pg_constraint c
+JOIN unnest(c.conkey) AS k(attnum) ON true
+JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+WHERE c.contype = 'f' AND c.confrelid = 'evaluation_set'::regclass
+ORDER BY 1, 2
+"""
 
 
 class RetireEvaluationSetsPayload(ProteaPayload, frozen=True):
     """Which windows to retire. Named one by one, never a predicate."""
 
     evaluation_set_ids: list[str]
+    #: Do every check and emit what would be retired, touching nothing.
+    dry_run: bool = False
 
     @field_validator("evaluation_set_ids")
     @classmethod
-    def _at_least_one(cls, value: list[str]) -> list[str]:
-        """Refuse an empty list rather than read it as "everything matching".
+    def _named_and_distinct(cls, value: list[str]) -> list[str]:
+        """Refuse an empty list, and refuse repeats.
 
-        A delete whose scope is a predicate is a delete whose scope nobody
-        read. The caller derives the list, looks at it, and passes it.
+        Empty, because a delete whose scope is a predicate is a delete whose
+        scope nobody read. Repeats, because the same id twice passed the check
+        twice, deleted zero rows on the second pass and counted a FALSE
+        orphan: the run would report damage it had not done.
         """
         if not value:
             raise ValueError(
@@ -80,42 +106,118 @@ class RetireEvaluationSetsPayload(ProteaPayload, frozen=True):
                 "windows it is given and takes no predicate: a delete whose scope is "
                 "a query is a delete nobody read before it ran."
             )
+        repetidos = sorted({v for v in value if value.count(v) > 1})
+        if repetidos:
+            raise ValueError(
+                f"evaluation_set_ids repeats {repetidos}. A repeated id passes the "
+                "checks twice, deletes nothing the second time and counts a false "
+                "orphan, so the run would report damage it did not do."
+            )
         return value
 
 
-def _refusal(session: Session, eset: EvaluationSet) -> str | None:
+def referrers(session: Session) -> list[tuple[str, str]]:
+    """Every table and column whose foreign key points at ``evaluation_set``.
+
+    DERIVED AND NEVER LISTED. The first version of this file hard-coded four
+    tables, which happened to be right on the day it was written. But
+    ``evaluation_result`` carries ``ON DELETE CASCADE``: a future table with
+    CASCADE that nobody added to the list would be emptied in silence by the
+    delete, and the operation would report success. A list is a promise about
+    a schema nobody re-reads.
+    """
+    return [(r[0], r[1]) for r in session.execute(text(_REFERRERS_SQL))]
+
+
+def _live_job_ids(session: Session, ids: list[uuid.UUID]) -> dict[str, str]:
+    """``{window id: job id}`` for windows named by a QUEUED or RUNNING job.
+
+    Retiring a window a live job is about to read is a race nobody can
+    diagnose afterwards: the job fails on a row that existed when it was
+    enqueued.
+    """
+    rows = session.execute(
+        text(
+            "SELECT j.id::text, j.payload::text FROM job j "
+            "WHERE j.status IN ('QUEUED', 'RUNNING')"
+        )
+    ).all()
+    out: dict[str, str] = {}
+    for job_id, payload in rows:
+        for vid in ids:
+            if str(vid) in (payload or ""):
+                out[str(vid)] = job_id
+    return out
+
+
+def _refusal(
+    eset: EvaluationSet,
+    counts: dict[str, int],
+    live: dict[str, str],
+) -> str | None:
     """Why this window must not be retired, or ``None``."""
     if eset.window_role is not None:
         return (
             f"it carries window_role={eset.window_role!r}, so it is the holdout or a "
             "declared band. The role is the protection and the result count is not: "
-            "the holdout has zero results here because its look was spent in the "
+            "holdout-227-230 has zero results here because its look was spent in the "
             "laboratory"
         )
     rules = (eset.truth_profile, eset.toi_rule, eset.not_codes)
     if rules != SUPERSEDED:
         return (
-            f"its rules are {rules}, not the superseded frame {SUPERSEDED}. This "
-            "operation retires the old frame; naming a live window here is far more "
-            "likely to be a mistake than an intention"
+            f"its rules are {rules}, not the superseded frame {SUPERSEDED}. Naming a "
+            "live window here is far more likely to be a mistake than an intention"
         )
-    for table in REFERRERS:
-        n = session.execute(
-            text(f"SELECT count(*) FROM {table} WHERE evaluation_set_id = :v"),
-            {"v": eset.id},
-        ).scalar_one()
-        if n:
-            return f"{n} row(s) in {table} point at it, and evidence is not retired"
+    apuntan = {t: n for t, n in counts.items() if n}
+    if apuntan:
+        return f"rows point at it: {apuntan}, and evidence is not retired"
+    if str(eset.id) in live:
+        return (
+            f"job {live[str(eset.id)]} is QUEUED or RUNNING and names it in its "
+            "payload. Retiring it now is a race nobody can diagnose afterwards"
+        )
     return None
+
+
+def _tombstone(eset: EvaluationSet, blob: bytes, archivo: str) -> dict[str, Any]:
+    """Everything the row said, before there is no row to ask.
+
+    The first version's ``retired`` event carried an id and a key. After the
+    delete that is not enough to say what was retired, which is the whole
+    reason an operation is used instead of a DELETE.
+    """
+    return {
+        "evaluation_set_id": str(eset.id),
+        "old_annotation_set_id": str(eset.old_annotation_set_id),
+        "new_annotation_set_id": str(eset.new_annotation_set_id),
+        "pivot_snapshot_id": str(eset.pivot_snapshot_id),
+        "old_native_snapshot_id": str(eset.old_native_snapshot_id),
+        "new_native_snapshot_id": str(eset.new_native_snapshot_id),
+        "truth_profile": eset.truth_profile,
+        "toi_rule": eset.toi_rule,
+        "not_codes": eset.not_codes,
+        "window_role": eset.window_role,
+        "code_revision": getattr(eset, "code_revision", None),
+        "groundtruth_uri": eset.groundtruth_uri,
+        "created_at": eset.created_at.isoformat() if eset.created_at else None,
+        "job_id": str(eset.job_id) if eset.job_id else None,
+        "stats": dict(eset.stats or {}),
+        "groundtruth_sha256": hashlib.sha256(blob).hexdigest(),
+        "groundtruth_bytes": len(blob),
+        "archived_key": archivo,
+    }
 
 
 class RetireEvaluationSetsOperation(Operation):
     name = "retire_evaluation_sets"
     description = (
-        "Delete named EvaluationSet rows of the superseded as_closed/pivot_terms/any "
-        "frame together with their ground-truth parquets, leaving a job behind. "
-        "Refuses any window that carries a window_role, belongs to the live frame, or "
-        "is pointed at by a result, an exploration, a reproduction or a model."
+        "Archive the ground-truth parquets of named EvaluationSet rows of the "
+        "superseded as_closed/pivot_terms/any frame under retired/, then delete the "
+        "rows and purge the originals, leaving a job and a full tombstone per window. "
+        "Refuses a window with a window_role, one of the live frame, one anything "
+        "points at, or one a live job names. dry_run does every check and touches "
+        "nothing."
     )
 
     def execute(
@@ -125,57 +227,122 @@ class RetireEvaluationSetsOperation(Operation):
         *,
         emit: EmitFn,
     ) -> OperationResult:
-        from protea.core.evaluation import groundtruth_key_for
-
         p = RetireEvaluationSetsPayload.model_validate(contract_payload(payload))
         store = get_artifact_store(load_settings(_project_root()))
+        ids = [uuid.UUID(raw) for raw in p.evaluation_set_ids]
 
-        objetivos: list[tuple[uuid.UUID, str]] = []
-        for raw in p.evaluation_set_ids:
-            eset = session.get(EvaluationSet, uuid.UUID(raw))
-            if eset is None:
-                raise ValueError(f"EvaluationSet {raw} does not exist")
-            motivo = _refusal(session, eset)
-            if motivo is not None:
-                raise ValueError(f"refusing to retire {raw}: {motivo}")
-            objetivos.append((eset.id, groundtruth_key_for(eset.id)))
-
-        # Checked them ALL before deleting ANY: a partial retirement of a
-        # named list leaves nobody able to say which half went.
+        tablas = referrers(session)
         emit(
-            "retire_evaluation_sets.checked",
+            "retire_evaluation_sets.referrers",
             None,
-            {"asked": len(objetivos)},
+            {"derived_from_pg_constraint": [f"{t}.{c}" for t, c in tablas]},
             "info",
         )
+        lapidas = self._check_all(session, store, ids, tablas, emit)
 
-        huerfanos = 0
-        for vid, key in objetivos:
-            session.execute(
-                text("DELETE FROM evaluation_set WHERE id = :v"), {"v": vid}
-            )
-            try:
-                store.delete(key)
-            except Exception:  # noqa: BLE001 -- an orphan file is the safe failure
-                huerfanos += 1
+        if p.dry_run:
             emit(
-                "retire_evaluation_sets.retired",
+                "retire_evaluation_sets.done",
                 None,
-                {"evaluation_set_id": str(vid), "key": key},
+                {"would_retire": len(lapidas), "asked": len(ids), "dry_run": True},
                 "info",
             )
+            return OperationResult(
+                result={"would_retire": len(lapidas), "asked": len(ids), "dry_run": True}
+            )
 
+        return self._retire(session, store, lapidas, emit)
+
+    def _check_all(
+        self,
+        session: Session,
+        store: Any,
+        ids: list[uuid.UUID],
+        tablas: list[tuple[str, str]],
+        emit: EmitFn,
+    ) -> list[dict[str, Any]]:
+        """Lock and check EVERY window, and archive each parquet, before any delete.
+
+        ``FOR UPDATE`` is what makes the check mean anything for the length of
+        the transaction: it takes a row lock that a foreign-key insert into any
+        referring table has to wait for, so a reference cannot appear between
+        the check and the delete.
+        """
+        from protea.core.evaluation import groundtruth_key_for
+
+        session.execute(
+            text("SELECT id FROM evaluation_set WHERE id = ANY(:v) FOR UPDATE"),
+            {"v": [str(i) for i in ids]},
+        )
+        live = _live_job_ids(session, ids)
+        lapidas: list[dict[str, Any]] = []
+        for vid in ids:
+            eset = session.get(EvaluationSet, vid)
+            if eset is None:
+                raise ValueError(f"EvaluationSet {vid} does not exist")
+            counts = {
+                tabla: session.execute(
+                    text(f"SELECT count(*) FROM {tabla} WHERE {col} = :v"), {"v": vid}
+                ).scalar_one()
+                for tabla, col in tablas
+            }
+            motivo = _refusal(eset, counts, live)
+            if motivo is not None:
+                raise ValueError(f"refusing to retire {vid}: {motivo}")
+            key = groundtruth_key_for(vid)
+            blob = store.get(key)
+            archivo = f"{RETIRED_PREFIX}/{vid}-{hashlib.sha256(blob).hexdigest()[:16]}.parquet"
+            store.put(archivo, blob)
+            lapida = _tombstone(eset, blob, archivo)
+            lapida["original_key"] = key
+            lapidas.append(lapida)
+            emit("retire_evaluation_sets.archived", None, lapida, "info")
+        return lapidas
+
+    def _retire(
+        self,
+        session: Session,
+        store: Any,
+        lapidas: list[dict[str, Any]],
+        emit: EmitFn,
+    ) -> OperationResult:
+        """Delete the rows, COMMIT, and only then purge the originals."""
+        for lapida in lapidas:
+            session.execute(
+                text("DELETE FROM evaluation_set WHERE id = :v"),
+                {"v": uuid.UUID(lapida["evaluation_set_id"])},
+            )
+        # Committed HERE and not left to the worker: until the rows are durably
+        # gone, purging an original would leave a row pointing at nothing if
+        # anything rolled the transaction back.
+        session.commit()
+        emit(
+            "retire_evaluation_sets.rows_gone",
+            None,
+            {"deleted": len(lapidas)},
+            "warning",
+        )
+
+        no_purgados = 0
+        for lapida in lapidas:
+            try:
+                store.delete(lapida["original_key"])
+            except Exception:  # noqa: BLE001 -- the copy is already in retired/
+                no_purgados += 1
         result = {
-            "retired": len(objetivos),
-            "orphaned_artifacts": huerfanos,
-            "asked": len(p.evaluation_set_ids),
+            "retired": len(lapidas),
+            "archived_under": RETIRED_PREFIX,
+            "originals_left_behind": no_purgados,
+            "asked": len(lapidas),
+            "dry_run": False,
         }
         emit("retire_evaluation_sets.done", None, result, "warning")
         return OperationResult(result=result)
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         n = len(payload.get("evaluation_set_ids") or [])
-        return f"retire {n} evaluation set(s) of the superseded frame"
+        seco = " (dry run)" if payload.get("dry_run") else ""
+        return f"retire {n} evaluation set(s) of the superseded frame{seco}"
 
 
 def _project_root():

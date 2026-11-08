@@ -1,34 +1,35 @@
-"""Retiring a window of the old frame, and everything it refuses to retire.
+"""Retiring a window: archive first, delete second, purge last.
 
-WHY AN OPERATION AT ALL. A raw ``DELETE`` is how 124 campaign rows disappear
-with nothing recording that they did. The project's rule is that every
-operation goes through ``POST /v1/jobs`` because a direct ``execute()`` leaves
-no job, and a DELETE is the case where that matters most: afterwards there is
-no row left to ask.
+THE DEFECT THE FIRST VERSION HAD, and the reason the order is the subject of
+this file. It deleted each row and each file inside one loop, with the commit
+left to the worker. A failure halfway rolled the rows back and left the
+earlier parquets gone: rows pointing at nothing, which its own docstring
+claimed to avoid. And the test meant to cover it simulated a STORE failure,
+not a transaction failure, so it reported assurance it had not earned. The
+desktop session found it by reading the code.
 
-THE TEST THAT MATTERS MOST is ``test_one_refusal_stops_the_whole_run``. All the
-windows are checked BEFORE any is deleted, because a partial retirement of a
-named list leaves nobody able to say which half went.
-
-AND THE HOLDOUT. ``cb46395a`` carries ``window_role='test'`` and has ZERO
-results in PROTEA, because its single declared look was spent in the
-laboratory on 2026-10-26. A "no results" filter would have swept it up, and I
-wrote such a filter once. The role is the protection; the result count is not.
+So ``test_an_interruption_leaves_the_earlier_parquet_alone`` is the test this
+file exists for.
 """
 
 from __future__ import annotations
 
+import hashlib
 import uuid
+from datetime import datetime
 
 import pytest
 
 from protea.core.operations.retire_evaluation_sets import (
+    RETIRED_PREFIX,
     RetireEvaluationSetsOperation,
     RetireEvaluationSetsPayload,
 )
 
 VIEJO = ("as_closed", "pivot_terms", "any")
 VIVO = ("projected", "live_in_both_ends", "experimental")
+BLOB = b"PAR1-verdad-vieja"
+SHA16 = hashlib.sha256(BLOB).hexdigest()[:16]
 
 
 class _Eset:
@@ -36,64 +37,167 @@ class _Eset:
         self.id = uuid.uuid4()
         self.truth_profile, self.toi_rule, self.not_codes = rules
         self.window_role = role
+        self.old_annotation_set_id = uuid.uuid4()
+        self.new_annotation_set_id = uuid.uuid4()
+        self.pivot_snapshot_id = uuid.uuid4()
+        self.old_native_snapshot_id = self.pivot_snapshot_id
+        self.new_native_snapshot_id = self.pivot_snapshot_id
+        self.code_revision = None
+        self.groundtruth_uri = f"s3://protea/eval_groundtruth/{self.id}/groundtruth.parquet"
+        self.created_at = datetime(2026, 10, 9)
+        self.job_id = uuid.uuid4()
+        self.stats = {"delta_proteins": 1646}
 
 
 class _Session:
-    """Answers ``get`` and the one count query the refusal check makes."""
+    """Answers the handful of statements the operation issues, and records them."""
 
-    def __init__(self, rows, referencias: dict[str, int] | None = None) -> None:
+    def __init__(self, rows, counts=None, live_payloads=None) -> None:
         self.rows = {e.id: e for e in rows}
-        self.referencias = referencias or {}
+        self.counts = counts or {}
+        self.live_payloads = live_payloads or []
         self.borradas: list[uuid.UUID] = []
+        self.commits = 0
+        self.bloqueo = False
 
     def get(self, _model, ident):
         return self.rows.get(ident)
 
+    def commit(self):
+        self.commits += 1
+
     def execute(self, statement, params=None):
-        sql = str(statement)
+        sql = " ".join(str(statement).split())
+        if "pg_constraint" in sql:
+            return [("evaluation_result", "evaluation_set_id"),
+                    ("exploration", "evaluation_set_id")]
+        if "FOR UPDATE" in sql:
+            self.bloqueo = True
+            return _Res([])
+        if sql.startswith("SELECT j.id::text"):
+            return _Res(self.live_payloads)
         if sql.startswith("DELETE"):
             self.borradas.append(params["v"])
-            return _Uno(0)
-        tabla = next(t for t in self.referencias if t in sql) if any(
-            t in sql for t in self.referencias
-        ) else None
-        return _Uno(self.referencias.get(tabla, 0))
+            return _Res([])
+        tabla = sql.split("FROM ")[1].split()[0]
+        return _Res([], uno=self.counts.get(tabla, 0))
 
 
-class _Uno:
-    def __init__(self, v: int) -> None:
-        self._v = v
+class _Res:
+    def __init__(self, rows, uno=0) -> None:
+        self._rows, self._uno = rows, uno
 
-    def scalar_one(self) -> int:
-        return self._v
+    def all(self):
+        return self._rows
+
+    def scalar_one(self):
+        return self._uno
+
+    def __iter__(self):
+        return iter(self._rows)
 
 
 class _Store:
-    def __init__(self, falla: bool = False) -> None:
+    def __init__(self, falla_en: int | None = None) -> None:
+        self.objetos: dict[str, bytes] = {}
         self.borrados: list[str] = []
-        self.falla = falla
+        self.gets = 0
+        self.falla_en = falla_en
+
+    def get(self, key: str) -> bytes:
+        self.gets += 1
+        if self.falla_en is not None and self.gets > self.falla_en:
+            raise OSError("el almacen se cayo")
+        return BLOB
+
+    def put(self, key: str, src) -> str:
+        self.objetos[key] = src if isinstance(src, bytes) else b""
+        return f"s3://protea/{key}"
 
     def delete(self, key: str) -> bool:
-        if self.falla:
-            raise OSError("el almacen no responde")
         self.borrados.append(key)
         return True
 
 
-def _run(session, store, ids, monkeypatch):
+def _run(session, store, ids, monkeypatch, dry=False):
     monkeypatch.setattr(
         "protea.core.operations.retire_evaluation_sets.get_artifact_store", lambda _s: store
     )
     monkeypatch.setattr(
         "protea.core.operations.retire_evaluation_sets.load_settings", lambda _r: object()
     )
-    eventos: list[tuple[str, str]] = []
+    eventos: list[tuple[str, dict]] = []
     out = RetireEvaluationSetsOperation().execute(
         session,
-        {"evaluation_set_ids": ids},
-        emit=lambda e, _p, f, lvl: eventos.append((e, lvl)) or f,
+        {"evaluation_set_ids": ids, "dry_run": dry},
+        emit=lambda e, _p, f, lvl: eventos.append((e, f)) or f,
     )
     return out.result, eventos
+
+
+class TestTheOrderThatWasWrong:
+    def test_an_interruption_leaves_the_earlier_parquet_alone(self, monkeypatch) -> None:
+        # THE TEST THIS FILE EXISTS FOR. The store fails fetching the SECOND
+        # window, after the first has been archived. Nothing may have been
+        # deleted and the first original must still be there: a failure
+        # halfway must not leave a row pointing at nothing.
+        a, b = _Eset(), _Eset()
+        session, store = _Session([a, b]), _Store(falla_en=1)
+        with pytest.raises(OSError):
+            _run(session, store, [str(a.id), str(b.id)], monkeypatch)
+        assert session.borradas == [], "borro filas antes de terminar de archivar"
+        assert session.commits == 0
+        assert store.borrados == [], "purgo un original antes de borrar su fila"
+        assert any(k.startswith(RETIRED_PREFIX) for k in store.objetos), "no archivo nada"
+
+    def test_the_rows_are_committed_before_any_original_is_purged(self, monkeypatch) -> None:
+        e = _Eset()
+        session, store = _Session([e]), _Store()
+        res, eventos = _run(session, store, [str(e.id)], monkeypatch)
+        assert session.commits == 1
+        assert [n for n, _ in eventos].index("retire_evaluation_sets.rows_gone") < [
+            n for n, _ in eventos
+        ].index("retire_evaluation_sets.done")
+        assert store.borrados == [f"eval_groundtruth/{e.id}/groundtruth.parquet"]
+        assert res["retired"] == 1 and res["originals_left_behind"] == 0
+
+    def test_the_parquet_is_archived_under_retired_with_its_sha(self, monkeypatch) -> None:
+        # Archiving rather than deleting, because these truths cannot be
+        # rebuilt: October code, a frame the campaign has left.
+        e = _Eset()
+        store = _Store()
+        _run(_Session([e]), store, [str(e.id)], monkeypatch)
+        assert f"{RETIRED_PREFIX}/{e.id}-{SHA16}.parquet" in store.objetos
+
+
+class TestTheReferrersAreDerived:
+    def test_they_come_from_pg_constraint_and_not_from_a_list(self, monkeypatch) -> None:
+        e = _Eset()
+        _, eventos = _run(_Session([e]), _Store(), [str(e.id)], monkeypatch)
+        campos = dict(eventos)["retire_evaluation_sets.referrers"]
+        assert campos["derived_from_pg_constraint"] == [
+            "evaluation_result.evaluation_set_id",
+            "exploration.evaluation_set_id",
+        ]
+
+    def test_the_orm_knows_of_no_referrer_the_query_would_miss(self) -> None:
+        # Without a database: the ORM metadata is the second opinion. A table
+        # the query cannot see is a table that would be CASCADE-emptied in
+        # silence, which is what a hard-coded list did.
+        import protea.infrastructure.orm.models  # noqa: F401
+        from protea.core.operations import retire_evaluation_sets as mod
+        from protea.infrastructure.orm.base import Base
+
+        del_orm = {
+            (t.name, fk.parent.name)
+            for t in Base.metadata.tables.values()
+            for fk in t.foreign_keys
+            if fk.column.table.name == "evaluation_set"
+        }
+        assert del_orm, "el ORM no ve ninguna FK a evaluation_set; la prueba no vale"
+        fuente = __import__("inspect").getsource(mod)
+        assert "pg_constraint" in fuente
+        assert "REFERRERS = (" not in fuente, "volvio la lista escrita a mano"
 
 
 class TestWhatItRefuses:
@@ -101,9 +205,14 @@ class TestWhatItRefuses:
         with pytest.raises(ValueError, match="cannot be empty"):
             RetireEvaluationSetsPayload.model_validate({"evaluation_set_ids": []})
 
+    def test_a_repeated_id_is_refused(self) -> None:
+        # It passed the checks twice, deleted nothing the second time and
+        # counted a FALSE orphan: the run reported damage it had not done.
+        vid = str(uuid.uuid4())
+        with pytest.raises(ValueError, match="repeats"):
+            RetireEvaluationSetsPayload.model_validate({"evaluation_set_ids": [vid, vid]})
+
     def test_a_window_with_a_role_is_refused_even_with_no_results(self, monkeypatch) -> None:
-        # THE HOLDOUT CASE. Zero results in PROTEA because the look was spent
-        # in the laboratory. A "no results" filter would have taken it.
         e = _Eset(role="test")
         with pytest.raises(ValueError, match="window_role"):
             _run(_Session([e]), _Store(), [str(e.id)], monkeypatch)
@@ -115,43 +224,58 @@ class TestWhatItRefuses:
 
     def test_a_referenced_window_is_refused_and_names_the_table(self, monkeypatch) -> None:
         e = _Eset()
-        session = _Session([e], referencias={"evaluation_result": 3})
+        session = _Session([e], counts={"evaluation_result": 3})
         with pytest.raises(ValueError, match="evaluation_result"):
             _run(session, _Store(), [str(e.id)], monkeypatch)
         assert session.borradas == []
 
-    def test_an_id_that_is_not_a_window_raises(self, monkeypatch) -> None:
-        with pytest.raises(ValueError, match="does not exist"):
-            _run(_Session([]), _Store(), [str(uuid.uuid4())], monkeypatch)
-
-
-class TestWhatItDoes:
-    def test_a_clean_superseded_window_goes_with_its_artefact(self, monkeypatch) -> None:
+    def test_a_window_a_live_job_names_is_refused(self, monkeypatch) -> None:
+        # Retiring a window a QUEUED job is about to read is a race nobody
+        # can diagnose afterwards.
         e = _Eset()
-        session, store = _Session([e]), _Store()
-        res, eventos = _run(session, store, [str(e.id)], monkeypatch)
-        assert session.borradas == [e.id]
-        assert store.borrados == [f"eval_groundtruth/{e.id}/groundtruth.parquet"]
-        assert res == {"retired": 1, "orphaned_artifacts": 0, "asked": 1}
-        assert ("retire_evaluation_sets.done", "warning") in eventos
+        job = str(uuid.uuid4())
+        session = _Session([e], live_payloads=[(job, f'{{"evaluation_set_id": "{e.id}"}}')])
+        with pytest.raises(ValueError, match="QUEUED or RUNNING"):
+            _run(session, _Store(), [str(e.id)], monkeypatch)
 
-    def test_one_refusal_stops_the_whole_run(self, monkeypatch) -> None:
-        # THE PROPERTY THAT MATTERS. A partial retirement of a named list
-        # leaves nobody able to say which half went, so every window is
-        # checked before any is deleted.
-        buena, mala = _Eset(), _Eset(role="valid")
-        session = _Session([buena, mala])
-        with pytest.raises(ValueError, match="window_role"):
-            _run(session, _Store(), [str(buena.id), str(mala.id)], monkeypatch)
-        assert session.borradas == [], "borro antes de terminar de comprobar"
-
-    def test_a_store_failure_leaves_an_orphan_and_not_a_dangling_row(
-        self, monkeypatch
-    ) -> None:
-        # The safe failure: a file nobody can attribute, rather than a row
-        # pointing at nothing.
+    def test_the_rows_are_locked_before_they_are_checked(self, monkeypatch) -> None:
+        # FOR UPDATE is what makes the check mean anything for the length of
+        # the transaction: a foreign-key insert into a referring table has to
+        # wait for that row lock.
         e = _Eset()
         session = _Session([e])
-        res, _ = _run(session, _Store(falla=True), [str(e.id)], monkeypatch)
-        assert session.borradas == [e.id]
-        assert res["orphaned_artifacts"] == 1
+        _run(session, _Store(), [str(e.id)], monkeypatch)
+        assert session.bloqueo
+
+
+class TestTheDryRunAndTheTombstone:
+    def test_a_dry_run_checks_everything_and_touches_nothing(self, monkeypatch) -> None:
+        e = _Eset()
+        session, store = _Session([e]), _Store()
+        res, _ = _run(session, store, [str(e.id)], monkeypatch, dry=True)
+        assert res == {"would_retire": 1, "asked": 1, "dry_run": True}
+        assert session.borradas == [] and session.commits == 0
+        assert store.borrados == []
+
+    def test_a_dry_run_still_refuses_what_the_real_run_would(self, monkeypatch) -> None:
+        e = _Eset(role="valid")
+        with pytest.raises(ValueError, match="window_role"):
+            _run(_Session([e]), _Store(), [str(e.id)], monkeypatch, dry=True)
+
+    def test_the_tombstone_carries_everything_the_row_said(self, monkeypatch) -> None:
+        # After the delete there is no row to ask, which is the whole reason
+        # an operation is used instead of a DELETE.
+        e = _Eset()
+        _, eventos = _run(_Session([e]), _Store(), [str(e.id)], monkeypatch)
+        lapida = dict(eventos)["retire_evaluation_sets.archived"]
+        for campo in (
+            "old_annotation_set_id", "new_annotation_set_id", "pivot_snapshot_id",
+            "old_native_snapshot_id", "new_native_snapshot_id", "truth_profile",
+            "toi_rule", "not_codes", "window_role", "code_revision",
+            "groundtruth_uri", "created_at", "job_id", "stats",
+            "groundtruth_sha256", "groundtruth_bytes", "archived_key",
+        ):
+            assert campo in lapida, campo
+        assert lapida["groundtruth_sha256"] == hashlib.sha256(BLOB).hexdigest()
+        assert lapida["groundtruth_bytes"] == len(BLOB)
+        assert lapida["stats"] == {"delta_proteins": 1646}
