@@ -9,6 +9,7 @@ from pydantic import field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core._artifact_identity import sha256_of_file
 from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evaluation import (
@@ -533,12 +534,22 @@ class GenerateEvaluationSetOperation:
         with tempfile.TemporaryDirectory(prefix="protea_eval_gt_") as tmp:
             local_path = Path(tmp) / "groundtruth.parquet"
             serialize_evaluation_data_to_parquet(data, local_path)
+            # Hashed from the file we are about to send, never from what comes
+            # back: a digest taken after a round trip would agree with
+            # whatever the store returned, including the wrong object.
+            digest = sha256_of_file(local_path)
             uri = store.put(key, local_path)
         eval_set.groundtruth_uri = uri
+        eval_set.groundtruth_sha256 = digest
         emit(
             "generate_evaluation_set.groundtruth_persisted",
             None,
-            {"evaluation_set_id": str(eval_set.id), "uri": uri, "key": key},
+            {
+                "evaluation_set_id": str(eval_set.id),
+                "uri": uri,
+                "key": key,
+                "sha256": digest,
+            },
             "info",
         )
         return uri

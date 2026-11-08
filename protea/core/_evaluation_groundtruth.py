@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import io
 import uuid
+import warnings
 from collections import defaultdict
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from protea.core._artifact_identity import fetch_and_verify
 from protea.core.evaluation import _GROUNDTRUTH_BUCKETS, EvaluationData
 
 
@@ -147,7 +149,17 @@ def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[Evaluation
     settings = load_settings(project_root)
     store = get_artifact_store(settings)
     key = groundtruth_key_for(eval_set.id)
-    blob = store.get(key)
+    # Through fetch_and_verify and never store.get: see
+    # protea.core._artifact_identity for why the single read path is the
+    # point. A row with no sha is REPORTED, not refused, because 133 windows
+    # predate the column and refusing would break reading every one of them.
+    blob = fetch_and_verify(
+        store,
+        key,
+        getattr(eval_set, "groundtruth_sha256", None),
+        f"the ground truth of evaluation set {eval_set.id}",
+        on_unverified=lambda msg: warnings.warn(msg, RuntimeWarning, stacklevel=2),
+    )
     data = deserialize_evaluation_data_from_bytes(blob)
     return data, pivot_id
 
