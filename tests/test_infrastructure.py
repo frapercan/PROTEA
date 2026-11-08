@@ -259,7 +259,17 @@ class TestCreateApp:
         client = TestClient(app)
         resp = client.get("/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        cuerpo = resp.json()
+        assert cuerpo["status"] == "ok"
+        # And which revision it serves, because `{"status": "ok"}` alone was
+        # true and useless: the API once served five days stale and nothing
+        # outside could see it.
+        assert "code_revision" in cuerpo
+        # `None` when the question cannot be answered, which is NOT agreement.
+        # There is no agent-farm clone under a fake root, so that is the case
+        # here and it must not come back as True.
+        assert cuerpo["revision_matches_declaration"] in (True, False, None)
+        assert cuerpo["revision_matches_declaration"] is not True
 
     def test_readiness_check_succeeds(self):
         """GET /health/ready returns 200 when DB and RabbitMQ are reachable."""

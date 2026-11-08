@@ -201,6 +201,12 @@ class EvaluationSet(Base):
     #: gain CAN be and this decides which gains COUNT. Four combinations, not
     #: two, and folding them into one field would be the single-field
     #: comparison this project keeps paying for.
+    #:
+    #: ``live_in_both_ends`` ASKS FOR THE ID AND NOT FOR THE IDENTITY, which
+    #: is a declared limitation and not an oversight: measured on the window
+    #: furthest from the pivot, a version by identity would recover 3 terms
+    #: over 11 proteins. See
+    #: :func:`protea.core._truth_rules._terms_of_interest`.
     toi_rule: Mapped[str] = mapped_column(
         String(24), nullable=False, server_default="pivot_terms"
     )
