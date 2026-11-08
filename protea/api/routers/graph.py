@@ -100,6 +100,7 @@ commits on exit, and a reporting surface has no business opening a write path.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Mapping
 from typing import Any
 
@@ -132,7 +133,6 @@ from protea.api.routers._graph_representations import build_representations
 from protea.infrastructure.settings import Settings
 from protea.infrastructure.storage.factory import (
     ArtifactStoreUnavailable,
-    get_artifact_store,
 )
 
 router = APIRouter(prefix="/graph", tags=["graph"])
@@ -537,14 +537,15 @@ def get_graph(
         # and the response would say nothing about it.
         _promote_head(record, evaluation_set_id)
         aspect_of_term = read_pivot_aspects(session, record)
-    units = _counted_units(record, aspect_of_term, settings)
+    units = _counted_units(session, record, aspect_of_term, settings)
     return build_graph(record, units)
 
 
 def _counted_units(
+    session: Session,
     record: dict[str, list[dict[str, Any]]],
     aspect_of_term: dict[str, str],
-    settings: Settings,
+    settings: Settings,  # noqa: ARG001 -- resolved inside read_groundtruth now
 ) -> Mapping[tuple[str, str], int] | None:
     """Count the panel populations from the window's stored ground truth.
 
@@ -555,12 +556,22 @@ def _counted_units(
     right one and silently rescales every panel that reads it.
     """
     head = record["evaluation_sets"][0] if record["evaluation_sets"] else None
-    uri = (head or {}).get("groundtruth_uri")
-    if not uri or not aspect_of_term:
+    if not head or not head.get("groundtruth_uri") or not aspect_of_term:
+        return None
+    # THE SAME DOOR THE CORE USES, and this is why it matters here: this read
+    # used to split the stored uri and fetch it with store.get, verifying
+    # nothing, while the core derived the key from the id. One object, two
+    # locators, nothing comparing them. ``read_groundtruth`` resolves one and
+    # refuses when they disagree.
+    from protea.core._artifact_identity import ArtifactMismatch
+    from protea.core.evaluation import read_groundtruth
+    from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+
+    eval_set = session.get(EvaluationSet, uuid.UUID(str(head["id"])))
+    if eval_set is None:
         return None
     try:
-        store = get_artifact_store(settings)
-        payload = store.get(uri.split("/", 3)[3] if uri.startswith("s3://") else uri)
-    except (ArtifactStoreUnavailable, OSError, ValueError, KeyError):
+        read = read_groundtruth(session, eval_set)
+    except (ArtifactStoreUnavailable, ArtifactMismatch, OSError, ValueError, KeyError):
         return None
-    return panel_units_from_groundtruth(payload, aspect_of_term)
+    return panel_units_from_groundtruth(read.blob, aspect_of_term)
