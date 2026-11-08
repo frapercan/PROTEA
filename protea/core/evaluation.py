@@ -137,6 +137,12 @@ class EvaluationData:
     #: nothing else, so a round trip returns None here. The operation stamps
     #: it on the ``evaluation_set`` row, which is where it has to survive.
     projection: dict[str, int] | None = None
+    #: Proteins whose ENTIRE F side the binding rule emptied, per side: some
+    #: 26,000 a window, computed on every build and recorded by nothing until
+    #: this field. SEPARATE from ``projection`` because that one's ``None``
+    #: claims "no profile rule ran", and the binding rule runs on every
+    #: window. Build time only, like ``projection``.
+    binding_dropped: dict[str, int] | None = None
 
     @property
     def nk_proteins(self) -> int:
@@ -191,6 +197,7 @@ class EvaluationData:
             "removed_proteins": self.removed_proteins,
             "removed_annotations": self.removed_annotations,
             **(self.projection or {}),
+            **{f"{k}_binding_dropped": v for k, v in (self.binding_dropped or {}).items()},
         }
 
 
@@ -477,7 +484,7 @@ def _reconcile_experimental_side(
     pivot_go_ids: set[str],
     pivot_aspect: dict[str, str],
     project: ProjectionRequest | None = None,
-) -> tuple[dict[str, dict[str, set[str]]], tuple[Projection | None, Applied | None]]:
+) -> tuple[dict[str, dict[str, set[str]]], tuple[Projection | None, Applied | None, int]]:
     """CAFA steps 1–2 for experimental positives on one side.
 
     Per protein: propagate ancestors under the *native* DAG (True Path Rule),
@@ -506,7 +513,10 @@ def _reconcile_experimental_side(
                 raw, side.frame.remap, side.frame.live, spare=project.graph.live
             )
         projection = project_direct_annotations(raw, project.graph, project.target)
-    _drop_binding_only(session, side.native_snapshot_id, raw)
+    # The return was discarded here. It is the number of proteins whose ENTIRE
+    # F side the binding rule empties, which is some 26,000 a window: computed
+    # on every build and recorded by nothing.
+    binding_dropped = _drop_binding_only(session, side.native_snapshot_id, raw)
 
     out: dict[str, dict[str, set[str]]] = {}
     for protein, go_ids in raw.items():
@@ -521,7 +531,7 @@ def _reconcile_experimental_side(
                 ns_map[aspect].add(go_id)
         if ns_map:
             out[protein] = {ns: terms for ns, terms in ns_map.items()}
-    return out, (projection, remapped)
+    return out, (projection, remapped, binding_dropped)
 
 
 def _reconcile_not_side(
@@ -629,6 +639,9 @@ class _BothSides(NamedTuple):
     negatives: dict[str, set[str]]
     projection: Projection | None
     remapped: dict[str, Applied | None]
+    #: Proteins whose whole F side the binding rule emptied, per side. Not a
+    #: remap quantity, so it does not live in ``remapped``.
+    binding_dropped: dict[str, int]
 
 
 def _reconcile_both_sides(
@@ -657,7 +670,7 @@ def _reconcile_both_sides(
     )
     old, new = _sides_of(session, window, project)
 
-    old_exp, (_, old_remapped) = _reconcile_experimental_side(
+    old_exp, (_, old_remapped, old_binding) = _reconcile_experimental_side(
         session,
         old,
         pivot_go_ids,
@@ -668,7 +681,7 @@ def _reconcile_both_sides(
         # ``old_exp_*`` are zero and that is a measurement, not a given).
         project._replace(graph=project.graph._replace(live=set())) if project else None,
     )
-    new_exp, (projection, new_remapped) = _reconcile_experimental_side(
+    new_exp, (projection, new_remapped, new_binding) = _reconcile_experimental_side(
         session, new, pivot_go_ids, pivot_aspect, project
     )
     merged_neg, not_remapped = _union_of_negatives(
@@ -685,6 +698,7 @@ def _reconcile_both_sides(
             "old_not": not_remapped[0],
             "new_not": not_remapped[1],
         },
+        binding_dropped={"old_exp": old_binding, "new_exp": new_binding},
     )
 
 
@@ -756,6 +770,7 @@ def compute_evaluation_data_reconciled(
         known=known,
         removed=removed,
         projection=_build_report(sides),
+        binding_dropped=sides.binding_dropped,
     )
 
 

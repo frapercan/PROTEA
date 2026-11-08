@@ -316,6 +316,7 @@ class TestTheSeams:
             negatives={},
             projection=None,
             remapped={"new_exp": Applied(alt_id=0, replaced_by=9, unmapped=0, proteins=9)},
+            binding_dropped={"old_exp": 26029, "new_exp": 26029},
         )
         report = _build_report(sides)
         assert report == {
@@ -327,6 +328,12 @@ class TestTheSeams:
         }
         # And out through the stats the window row stores.
         assert EvaluationData(projection=report).stats()["new_exp_replaced_by"] == 9
+        # The binding count does NOT come through _build_report: that dict's
+        # ``None`` claims "no profile rule ran", and the binding rule runs on
+        # every window. It is its own field, and it reaches the same stats.
+        assert "old_exp_binding_dropped" not in report
+        stats = EvaluationData(binding_dropped=sides.binding_dropped).stats()
+        assert stats["old_exp_binding_dropped"] == 26029
 
     def test_the_default_profile_reports_nothing(self) -> None:
         # No rule ran, so there is no report: an empty dict would read as
@@ -334,8 +341,16 @@ class TestTheSeams:
         from protea.core.evaluation import _BothSides, _build_report
 
         sides = _BothSides(
-            old_exp={}, new_exp={}, negatives={}, projection=None, remapped={"new_exp": None}
+            old_exp={},
+            new_exp={},
+            negatives={},
+            projection=None,
+            remapped={"new_exp": None},
+            binding_dropped={"old_exp": 12, "new_exp": 34},
         )
+        # Still None WITH a binding count present: that is the whole point of
+        # keeping the two apart. An ``as_closed`` window reports the binding
+        # number and no projection dict.
         assert _build_report(sides) is None
 
     def test_both_rules_run_in_order_over_one_protein(self, monkeypatch) -> None:
@@ -372,7 +387,7 @@ class TestTheSeams:
             "snap-t1",
             SideFrame(snapshot_id="snap-t1", live=LIVE, remap=_map()),
         )
-        out, (projection, remapped) = ev._reconcile_experimental_side(
+        out, (projection, remapped, binding_dropped) = ev._reconcile_experimental_side(
             self._Session(ROWS), side, LIVE, {t: "F" for t in LIVE}, request
         )
         # GO:DEAD1 was remapped to its successor; GO:NEW was projected to its
@@ -380,6 +395,9 @@ class TestTheSeams:
         assert remapped is not None and remapped.replaced_by == 1
         assert projection is not None and projection.entries == 1
         assert out["P1"]["F"] == {"GO:LIVE2", "GO:LIVE3"}
+        # And the binding rule's own number comes back instead of being
+        # dropped on the floor, which is what the call site used to do.
+        assert binding_dropped == 0
 
 
 #: ``go_term_alias`` rows in the shapes the campaign's pivot really carries,

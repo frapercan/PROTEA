@@ -496,6 +496,10 @@ class TestResolveTrainSplitEval:
         new_id = uuid.uuid4()
         ctx = _make_train_split_context(version_to_set={170: old_id, 200: new_id})
         eset = MagicMock()
+        # The window has to pivot on the axis the payload declares, or the
+        # resolver refuses. Two MagicMocks disagree by identity, so this line
+        # makes the agreement explicit instead of accidental.
+        eset.pivot_snapshot_id = ctx.payload.ontology_snapshot_id
         eval_data = MagicMock()
         session = MagicMock()
         session.query.return_value.filter_by.return_value.all.return_value = [eset]

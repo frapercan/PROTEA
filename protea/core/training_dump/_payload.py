@@ -34,6 +34,25 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc
     # GOA source_version numbers for test evaluation (e.g. [225] or [225,229])
     test_versions: list[int]
 
+    #: WHICH declared window each pair's truth comes from, by id. A SET of
+    #: ids and not a list parallel to the pairs, because the pairs are
+    #: generated from ``train_versions`` and a position nobody can check is a
+    #: position that silently shifts.
+    #:
+    #: Empty is the old behaviour and still works wherever a pair has exactly
+    #: one window. It does not work on this campaign: the three propagation
+    #: graphs and the three truth rules are part of a window's identity, so
+    #: **62 of 69 distinct pairs already carry more than one**, and the export
+    #: refuses rather than guess. Naming is how a dump says which truth it
+    #: trained on, which is the part that moves and the part a dataset could
+    #: not previously record.
+    #:
+    #: Every named window's ``pivot_snapshot_id`` has to equal
+    #: ``ontology_snapshot_id``: a window on another pivot expresses its truth
+    #: on another term axis, and a manifest declaring one axis over windows
+    #: using another is wrong about its own vocabulary.
+    evaluation_set_ids: list[str] = []
+
     # Annotation source in annotation_set (default "goa")
     annotation_source: str = "goa"
 

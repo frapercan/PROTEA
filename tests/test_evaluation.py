@@ -668,8 +668,8 @@ class TestComputeEvaluationDataReconciled:
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
                 side_effect=[
-                    ({"P1": {"F": {"GO:0001"}}}, (None, None)),
-                    ({"P1": {"F": {"GO:0001"}}}, (None, None)),
+                    ({"P1": {"F": {"GO:0001"}}}, (None, None, 0)),
+                    ({"P1": {"F": {"GO:0001"}}}, (None, None, 0)),
                 ],
             ),
             patch("protea.core.evaluation._reconcile_not_side", return_value=({}, None)),
@@ -690,7 +690,7 @@ class TestComputeEvaluationDataReconciled:
             patch("protea.core.evaluation._load_children_by_go_id", return_value={}),
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
-                side_effect=[({}, (None, None)), ({"P1": {"F": {"GO:0001"}}}, (None, None))],
+                side_effect=[({}, (None, None, 0)), ({"P1": {"F": {"GO:0001"}}}, (None, None, 0))],
             ),
             patch("protea.core.evaluation._reconcile_not_side", return_value=({}, None)),
         ):
@@ -714,8 +714,8 @@ class TestComputeEvaluationDataReconciled:
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
                 side_effect=[
-                    ({"P1": {"F": {"GO:0001", "GO:0002"}}}, (None, None)),
-                    ({"P1": {"F": {"GO:0001", "GO:0002", "GO:0003"}}}, (None, None)),
+                    ({"P1": {"F": {"GO:0001", "GO:0002"}}}, (None, None, 0)),
+                    ({"P1": {"F": {"GO:0001", "GO:0002", "GO:0003"}}}, (None, None, 0)),
                 ],
             ),
             patch(
@@ -745,8 +745,8 @@ class TestComputeEvaluationDataReconciled:
             patch(
                 "protea.core.evaluation._reconcile_experimental_side",
                 side_effect=[
-                    ({"P1": {"F": {"GO:0001"}}}, (None, None)),
-                    ({"P1": {"F": {"GO:0001"}, "P": {"GO:0002"}}}, (None, None)),
+                    ({"P1": {"F": {"GO:0001"}}}, (None, None, 0)),
+                    ({"P1": {"F": {"GO:0001"}, "P": {"GO:0002"}}}, (None, None, 0)),
                 ],
             ),
             patch("protea.core.evaluation._reconcile_not_side", return_value=({}, None)),

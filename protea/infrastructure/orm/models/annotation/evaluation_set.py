@@ -199,6 +199,35 @@ class EvaluationSet(Base):
     #: of them LK, and nine projected entries: small, and exactly the
     #: difference between reproducing the lab's truth and missing it.
     not_codes: Mapped[str] = mapped_column(String(16), nullable=False, server_default="any")
+    #: WHICH CODE BUILT THIS ROW, from :func:`protea.core.code_revision`.
+    #:
+    #: The three rule columns above say what the delta IS by declaration. This
+    #: one says it by implementation, and the two are not the same thing: on
+    #: 2026-11-07 a fix to the synonym map's anchoring changed the delta of
+    #: every window whose corpus era is not its closing graph, with all eight
+    #: identity fields untouched. Before this column, the only way to ask
+    #: which code built a window was to match its ``created_at`` against the
+    #: dated blocks of ``agent-farm/plans/DECLARED-REVISION.txt``. That is
+    #: archaeology, and 130 of the 133 rows that existed when this landed can
+    #: only be read that way: their producing job predates the revision stamp
+    #: on ``job.started``, so the backfill leaves them NULL rather than
+    #: guessing. NULL means "ask the dated declaration", never "same as this
+    #: one".
+    #:
+    #: NOT IN THE IDENTITY ABOVE, and that is a known limitation rather than a
+    #: judgement. It belongs there by the project's own rule, since it decides
+    #: the delta; it is kept out because putting it there would let every
+    #: deploy mint a duplicate of every window. The consequence to know: a
+    #: window built by superseded code CANNOT be rebuilt in place. The unique
+    #: constraint refuses it as a duplicate, so correcting one means deleting
+    #: the stale row first, which is a destructive act and needs the
+    #: researcher to say so knowing it.
+    #:
+    #: ``+dirty`` or ``unknown`` are recorded verbatim when that is the truth.
+    #: :func:`protea.core.code_revision.revisions_conflict` is the only right
+    #: way to compare two of these: it refuses to conclude anything from an
+    #: unidentifying value instead of reporting agreement.
+    code_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     old_annotation_set: Mapped[AnnotationSet] = relationship(
         "AnnotationSet", foreign_keys=[old_annotation_set_id]
