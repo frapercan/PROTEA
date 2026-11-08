@@ -46,7 +46,7 @@ from typing import Any, NamedTuple
 
 import pyarrow.parquet as pq
 from pydantic import field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from protea.core._artifact_identity import fetch_and_verify
@@ -56,6 +56,15 @@ from protea.core.contracts.operation import (
     Operation,
     OperationResult,
     ProteaPayload,
+)
+from protea.core.operations._exam_population_checks import (
+    counted_roles,
+    labels_must_fit_where_the_sequence_agrees,
+    labels_outside_this_platform,
+    labels_stay_inside_the_population,
+    positions_count_from_one,
+    split_agrees_with_the_population,
+    the_sequences_are_the_ones_the_md5_names,
 )
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.protein.protein import Protein
@@ -106,6 +115,9 @@ class _Resolved(NamedTuple):
 
     sequence_of: dict[str, int]
     hash_of: dict[str, str]
+    #: The length of the sequence stored HERE, which is what a label can fall
+    #: outside of. Not the length the exam's own sequence has.
+    length_of: dict[str, int]
     missing: list[str]
 
 
@@ -153,7 +165,21 @@ def _manifest(p: DeclareExamPopulationPayload, store: Any) -> _Manifest:
     """The manifest, verified against the digest the caller declared."""
     raw = fetch_and_verify(store, p.manifest_key, p.manifest_sha256, f"the manifest at {p.manifest_key}")
     data = json.loads(raw.decode("utf-8"))
-    for campo in ("exam", "files", "partition", "concepts", "population_file"):
+    # ``position_conventions`` and ``halves`` are required, which is what makes
+    # the two manifests written before this check undeclarable. One of them said
+    # positions were indices from 0 and that was false of every label file, so
+    # the fix is not to delete those two objects but to refuse any manifest that
+    # does not state the convention per file: the next one written by hand
+    # cannot repeat it either.
+    for campo in (
+        "exam",
+        "files",
+        "partition",
+        "concepts",
+        "population_file",
+        "position_conventions",
+        "halves",
+    ):
         if campo not in data:
             raise ValueError(f"the manifest at {p.manifest_key} has no '{campo}'")
     if data["population_file"] not in data["files"]:
@@ -233,7 +259,12 @@ def _parse_population(blob: bytes, exam: str) -> _Population:
 def _resolve(session: Session, accessions: list[str]) -> _Resolved:
     """This platform's sequence for each accession, and the ones it lacks."""
     rows = session.execute(
-        select(Protein.accession, Protein.sequence_id, Sequence.sequence_hash)
+        select(
+            Protein.accession,
+            Protein.sequence_id,
+            Sequence.sequence_hash,
+            func.length(Sequence.sequence),
+        )
         .join(Sequence, Sequence.id == Protein.sequence_id)
         .where(Protein.accession.in_(accessions))
     ).all()
@@ -241,6 +272,7 @@ def _resolve(session: Session, accessions: list[str]) -> _Resolved:
     return _Resolved(
         sequence_of=sequence_of,
         hash_of={r[0]: r[2] for r in rows},
+        length_of={r[0]: int(r[3]) for r in rows},
         missing=[a for a in accessions if a not in sequence_of],
     )
 
@@ -342,6 +374,75 @@ def _agreement(pop: _Population, got: _Resolved) -> dict[str, Any]:
     }
 
 
+#: The label files of each exam, and the columns whose upper bound is a residue
+#: number. Named here rather than inferred from the file list, because a file
+#: this map does not know is a file nobody decided how to check.
+ETIQUETAS = {
+    "sites.parquet": ("position",),
+    "instances.parquet": ("start", "end"),
+}
+
+
+def _check_between_files(
+    m: _Manifest, pop: _Population, leidos: dict[str, bytes]
+) -> dict[str, Any]:
+    """Make the files agree with each other, not just with their own digests.
+
+    Each file can be perfectly intact and describe a different population, and
+    nothing in a digest notices. So: the split's halves against the tsv's, the
+    labels inside the membership, the sequences against the md5 they are paired
+    with, the roles counted instead of copied, and the position convention
+    verified rather than read.
+    """
+    medido: dict[str, Any] = {"positions": positions_count_from_one(m.exam, leidos)}
+    if "split.parquet" in leidos:
+        split_agrees_with_the_population(m.exam, pop.accessions, pop.half_of, leidos["split.parquet"])
+        medido["split_agrees"] = True
+    for nombre in ETIQUETAS:
+        if nombre in leidos:
+            medido[f"{nombre}_proteins"] = labels_stay_inside_the_population(
+                m.exam, pop.accessions, leidos[nombre], nombre
+            )
+    if "proteins.parquet" in leidos:
+        the_sequences_are_the_ones_the_md5_names(m.exam, pop.md5_of, leidos["proteins.parquet"])
+        medido["sequences_match_their_md5"] = True
+    contado = counted_roles(m.exam, leidos["concepts.json"])
+    afirmado = {str(k): int(v) for k, v in m.data["concepts"].items()}
+    if contado != afirmado:
+        raise ValueError(
+            f"{m.exam}: concepts.json counts {contado} by role and the manifest claims "
+            f"{afirmado}. These numbers reach the row's description, which is the "
+            "visible identity of this population, so a claim is not enough"
+        )
+    medido["concepts_counted"] = contado
+    return medido
+
+
+def _outside(leidos: dict[str, bytes], got: _Resolved) -> dict[str, Any]:
+    """Labels that fall past the sequence this platform holds, per label file."""
+    return {
+        nombre: labels_outside_this_platform(leidos[nombre], columnas, got.length_of)
+        for nombre, columnas in ETIQUETAS.items()
+        if nombre in leidos
+    }
+
+
+def _must_fit(exam: str, leidos: dict[str, bytes], pop: _Population, got: _Resolved) -> int:
+    """Require the upper bound where the md5 agrees, which is where it is knowable.
+
+    Separate from ``_outside`` because they are different claims about the same
+    column: one refuses and one reports, and which it is depends on whether the
+    sequence stored here is the sequence the labels were made against.
+    """
+    de_acuerdo = {a for a in pop.accessions if got.hash_of.get(a) == pop.md5_of[a]}
+    for nombre, columnas in ETIQUETAS.items():
+        if nombre in leidos:
+            labels_must_fit_where_the_sequence_agrees(
+                exam, leidos[nombre], columnas, got.length_of, de_acuerdo
+            )
+    return len(de_acuerdo)
+
+
 class DeclareExamPopulationOperation(Operation):
     name = "declare_exam_population"
     description = (
@@ -366,6 +467,7 @@ class DeclareExamPopulationOperation(Operation):
         leidos = _verify_every_file(m, store)
         pop = _parse_population(leidos[m.data["population_file"]], m.exam)
         _check_partition(m, pop)
+        medido = _check_between_files(m, pop, leidos)
         got = _resolve(session, pop.accessions)
         if got.missing:
             raise ValueError(
@@ -373,6 +475,7 @@ class DeclareExamPopulationOperation(Operation):
                 f"sequence in this platform, the first being {got.missing[:5]}. A population "
                 "whose members this platform cannot resolve is not a set it can declare"
             )
+        _must_fit(m.exam, leidos, pop, got)
         _refuse_a_second_row(session, m.digest)
         row = _declare(session, m, pop, got, job_id_from_payload(payload))
         result = {
@@ -382,13 +485,22 @@ class DeclareExamPopulationOperation(Operation):
             "proteins": len(pop.accessions),
             "sequences": len(set(got.sequence_of.values())),
             "partition": m.data["partition"],
-            "concepts": m.data["concepts"],
+            # COUNTED from concepts.json, not copied from the manifest: this
+            # number reaches the row's description, which is the visible
+            # identity of the population.
+            "concepts": medido["concepts_counted"],
+            "between_files": medido,
             "artifact_uri": m.uri,
             "content_sha256": m.digest,
             "rule": EXAM_RULE,
             "files": {n: s["sha256"] for n, s in m.files.items()},
             "lab_commit": m.data.get("lab_commit"),
             "sequence_agreement": _agreement(pop, got),
+            # What the exclusion protects against, measured: labels that fall
+            # past the sequence stored here. Every one belongs to a protein
+            # whose md5 differs, and the converse does not hold, so this is a
+            # measure and never the exclusion rule.
+            "labels_outside_this_platform": _outside(leidos, got),
         }
         emit(
             "exam_population.declared",
