@@ -120,6 +120,13 @@ def test_the_vocabulary_is_closed_and_says_what_it_cannot_say():
         # which is neither an upload nor a window's delta, and which no value
         # of the first four could say.
         "corpus_population",
+        # The sixth, also 2026-11-08, and the hard-coded list did its job: this
+        # test failed when the value was added and the line was not. One of
+        # ADR-D57's two frozen vocabulary exam populations, over Swiss-Prot
+        # 2022_03. It is not the corpus, because it is a sample with a
+        # selection and a confirmation half, and it has no evaluation window at
+        # all, which is also why these exams do not fit ADR-D55's exploration.
+        "exam_population",
         "legacy_undeclared",
     }
 

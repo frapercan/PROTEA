@@ -40,6 +40,13 @@ QUERY_SET_SOURCES: tuple[str, ...] = (
     #: exactly. A vector bank is a RECIPE applied to a POPULATION, and until
     #: this value existed only the recipe had an identity.
     "corpus_population",
+    #: One of the two frozen exam populations of ADR-D57, over Swiss-Prot
+    #: 2022_03: a sample with a partition into a selection and a confirmation
+    #: half, the second of which is spent once. It is NOT the corpus and it
+    #: has no evaluation window at all, which is also why these exams do not
+    #: fit ADR-D55's exploration unit. Its artifact is a MANIFEST, because an
+    #: exam population is several files and a row has one uri.
+    "exam_population",
     "legacy_undeclared",
 )
 
@@ -133,6 +140,16 @@ class QuerySet(Base):
             "AND description IS NOT NULL AND job_id IS NOT NULL "
             "AND evaluation_set_id IS NULL)",
             name="ck_query_set_corpus_is_declared",
+        ),
+        # The same four criteria for the exam populations, and the comment
+        # above about two NULLs not colliding applies to them too: the
+        # operation that writes one refuses a duplicate itself.
+        CheckConstraint(
+            "source_kind <> 'exam_population' OR ("
+            "artifact_uri IS NOT NULL AND content_sha256 IS NOT NULL "
+            "AND description IS NOT NULL AND job_id IS NOT NULL "
+            "AND evaluation_set_id IS NULL)",
+            name="ck_query_set_exam_is_declared",
         ),
     )
 
