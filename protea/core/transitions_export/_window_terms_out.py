@@ -33,14 +33,12 @@ was trimmed by, and nothing in either artefact would say so.
 
 from __future__ import annotations
 
-import uuid
 from typing import NamedTuple
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 from sqlalchemy.orm import Session
 
-from protea.core._evaluation_graph import _live_terms_with_aspect
 from protea.core._truth_rules import (
     ReconciledWindow,
     _terms_of_interest,
@@ -68,23 +66,6 @@ class WindowTerms(NamedTuple):
     #: Distinct terms across the window's NK, LK and PK maps, read from its
     #: own sealed parquet. 0 when the invariant was not checked.
     gain_terms: int
-
-
-def axis_live_terms(session: Session, cut: uuid.UUID) -> set[str]:
-    """The non-obsolete ids of the declared term axis.
-
-    Refuses an empty answer rather than writing every window's whole axis as
-    "out": an unknown or unloaded snapshot would otherwise produce a table
-    that is complete, consistent and about nothing.
-    """
-    live, _ = _live_terms_with_aspect(session, cut)
-    if not live:
-        raise ValueError(
-            f"OntologySnapshot {cut} has no live terms, so it cannot be the term axis. "
-            "Every window would export its entire TOI complement as empty and the "
-            "dataset would say the loader may use the whole axis as negatives"
-        )
-    return live
 
 
 def _refuse_gains_outside_toi(facts: WindowFacts, out: set[str]) -> int:

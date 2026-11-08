@@ -204,6 +204,46 @@ one would be the step that makes a number stop being attributable: a bundle
 whose leakage rule was evaluated against a release nobody declared cannot say
 what it is leak-free with respect to.
 
+Two tables are keyed by the cut alone, and need no windows
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Noted 2026-11-08, because it was missed. ``terms`` and ``term_ancestors``
+depend on no window: they are the vocabulary a model may name and the
+subsumption between those names. Which transitions train the model changes
+neither, so a run asking only for these two declares no window list at all.
+Demanding ids would be asking for a scope the table does not use, and the
+writer's refusal of an empty list is therefore conditional on which tables are
+requested rather than absolute.
+
+**Measured on the campaign axis**, ``releases/2022-07-01``: 43.558 live terms,
+every one with an aspect, 77.055 direct edges and **595.072 closure pairs**,
+with both ends live in every pair. ``Dag.closure``'s own docstring says 783.477
+"on GO", which is a different release: that number is quoted and this one is
+measured, and they are not the same quantity. Loading and closing the axis takes
+under a second, which is what makes the run short enough for a queue that has
+no permanent consumer yet.
+
+A closure pair reaching outside the axis is dropped rather than written, since
+the loader draws from ``terms`` and an ancestor it cannot name is a row that
+joins to nothing. On this axis there are none, and the filter is what keeps
+that a fact rather than an assumption.
+
+The vectors are verified, never quoted
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``terms`` carries ``vector_uri`` and ``vector_sha256`` for the axis's
+text-embedding artefact, and the writer FETCHES those bytes and checks the
+digest before publishing either column. ``exists`` would answer whether
+something sits at that key, which is a different question from whether the
+digest this table is about to publish describes what is there.
+
+On 2026-11-08 that artefact was NOT in the platform's object store: 6.426
+objects over twelve prefixes and nothing matching it. So ``terms`` refuses
+until it is published, and the refusal names the key it looked for. Writing the
+sha from the message that mentioned it would have produced a locator for bytes
+nobody on this side could check, which is the defect this project has spent a
+week closing.
+
 The leakage rule is applied when the bundle is BUILT
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
