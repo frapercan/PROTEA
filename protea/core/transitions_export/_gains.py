@@ -49,11 +49,6 @@ SCHEMA = pa.schema(
 #: reports and never scores.
 STRATA: tuple[str, ...] = ("nk", "lk", "pk")
 
-#: How the truth profile maps to the closure the gain is expressed in. ONE
-#: spelling, because a second one would let a bundle say ``pivot`` about a
-#: truth closed natively, and nothing in the parquet could contradict it.
-_CLOSURE_OF_PROFILE: dict[str, str] = {"projected": "pivot", "as_closed": "native"}
-
 
 class WindowGains(NamedTuple):
     """One window's gains, with what the guards found."""
@@ -67,17 +62,43 @@ class WindowGains(NamedTuple):
     distinct_terms: int
 
 
-def closure_of(truth_profile: str) -> str:
-    """Which graph this window's gain is expressed in, or a refusal."""
-    try:
-        return _CLOSURE_OF_PROFILE[truth_profile]
-    except KeyError:
-        raise ValueError(
-            f"truth_profile {truth_profile!r} has no declared closure. The column says "
-            f"which graph the gain is expressed in, and only {sorted(_CLOSURE_OF_PROFILE)} "
-            "have an answer: guessing one would let the bundle claim a closure its "
-            "truth was not built under"
-        ) from None
+def closure_of(facts: WindowFacts) -> str:
+    """Which graphs this window's two ends close in, DERIVED, or a refusal.
+
+    IT IS NOT ``truth_profile``, AND THE FIRST VERSION OF THIS FUNCTION MADE
+    EXACTLY THAT MISTAKE. It mapped ``projected`` to ``pivot`` and
+    ``as_closed`` to ``native``, which ADR-D56 says in as many words is wrong:
+    ``truth_profile`` says HOW the truth is derived and ``closure`` says WHICH
+    GRAPHS the two ends close in, and they vary independently.
+
+    The proof is in the database. The (A) and (B) twins of ``160 -> 177`` are
+    BOTH ``projected`` and differ only in their natives, so under the mapping
+    the (B) one, ``e84dfec8``, would have been written as ``pivot``. The
+    desktop session caught it by reading the ADR that this project's own
+    earlier PR had written, and it had made the same mistake a day before and
+    withdrawn it.
+
+    So the value comes from comparing the window's two natives against its
+    pivot and against the ontology each end's corpus was loaded under, the way
+    the window inventory already derives it, and a combination that is neither
+    is refused rather than guessed. Measured over the 131 evaluation sets:
+    122 are ``native`` and 9 are ``pivot``.
+    """
+    eset = facts.eset
+    pivote = eset.pivot_snapshot_id
+    viejo, nuevo = eset.old_native_snapshot_id, eset.new_native_snapshot_id
+    if viejo == pivote and nuevo == pivote:
+        return "pivot"
+    if viejo == facts.old_end_snapshot and nuevo == facts.new_end_snapshot:
+        return "native"
+    raise ValueError(
+        f"window {facts.window} has natives {str(viejo)[:8]} and {str(nuevo)[:8]} "
+        f"against pivot {str(pivote)[:8]} and corpus ontologies "
+        f"{str(facts.old_end_snapshot)[:8]} and {str(facts.new_end_snapshot)[:8]}: "
+        "neither both-on-the-pivot nor each-on-its-own-era. The closure column says "
+        "which graphs the two ends close in, and a third combination has no name yet, "
+        "so it is refused rather than written as one of the two"
+    )
 
 
 def gains_of(
@@ -89,7 +110,7 @@ def gains_of(
     a list of tuples per window and a concatenation afterwards is the one
     avoidable cost in this table.
     """
-    cierre = closure_of(facts.eset.truth_profile)
+    cierre = closure_of(facts)
     por_estrato: dict[str, int] = {}
     terminos: set[str] = set()
     fuera: set[str] = set()

@@ -29,17 +29,25 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import pytest
 
-from protea.core._truth_rules import TRUTH_PROFILES
 from protea.core.transitions_export import _gains as G
 from protea.core.transitions_export._window_facts import WindowFacts
 
 ASPECTO = {"GO:1": "BPO", "GO:2": "MFO", "GO:3": "CCO"}
 
 
+PIVOTE = uuid.uuid4()
+CORPUS_T = uuid.uuid4()
+CORPUS_T1 = uuid.uuid4()
+
+
 class _Eset:
-    def __init__(self, perfil="projected") -> None:
+    def __init__(self, perfil="projected", viejo=None, nuevo=None) -> None:
         self.id = uuid.uuid4()
         self.truth_profile = perfil
+        self.pivot_snapshot_id = PIVOTE
+        # Por defecto (A): los dos nativos en el pivote.
+        self.old_native_snapshot_id = PIVOTE if viejo is None else viejo
+        self.new_native_snapshot_id = PIVOTE if nuevo is None else nuevo
 
 
 class _Data:
@@ -50,8 +58,8 @@ class _Data:
         self.removed = removed or {}
 
 
-def _facts(data, perfil="projected"):
-    e = _Eset(perfil)
+def _facts(data, perfil="projected", viejo=None, nuevo=None):
+    e = _Eset(perfil, viejo, nuevo)
     return WindowFacts(
         eset=e,
         window=str(e.id),
@@ -59,6 +67,8 @@ def _facts(data, perfil="projected"):
         version_t="200",
         version_t_prime="201",
         horizon_days=31,
+        old_end_snapshot=CORPUS_T,
+        new_end_snapshot=CORPUS_T1,
     )
 
 
@@ -66,22 +76,52 @@ def _facts(data, perfil="projected"):
 
 
 class TestTheClosure:
-    def test_projected_is_the_pivot_and_as_closed_is_native(self):
-        assert G.closure_of("projected") == "pivot"
-        assert G.closure_of("as_closed") == "native"
+    """IT IS DERIVED FROM THE NATIVES, AND THE FIRST VERSION GOT IT WRONG.
 
-    def test_a_profile_with_no_closure_is_refused(self):
-        with pytest.raises(ValueError, match="no declared closure"):
-            G.closure_of("inventado")
+    It mapped ``projected`` to ``pivot`` and ``as_closed`` to ``native``, which
+    ADR-D56 says in as many words is wrong: ``truth_profile`` says HOW the
+    truth is derived and ``closure`` says WHICH GRAPHS the two ends close in,
+    and they vary independently.
 
-    def test_every_declared_profile_has_one(self):
-        """So adding a profile forces someone to say which graph it closes in.
+    So these tests walk combinations of NATIVES and not values of
+    ``TRUTH_PROFILES``, and the one that matters is
+    ``test_two_projected_windows_can_have_different_closures``: the (A) and (B)
+    twins of ``160 -> 177`` in the database are both ``projected`` and differ
+    only there, so under the mapping the (B) one would have been written as
+    ``pivot``. The desktop session caught it by reading the ADR this project's
+    own earlier PR had written.
+    """
 
-        Without this, a new profile would reach ``gains`` and be refused at
-        run time instead of at the moment it was declared.
-        """
-        for perfil in TRUTH_PROFILES:
-            assert G.closure_of(perfil) in {"pivot", "native"}
+    def test_both_natives_on_the_pivot_is_pivot(self):
+        assert G.closure_of(_facts(_Data())) == "pivot"
+
+    def test_each_native_on_its_own_era_is_native(self):
+        assert G.closure_of(_facts(_Data(), viejo=CORPUS_T, nuevo=CORPUS_T1)) == "native"
+
+    def test_two_projected_windows_can_have_DIFFERENT_closures(self):
+        """THE TEST THIS CLASS EXISTS FOR, and the ADR's own proof."""
+        a = _facts(_Data(), perfil="projected")
+        b = _facts(_Data(), perfil="projected", viejo=CORPUS_T, nuevo=CORPUS_T1)
+
+        assert a.eset.truth_profile == b.eset.truth_profile == "projected"
+        assert G.closure_of(a) == "pivot"
+        assert G.closure_of(b) == "native"
+
+    def test_as_closed_on_the_pivot_is_still_pivot(self):
+        """The other direction of the same independence."""
+        assert G.closure_of(_facts(_Data(), perfil="as_closed")) == "pivot"
+
+    def test_a_third_combination_is_refused(self):
+        """Neither both-on-the-pivot nor each-on-its-own-era has a name yet."""
+        with pytest.raises(ValueError, match="neither both-on-the-pivot"):
+            G.closure_of(_facts(_Data(), viejo=PIVOTE, nuevo=uuid.uuid4()))
+
+    def test_the_profile_is_not_read_at_all(self):
+        import inspect
+
+        fuente = inspect.getsource(G.closure_of)
+
+        assert "truth_profile" not in fuente.split('"""')[2]
 
 
 # ------------------------------------------------------------- lo que escribe

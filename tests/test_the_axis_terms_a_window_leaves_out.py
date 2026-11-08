@@ -80,6 +80,8 @@ def _facts(eset=None, data=None, version_t="200", version_t_prime="201", dias=30
         version_t=version_t,
         version_t_prime=version_t_prime,
         horizon_days=dias,
+        old_end_snapshot=uuid.uuid4(),
+        new_end_snapshot=uuid.uuid4(),
     )
 
 

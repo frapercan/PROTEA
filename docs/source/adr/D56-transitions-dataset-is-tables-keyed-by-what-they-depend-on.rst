@@ -406,6 +406,21 @@ describes and nothing would see it. Measured over the 131 evaluation sets in
 the database, two values are enough and a third is not needed: **122 are
 ``native`` and 9 are ``pivot``**.
 
+**AND THE WRITER MADE EXACTLY THAT MISTAKE, twice, on 2026-11-08.** The first
+version of ``gains`` mapped ``projected`` to ``pivot`` and ``as_closed`` to
+``native``, in a constant named ``_CLOSURE_OF_PROFILE``, with a test that
+walked the values of ``TRUTH_PROFILES`` and therefore could not see it. The
+laboratory had made the same mapping a day earlier and withdrawn it. Both times
+the paragraph below was already in this record, written by an earlier PR of
+this same project: the warning was not missing, it was not read.
+
+So the derivation now compares the two natives against the pivot and against
+each end's corpus ontology, the way the window inventory already does, a third
+combination is refused rather than named, and the test walks combinations of
+NATIVES. The case that settles it is in the database: the twins of
+``160 -> 177`` are both ``projected`` and differ only here, so under the
+mapping the (B) one would have been written as ``pivot``.
+
 **It is NOT ``truth_profile``.** That field says how the truth is derived,
 ``projected`` or ``as_closed``; ``closure`` says which graphs the two ends
 close in. They vary independently, and the probe that settles the open decision
