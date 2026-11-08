@@ -133,7 +133,7 @@ class _Store:
         return not self.borra_false
 
 
-def _run(session, store, ids, monkeypatch, dry=False, eventos=None):
+def _run(session, store, ids, monkeypatch, dry=False, eventos=None, job_id=None):
     monkeypatch.setattr(
         "protea.core.operations.retire_evaluation_sets.get_artifact_store", lambda _s: store
     )
@@ -141,9 +141,14 @@ def _run(session, store, ids, monkeypatch, dry=False, eventos=None):
         "protea.core.operations.retire_evaluation_sets.load_settings", lambda _r: object()
     )
     eventos = [] if eventos is None else eventos
+    carga = {"evaluation_set_ids": ids, "dry_run": dry}
+    if job_id is not None:
+        # BaseWorker inyecta _job_id en TODO payload de operacion. El ayudante
+        # no lo hacia, que es por lo que las pruebas no vieron el reflejo.
+        carga["_job_id"] = str(job_id)
     out = RetireEvaluationSetsOperation().execute(
         session,
-        {"evaluation_set_ids": ids, "dry_run": dry},
+        carga,
         emit=lambda e, _p, f, lvl: eventos.append((e, f)) or f,
     )
     return out.result, eventos
@@ -425,3 +430,63 @@ class TestEveryRefusalInOnePass:
         # Y el evento si los lleva todos, que es donde hay que mirarlos.
         campos = next(f for nombre, f in eventos if nombre.endswith(".refused"))
         assert len(campos["reasons"]) == 7
+
+
+class TestItDoesNotRefuseItself:
+    """The guard is about OTHER live jobs, and it was reading its own reflection.
+
+    MEASURED ON THE FIRST REAL RUN, 2026-11-08: a dry pass over the 125
+    superseded windows refused **125 of 125**, and 124 of those said "job
+    <this very job> is QUEUED or RUNNING and names it in its payload". Of
+    course it does: the job doing the asking is RUNNING by definition and its
+    payload lists every window it was asked about.
+
+    WHY THE SUITE DID NOT CATCH IT, which is the part worth keeping. The fake
+    session answered the live-job query with a ``live_payloads`` list that the
+    operation's own job was never in, and ``_run`` never injected ``_job_id``
+    at all. So a guard about OTHER jobs was tested in a world with no self to
+    find. The fixture was the blind spot, not the assertion.
+    """
+
+    def test_the_asking_job_naming_its_own_windows_is_not_a_reason(self, monkeypatch):
+        eset = _Eset()
+        mi_job = uuid.uuid4()
+        # Lo que la base devuelve de verdad: el propio job, RUNNING, con las
+        # ventanas en su payload.
+        session = _Session(
+            [eset], live_payloads=[(str(mi_job), f'{{"evaluation_set_ids": ["{eset.id}"]}}')]
+        )
+        store = _Store()
+
+        result, _ = _run(session, store, [str(eset.id)], monkeypatch, dry=True, job_id=mi_job)
+
+        assert result["would_retire"] == 1
+        assert result["asked"] == 1
+
+    def test_ANOTHER_live_job_naming_it_still_refuses(self, monkeypatch):
+        """The guard still does its job, which is what makes the fix a fix."""
+        eset = _Eset()
+        mi_job, otro = uuid.uuid4(), uuid.uuid4()
+        session = _Session(
+            [eset],
+            live_payloads=[
+                (str(mi_job), f'{{"evaluation_set_ids": ["{eset.id}"]}}'),
+                (str(otro), f'{{"evaluation_set_id": "{eset.id}"}}'),
+            ],
+        )
+
+        with pytest.raises(ValueError, match="QUEUED or RUNNING"):
+            _run(session, _Store(), [str(eset.id)], monkeypatch, dry=True, job_id=mi_job)
+
+    def test_with_no_job_at_all_every_live_payload_counts(self, monkeypatch):
+        """``_job_id`` absent means the operation ran outside a job.
+
+        The platform's own rule says that never happens, so the safe reading
+        is to trust nothing: with no self to exclude, every live payload that
+        names the window is a reason.
+        """
+        eset = _Eset()
+        session = _Session([eset], live_payloads=[(str(uuid.uuid4()), f'{{"v": "{eset.id}"}}')])
+
+        with pytest.raises(ValueError, match="QUEUED or RUNNING"):
+            _run(session, _Store(), [str(eset.id)], monkeypatch, dry=True)

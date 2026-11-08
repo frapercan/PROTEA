@@ -62,7 +62,7 @@ from protea.core.contracts.operation import (
     OperationResult,
     ProteaPayload,
 )
-from protea.core.utils import contract_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
@@ -130,12 +130,27 @@ def referrers(session: Session) -> list[tuple[str, str]]:
     return [(r[0], r[1]) for r in session.execute(text(_REFERRERS_SQL))]
 
 
-def _live_job_ids(session: Session, ids: list[uuid.UUID]) -> dict[str, str]:
-    """``{window id: job id}`` for windows named by a QUEUED or RUNNING job.
+def _live_job_ids(
+    session: Session, ids: list[uuid.UUID], myself: uuid.UUID | None
+) -> dict[str, str]:
+    """``{window id: job id}`` for windows named by ANOTHER live job.
 
     Retiring a window a live job is about to read is a race nobody can
     diagnose afterwards: the job fails on a row that existed when it was
     enqueued.
+
+    IT EXCLUDES THE ASKING JOB, and leaving that out made the guard refuse
+    everything. Measured on 2026-11-08, the first real dry run over the 125
+    superseded windows: **125 of 125 refused**, 124 of them because "job
+    <this job> is QUEUED or RUNNING and names it in its payload". The job
+    doing the asking is RUNNING by definition and its payload lists every
+    window it was asked about, so the guard was reading its own reflection.
+
+    The tests did not catch it because their fake sessions returned a
+    ``live_payloads`` list that the operation's own job was never in: a guard
+    about OTHER jobs was tested with no self to find. ``myself`` is None only
+    when the operation runs outside a job, which the platform's own rule says
+    never happens.
     """
     rows = session.execute(
         text(
@@ -144,6 +159,8 @@ def _live_job_ids(session: Session, ids: list[uuid.UUID]) -> dict[str, str]:
     ).all()
     out: dict[str, str] = {}
     for job_id, payload in rows:
+        if myself is not None and job_id == str(myself):
+            continue
         for vid in ids:
             if str(vid) in (payload or ""):
                 out[str(vid)] = job_id
@@ -239,6 +256,11 @@ class _Plan(NamedTuple):
     store: Any
     tablas: list[tuple[str, str]]
     dry: bool
+    #: This operation's own job. The live-job guard has to skip it: the job
+    #: asking is RUNNING and its payload names every window it was asked
+    #: about, so without this the guard reads its own reflection and refuses
+    #: everything.
+    myself: uuid.UUID | None
 
 
 def _counts_of(
@@ -315,7 +337,15 @@ class RetireEvaluationSetsOperation(Operation):
             "info",
         )
         lapidas = self._check_all(
-            session, ids, _Plan(store=store, tablas=tablas, dry=p.dry_run), emit
+            session,
+            ids,
+            _Plan(
+                store=store,
+                tablas=tablas,
+                dry=p.dry_run,
+                myself=job_id_from_payload(payload),
+            ),
+            emit,
         )
 
         if p.dry_run:
@@ -358,7 +388,7 @@ class RetireEvaluationSetsOperation(Operation):
             text("SELECT id FROM evaluation_set WHERE id = ANY(:v) FOR UPDATE"),
             {"v": [str(i) for i in ids]},
         )
-        live = _live_job_ids(session, ids)
+        live = _live_job_ids(session, ids, plan.myself)
         buenos: list[EvaluationSet] = []
         rechazos: list[dict[str, str]] = []
         for vid in ids:
