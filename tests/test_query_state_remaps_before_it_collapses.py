@@ -125,6 +125,24 @@ def test_crossing_an_aspect_is_counted_and_NOT_dropped():
     assert st.discards.off_axis == 0
 
 
+def test_a_card_with_no_evidence_code_is_dropped_and_counted():
+    """The branch the live data does not take, which is where they survive.
+
+    ``protein_go_annotation.evidence_code`` is nullable in the schema, so a
+    card with no evidence class is representable; the top eight codes of a
+    sample of release 211 are all real ones, so nothing exercises it today.
+    Written as a counted drop rather than as an empty string, because an empty
+    evidence class is not a class and the laboratory's loader would drop it as
+    unknown with only its own counter to show it.
+    """
+    filas = [("P1", VIVO, "IDA", ""), ("P1", OTRO, None, "")]
+    tabla, st = Q.state_of(_Session({"aset-t": filas}), _facts(), ["P1"], _axis())
+
+    assert tabla.column("go_id").to_pylist() == [VIVO]
+    assert st.discards.no_evidence == 1
+    assert "" not in st.evidence["t"]
+
+
 # ------------------------------------------------------ la ficha, y los momentos
 
 

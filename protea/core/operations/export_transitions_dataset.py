@@ -484,6 +484,11 @@ def _emit_state(st: WindowState, emit: EmitFn) -> WindowState:
             # ontology. It is the first thing to read before trusting a bundle.
             "discarded_off_axis": st.discards.off_axis,
             "remapped_across_aspects": st.discards.crossed_aspect,
+            # The column is NULLABLE in the schema, so this branch is reachable
+            # even though the live data does not take it. Dropped rather than
+            # written: the model reads an evidence CLASS and an empty class is
+            # not one.
+            "discarded_without_evidence": st.discards.no_evidence,
             # A negation is "contains NOT", because the qualifier is a relation
             # and the regime changes at release 202.
             "negated_rows": st.negated,

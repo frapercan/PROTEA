@@ -8,14 +8,24 @@ includes what is merely inferred. The laboratory asked for this and it was the
 correction that mattered most: this table was being thought of as the truth of
 each end, and it is not.
 
-THE ORDER IS REMAP, THEN DISTINCT, AND IT IS NOT INTERCHANGEABLE. Both steps
-remove rows, so doing them the other way round reports the wrong number for
-both and leaves rows the axis cannot name. A card is read in the id space of
-ITS OWN snapshot, where ``go_term.id`` is a surrogate per snapshot and the same
-term carries a different one in every release; it is rewritten into the axis
-first, and only then are equal cards collapsed. The two collapses are counted
-APART, because they are two different facts about the data: what the GAF itself
-wrote twice, and what became equal only once the axis named it.
+THE ORDER IS THREE STEPS, AND WHAT IT BUYS IS THE TWO COUNTS. Exactly: an
+exact DISTINCT in the id space of each card's OWN snapshot, which is the GAF's
+own duplication; then the rewrite into the axis; then a second DISTINCT on the
+axis, which is two surrogates of one term meeting. ``go_term.id`` is a
+surrogate PER SNAPSHOT, so a card read from release R names its term in R's id
+space and has to be rewritten before it can be compared with one from another.
+
+THE ROWS WOULD BE THE SAME EITHER WAY, and this is the honest statement of it.
+The rewrite is a FUNCTION on cards, so rewriting and then removing duplicates
+gives exactly the rows that removing duplicates and then rewriting does. What
+the order buys is not rows: it is that the two collapses are ATTRIBUTABLE. One
+DISTINCT at the end would give the right table and one unreadable number, and
+the laboratory's session is the one that put it this way.
+
+They are counted APART because they are two different facts about the data:
+what the GAF itself wrote twice, and what became equal only once the axis named
+it. One number for both would print the same digit for a bundle whose GAF
+duplication changed and a bundle whose synonym map changed.
 
 THE CARD IS FOUR FIELDS PLUS THE MOMENT, and ``assigned_by`` is NOT one of
 them. That is not an omission. Production's own scorer sorts a donor's
@@ -122,7 +132,7 @@ class Collapse(NamedTuple):
 
 
 class Discards(NamedTuple):
-    """Rows the axis could not take, by reason. ``off_axis`` should be zero."""
+    """Rows this table does not write, by reason. ``off_axis`` should be zero."""
 
     #: No live id on the axis and no published successor that has one. On the
     #: 65 windows published so far the axis IS release 211's own corpus
@@ -133,6 +143,14 @@ class Discards(NamedTuple):
     #: discard: the substitution happens, because the ontology said so. Counted
     #: because it moves a term between the groups the loader groups by.
     crossed_aspect: int
+    #: No evidence code at all. ``protein_go_annotation.evidence_code`` is
+    #: NULLABLE in the schema, so this branch is REACHABLE even though the live
+    #: data does not take it: the top eight codes of a sample of release 211
+    #: are all real ones. It is dropped rather than written, because the model
+    #: reads an evidence CLASS and an empty class is not one, and the
+    #: laboratory's loader would drop it as unknown anyway. Counted here so the
+    #: number is visible on this side before it reaches that one.
+    no_evidence: int
 
 
 class WindowState(NamedTuple):
@@ -166,15 +184,17 @@ def state_of(
     cartas: set[_Row] = set()
     por_momento: dict[str, int] = {}
     evidencia: dict[str, dict[str, int]] = {}
-    gaf = remapeo = fuera = cruzado = 0
+    gaf = remapeo = fuera = cruzado = sin_evidencia = 0
     ends = (
         (MOMENTS[0], facts.eset.old_annotation_set_id),
         (MOMENTS[1], facts.eset.new_annotation_set_id),
     )
     for momento, aset in ends:
         crudas = list(session.execute(_STATE, {"aset": aset, "population": population}))
-        antes = {(acc, momento, go, ev or "", qu) for acc, go, ev, qu in crudas}
-        gaf += len(crudas) - len(antes)
+        con_evidencia = [f for f in crudas if f[2]]
+        sin_evidencia += len(crudas) - len(con_evidencia)
+        antes = {(acc, momento, go, ev, qu) for acc, go, ev, qu in con_evidencia}
+        gaf += len(con_evidencia) - len(antes)
         puestas, vivas, d = _onto_axis(antes, axis)
         remapeo += vivas - len(puestas)
         fuera += d.off_axis
@@ -182,7 +202,10 @@ def state_of(
         por_momento[momento] = len(puestas)
         evidencia[momento] = dict(Counter(f[3] for f in puestas))
         cartas |= puestas
-    cuentas = (Collapse(gaf=gaf, remap=remapeo), Discards(off_axis=fuera, crossed_aspect=cruzado))
+    cuentas = (
+        Collapse(gaf=gaf, remap=remapeo),
+        Discards(off_axis=fuera, crossed_aspect=cruzado, no_evidence=sin_evidencia),
+    )
     return _as_table(facts, sorted(cartas), por_momento, evidencia, cuentas)
 
 
@@ -210,7 +233,7 @@ def _onto_axis(antes: set[_Row], axis: SideFrame) -> tuple[set[_Row], int, Disca
         vivas += 1
         if go_id in axis.remap.crossed_aspect:
             cruzado += 1
-    return puestas, vivas, Discards(off_axis=fuera, crossed_aspect=cruzado)
+    return puestas, vivas, Discards(off_axis=fuera, crossed_aspect=cruzado, no_evidence=0)
 
 
 def _as_table(
