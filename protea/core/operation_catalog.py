@@ -101,6 +101,9 @@ from protea.core.operations.register_ingested_method import (
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesOperation,
 )
+from protea.core.operations.retire_evaluation_sets import (
+    RetireEvaluationSetsOperation,
+)
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
 from protea.core.operations.run_lab_method import RunLabMethodOperation
@@ -165,6 +168,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(ArchiveOntologySnapshotOperation())
     registry.register(CountBackendParametersOperation())
     registry.register(ExportEvaluationTargetsOperation())
+    registry.register(RetireEvaluationSetsOperation())
     registry.register(IngestMethodPredictionsOperation())
     registry.register(RunLabMethodOperation())
     registry.register(LoadOntologyAliasesOperation())

@@ -146,6 +146,9 @@ from protea.core.operations.register_ingested_method import (
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesPayload,
 )
+from protea.core.operations.retire_evaluation_sets import (
+    RetireEvaluationSetsPayload,
+)
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
@@ -587,6 +590,14 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ExportEvaluationTargetsPayload,
         {"evaluation_set_id": "e", "categories": ["removed"]},
         ("categories",),
+    ),
+    (
+        # Un borrado cuyo alcance es un predicado es un borrado que nadie leyo
+        # antes de correr. La lista se deriva, se mira y se pasa.
+        "retire_evaluation_sets",
+        RetireEvaluationSetsPayload,
+        {"evaluation_set_ids": []},
+        ("evaluation_set_ids",)
     ),
     # invariant: a method's prediction set has to say what produced it. The
     # name identifies the arm and is written on every row, and prediction_set
