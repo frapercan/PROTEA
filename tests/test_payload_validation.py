@@ -155,6 +155,9 @@ from protea.core.operations.run_interproscan_batch import (
 )
 from protea.core.operations.run_lab_method import RunLabMethodPayload
 from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
+from protea.core.operations.seal_evaluation_groundtruth import (
+    SealEvaluationGroundtruthPayload,
+)
 from protea.core.operations.store_residue_codes import StoreResidueCodesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
 from protea.core.operations.upload_residue_shard import UploadResidueShardPayload
@@ -596,6 +599,15 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         # antes de correr. La lista se deriva, se mira y se pasa.
         "retire_evaluation_sets",
         RetireEvaluationSetsPayload,
+        {"evaluation_set_ids": []},
+        ("evaluation_set_ids",),
+    ),
+    (
+        # Sin modo "todas": un alcance que vive en un valor por defecto es un
+        # alcance que nadie declaro, y la primera corrida de un "todas" habria
+        # alcanzado el holdout sin que nadie escribiera su id.
+        "seal_evaluation_groundtruth",
+        SealEvaluationGroundtruthPayload,
         {"evaluation_set_ids": []},
         ("evaluation_set_ids",)
     ),
