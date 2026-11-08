@@ -298,8 +298,11 @@ not enter the mean. The row exists, with the AP null, because "measured and
 empty" and "not measured" are different facts and a missing row says neither.
 
 ``vocabulary_exam_choice``, one row per (run, concept, chosen_on_half, metric,
-rank): the feature, its threshold level where the metric has one, and its
-coefficient where the metric fits one. It exists because **the chosen feature is
+rank): the feature, its ``exam_bin`` where the metric has a threshold, and its
+coefficient where the metric fits one. The threshold is a bin of THIS EXAM's
+histogram and is deliberately not called ``level``, which in every other table
+means a level of the vocabulary's quantisation: two different quantities one
+character apart in the same schema is how a reader joins the wrong one. It exists because **the chosen feature is
 two, not one**: the single-feature AP is ``(a1[argmax a0] + a0[argmax a1]) / 2``,
 so there is a feature chosen on sub-half 0 and measured on 1 and another the
 other way round, and today they survive only inside the dump. The extras choose
@@ -323,23 +326,43 @@ for bit (``HA`` and ``hp_hist`` of the dump), because an AP that agrees over
 histograms that do not is two errors cancelling. Then the AP in double precision
 to 1e-12, concept by concept.
 
-**The two group exams: the selection exactly, the regression's AP against a
-measured floor.** The feature selection is a ranking of mean differences with ties
-broken by index, so it is deterministic and is required to be identical, as is
-``ap_held_out_uno``, which is an exact AP over the first selected feature. The
-regression is not: it is torch's L-BFGS (lr 1, max_iter 100, strong Wolfe, L2
-1e-4, standardised with the deviation clipped to 1e-6), and its result is
-bit-identical only under the same implementation on the same device. The
-laboratory fitted it on a card; the platform fits on CPU, where this project has
-already measured that a 1-ulp difference in a matmul changes which atom a k-WTA
-selects.
+**The two group exams: nothing is required to be identical, because nothing in
+them is.** The first version of this record said the feature selection was a
+ranking of mean differences with ties broken by index, therefore deterministic,
+and required it to be identical across devices. That is false, and it is false
+in four places inside ``step22`` alone:
 
-So this record does not declare a tolerance for it. **The floor is measured
-first**, by running the laboratory's own group exam twice, once per device, over
-the same codes and the same selection, and the acceptance is that the platform
-agrees with the laboratory within that floor. A tolerance chosen by hand would be
-a number with no population behind it, which is the error this project has paid
-for more than once.
+* each protein's contribution is summed in float32 ON THE DEVICE and only then
+  widened (``tot[h] += z.sum(0).double()``), and a card and a CPU do not reduce
+  in the same order;
+* ``diff = (mp - mn).float()`` rounds the difference back to float32;
+* ``torch.topk`` does not fix the order of ties;
+* when no feature has a positive difference the code keeps ``top[:1]``, and there
+  the ties are at exactly zero.
+
+Over values dequantised to 256 levels, near-ties are not rare. So the selection
+can differ between the laboratory's card and the platform's CPU, and with it
+``ap_held_out_uno``, which is the exact AP of whichever feature came first.
+
+The same error twice in one record, and the same error this project keeps paying
+for: a property asserted from reading what the code MEANS instead of what it
+executes. The measured precedent was already written down, about this very
+vocabulary: a 1-ulp difference in a matmul makes a k-WTA select a different atom.
+
+So the acceptance for these two exams **measures agreement rather than requiring
+it**, over one double run of the laboratory's own exam, once per device, on the
+same codes:
+
+* the selection is compared concept by concept. If it is identical everywhere it
+  becomes a requirement; where it is not, the concepts that move are COUNTED AND
+  NAMED, and the same for ``ap_held_out_uno``;
+* the regression's AP is accepted within the floor that double run measures. It
+  is torch's L-BFGS (lr 1, max_iter 100, strong Wolfe, L2 1e-4, standardised with
+  the deviation clipped to 1e-6), bit-identical only under the same
+  implementation on the same device.
+
+A tolerance chosen by hand would be a number with no population behind it, which
+is the error this project has paid for more than once.
 
 The runs of the lab's D37 and D38 do not serve as the criterion as they stand:
 they include the 50 and they are continuous, not quantised.
