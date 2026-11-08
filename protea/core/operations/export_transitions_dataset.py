@@ -119,7 +119,23 @@ class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
     accept_revisions: list[str] = []
     term_vectors_key: str | None = None
     term_vectors_sha256: str | None = None
-    embedding_config_id: str | None = None
+    #: The config whose per-residue CODES index ``residue_refs`` and, later,
+    #: ``feature_tokens``: the VOCABULARY config, not the model one it was
+    #: derived from.
+    #:
+    #: NOT called ``embedding_config_id``, which is what it was called for one
+    #: commit. There are two configs in this dataset and neither derives from
+    #: the other: the codes config indexes the reference tables, and the kNN
+    #: config gives the neighbourhood. One field named for both invites
+    #: putting one where the other goes, which is the ``cut`` and
+    #: ``cut_version`` mistake again. ``knn_config_id`` arrives with
+    #: ``neighbourhood`` and not before, because a field that does nothing
+    #: lies about what the run declared.
+    #:
+    #: The COLUMN inside ``residue_refs`` stays ``embedding_config_id``,
+    #: because that is the laboratory loader's contract and inside one table
+    #: there is only one config to mean.
+    codes_config_id: str | None = None
 
     @field_validator("windows")
     @classmethod
@@ -154,10 +170,10 @@ class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
                 f"tables {por_ventana} are keyed by a window, so windows cannot be "
                 "empty and there is no 'all' mode for it"
             )
-        if "residue_refs" in self.tables and not self.embedding_config_id:
+        if "residue_refs" in self.tables and not self.codes_config_id:
             raise ValueError(
                 "residue_refs is keyed by an embedding config, so "
-                "embedding_config_id has to be named. And it is the VOCABULARY "
+                "codes_config_id has to be named. And it is the VOCABULARY "
                 "config that keys those rows, not the model config the vocabulary "
                 "was derived from: the second has zero rows, and an empty "
                 "residue_refs is indistinguishable from a bank with no codes"
@@ -394,8 +410,8 @@ class ExportTransitionsDatasetOperation(Operation):
             )
         vivos = set(axis.aspect) if axis is not None else set()
         refs = (
-            refs_of(session, uuid.UUID(p.embedding_config_id))
-            if "residue_refs" in p.tables and p.embedding_config_id
+            refs_of(session, uuid.UUID(p.codes_config_id))
+            if "residue_refs" in p.tables and p.codes_config_id
             else None
         )
         if refs is not None:

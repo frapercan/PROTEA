@@ -270,6 +270,20 @@ per-residue codes at all. So the writer refuses a config with no rows and names
 the distinction in the refusal, which is the same shape as the ``window`` join
 key above: a mismatch that produces no error is worse than one that does.
 
+**THE MANIFEST DECLARES TWO CONFIG IDS, NOT ONE.** Asked by the laboratory on
+2026-11-08, before either field existed, which is the cheap moment. The CODES
+config (the vocabulary one) indexes ``residue_refs`` and ``feature_tokens``;
+the KNN config (Ankh base) gives the ``neighbourhood``. Neither derives from
+the other, so they are two fields, exactly as ``cut`` and ``cut_version`` are:
+one field named for both invites putting one where the other goes.
+
+The payload's field is therefore ``codes_config_id`` and not
+``embedding_config_id``, which is what it was called for one commit.
+``knn_config_id`` arrives with ``neighbourhood`` and not before, because a
+field that does nothing lies about what the run declared. The COLUMN inside
+``residue_refs`` stays ``embedding_config_id``: that is the loader's contract,
+and inside one table there is only one config to mean.
+
 ``feature_tokens`` is NOT in this group, and the difference is the point of the
 grouping. Summarising the bank's codes means reading those 90,4 GB, which is
 computation rather than reference, so it waits on where that computation runs.

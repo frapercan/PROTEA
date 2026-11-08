@@ -156,8 +156,38 @@ def test_it_copies_no_codes_only_references():
     assert "iter_chunks" not in fuente
 
 
-def test_the_payload_needs_the_config_named():
+def test_the_field_is_not_called_embedding_config_id():
+    """Two configs, and neither derives from the other.
+
+    The codes config indexes the reference tables; the kNN config gives the
+    neighbourhood. One field named for both invites putting one where the
+    other goes, which is the ``cut`` and ``cut_version`` mistake again. The
+    laboratory asked for the two to be separate in the manifest before either
+    was written, which is the cheap moment.
+
+    The COLUMN inside the table stays ``embedding_config_id``: that is the
+    loader's contract, and inside one table there is only one config to mean.
+    """
+    campos = set(ExportTransitionsDatasetPayload.model_fields)
+
+    assert "codes_config_id" in campos
+    assert "embedding_config_id" not in campos
+    assert R.SCHEMA.names[0] == "embedding_config_id"
+
+    # Y el nombre viejo se RECHAZA, no se ignora: el payload prohibe campos
+    # extra, asi que quien lo pase recibe un error y no silencio.
     with pytest.raises(ValueError, match="embedding_config_id"):
+        ExportTransitionsDatasetPayload(
+            windows=[],
+            cut="c",
+            cut_version="211",
+            tables=["residue_refs"],
+            embedding_config_id=str(VOCAB),
+        )
+
+
+def test_the_payload_needs_the_config_named():
+    with pytest.raises(ValueError, match="codes_config_id"):
         ExportTransitionsDatasetPayload(
             windows=[], cut="c", cut_version="211", tables=["residue_refs"]
         )
@@ -169,8 +199,8 @@ def test_the_payload_needs_no_windows_for_it():
         cut="c",
         cut_version="211",
         tables=["residue_refs"],
-        embedding_config_id=str(VOCAB),
+        codes_config_id=str(VOCAB),
     )
 
     assert p.windows == []
-    assert p.embedding_config_id == str(VOCAB)
+    assert p.codes_config_id == str(VOCAB)
