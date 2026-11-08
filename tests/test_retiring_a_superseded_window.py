@@ -69,8 +69,10 @@ class _Session:
     def execute(self, statement, params=None):
         sql = " ".join(str(statement).split())
         if "pg_constraint" in sql:
-            return [("evaluation_result", "evaluation_set_id"),
-                    ("exploration", "evaluation_set_id")]
+            return [
+                ("evaluation_result", "evaluation_set_id"),
+                ("exploration", "evaluation_set_id"),
+            ]
         if "FOR UPDATE" in sql:
             self.bloqueo = True
             return _Res([])
@@ -131,14 +133,14 @@ class _Store:
         return not self.borra_false
 
 
-def _run(session, store, ids, monkeypatch, dry=False):
+def _run(session, store, ids, monkeypatch, dry=False, eventos=None):
     monkeypatch.setattr(
         "protea.core.operations.retire_evaluation_sets.get_artifact_store", lambda _s: store
     )
     monkeypatch.setattr(
         "protea.core.operations.retire_evaluation_sets.load_settings", lambda _r: object()
     )
-    eventos: list[tuple[str, dict]] = []
+    eventos = [] if eventos is None else eventos
     out = RetireEvaluationSetsOperation().execute(
         session,
         {"evaluation_set_ids": ids, "dry_run": dry},
@@ -261,9 +263,7 @@ class TestWhatItRefuses:
 
 
 class TestTheCopyIsVerifiedAndThePurgeIsRead:
-    def test_a_copy_that_does_not_verify_stops_the_run_before_any_delete(
-        self, monkeypatch
-    ) -> None:
+    def test_a_copy_that_does_not_verify_stops_the_run_before_any_delete(self, monkeypatch) -> None:
         # A put taken on faith plus a purge is a lost original: the write may
         # be partial or in another bucket. The copy is re-read through the
         # same door the truth is read by, and a mismatch stops everything
@@ -276,9 +276,7 @@ class TestTheCopyIsVerifiedAndThePurgeIsRead:
             _run(session, _Store(copia_mala=True), [str(e.id)], monkeypatch)
         assert session.borradas == [] and session.commits == 0
 
-    def test_a_delete_that_returns_false_is_counted_as_left_behind(
-        self, monkeypatch
-    ) -> None:
+    def test_a_delete_that_returns_false_is_counted_as_left_behind(self, monkeypatch) -> None:
         # ``delete`` returns False when the key was not there, and the MinIO
         # backend also returns False on any S3Error from its stat. Ignoring
         # the return counted every one of those as purged.
@@ -318,13 +316,112 @@ class TestTheDryRunAndTheTombstone:
         _, eventos = _run(_Session([e]), _Store(), [str(e.id)], monkeypatch)
         lapida = dict(eventos)["retire_evaluation_sets.archived"]
         for campo in (
-            "old_annotation_set_id", "new_annotation_set_id", "pivot_snapshot_id",
-            "old_native_snapshot_id", "new_native_snapshot_id", "truth_profile",
-            "toi_rule", "not_codes", "window_role", "code_revision",
-            "groundtruth_uri", "created_at", "job_id", "stats",
-            "groundtruth_sha256", "groundtruth_bytes", "archived_key",
+            "old_annotation_set_id",
+            "new_annotation_set_id",
+            "pivot_snapshot_id",
+            "old_native_snapshot_id",
+            "new_native_snapshot_id",
+            "truth_profile",
+            "toi_rule",
+            "not_codes",
+            "window_role",
+            "code_revision",
+            "groundtruth_uri",
+            "created_at",
+            "job_id",
+            "stats",
+            "groundtruth_sha256",
+            "groundtruth_bytes",
+            "archived_key",
         ):
             assert campo in lapida, campo
         assert lapida["groundtruth_sha256"] == hashlib.sha256(BLOB).hexdigest()
         assert lapida["groundtruth_bytes"] == len(BLOB)
         assert lapida["stats"] == {"delta_proteins": 1646}
+
+
+class TestEveryRefusalInOnePass:
+    """One pass shows every problem, which is the desktop session's point.
+
+    It used to refuse on the first bad window, so a pass over 124 ids was a
+    queue of 124 passes: learn one reason, fix it, find the next. The reasons
+    are independent of each other, so there was never a reason to learn them
+    one at a time.
+
+    And the fix has a second half that matters more. Deciding and archiving
+    were ONE function, so a refusal at the fiftieth window had already written
+    forty-nine copies under ``retired/`` beside rows that were still alive.
+    Every window is decided first now, so a refusal anywhere leaves the store
+    untouched -- which is what ``store.puts == []`` asserts below, in BOTH
+    modes. Asserting it only in the dry pass would be the same mistake this
+    file was written about: a test that checks the tidy case.
+    """
+
+    def _tres_motivos(self):
+        con_rol = _Eset(role="holdout-227-230")
+        marco_vivo = _Eset(rules=VIVO)
+        bueno = _Eset()
+        ausente = uuid.uuid4()
+        session = _Session([con_rol, marco_vivo, bueno])
+        ids = [str(con_rol.id), str(marco_vivo.id), str(ausente), str(bueno.id)]
+        return session, ids
+
+    @pytest.mark.parametrize("dry", [True, False])
+    def test_it_names_every_refusal_and_touches_nothing(self, monkeypatch, dry):
+        session, ids = self._tres_motivos()
+        store = _Store()
+        eventos: list[tuple[str, dict]] = []
+        with pytest.raises(ValueError) as exc:
+            _run(session, store, ids, monkeypatch, dry=dry, eventos=eventos)
+
+        mensaje = str(exc.value)
+        assert "3 of 4" in mensaje
+        # Los tres motivos son distintos y los tres salen: el fallo que se
+        # arregla es justo quedarse en el primero.
+        assert "window_role" in mensaje
+        assert "not the superseded frame" in mensaje
+        assert "does not exist" in mensaje
+
+        # Nada escrito, nada borrado, y la ventana BUENA tampoco se archivo.
+        assert store.puts == []
+        assert store.borrados == []
+        assert session.borradas == []
+        assert session.commits == 0
+
+    def test_the_event_carries_the_reasons_as_data(self, monkeypatch):
+        session, ids = self._tres_motivos()
+        eventos: list[tuple[str, dict]] = []
+        with pytest.raises(ValueError):
+            _run(session, _Store(), ids, monkeypatch, dry=True, eventos=eventos)
+
+        rechazo = [f for nombre, f in eventos if nombre == "retire_evaluation_sets.refused"]
+        assert len(rechazo) == 1
+        campos = rechazo[0]
+        assert campos["asked"] == 4
+        assert campos["refused"] == 3
+        # Leer el MOTIVO de la data y no del texto: el mensaje esta acotado y
+        # el evento no, asi que el evento es el registro.
+        assert len(campos["reasons"]) == 3
+        assert all({"evaluation_set_id", "motivo"} == set(r) for r in campos["reasons"])
+
+    def test_the_message_is_bounded_and_says_how_many_it_left_out(self, monkeypatch):
+        # Siete con rol: mas que la muestra, que es lo que obliga a la cola.
+        malas = [_Eset(role="holdout-227-230") for _ in range(7)]
+        session = _Session(malas)
+        eventos: list[tuple[str, dict]] = []
+        with pytest.raises(ValueError) as exc:
+            _run(
+                session,
+                _Store(),
+                [str(e.id) for e in malas],
+                monkeypatch,
+                dry=True,
+                eventos=eventos,
+            )
+
+        mensaje = str(exc.value)
+        assert "7 of 7" in mensaje
+        assert "and 2 more" in mensaje
+        # Y el evento si los lleva todos, que es donde hay que mirarlos.
+        campos = next(f for nombre, f in eventos if nombre.endswith(".refused"))
+        assert len(campos["reasons"]) == 7

@@ -139,8 +139,7 @@ def _live_job_ids(session: Session, ids: list[uuid.UUID]) -> dict[str, str]:
     """
     rows = session.execute(
         text(
-            "SELECT j.id::text, j.payload::text FROM job j "
-            "WHERE j.status IN ('QUEUED', 'RUNNING')"
+            "SELECT j.id::text, j.payload::text FROM job j WHERE j.status IN ('QUEUED', 'RUNNING')"
         )
     ).all()
     out: dict[str, str] = {}
@@ -179,6 +178,25 @@ def _refusal(
             "payload. Retiring it now is a race nobody can diagnose afterwards"
         )
     return None
+
+
+#: How many refusals the exception text carries. The event carries all of them.
+MUESTRA = 5
+
+
+def _refusal_message(rechazos: list[dict[str, str]], asked: int) -> str:
+    """One message for every refusal, with a bounded sample of the reasons."""
+    muestra = "; ".join(f"{r['evaluation_set_id']}: {r['motivo']}" for r in rechazos[:MUESTRA])
+    resto = len(rechazos) - MUESTRA
+    cola = (
+        f"; and {resto} more, all of them in the retire_evaluation_sets.refused event"
+        if resto > 0
+        else ""
+    )
+    return (
+        f"refusing to retire: {len(rechazos)} of {asked} windows are not retirable "
+        f"and NOTHING was touched. {muestra}{cola}"
+    )
 
 
 def _tombstone(eset: EvaluationSet, blob: bytes, archivo: str) -> dict[str, Any]:
@@ -223,13 +241,25 @@ class _Plan(NamedTuple):
     dry: bool
 
 
-def _archive_one(
-    plan: _Plan,
-    session: Session,
-    eset: EvaluationSet,
-    live: dict[str, str],
-) -> dict[str, Any]:
-    """Check one window and, unless dry, archive its parquet verified.
+def _counts_of(
+    session: Session, eset: EvaluationSet, tablas: list[tuple[str, str]]
+) -> dict[str, int]:
+    """How many rows of each referring table point at this window."""
+    return {
+        tabla: session.execute(
+            text(f"SELECT count(*) FROM {tabla} WHERE {col} = :v"), {"v": eset.id}
+        ).scalar_one()
+        for tabla, col in tablas
+    }
+
+
+def _archive_one(plan: _Plan, eset: EvaluationSet) -> dict[str, Any]:
+    """Archive one window's parquet, verified, unless dry.
+
+    IT DOES NOT DECIDE. Deciding and archiving used to be one function, so a
+    refusal at the fiftieth window left forty-nine copies under ``retired/``
+    beside rows that were still alive. Every window is decided first now, and
+    nothing is written until all of them passed.
 
     THE DRY PASS DOES NOT WRITE. The first version archived unconditionally
     and the dry run called it, so the pass that "touches nothing" left copies
@@ -243,25 +273,13 @@ def _archive_one(
     """
     from protea.core.evaluation import groundtruth_key_for
 
-    counts = {
-        tabla: session.execute(
-            text(f"SELECT count(*) FROM {tabla} WHERE {col} = :v"), {"v": eset.id}
-        ).scalar_one()
-        for tabla, col in plan.tablas
-    }
-    motivo = _refusal(eset, counts, live)
-    if motivo is not None:
-        raise ValueError(f"refusing to retire {eset.id}: {motivo}")
-
     key = groundtruth_key_for(eset.id)
     blob = plan.store.get(key)
     digest = hashlib.sha256(blob).hexdigest()
     archivo = f"{RETIRED_PREFIX}/{eset.id}-{digest[:16]}.parquet"
     if not plan.dry:
         plan.store.put(archivo, blob)
-        fetch_and_verify(
-            plan.store, archivo, digest, f"the archived copy of {eset.id}"
-        )
+        fetch_and_verify(plan.store, archivo, digest, f"the archived copy of {eset.id}")
     lapida = _tombstone(eset, blob, archivo)
     lapida["original_key"] = key
     return lapida
@@ -275,7 +293,7 @@ class RetireEvaluationSetsOperation(Operation):
         "rows and purge the originals, leaving a job and a full tombstone per window. "
         "Refuses a window with a window_role, one of the live frame, one anything "
         "points at, or one a live job names. dry_run does every check and touches "
-        "nothing."
+        "nothing, and either mode lists EVERY refusal instead of stopping at the first."
     )
 
     def execute(
@@ -313,6 +331,56 @@ class RetireEvaluationSetsOperation(Operation):
 
         return self._retire(session, store, lapidas, emit)
 
+    def _decide(
+        self,
+        session: Session,
+        ids: list[uuid.UUID],
+        plan: _Plan,
+        emit: EmitFn,
+    ) -> list[EvaluationSet]:
+        """Lock every window and collect EVERY refusal before anything is written.
+
+        It used to refuse on the first bad window. Over 124 ids that turns one
+        dry pass into a queue of passes: you learn one reason, fix it, and find
+        the next. The reasons are independent, so there is no reason to learn
+        them one at a time.
+
+        ``FOR UPDATE`` is what makes the check mean anything for the length of
+        the transaction: it takes a row lock that a foreign-key insert into any
+        referring table has to wait for, so a reference cannot appear between
+        the check and the delete.
+
+        The full list of refusals goes in the EVENT and a bounded sample in the
+        exception. A message carrying 124 reasons is unreadable where it lands,
+        and the record of what was refused belongs in the data either way.
+        """
+        session.execute(
+            text("SELECT id FROM evaluation_set WHERE id = ANY(:v) FOR UPDATE"),
+            {"v": [str(i) for i in ids]},
+        )
+        live = _live_job_ids(session, ids)
+        buenos: list[EvaluationSet] = []
+        rechazos: list[dict[str, str]] = []
+        for vid in ids:
+            eset = session.get(EvaluationSet, vid)
+            if eset is None:
+                rechazos.append({"evaluation_set_id": str(vid), "motivo": "does not exist"})
+                continue
+            motivo = _refusal(eset, _counts_of(session, eset, plan.tablas), live)
+            if motivo is None:
+                buenos.append(eset)
+            else:
+                rechazos.append({"evaluation_set_id": str(vid), "motivo": motivo})
+        if rechazos:
+            emit(
+                "retire_evaluation_sets.refused",
+                f"{len(rechazos)} of {len(ids)} refused, nothing touched",
+                {"refused": len(rechazos), "asked": len(ids), "reasons": rechazos},
+                "warning",
+            )
+            raise ValueError(_refusal_message(rechazos, len(ids)))
+        return buenos
+
     def _check_all(
         self,
         session: Session,
@@ -320,27 +388,14 @@ class RetireEvaluationSetsOperation(Operation):
         plan: _Plan,
         emit: EmitFn,
     ) -> list[dict[str, Any]]:
-        """Lock and check EVERY window before any delete.
-
-        ``FOR UPDATE`` is what makes the check mean anything for the length of
-        the transaction: it takes a row lock that a foreign-key insert into
-        any referring table has to wait for, so a reference cannot appear
-        between the check and the delete.
-        """
-        session.execute(
-            text("SELECT id FROM evaluation_set WHERE id = ANY(:v) FOR UPDATE"),
-            {"v": [str(i) for i in ids]},
-        )
-        live = _live_job_ids(session, ids)
+        """Decide on every window, and only then archive. Never interleaved."""
         lapidas: list[dict[str, Any]] = []
-        for vid in ids:
-            eset = session.get(EvaluationSet, vid)
-            if eset is None:
-                raise ValueError(f"EvaluationSet {vid} does not exist")
-            lapida = _archive_one(plan, session, eset, live)
+        for eset in self._decide(session, ids, plan, emit):
+            lapida = _archive_one(plan, eset)
             lapidas.append(lapida)
             emit(
-                "retire_evaluation_sets.would_archive" if plan.dry
+                "retire_evaluation_sets.would_archive"
+                if plan.dry
                 else "retire_evaluation_sets.archived",
                 None,
                 lapida,
