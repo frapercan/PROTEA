@@ -79,3 +79,12 @@ jobs:
 
       - name: OpenAPI cross-reference check (DS.3)
         run: python scripts/check_openapi_refs.py
+
+      # Cada conjunto declarado, descrito y verificable. EN MODO INFORME: los
+      # seis fallan al menos un criterio hoy, asi que bloquear ahora pararia
+      # todo cambio no relacionado hasta que aterrice una docena de
+      # migraciones. El paso imprime el hueco y sale 0. Lo que lo pasa a
+      # bloquear es `--strict`, y eso lo enciende la ultima de esas
+      # migraciones, no esta linea.
+      - name: set guard (declarado, descrito, verificable) -- informe
+        run: poetry run python scripts/check_sets.py

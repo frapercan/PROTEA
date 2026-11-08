@@ -374,7 +374,6 @@ class TestTheSeams:
 
         from protea.core._truth_projection import Graph
         from protea.core._truth_projection import Request as ProjectionRequest
-
         from protea.core._truth_remap import SideFrame
         from protea.core._truth_rules import _Side
 
