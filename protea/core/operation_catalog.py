@@ -61,6 +61,9 @@ from protea.core.operations.export_minijobs import (
 from protea.core.operations.export_research_dataset import (
     ExportResearchDatasetOperation,
 )
+from protea.core.operations.export_transitions_dataset import (
+    ExportTransitionsDatasetOperation,
+)
 from protea.core.operations.extract_goa_universe import ExtractGoaUniverseOperation
 from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOperation
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetOperation
@@ -130,6 +133,7 @@ def _register_window_maintenance(registry: OperationRegistry) -> None:
     give it the digest it never had and one to retire it, and both leave a job
     precisely because they change what a row says about itself.
     """
+    registry.register(ExportTransitionsDatasetOperation())
     registry.register(RetireEvaluationSetsOperation())
     registry.register(SealEvaluationGroundtruthOperation())
 

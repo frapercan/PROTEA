@@ -36,10 +36,13 @@ already exists, so it cannot add a grain.** A query's own state is N rows per
 query, a neighbour's state is N by M, and a vocabulary key is one per sequence.
 None of the three is a column on a pair.
 
-Decision: eight tables, each keyed by what it actually depends on
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Decision: ten tables, each keyed by what it actually depends on
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-One ``Dataset`` row, one manifest, eight parquets.
+One ``Dataset`` row, one manifest, ten parquets. Eight when this record was
+accepted; ``window_terms_out`` and ``residue_refs`` were added on 2026-11-08
+after the laboratory read the writer's design, and each has its own section
+below saying what it is for.
 
 **The principle is one sentence: a table is stored by what it depends on.** It
 came up three times before it was named. A protein's neighbours at ``t`` do not
@@ -94,6 +97,14 @@ read it at that grain.
    * - ``term_ancestors``
      - ``(cut, go_id, ancestor)``
      - the relation to each strict ancestor
+   * - ``window_terms_out``
+     - ``(window, go_id)``
+     - the axis terms this window's rule leaves OUT, so negatives are drawn
+       from the axis minus this
+   * - ``residue_refs``
+     - ``(embedding_config_id, sequence_id)``
+     - ``shard_key``, ``shard_sha256``, ``position``: the per-residue codes
+       NAMED and never copied
 
 The keys are the whole decision. A protein's neighbours at ``t`` and a
 protein's state at ``t`` do not depend on ``t'``, so neither table is keyed by
@@ -114,6 +125,62 @@ because the same window under two closures is two different truths. Drop any
 one of the three and rows from two levels occupy one key, which is the defect
 class this project keeps paying for: a level must be named by every field that
 varies.
+
+The terms a window leaves out are stored, not the ones it keeps
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Added 2026-11-08. The loader draws negatives from the term axis, and without
+this table it draws them from the WHOLE axis. A term created after an early
+window then appears as a negative there, and the model learns that new terms
+are never gained, which is an artefact of the rule and not biology. What the
+loader needs is exactly the axis terms it must not treat as negatives.
+
+**It is stored as the complement because of the size, measured.** Over the 64
+windows of revision ``d5416224``, on one axis of 43.558 live terms:
+
+.. list-table::
+   :header-rows: 1
+
+   * - quantity
+     - min
+     - median
+     - max
+     - total
+   * - ``axis - TOI``, which is this table
+     - 207
+     - 1.339
+     - 4.087
+     - 106.010
+   * - ``TOI - axis``, which the loader never sees
+     - 0
+     - 2.481
+     - 3.286
+     -
+
+Storing each window's terms of interest instead would be 64 times 43.558, about
+2,79 million rows, for the same information.
+
+**And it is ``axis - TOI``, not "the complement of the TOI".** The terms of
+interest are what is live in both ENDS, and a term can be live in both ends
+while being obsolete in the pivot's era. So the set is not contained in the
+axis: in **42 of those 64 windows it holds more terms than the axis does**. A
+reader told only two of the three counts would compute the third wrongly, which
+is why the writer emits ``toi_terms_off_axis`` as its own number instead of
+leaving it to be inferred.
+
+The axis is a snapshot and the cut is a release, and they are two fields
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Added 2026-11-08, correcting a design that had them as one. ``cut`` is the
+``ontology_snapshot_id`` that indexes ``terms`` and ``term_ancestors``: the term
+AXIS. ``cut_version`` is the GOA release the leakage rule compares against,
+``t' <= cut_version``. Two different things, and the first draft of the writer's
+payload carried one field for both.
+
+Neither is derived from the other, in the payload or in the manifest. Deriving
+one would be the step that makes a number stop being attributable: a bundle
+whose leakage rule was evaluated against a release nobody declared cannot say
+what it is leak-free with respect to.
 
 The truth is exported, never re-derived
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
