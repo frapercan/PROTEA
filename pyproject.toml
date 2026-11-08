@@ -83,7 +83,7 @@ priority = "explicit"
 protea-method = { git = "https://github.com/frapercan/protea-method.git", rev = "75ba91a3c0172dcb34b131e30c1adb3814a1b9bf" }
 protea-sources = { git = "https://github.com/frapercan/protea-sources.git", rev = "fa42f5963c5a55fd5669862c727ee690bd573168" }
 protea-runners = { git = "https://github.com/frapercan/protea-runners.git", rev = "fb8ae81b5674a94e2d8ec29c68f21c944510501f" }
-protea-backends = { git = "https://github.com/frapercan/protea-backends.git", rev = "5fec3f59453714fb18d31d3bd43a502ad244c5d7" }
+protea-backends = { git = "https://github.com/frapercan/protea-backends.git", rev = "2cb6b479e5a2f2009915412b0e888676e4f9b199" }
 
 
 [build-system]
