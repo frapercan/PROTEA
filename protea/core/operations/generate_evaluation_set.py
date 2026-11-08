@@ -9,7 +9,11 @@ from pydantic import field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from protea.core.code_revision import code_revision
+from protea.core.code_revision import (
+    code_revision,
+    is_identifying,
+    revisions_conflict,
+)
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evaluation import (
     GAIN_RULES,
@@ -157,6 +161,46 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
         if not isinstance(v, str) or v not in ("valid", "test"):
             raise ValueError("must be one of 'valid', 'test', or null")
         return v
+
+
+def _reuse_verdict(served: str | None) -> tuple[str, str]:
+    """``(level, note)`` for serving a row built by ``served``.
+
+    WHY IT EXISTS. The eight identity fields say what the delta is by
+    DECLARATION and the code says it by IMPLEMENTATION, and they are
+    different quantities: on 2026-11-07 a fix to the synonym map changed the
+    delta of a whole class of windows with every identity field untouched. So
+    a re-submission after that fix got the OLD truth back under an ``info``
+    event, and the only way to notice was to go and look. ``3bd720c9`` is
+    such a row today.
+
+    ``revisions_conflict`` and never ``!=``: it returns False when either side
+    is unidentifying, which is NOT agreement, and the caller is expected to
+    say so out loud. That is why the unknown case gets its own sentence and
+    the same ``warning`` level as a known conflict. A dirty tree is
+    unidentifying too, so the fleet running out of an edited worktree lands
+    here rather than claiming a match.
+    """
+    running = code_revision()
+    if served is None:
+        return "warning", (
+            "the row served carries no code_revision, so nothing can say whether its "
+            "truth was built by the code running now. It predates the column."
+        )
+    if revisions_conflict(served, running):
+        return "warning", (
+            f"the row served was built by {served[:12]} and this process is "
+            f"{running[:12]}. Its stored truth is that other code's, and the identity "
+            "fields cannot tell them apart. Delete it and regenerate if you need this "
+            "revision's truth."
+        )
+    if not is_identifying(served) or not is_identifying(running):
+        return "warning", (
+            f"one of the two revisions is unidentifying ({served[:12]} served, "
+            f"{running[:12]} running), so they cannot be compared. This is not "
+            "agreement."
+        )
+    return "info", "the row served was built by the code running now."
 
 
 class GenerateEvaluationSetOperation:
@@ -433,11 +477,17 @@ class GenerateEvaluationSetOperation:
         already-computed set to a protocol window. Designating the window
         is metadata only, so it is applied in place without recomputing
         the delta.
+
+        AND IT SAYS WITH WHAT CODE THE ROW IT SERVES WAS BUILT, which it did
+        not: see :func:`_reuse_verdict`. It still SERVES it, because refusing
+        would change what every re-submission does and that is the
+        researcher's call; what was wrong was the silence, not the serving.
         """
         existing = self._existing_set(session, ident)
         if existing is None:
             return None
         self._rebind_window_role(session, existing, window_role, emit)
+        level, nota = _reuse_verdict(getattr(existing, "code_revision", None))
         stats = dict(existing.stats or {})
         result = {
             "evaluation_set_id": str(existing.id),
@@ -454,8 +504,11 @@ class GenerateEvaluationSetOperation:
                 "pivot_snapshot_id": str(ident.pivot_id),
                 "old_native_snapshot_id": str(ident.old_native),
                 "new_native_snapshot_id": str(ident.new_native),
+                "served_code_revision": getattr(existing, "code_revision", None),
+                "running_code_revision": code_revision(),
+                "note": nota,
             },
-            "info",
+            level,
         )
         return OperationResult(result=result)
 
