@@ -243,6 +243,37 @@ pivot: ``_load_children_by_go_id(session, window.pivot_snapshot_id)``, where
 re-reading the relation list, for the reason the terms-of-interest test does: a
 second copy of the filter would agree until it did not.
 
+``residue_refs`` covers the whole bank, and its key is not the name
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Noted 2026-11-08. It is a third table that depends on no window, so it joins
+the two above in needing no window list: it covers the WHOLE bank rather than a
+bundle's population, which is a superset of any selection a bundle could make,
+and the loader reads only the ``sequence_id`` values of its own batch.
+Per-window coverage is still computed when a bundle is exported, against its
+real population, because that number is about the bundle and not about the
+bank.
+
+**Not one byte of code is copied.** The 90,4 GB of shards stay where they are;
+each row names the shard key, that shard's sha256 and the sequence's position
+inside it, so a reader fetches one shard and verifies it before believing it.
+Measured: 683.887 rows over 5.344 shards, one distinct sha per shard, positions
+0 to 127.
+
+**AND THE CONFIG THAT KEYS THOSE ROWS IS NOT THE ONE THEY ARE NAMED AFTER.**
+Every row carries ``43193409-de70-526b-ae8d-43892a744049``, whose model name is
+``residue-vocabulary:06fed75ca76d17be:f3a7fe16``, while the ankh config
+``f3a7fe16-eaf5-5083-b459-7c5fa7a9a9e0`` the vocabulary was derived FROM has
+**zero** rows. A reader asking for "the f3a7fe16 bank" therefore gets nothing,
+and an empty ``residue_refs`` is indistinguishable from a bank with no
+per-residue codes at all. So the writer refuses a config with no rows and names
+the distinction in the refusal, which is the same shape as the ``window`` join
+key above: a mismatch that produces no error is worse than one that does.
+
+``feature_tokens`` is NOT in this group, and the difference is the point of the
+grouping. Summarising the bank's codes means reading those 90,4 GB, which is
+computation rather than reference, so it waits on where that computation runs.
+
 The vectors are verified, never quoted
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

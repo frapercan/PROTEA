@@ -34,7 +34,7 @@ import pytest
 
 from protea.core._artifact_identity import ArtifactMismatch
 from protea.core.operations.export_transitions_dataset import (
-    AXIS_ONLY,
+    WINDOWLESS,
     ExportTransitionsDatasetPayload,
 )
 from protea.core.transitions_export import _terms as T
@@ -230,7 +230,9 @@ class TestWhatTheTablesAskOfThePayload:
         )
 
         assert p.windows == []
-        assert AXIS_ONLY == {"terms", "term_ancestors"}
+        # ``residue_refs`` joined them: it is keyed by an embedding config and
+        # covers the WHOLE bank, which is a superset of any selection.
+        assert WINDOWLESS == {"terms", "term_ancestors", "residue_refs"}
 
     def test_a_window_keyed_table_still_needs_them(self):
         with pytest.raises(ValueError, match="keyed by a window"):
