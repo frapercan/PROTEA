@@ -8,6 +8,7 @@ frontend needs to chain ``predict_go_terms`` once embeddings finish.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Any
 
@@ -229,7 +230,7 @@ async def annotate(
     cached_config_id = _best_embedding_config_id_cached(factory, ttl)
 
     with session_scope(factory) as session:
-        query_set_id = _upsert_query_set(session, name, records)
+        query_set_id = _upsert_query_set(session, name, records, content)
         config_id, annotation_set_id, ontology_snapshot_id, reranker_id = (
             _resolve_dispatch_resources(session, cached_config_id)
         )
@@ -390,14 +391,24 @@ def _parse_and_dedup_records(content: str) -> list[tuple[str, str, str]]:
 
 
 def _upsert_query_set(
-    session: Session, name: str, records: list[tuple[str, str, str]]
+    session: Session, name: str, records: list[tuple[str, str, str]], content: str
 ) -> uuid.UUID:
     """Upsert ``Sequence`` rows for the FASTA records and create a ``QuerySet``
-    with one ``QuerySetEntry`` per record. Returns the new ``QuerySet`` id."""
+    with one ``QuerySetEntry`` per record. Returns the new ``QuerySet`` id.
+
+    ``content`` is the FASTA these records were parsed from, and its sha256 is
+    stored so this set can say which population it is. It is the same quantity
+    the uploaded and the derived sets carry.
+    """
     hashes = [Sequence.compute_hash(seq) for _, seq, _ in records]
     hash_to_seq_id = _upsert_sequences(session, records, hashes)
 
-    qs = QuerySet(name=name, description="Created via quick annotation")
+    qs = QuerySet(
+        name=name,
+        description="Created via quick annotation",
+        source_kind="quick_annotation",
+        content_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+    )
     session.add(qs)
     session.flush()
     session.add_all(
