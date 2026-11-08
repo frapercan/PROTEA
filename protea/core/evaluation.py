@@ -75,6 +75,8 @@ from protea.core._truth_rules import (
     ReconciledWindow,
     _keep_within_toi,
     _projection_request,
+    _Side,
+    _sides_of,
     _terms_of_interest,
     refuse_unknown_rules,
 )
@@ -135,6 +137,12 @@ class EvaluationData:
     #: nothing else, so a round trip returns None here. The operation stamps
     #: it on the ``evaluation_set`` row, which is where it has to survive.
     projection: dict[str, int] | None = None
+    #: Proteins whose ENTIRE F side the binding rule emptied, per side: some
+    #: 26,000 a window, computed on every build and recorded by nothing until
+    #: this field. SEPARATE from ``projection`` because that one's ``None``
+    #: claims "no profile rule ran", and the binding rule runs on every
+    #: window. Build time only, like ``projection``.
+    binding_dropped: dict[str, int] | None = None
 
     @property
     def nk_proteins(self) -> int:
@@ -189,6 +197,7 @@ class EvaluationData:
             "removed_proteins": self.removed_proteins,
             "removed_annotations": self.removed_annotations,
             **(self.projection or {}),
+            **{f"{k}_binding_dropped": v for k, v in (self.binding_dropped or {}).items()},
         }
 
 
@@ -471,12 +480,11 @@ def _drop_binding_only(
 
 def _reconcile_experimental_side(
     session: Session,
-    annotation_set_id: uuid.UUID,
-    native_snapshot_id: uuid.UUID,
+    side: _Side,
     pivot_go_ids: set[str],
     pivot_aspect: dict[str, str],
     project: ProjectionRequest | None = None,
-) -> tuple[dict[str, dict[str, set[str]]], tuple[Projection | None, Applied | None]]:
+) -> tuple[dict[str, dict[str, set[str]]], tuple[Projection | None, Applied | None, int]]:
     """CAFA steps 1–2 for experimental positives on one side.
 
     Per protein: propagate ancestors under the *native* DAG (True Path Rule),
@@ -484,8 +492,8 @@ def _reconcile_experimental_side(
     Step 3 (re-propagate under pivot) is deferred to cafaeval, which applies
     ancestor propagation before scoring and produces the same closure.
     """
-    native_parents = _load_parents_by_go_id(session, native_snapshot_id)
-    raw = _load_experimental_raw_go_ids(session, annotation_set_id)
+    native_parents = _load_parents_by_go_id(session, side.native_snapshot_id)
+    raw = _load_experimental_raw_go_ids(session, side.annotation_set_id)
     projection = None
     remapped = None
     if project is not None:
@@ -497,12 +505,18 @@ def _reconcile_experimental_side(
         # ontology itself renamed is not a term to be generalised. ``spare``
         # hands the rest to the projection instead of dropping it, and what
         # neither rule can place is dropped and counted.
-        if project.remap is not None:
+        if side.frame is not None:
+            # ``frame.live``, never ``project.target``: the map and the
+            # liveness test are ONE snapshot's answer, and this side's
+            # snapshot is not where the landings come from.
             remapped = apply_remap(
-                raw, project.remap, project.target, spare=project.graph.live
+                raw, side.frame.remap, side.frame.live, spare=project.graph.live
             )
         projection = project_direct_annotations(raw, project.graph, project.target)
-    _drop_binding_only(session, native_snapshot_id, raw)
+    # The return was discarded here. It is the number of proteins whose ENTIRE
+    # F side the binding rule empties, which is some 26,000 a window: computed
+    # on every build and recorded by nothing.
+    binding_dropped = _drop_binding_only(session, side.native_snapshot_id, raw)
 
     out: dict[str, dict[str, set[str]]] = {}
     for protein, go_ids in raw.items():
@@ -517,19 +531,7 @@ def _reconcile_experimental_side(
                 ns_map[aspect].add(go_id)
         if ns_map:
             out[protein] = {ns: terms for ns, terms in ns_map.items()}
-    return out, (projection, remapped)
-
-
-class _Side(NamedTuple):
-    """One end of the window: its corpus and the graph that closes it.
-
-    The two travel together through both reconcile steps, and bundling them
-    is what leaves room for the window's rules without passing seven
-    arguments.
-    """
-
-    annotation_set_id: uuid.UUID
-    native_snapshot_id: uuid.UUID
+    return out, (projection, remapped, binding_dropped)
 
 
 def _reconcile_not_side(
@@ -555,10 +557,11 @@ def _reconcile_not_side(
     # The same remapping as the experimental side, and NEVER a projection: a
     # NOT denies the term and everything under it, so climbing to an ancestor
     # would assert the protein lacks something it may well have. No ``spare``
-    # for the same reason -- what has no map at t0 is dropped and counted.
+    # for the same reason: what the graph that closes THIS side cannot
+    # name is dropped and counted.
     remapped = None
-    if project is not None and project.remap is not None:
-        remapped = apply_remap(raw, project.remap, project.target)
+    if project is not None and side.frame is not None:
+        remapped = apply_remap(raw, side.frame.remap, side.frame.live)
 
     out: dict[str, set[str]] = {}
     for protein, go_ids in raw.items():
@@ -589,22 +592,18 @@ def _apply_negatives(
     return cleaned
 
 
-
-
-
-
-
-
-
-
 def _union_of_negatives(
     session: Session,
     window: ReconciledWindow,
+    sides: tuple[_Side, _Side],
     pivot_go_ids: set[str],
     pivot_children: dict[str, set[str]],
     project: ProjectionRequest | None,
 ) -> tuple[dict[str, set[str]], list[Applied | None]]:
     """The NOT terms of both ends, unioned, with each side's remap report.
+
+    The two sides arrive already built: the NOT rule must remap against the
+    very frame the experimental rule used on that side.
 
     Unioned and applied to both sides, which is what the same-snapshot path
     does: a term a protein is known NOT to have at either end is not a gain
@@ -615,10 +614,7 @@ def _union_of_negatives(
     merged: dict[str, set[str]] = defaultdict(set)
     reports: list[Applied | None] = []
     experimental_only = window.not_codes == "experimental"
-    for side in (
-        _Side(window.old_annotation_set_id, window.old_native_snapshot_id),
-        _Side(window.new_annotation_set_id, window.new_native_snapshot_id),
-    ):
+    for side in sides:
         negatives, applied = _reconcile_not_side(
             session, side, pivot_go_ids, pivot_children, project, experimental_only
         )
@@ -643,6 +639,9 @@ class _BothSides(NamedTuple):
     negatives: dict[str, set[str]]
     projection: Projection | None
     remapped: dict[str, Applied | None]
+    #: Proteins whose whole F side the binding rule emptied, per side. Not a
+    #: remap quantity, so it does not live in ``remapped``.
+    binding_dropped: dict[str, int]
 
 
 def _reconcile_both_sides(
@@ -654,10 +653,13 @@ def _reconcile_both_sides(
 ) -> _BothSides:
     """Both sides reconciled, and the NOT terms unioned across them.
 
-    ONLY THE t1 SIDE PROJECTS, and only onto what is LIVE at t0. The target is
-    the old side's own graph rather than the pivot's: the pivot keeps obsolete
-    terms, and landing the truth on one would put it on a node cafaeval's
-    graph does not have.
+    ONLY THE t1 SIDE PROJECTS, and only onto what is LIVE in the graph that
+    CLOSES the t0 side: non-obsolete rather than the whole pivot universe,
+    because the pivot keeps obsolete terms and landing the truth on one would
+    put it on a node cafaeval's graph does not have.
+
+    EACH SIDE REMAPS AGAINST ITS OWN CLOSING GRAPH: see
+    :func:`protea.core._truth_rules._frames_by_snapshot`.
 
     The NOT union is applied to both sides, which is the same thing the
     same-snapshot path does: a term a protein is known NOT to have at either
@@ -666,11 +668,11 @@ def _reconcile_both_sides(
     project = (
         _projection_request(session, window) if window.truth_profile == "projected" else None
     )
+    old, new = _sides_of(session, window, project)
 
-    old_exp, (_, old_remapped) = _reconcile_experimental_side(
+    old_exp, (_, old_remapped, old_binding) = _reconcile_experimental_side(
         session,
-        window.old_annotation_set_id,
-        window.old_native_snapshot_id,
+        old,
         pivot_go_ids,
         pivot_aspect,
         # The t0 side remaps too and never projects: its own terms are
@@ -679,16 +681,11 @@ def _reconcile_both_sides(
         # ``old_exp_*`` are zero and that is a measurement, not a given).
         project._replace(graph=project.graph._replace(live=set())) if project else None,
     )
-    new_exp, (projection, new_remapped) = _reconcile_experimental_side(
-        session,
-        window.new_annotation_set_id,
-        window.new_native_snapshot_id,
-        pivot_go_ids,
-        pivot_aspect,
-        project,
+    new_exp, (projection, new_remapped, new_binding) = _reconcile_experimental_side(
+        session, new, pivot_go_ids, pivot_aspect, project
     )
     merged_neg, not_remapped = _union_of_negatives(
-        session, window, pivot_go_ids, pivot_children, project
+        session, window, (old, new), pivot_go_ids, pivot_children, project
     )
     return _BothSides(
         old_exp=old_exp,
@@ -701,6 +698,7 @@ def _reconcile_both_sides(
             "old_not": not_remapped[0],
             "new_not": not_remapped[1],
         },
+        binding_dropped={"old_exp": old_binding, "new_exp": new_binding},
     )
 
 
@@ -710,6 +708,10 @@ def _build_report(sides: _BothSides) -> dict[str, int] | None:
     One dict, because they are read together or not at all: the projection's
     numbers only mean something next to the remapping's. ``None`` when
     neither rule ran, which is the default profile and every stored window.
+
+    ``*_aspect_crossed`` is OURS and has no counterpart in the lab's. Which
+    snapshot each side's map was read from is NOT in here: that is the
+    window's own ``*_native_snapshot_id``, by construction.
     """
     report: dict[str, int] = {}
     if sides.projection is not None:
@@ -768,6 +770,7 @@ def compute_evaluation_data_reconciled(
         known=known,
         removed=removed,
         projection=_build_report(sides),
+        binding_dropped=sides.binding_dropped,
     )
 
 

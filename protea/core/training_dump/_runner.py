@@ -47,6 +47,7 @@ from protea.core.training_dump._resume import (
 )
 from protea.core.training_dump._test_split import _run_test_split
 from protea.core.training_dump._train_split import _run_train_split
+from protea.core.training_dump._window_choice import window_identity
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 
@@ -221,7 +222,22 @@ class _DumpRunner:
 
     def _run_test_split(self) -> None:
         _eset, test_eval_data, self.test_old_v, self.test_new_v = _resolve_test_eval_inputs(
-            self.session, self.p.train_versions, self.p.test_versions, self.version_to_set
+            self.session,
+            self.p.train_versions,
+            self.p.test_versions,
+            self.version_to_set,
+            set(getattr(self.p, "evaluation_set_ids", []) or []),
+            getattr(self.p, "ontology_snapshot_id", None),
+        )
+        # Which window the test split's truth came from, on the record. The
+        # manifest cannot carry it yet: it is assembled in the write minijob,
+        # past this phase's boundary. An event is durable and queryable, and
+        # it is more than the dataset said before, which was nothing.
+        self.emit(
+            "dump_helper.test_window_resolved",
+            None,
+            window_identity(_eset),
+            "info",
         )
         if self._resume.is_complete("test", 0):
             self.test_files = record_to_test_files(self._resume.read_record("test", 0))

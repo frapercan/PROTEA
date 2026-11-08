@@ -406,6 +406,33 @@ def _sparse_reference_views(
     }
 
 
+def _dense_f32_views(
+    embeddings_f16: Any, *, need_cos: bool, need_plain: bool
+) -> tuple[Any, Any]:
+    """``(raw, cosine)`` f32 views of a dense bank, materialising only the read ones.
+
+    WHEN THE RAW COPY IS NOT READ, THE COSINE COPY IS THE SAME BUFFER. Dividing
+    in place with ``out=`` is the same ufunc over the same operands, so every
+    value is bit-identical to the copy it replaces; what changes is that one
+    array exists here instead of two. On the production bank that is 4.24 GB
+    off the peak of this path, and this path is where the peak is highest: f16
+    plus two f32 copies at once, 10.60 GB for 690,407 rows by 1536 dims.
+
+    The in-place branch is only safe because ``_reference_needs`` has already
+    settled that nothing downstream reads the raw copy on this route. Reversing
+    that decision without reading this returns a normalised bank to a caller
+    asking for the raw one, which no test of shapes would catch.
+    """
+    emb_f32 = embeddings_f16.astype(np.float32)
+    if not need_cos:
+        return (emb_f32 if need_plain else None), None
+    norms = np.linalg.norm(emb_f32, axis=1, keepdims=True)
+    if need_plain:
+        return emb_f32, emb_f32 / (norms + 1e-9)
+    np.divide(emb_f32, norms + 1e-9, out=emb_f32)
+    return None, emb_f32
+
+
 def _derive_reference_views(
     accessions: list[str],
     embeddings_f16: Any,
@@ -449,11 +476,9 @@ def _derive_reference_views(
             "embeddings_f32": np.empty((0,), dtype=np.float32),
             "embeddings_f32_cos": np.empty((0,), dtype=np.float32),
         }
-    emb_f32 = embeddings_f16.astype(np.float32)
-    emb_f32_cos = None
-    if need_cos:
-        norms = np.linalg.norm(emb_f32, axis=1, keepdims=True)
-        emb_f32_cos = emb_f32 / (norms + 1e-9)
+    emb_f32, emb_f32_cos = _dense_f32_views(
+        embeddings_f16, need_cos=need_cos, need_plain=need_plain
+    )
     return {
         "accessions": accessions,
         "embeddings": embeddings_f16,

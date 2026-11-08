@@ -423,7 +423,16 @@ class PredictGOTermsOperation:
         embedding_config_id: uuid.UUID,
         emit: EmitFn,
     ) -> list[str]:
-        """Load accessions for query proteins that have an embedding."""
+        """Load accessions for query proteins that have an embedding, IN ORDER.
+
+        ORDERED FOR THE SAME REASON THE BANK IS. Without an ``ORDER BY`` the
+        plan decides the order, ``_dispatch_batches`` slices it into batches,
+        and the batch a query rides in is a property of the plan rather than
+        of the query set. ``_bank_order`` closed this on the reference side
+        and this side was left open; exploration 3 measured the cost, and the
+        PR carries it. Ordering does not make the arithmetic exact, it makes
+        it the same arithmetic every time.
+        """
         emit("predict_go_terms.load_queries_start", None, {}, "info")
 
         if p.query_set_id:
@@ -438,6 +447,7 @@ class PredictGOTermsOperation:
                     & (SequenceEmbedding.embedding_config_id == embedding_config_id),
                 )
                 .filter(QuerySetEntry.query_set_id == query_set_id)
+                .order_by(QuerySetEntry.accession)
                 .all()
             )
         else:
@@ -452,7 +462,7 @@ class PredictGOTermsOperation:
             )
             if p.query_accessions:
                 q = q.filter(Protein.accession.in_(p.query_accessions))
-            rows = q.all()
+            rows = q.order_by(Protein.accession).all()
         accessions = [r[0] for r in rows]
         implicit = not p.query_set_id and not p.query_accessions
         emit(

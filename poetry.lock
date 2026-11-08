@@ -674,8 +674,8 @@ test = ["pytest (>=7)"]
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/cafaeval-protea.git"
-reference = "e937e0e161c1b5ea9f840c5652dfd614e9d57163"
-resolved_reference = "e937e0e161c1b5ea9f840c5652dfd614e9d57163"
+reference = "203af0a28f0bb6f8cd0588c0d6d02ebf251eccce"
+resolved_reference = "203af0a28f0bb6f8cd0588c0d6d02ebf251eccce"
 
 [[package]]
 name = "certifi"
@@ -4021,8 +4021,8 @@ t5 = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@5f
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-method.git"
-reference = "10490506ce2cde1c1e401daf4773e81552347003"
-resolved_reference = "10490506ce2cde1c1e401daf4773e81552347003"
+reference = "75ba91a3c0172dcb34b131e30c1adb3814a1b9bf"
+resolved_reference = "75ba91a3c0172dcb34b131e30c1adb3814a1b9bf"
 
 [[package]]
 name = "protea-reranker-lab"
@@ -7011,4 +7011,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "6855bf564bb3f8d60e6a7751bfb41a8559dce722180895852569d61c62bedecb"
+content-hash = "d66bd64cf6e5b33afbfe8a64e7b81ae13ef25b892cf4dc8ba23ff90c42a49c44"

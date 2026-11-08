@@ -40,6 +40,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 import protea.services.exploration_receipt as receipt
+from protea.core.domain.aspect import Aspect
 from protea.core.explorations import rules_fingerprint
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -86,6 +87,94 @@ def _comparisons(session: Session, exploration: Exploration) -> list[dict[str, A
             }
         )
     return out
+
+
+#: The producer's own record of a namespace it refused to write into the
+#: per-protein grid, for every evaluation result this exploration links. Read
+#: over all of them because a panel is comparable only when BOTH arms wrote it:
+#: one arm refusing is enough to leave nothing to pair.
+_REFUSED_SQL = text(
+    """
+    SELECT DISTINCT e.fields ->> 'setting'   AS setting,
+                    e.fields ->> 'namespace' AS namespace,
+                    e.fields ->> 'code'      AS code
+      FROM exploration_link l
+      JOIN evaluation_result r ON r.id = l.evaluation_result_id
+      JOIN job_event e ON e.job_id = r.job_id
+     WHERE l.exploration_id = CAST(:eid AS uuid)
+       AND l.evaluation_result_id IS NOT NULL
+       AND e.event = 'run_cafa_evaluation.per_protein_grid_namespace_dropped'
+"""
+)
+
+
+def _panel_coverage(
+    session: Session,
+    exploration: Exploration,
+    comparisons: list[dict[str, Any]],
+    deciding: list[str] | None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Each deciding panel's state, and the absences that block a verdict.
+
+    THREE STATES AND NOT TWO. A panel the comparison read is ``computed``. A
+    panel it could not read because the evaluation refused to write that
+    namespace is ``refused``, and the producer's own ``code`` says why: a
+    limit recorded at the time, not a run that did not happen. Only a panel
+    that is neither blocks, because then nothing in the record says why its
+    number is missing.
+
+    Both halves of that distinction are load-bearing, and each one alone is
+    wrong. ``PK:BPO`` cannot be written at all while the weighted and
+    unweighted branches score two populations out of one row per protein, so a
+    rule that blocked on absence would block that exploration for ever. And
+    :func:`verdict` reads the deciding panels through a comprehension that
+    simply skips the ones that never arrived, so a rule that ignored absence
+    publishes a verdict over part of its declared evidence without saying
+    which part.
+
+    With nothing declared the asked-for set stands in, which is what
+    ``verdict`` already falls back to, and the refusals then say why nine
+    requested panels became six.
+    """
+    asked = {key for comparison in comparisons for key in comparison["panels"]}
+    read = {
+        key
+        for comparison in comparisons
+        for key, panel in comparison["panels"].items()
+        if panel.get("status") != "empty"
+    }
+    refused = {
+        (row.setting, row.namespace): row.code
+        for row in session.execute(_REFUSED_SQL, {"eid": str(exploration.id)})
+    }
+    panels: dict[str, Any] = {}
+    blockers: list[str] = []
+    for key in list(deciding) if deciding else sorted(asked):
+        if key in read:
+            panels[key] = {"state": "computed"}
+            continue
+        setting, _, cafa = key.partition(":")
+        code = refused.get((setting, _namespace_of(cafa)))
+        if code is not None:
+            panels[key] = {"state": "refused", "code": code}
+            continue
+        panels[key] = {"state": "uncomputed"}
+        blockers.append(f"the deciding panel {key} was never computed")
+    return {"panels": panels}, blockers
+
+
+def _namespace_of(cafa: str) -> str | None:
+    """The long namespace a CAFA code names, or ``None`` when it names none.
+
+    A deciding panel is a string in frozen rules, so it can carry a typo that
+    no aspect answers to. That returns ``None`` rather than raising: the panel
+    then has no recorded refusal, falls through to ``uncomputed`` and blocks,
+    which is the safe direction for a panel nobody can even name.
+    """
+    try:
+        return Aspect.from_cafa(cafa).namespace
+    except KeyError:
+        return None
 
 
 def _release(session: Session, annotation_set_id: Any) -> int | None:
@@ -160,8 +249,8 @@ def _instrument_verdict(
     """An instrument reads its predicate: identical rows, panels within their tolerance.
 
     A repeatability test is an assertion of identity, and power does not apply
-    to it: two runs that agree byte for byte give a delta of exactly zero in
-    every pair, the paired bootstrap is degenerate, and every panel comes back
+    to it: runs that agree byte for byte give a delta of exactly zero in every
+    pair, the paired bootstrap is degenerate, and every panel comes back
     ``unresolvable``, which read for power says the opposite of what happened.
     The rows decide, with zero tolerance (see ``exploration_identity``). The
     panels only corroborate, because stored metrics are rounded to four
@@ -238,11 +327,12 @@ def _bank_loads(session: Session, rows: dict[str, dict[str, Any]]) -> dict[str, 
 
 
 def bank_load_problems(loads: dict[str, dict[str, Any]], declared: str | None) -> list[str]:
-    """What forbids reading two runs as the same pipeline: their banks' sources.
+    """What forbids reading an instrument's runs as one pipeline: their banks' sources.
 
     Each arm must record its bank load, from one source, the one the rules
-    declare in ``bank_load`` when they declare one, and the same in both arms.
-    A cold run against a warm run compares two pipelines, not one twice.
+    declare in ``bank_load`` when they declare one, and the same across every
+    arm. A cold run against a warm run compares two pipelines, not one twice,
+    and that holds for the third and fourth arm as much as for the second.
     """
     problems = []
     for arm, load in loads.items():
@@ -260,18 +350,102 @@ def bank_load_problems(loads: dict[str, dict[str, Any]], declared: str | None) -
     return problems
 
 
+def _identity_classes(
+    session: Session,
+    rows: dict[str, dict[str, Any]],
+    reference: str,
+    pairs: dict[str, dict[str, Any]],
+) -> tuple[list[list[str]], list[str] | None]:
+    """Group the arms into classes of identical rows, and name the ones that moved.
+
+    **Comparisons against one reference give the verdict but not the blame.**
+    Equality is transitive, so N-1 comparisons decide whether every arm agrees.
+    They cannot say WHO disagrees when the arm that moved is the reference
+    itself: then all N-1 pairs read ``identical`` false, and a report that
+    stopped there would accuse every other arm. With four arms that is one case
+    in four, and it is the case an instrument exists to catch.
+
+    So on failure the arms that differ from the reference are compared among
+    themselves, which costs nothing when nothing moved. The largest class is
+    taken as the unmoved one and the rest as moved, but only when it is
+    STRICTLY largest: two arms that differ, or two against two, leave no
+    majority and ``moved`` is None, because the rows cannot say which side is
+    the anomaly and a guess would read as a measurement.
+    """
+    from protea.services.exploration_identity import row_identity
+
+    classes: list[list[str]] = [[reference]]
+    for arm in sorted(pairs):
+        if pairs[arm]["identical"]:
+            classes[0].append(arm)
+            continue
+        for cls in classes[1:]:
+            same = row_identity(session, str(rows[cls[0]]["id"]), str(rows[arm]["id"]))
+            if same["identical"]:
+                cls.append(arm)
+                break
+        else:
+            classes.append([arm])
+    classes.sort(key=lambda c: (-len(c), c[0]))
+    decided = len(classes) == 1 or len(classes[0]) > len(classes[1])
+    moved = sorted(a for c in classes[1:] for a in c) if decided else None
+    return classes, moved
+
+
 def _instrument(session: Session, exploration: Exploration) -> tuple[dict[str, Any], list[str]]:
-    """An instrument's two runs: their row identity, their bank loads, and what blocks."""
+    """An instrument's runs: their row identity, their bank loads, and what blocks.
+
+    **Two arms used to be the only shape this read, and that cost a verdict.**
+    Exploration 3 ran four arms on one revision; ``len(rows) != 2`` refused
+    them, the report came back with no predicate at all, and its reading had to
+    be written by hand as a job event. A figure whose predicate is an event
+    somebody wrote is not the same object as one an operation computed, and the
+    first cannot be re-derived from the database.
+
+    **N arms need N-1 comparisons, not N(N-1)/2.** ``row_identity`` is exact
+    equality, which is transitive, so every arm identical to one reference arm
+    means every arm identical to every other. The reference is the first in
+    sorted arm order, so which pairs a report names does not depend on dict
+    order, and ``pairs`` carries every comparison rather than only its
+    conclusion. Naming the arm that moved needs more than those pairs, and
+    :func:`_identity_classes` says why and does it.
+
+    A report built here for a two-arm instrument carries more keys than it did
+    before, so its sha256 differs from one stored earlier. The structure
+    changed, not the measurement.
+    """
     from protea.services.exploration_identity import row_identity
 
     rules = exploration.rules or {}
     rows = receipt.arm_rows(session, exploration)
-    if len(rows) != 2:
-        detail = f"an instrument compares two runs with a prediction set each; {len(rows)} linked"
+    if len(rows) < 2:
+        detail = (
+            "an instrument compares at least two runs with a prediction set each; "
+            f"{len(rows)} linked"
+        )
         return {"identical": None, "detail": detail}, []
-    a, b = (str(row["id"]) for row in rows.values())
+    arms = sorted(rows)
+    reference, others = arms[0], arms[1:]
+    ref_id = str(rows[reference]["id"])
+    pairs = {arm: row_identity(session, ref_id, str(rows[arm]["id"])) for arm in others}
+    first = next((p["first_difference"] for p in pairs.values() if not p["identical"]), None)
+    classes, moved = _identity_classes(session, rows, reference, pairs)
     loads = _bank_loads(session, rows)
-    identity = {"arms": list(rows), "bank_loads": loads, **row_identity(session, a, b)}
+    identity = {
+        "arms": arms,
+        "reference": reference,
+        "bank_loads": loads,
+        "identical": all(p["identical"] for p in pairs.values()),
+        "rows": {reference: next(iter(pairs.values()))["rows"]["a"]}
+        | {arm: p["rows"]["b"] for arm, p in pairs.items()},
+        "pairs": {
+            arm: {"identical": p["identical"], "first_difference": p["first_difference"]}
+            for arm, p in pairs.items()
+        },
+        "classes": classes,
+        "moved": moved,
+        "first_difference": first,
+    }
     return identity, bank_load_problems(loads, rules.get("bank_load"))
 
 
@@ -296,7 +470,8 @@ def build(session: Session, exploration: Exploration) -> tuple[dict[str, Any], s
     failed = [k for k, c in checks.items() if c["blocking"] and c["answer"] == FAIL]
     comparisons = _comparisons(session, exploration)
     deciding = (exploration.rules or {}).get("deciding_panels")
-    blocks = list(computed["blocks_verdict"]) + [f"check failed: {k}" for k in failed]
+    coverage, uncomputed = _panel_coverage(session, exploration, comparisons, deciding)
+    blocks = list(computed["blocks_verdict"]) + [f"check failed: {k}" for k in failed] + uncomputed
     instrument = None
     if exploration.kind == "instrument":
         identity, load_problems = _instrument(session, exploration)
@@ -321,6 +496,7 @@ def build(session: Session, exploration: Exploration) -> tuple[dict[str, Any], s
         "receipt": computed,
         "comparisons": comparisons,
         "deciding_panels": deciding or "every compared panel; none declared",
+        "panel_coverage": coverage,
         "checklist": {"version": CHECKLIST_VERSION, "items": checks},
         "blocks_verdict": blocks,
         "identity": instrument["identity"] if instrument else None,

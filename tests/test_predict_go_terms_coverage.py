@@ -39,10 +39,12 @@ from protea.core.operations.predict_go_terms._batch_op_reference import (
     _find_missing_aspects,
     _PoolRequest,
 )
+from protea.core.operations.predict_go_terms._reference_aspect import aspect_bank
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
-from protea.infrastructure.orm.models.query.query_set import QuerySet
+from protea.infrastructure.orm.models.protein.protein import Protein
+from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 
 _noop_emit = lambda *_a, **_k: None  # noqa: E731
 
@@ -247,9 +249,13 @@ class TestLoadQueryAccessions:
         session = MagicMock()
         session.get.return_value = MagicMock(spec=QuerySet)
         chain = session.query.return_value.join.return_value.filter.return_value
-        chain.all.return_value = [("Q1",), ("Q2",)]
+        chain.order_by.return_value.all.return_value = [("Q1",), ("Q2",)]
         accs = op._load_query_accessions(session, p, uuid.uuid4(), _noop_emit)
         assert accs == ["Q1", "Q2"]
+        # Ordered for the same reason the bank is: without it the plan decides
+        # which batch a query rides in, and the batch is then a property of the
+        # plan and not of the query set.
+        assert chain.order_by.call_args.args == (QuerySetEntry.accession,)
 
     def test_query_set_missing_raises(self) -> None:
         op = PredictGOTermsOperation()
@@ -265,20 +271,22 @@ class TestLoadQueryAccessions:
         p = self._payload_obj(query_accessions=["P1", "P2"])
         session = MagicMock()
         filtered_q = MagicMock()
-        filtered_q.all.return_value = [("P1",)]
+        filtered_q.order_by.return_value.all.return_value = [("P1",)]
         q_chain = session.query.return_value.join.return_value.join.return_value
         q_chain.filter.return_value = filtered_q
         accs = op._load_query_accessions(session, p, uuid.uuid4(), _noop_emit)
         assert accs == ["P1"]
+        assert filtered_q.order_by.call_args.args == (Protein.accession,)
 
     def test_all_accessions_when_no_filter(self) -> None:
         op = PredictGOTermsOperation()
         p = self._payload_obj()  # no query_set_id, no explicit accessions
         session = MagicMock()
         q_chain = session.query.return_value.join.return_value.join.return_value
-        q_chain.all.return_value = [("X1",), ("X2",), ("X3",)]
+        q_chain.order_by.return_value.all.return_value = [("X1",), ("X2",), ("X3",)]
         accs = op._load_query_accessions(session, p, uuid.uuid4(), _noop_emit)
         assert accs == ["X1", "X2", "X3"]
+        assert q_chain.order_by.call_args.args == (Protein.accession,)
 
 
 class TestBuildBatchMessageRerankerNulls:
@@ -653,7 +661,7 @@ class TestLoadReferenceData:
             patch.object(
                 op,
                 "_stream_reference_pool",
-                return_value=([], np.empty((0,), dtype=np.float16)),
+                return_value=([], np.empty((0,), dtype=np.float16), None),
             ),
         ):
             emit, events = _emit_capture()
@@ -678,7 +686,7 @@ class TestLoadReferenceData:
 
         def _stream(_q):
             stream_calls["n"] += 1
-            return list(accs), emb
+            return list(accs), emb, "binary"
 
         with (
             patch.object(
@@ -700,12 +708,20 @@ class TestStreamReferencePool:
         op = PredictGOTermsBatchOperation()
         accession_q = MagicMock()
         accession_q.count.return_value = 0
-        accs, embeddings = op._stream_reference_pool(accession_q)
+        accs, embeddings, transfer = op._stream_reference_pool(accession_q)
         assert accs == []
         assert embeddings.shape == (0,)
         assert embeddings.dtype == np.float16
+        assert transfer is None, "nothing crossed the driver, so there is no route to name"
 
-    def test_streams_rows_into_matrix(self) -> None:
+    def test_falls_back_to_text_when_the_driver_gives_no_binary_cursor(self) -> None:
+        """A mock connection cannot stream, so the text path fills the bank.
+
+        The same rows and the same dtype, and ``transfer`` says "text" so the
+        job's own record shows which route answered. Before this said
+        "binary" or nothing at all, a bank that quietly went back to text was
+        indistinguishable from a slow link.
+        """
         op = PredictGOTermsBatchOperation()
         # accession_q.count() == 2, base_q.limit(1).one() returns
         # (acc, halfvec), base_q.yield_per() returns (acc, halfvec) pairs.
@@ -717,10 +733,67 @@ class TestStreamReferencePool:
         accession_q.add_columns.return_value = base_q
         base_q.limit.return_value.one.return_value = ("R1", hv0)
         base_q.yield_per.return_value = [("R1", hv0), ("R2", hv1)]
-        accs, embeddings = op._stream_reference_pool(accession_q)
+        accs, embeddings, transfer = op._stream_reference_pool(accession_q)
         assert accs == ["R1", "R2"]
         assert embeddings.shape == (2, 2)
         assert embeddings.dtype == np.float16
+        assert transfer == "text"
+
+    def test_reads_over_a_binary_cursor_when_the_driver_allows_it(self) -> None:
+        """The binary route fills the bank and ``yield_per`` is never asked.
+
+        That last assertion is the point: a test that only checked the values
+        would pass with the text path and prove nothing, since both routes
+        return the same ``HalfVector`` objects.
+        """
+        op = PredictGOTermsBatchOperation()
+        hv0 = _halfvec([1.0, 2.0])
+        hv1 = _halfvec([3.0, 4.0])
+        accession_q = MagicMock()
+        accession_q.count.return_value = 2
+        base_q = MagicMock()
+        accession_q.add_columns.return_value = base_q
+        base_q.limit.return_value.one.return_value = ("R1", hv0)
+        cur = base_q.session.connection().connection.driver_connection.cursor
+        cur.return_value.__enter__.return_value.__iter__.return_value = iter(
+            [("R1", hv0), ("R2", hv1)]
+        )
+
+        accs, embeddings, transfer = op._stream_reference_pool(accession_q)
+
+        assert accs == ["R1", "R2"]
+        assert embeddings.shape == (2, 2)
+        assert transfer == "binary"
+        assert cur.call_args.kwargs["binary"] is True
+        base_q.yield_per.assert_not_called()
+
+    def test_a_short_binary_read_falls_back_instead_of_banking_garbage(self) -> None:
+        """Fewer rows than ``count()`` is refused, not accepted quietly.
+
+        The bank is allocated at ``count()`` and filled by index, so a cursor
+        that stops early leaves the tail as whatever ``np.empty`` found, with an
+        accession list too short to reveal it. Those rows would then be donors
+        with uninitialised coordinates. The guard turns that into the text path.
+        """
+        op = PredictGOTermsBatchOperation()
+        hv0 = _halfvec([1.0, 2.0])
+        hv1 = _halfvec([3.0, 4.0])
+        accession_q = MagicMock()
+        accession_q.count.return_value = 2
+        base_q = MagicMock()
+        accession_q.add_columns.return_value = base_q
+        base_q.limit.return_value.one.return_value = ("R1", hv0)
+        base_q.yield_per.return_value = [("R1", hv0), ("R2", hv1)]
+        cur = base_q.session.connection().connection.driver_connection.cursor
+        cur.return_value.__enter__.return_value.__iter__.return_value = iter(
+            [("R1", hv0)]  # one row where the query counted two
+        )
+
+        accs, embeddings, transfer = op._stream_reference_pool(accession_q)
+
+        assert transfer == "text", "a short binary read must not be banked"
+        assert accs == ["R1", "R2"]
+        assert embeddings[1].tolist() == [3.0, 4.0]
 
 
 class TestLoadReferenceDataPerAspect:
@@ -797,7 +870,7 @@ class TestLoadReferenceDataPerAspect:
             )
         for asp in ASPECT_CODES:
             view = result[asp]
-            assert isinstance(view["embeddings_f32"], np.ndarray)
+            assert isinstance(aspect_bank(view, use_cos=False), np.ndarray)
             assert "anno_gtids" in view
             assert "acc_to_anno_idx" in view
         assert result["P"]["accessions"] == ["R1", "R4"] or sorted(result["P"]["accessions"]) == [
@@ -853,7 +926,7 @@ class TestAssembleAspectView:
         view, n = _assemble_aspect_view("P", unified, _PoolRequest(ec_id, as_id))
         assert n == 2
         assert view["accessions"] == ["R1", "R3"]
-        assert view["embeddings_f32"].shape == (2, 2)
+        assert aspect_bank(view, use_cos=False).shape == (2, 2)
         assert "anno_gtids" in view
         assert view["acc_to_anno_idx"] == {"R1": 0, "R3": 1}
 
@@ -1491,7 +1564,11 @@ class TestEnsureReferenceCacheMode:
             annotation_set_id=uuid.uuid4(),
         )
         sentinel = {"cached": True}
-        need_cos, need_plain = op._reference_dtype_needs(ctx.p)
+        from protea.core.operations.predict_go_terms._reference_needs import (
+            reference_dtype_needs,
+        )
+
+        need_cos, need_plain = reference_dtype_needs(ctx.p)
         # Derived, not restated. A key spelled twice is a key that can
         # disagree with itself, and this test existed to catch a cache hit,
         # not to re-implement how the cache is addressed.

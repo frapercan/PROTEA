@@ -28,6 +28,7 @@ from protea.core.operations.predict_go_terms._common import (
 )
 from protea.core.operations.predict_go_terms._ia_feature import apply_ia
 from protea.core.operations.predict_go_terms._lineage_feature import apply_lineage
+from protea.core.operations.predict_go_terms._reference_aspect import aspect_bank
 from protea.core.reranker import EMBEDDING_PCA_DIM
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 
@@ -564,9 +565,9 @@ def apply_v6_features(
     assert v6_ctx is not None  # caller guards on this
     if p.aspect_separated_knn:
         pools = [
-            ref_data[a]["embeddings_f32"]
+            bank
             for a in _ASPECTS
-            if ref_data[a].get("embeddings_f32") is not None and ref_data[a]["embeddings_f32"].size
+            if (bank := aspect_bank(ref_data[a], use_cos=False)) is not None and bank.size
         ]
         pca_pool = np.concatenate(pools, axis=0) if pools else np.empty((0,), dtype=np.float32)
     else:
