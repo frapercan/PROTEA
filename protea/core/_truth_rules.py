@@ -122,6 +122,7 @@ def refuse_unknown_rules(window: ReconciledWindow) -> None:
         if value not in rules:
             raise ValueError(f"unknown {name} {value!r}; expected one of {rules}")
 
+
 class ReconciledWindow(NamedTuple):
     """The five ids a reconciled delta is built from, plus how to build it.
 
@@ -144,7 +145,35 @@ class ReconciledWindow(NamedTuple):
     not_codes: str = NOT_CODE_RULES[0]
 
 
-def _window_end_snapshots(session: Session, window: ReconciledWindow) -> tuple[uuid.UUID, uuid.UUID]:
+def toi_restricts_the_gain(toi_rule: str) -> bool:
+    """Whether this rule trims the gain to the terms of interest.
+
+    ONE SPELLING, because there were nearly two. ``_terms_of_interest`` does
+    not look at the rule: it always intersects the two ends' live sets, and
+    this condition is what decides whether that intersection is APPLIED.
+    ``pivot_terms`` is the default of :data:`GAIN_RULES`, so a caller that
+    computed the intersection and forgot the condition would restrict a gain
+    that was never restricted, and the artefact would say nothing.
+
+    The transitions export asked for exactly that and got it right only
+    because the desktop session asked what a ``pivot_terms`` window would do.
+    """
+    refuse_unknown_rules(
+        ReconciledWindow(
+            uuid.uuid4(),
+            uuid.uuid4(),
+            uuid.uuid4(),
+            uuid.uuid4(),
+            uuid.uuid4(),
+            toi_rule=toi_rule,
+        )
+    )
+    return toi_rule == "live_in_both_ends"
+
+
+def _window_end_snapshots(
+    session: Session, window: ReconciledWindow
+) -> tuple[uuid.UUID, uuid.UUID]:
     """The ontology each end's corpus was loaded under.
 
     NOT ``old_native_snapshot_id`` / ``new_native_snapshot_id``. Those two do
@@ -167,6 +196,7 @@ def _window_end_snapshots(session: Session, window: ReconciledWindow) -> tuple[u
             )
         ends.append(row.ontology_snapshot_id)
     return ends[0], ends[1]
+
 
 def _terms_of_interest(session: Session, window: ReconciledWindow) -> set[str]:
     """The ids non-obsolete in the ontology of BOTH ends.
@@ -209,6 +239,7 @@ def _terms_of_interest(session: Session, window: ReconciledWindow) -> set[str]:
     old_live, _ = _live_terms_with_aspect(session, old_snapshot)
     new_live, _ = _live_terms_with_aspect(session, new_snapshot)
     return old_live & new_live
+
 
 def _frame_of(session: Session, closing_snapshot_id: uuid.UUID) -> SideFrame:
     """The graph that closes ONE side, and what it says about its synonyms.
@@ -300,9 +331,7 @@ def _sides_of(
     )
 
 
-def _frames_by_snapshot(
-    session: Session, window: ReconciledWindow
-) -> dict[uuid.UUID, SideFrame]:
+def _frames_by_snapshot(session: Session, window: ReconciledWindow) -> dict[uuid.UUID, SideFrame]:
     """One frame per snapshot that CLOSES a side, built once per window.
 
     Keyed by snapshot id, which is also how each side finds its own. A window

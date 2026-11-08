@@ -41,7 +41,11 @@ import pyarrow.parquet as pq
 from sqlalchemy.orm import Session
 
 from protea.core._evaluation_graph import _live_terms_with_aspect
-from protea.core._truth_rules import ReconciledWindow, _terms_of_interest
+from protea.core._truth_rules import (
+    ReconciledWindow,
+    _terms_of_interest,
+    toi_restricts_the_gain,
+)
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 
 #: ``(window, go_id)``, the two columns the laboratory's loader reads.
@@ -56,6 +60,14 @@ class WindowTerms(NamedTuple):
     axis_size: int
     toi_size: int
     toi_off_axis: int
+    #: Whether this window's rule trims the gain at all. ``False`` means the
+    #: gain was never restricted, so ``out`` is empty BY RULE and not because
+    #: the intersection happened to cover the axis. The two look identical in
+    #: the parquet and are different facts.
+    restricts: bool
+    #: Distinct terms across the window's NK, LK and PK maps, read from its
+    #: own sealed parquet. 0 when the invariant was not checked.
+    gain_terms: int
 
 
 def axis_live_terms(session: Session, cut: uuid.UUID) -> set[str]:
@@ -75,8 +87,52 @@ def axis_live_terms(session: Session, cut: uuid.UUID) -> set[str]:
     return live
 
 
+def _refuse_gains_outside_toi(session: Session, eset: EvaluationSet, out: set[str]) -> int:
+    """No term of a gain may be in its own window's ``window_terms_out``.
+
+    THE CROSS-TABLE INVARIANT, and the only check that can see in the DATA
+    what the function-identity test cannot. A gain is ``new - old`` restricted
+    to ``(new & TOI) | (new & old)``; a gained term is by definition not in
+    ``old``, so it has to come from ``new & TOI`` and therefore lies inside the
+    terms of interest. If one ever turns up here, the rule that trimmed the
+    gain and the rule that wrote this table are not the same rule, and
+    importing the same function would not have told us.
+
+    Read through the one door the truth has, so this cannot drift from the
+    verified read. Measured on 2026-11-08 over four windows: 0 violations
+    against 3.346 to 5.241 gained terms each.
+
+    Returns the number of distinct gained terms, which is also the number that
+    makes a silent empty gain visible.
+    """
+    from protea.core.evaluation import load_evaluation_data_for_set
+
+    data, _ = load_evaluation_data_for_set(session, eset)
+    ganados: set[str] = set()
+    for categoria in ("nk", "lk", "pk"):
+        for por_proteina in (getattr(data, categoria, {}) or {}).values():
+            ganados |= set(por_proteina)
+    violan = sorted(ganados & out)
+    if violan:
+        raise ValueError(
+            f"window {eset.id} has {len(violan)} gained terms inside its own "
+            f"window_terms_out: {violan[:5]}. A gained term is not in the old side, "
+            "so it can only come from the terms of interest. The rule that trimmed "
+            "this gain and the rule writing this table are not the same rule"
+        )
+    return len(ganados)
+
+
 def terms_out(session: Session, eset: EvaluationSet, axis: set[str]) -> WindowTerms:
-    """The axis terms this window's rule leaves out, with its counts."""
+    """The axis terms this window's rule leaves out, with its counts.
+
+    A WINDOW WHOSE RULE DOES NOT TRIM GETS AN EMPTY TABLE, not the
+    intersection. ``_terms_of_interest`` ignores ``toi_rule`` and always
+    intersects the two ends, and ``pivot_terms`` is the DEFAULT rule, so
+    writing that intersection for such a window would remove terms from the
+    loader's negatives that its gain never excluded. The 64 windows of this
+    campaign are all ``live_in_both_ends``, so nothing would have shown it.
+    """
     window = ReconciledWindow(
         eset.old_annotation_set_id,
         eset.new_annotation_set_id,
@@ -87,13 +143,17 @@ def terms_out(session: Session, eset: EvaluationSet, axis: set[str]) -> WindowTe
         eset.toi_rule,
         eset.not_codes,
     )
+    restringe = toi_restricts_the_gain(eset.toi_rule)
     toi = _terms_of_interest(session, window)
+    fuera = (axis - toi) if restringe else set()
     return WindowTerms(
         window=str(eset.id),
-        out=sorted(axis - toi),
+        out=sorted(fuera),
         axis_size=len(axis),
         toi_size=len(toi),
         toi_off_axis=len(toi - axis),
+        restricts=restringe,
+        gain_terms=_refuse_gains_outside_toi(session, eset, fuera),
     )
 
 

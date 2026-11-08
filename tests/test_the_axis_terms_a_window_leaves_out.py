@@ -79,6 +79,7 @@ def test_the_counters_separate_the_two_directions(monkeypatch):
     eje = {"GO:1", "GO:2", "GO:3", "GO:4"}
     toi = {"GO:3", "GO:4", "GO:9", "GO:8", "GO:7"}  # tres fuera del eje
     monkeypatch.setattr(W, "_terms_of_interest", lambda _s, _w: toi)
+    monkeypatch.setattr(W, "_refuse_gains_outside_toi", lambda _s, _e, _o: 7)
 
     r = W.terms_out(object(), _Eset(), eje)
 
@@ -86,6 +87,8 @@ def test_the_counters_separate_the_two_directions(monkeypatch):
     assert r.axis_size == 4
     assert r.toi_size == 5
     assert r.toi_off_axis == 3
+    assert r.restricts is True
+    assert r.gain_terms == 7
     # Y el caso que motiva el contador: el TOI es MAYOR que el eje.
     assert r.toi_size > r.axis_size
 
@@ -106,7 +109,15 @@ def test_an_axis_with_no_live_terms_is_refused(monkeypatch):
 
 
 def _wt(window: str, out: list[str]):
-    return W.WindowTerms(window=window, out=out, axis_size=10, toi_size=8, toi_off_axis=0)
+    return W.WindowTerms(
+        window=window,
+        out=out,
+        axis_size=10,
+        toi_size=8,
+        toi_off_axis=0,
+        restricts=True,
+        gain_terms=5,
+    )
 
 
 def test_the_same_windows_give_the_same_bytes_whatever_order_they_arrive(tmp_path: Path):
@@ -194,3 +205,88 @@ def test_the_operation_says_it_writes_no_dataset_row():
 
     assert "writes no dataset row" in op.description.lower()
     assert "by id" in op.description
+
+
+# ------------------------------------------- la regla que no restringe, y el cruce
+
+
+def test_a_rule_that_does_not_trim_gets_an_empty_table(monkeypatch):
+    """``pivot_terms`` does not restrict the gain, so nothing is excluded.
+
+    AND IT IS THE DEFAULT RULE, which is what makes this worth a test.
+    ``_terms_of_interest`` ignores ``toi_rule`` and always intersects the two
+    ends, so writing that intersection for such a window would remove terms
+    from the loader's negatives that its gain never excluded. The 64 windows
+    of this campaign are all ``live_in_both_ends``, so nothing in the data
+    would have shown it. The desktop session asked the question.
+    """
+    eset = _Eset()
+    eset.toi_rule = "pivot_terms"
+    monkeypatch.setattr(W, "_terms_of_interest", lambda _s, _w: {"GO:3"})
+    monkeypatch.setattr(W, "_refuse_gains_outside_toi", lambda _s, _e, _o: 0)
+
+    r = W.terms_out(object(), eset, {"GO:1", "GO:2", "GO:3"})
+
+    assert r.out == []
+    assert r.restricts is False
+    # The counts are still reported, so a reader can see the rule did nothing
+    # rather than conclude the intersection covered the axis.
+    assert r.axis_size == 3
+    assert r.toi_size == 1
+
+
+def test_the_condition_lives_in_one_place():
+    """The export and the evaluation ask the SAME function.
+
+    ``_terms_of_interest`` does not look at the rule, and ``pivot_terms`` is
+    the default, so a caller that computed the intersection and forgot the
+    condition would restrict a gain that was never restricted. Two spellings
+    of that condition is how that happens.
+    """
+    import inspect
+
+    from protea.core import evaluation
+    from protea.core._truth_rules import toi_restricts_the_gain
+
+    assert W.toi_restricts_the_gain is toi_restricts_the_gain
+    fuente = inspect.getsource(evaluation)
+    assert "toi_restricts_the_gain(window.toi_rule)" in fuente
+    assert 'window.toi_rule == "live_in_both_ends"' not in fuente
+
+
+class TestTheCrossTableInvariant:
+    """No gained term may be in its own window's ``window_terms_out``.
+
+    A gain is ``new - old`` restricted to ``(new & TOI) | (new & old)``. A
+    gained term is by definition not in ``old``, so it comes from
+    ``new & TOI`` and lies inside the terms of interest. This is the only
+    check that can see in the DATA what importing the same function cannot:
+    if the two rules ever differ, the function identity test still passes.
+
+    Measured on 2026-11-08 over four windows: 0 violations against 3.346 to
+    5.241 gained terms each.
+    """
+
+    class _Data:
+        def __init__(self, terms: set[str]) -> None:
+            self.nk = {"P1": set(terms)}
+            self.lk: dict[str, set[str]] = {}
+            self.pk: dict[str, set[str]] = {}
+
+    def _load(self, monkeypatch, terms: set[str]):
+        import protea.core.evaluation as ev
+
+        monkeypatch.setattr(
+            ev, "load_evaluation_data_for_set", lambda _s, _e: (self._Data(terms), None)
+        )
+
+    def test_a_gain_inside_the_excluded_set_is_refused(self, monkeypatch):
+        self._load(monkeypatch, {"GO:1", "GO:9"})
+
+        with pytest.raises(ValueError, match="not the same rule"):
+            W._refuse_gains_outside_toi(object(), _Eset(), {"GO:9"})
+
+    def test_a_clean_window_reports_its_gained_terms(self, monkeypatch):
+        self._load(monkeypatch, {"GO:1", "GO:2"})
+
+        assert W._refuse_gains_outside_toi(object(), _Eset(), {"GO:9"}) == 2

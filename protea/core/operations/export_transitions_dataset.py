@@ -227,6 +227,14 @@ class ExportTransitionsDatasetOperation(Operation):
                     # The TOI is NOT a subset of the axis, so this is emitted
                     # rather than left to be inferred from the other two.
                     "toi_terms_off_axis": r.toi_off_axis,
+                    # Whether the rule trims at all. An empty table because
+                    # the rule does not restrict and an empty table because
+                    # the intersection covered the axis look identical in the
+                    # parquet and are different facts.
+                    "toi_restricts_the_gain": r.restricts,
+                    # From the window's own sealed parquet, which is also what
+                    # the cross-table invariant was checked against.
+                    "gain_terms": r.gain_terms,
                 },
                 "info",
             )

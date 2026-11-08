@@ -168,6 +168,28 @@ reader told only two of the three counts would compute the third wrongly, which
 is why the writer emits ``toi_terms_off_axis`` as its own number instead of
 leaving it to be inferred.
 
+**A window whose rule does not trim gets an EMPTY table, not the
+intersection.** The function that computes the terms of interest does not look
+at ``toi_rule``: it always intersects the two ends' live sets, and a separate
+condition decides whether that intersection is applied. ``pivot_terms`` is the
+DEFAULT of the rule vocabulary, so a writer that computed the intersection and
+forgot the condition would remove terms from the loader's negatives that the
+window's gain never excluded. Every window of this campaign is
+``live_in_both_ends``, so nothing in the data would have shown it. The
+condition therefore lives in ONE function that both the evaluation and the
+writer call, with a test that asserts the identity and that the old inline
+comparison is gone.
+
+**And one invariant is asserted across tables, per window.** No gained term may
+appear in its own window's ``window_terms_out``. A gain is ``new - old``
+restricted to ``(new & TOI) | (new & old)``; a gained term is by definition not
+in the old side, so it can only come from ``new & TOI`` and lies inside the
+terms of interest. This is the only check that can see IN THE DATA what sharing
+the function cannot: if the two rules ever diverge, an identity test on the
+import still passes. Measured on 2026-11-08 over four windows: zero violations
+against 3.346 to 5.241 gained terms each. The gain is read through the single
+verified door the truth has, so the check cannot drift from the read.
+
 The axis is a snapshot and the cut is a release, and they are two fields
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
