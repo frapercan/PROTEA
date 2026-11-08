@@ -31,10 +31,13 @@ from protea.core.transitions_export import _window_facts as F
 
 
 class _Aset:
-    def __init__(self, version="200", fecha=datetime(2022, 1, 1)) -> None:
+    def __init__(self, version="200", fecha=datetime(2022, 1, 1), snapshot=None) -> None:
         self.id = uuid.uuid4()
         self.source_version = version
         self.source_published_at = fecha
+        #: The ontology this corpus was loaded under. The closure is derived
+        #: by comparing the window's natives against it, so the facts carry it.
+        self.ontology_snapshot_id = snapshot if snapshot is not None else uuid.uuid4()
 
 
 class _Eset:
@@ -92,6 +95,8 @@ def _facts(version_t="200", version_t_prime="201", dias=31, data=None):
         version_t=version_t,
         version_t_prime=version_t_prime,
         horizon_days=dias,
+        old_end_snapshot=uuid.uuid4(),
+        new_end_snapshot=uuid.uuid4(),
     )
 
 
@@ -271,9 +276,12 @@ class TestTheTwoTablesAgreeAboutTheirWindows:
 
     def _computed(self, ventanas_terminos, ventanas_consultas):
         from protea.core.operations.export_transitions_dataset import _Computed
+        from protea.core.transitions_export._gains import new_columns
         from protea.core.transitions_export._window_terms_out import WindowTerms
 
         return _Computed(
+            gains=[],
+            gain_columns=new_columns(),
             terms=[
                 WindowTerms(
                     window=w,

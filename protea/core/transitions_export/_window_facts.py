@@ -43,10 +43,16 @@ class WindowFacts(NamedTuple):
     version_t: str
     version_t_prime: str
     horizon_days: int
+    #: The ontology each end's CORPUS was loaded under, which is what the
+    #: closure is derived by comparing the window's two natives against. Read
+    #: from the same annotation_set rows the versions come from, so it costs
+    #: no extra query.
+    old_end_snapshot: Any
+    new_end_snapshot: Any
 
 
-def _end(session: Session, annotation_set_id: Any, lado: str, window: Any) -> tuple[str, date]:
-    """One end's release and publication date, both validated.
+def _end(session: Session, annotation_set_id: Any, lado: str, window: Any) -> tuple[str, date, Any]:
+    """One end's release, publication date and corpus ontology, all validated.
 
     It returns the VALUES and not the row so the caller's types narrow: a check
     inside a different function does not narrow ``str | None`` at the call
@@ -68,7 +74,7 @@ def _end(session: Session, annotation_set_id: Any, lado: str, window: Any) -> tu
             "publication date, so the horizon cannot be computed. Run "
             "refresh_goa_release_dates first"
         )
-    return aset.source_version, aset.source_published_at.date()
+    return aset.source_version, aset.source_published_at.date(), aset.ontology_snapshot_id
 
 
 def refuse_after_the_cut(facts: WindowFacts, cut_version: str) -> None:
@@ -109,8 +115,8 @@ def facts_of(session: Session, eset: EvaluationSet) -> WindowFacts:
     """
     from protea.core.evaluation import load_evaluation_data_for_set
 
-    version_t, fecha_t = _end(session, eset.old_annotation_set_id, "old", eset.id)
-    version_t1, fecha_t1 = _end(session, eset.new_annotation_set_id, "new", eset.id)
+    version_t, fecha_t, snap_t = _end(session, eset.old_annotation_set_id, "old", eset.id)
+    version_t1, fecha_t1, snap_t1 = _end(session, eset.new_annotation_set_id, "new", eset.id)
     horizonte = (fecha_t1 - fecha_t).days
     if horizonte <= 0:
         raise ValueError(
@@ -127,4 +133,6 @@ def facts_of(session: Session, eset: EvaluationSet) -> WindowFacts:
         version_t=version_t,
         version_t_prime=version_t1,
         horizon_days=horizonte,
+        old_end_snapshot=snap_t,
+        new_end_snapshot=snap_t1,
     )

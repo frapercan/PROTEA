@@ -330,6 +330,40 @@ constraint this section states is only the bound: for a bundle that must not
 leak into the long validation window, ``cut_version`` has to be at or before
 the release that window opens on.
 
+``gains`` shares the query population, and that is a guard
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Noted 2026-11-08, when the table was written. ``queries`` excludes a protein
+with no stored sequence, because the exported FASTA excludes it and the
+training rows have to be about the scored population. So a gain for a protein
+outside that set would be a gain for a query the loader does not know, and the
+two tables would disagree about who the queries are **without either being
+wrong on its own**.
+
+The writer therefore computes the query population once and refuses a gain
+outside it, rather than dropping one. Dropping would make ``gains`` quietly
+smaller than the truth it copies, and a row count is the only thing a reader
+could compare it against. Measured over the 65 admissible windows: **zero**
+delta proteins lack a sequence, so the guard changes nothing today and says so
+when that stops being true. The same shape covers a gained term the axis cannot
+name: the loader groups by aspect, so such a row is one it cannot place.
+
+**The closure is derived from the truth profile in one place.** ``projected``
+means the gain is expressed on the pivot and ``as_closed`` on each end's own
+graph, and the same window under two closures is two different truths. A
+profile with no declared closure is refused rather than guessed, and a test
+asserts that every value of ``TRUTH_PROFILES`` has one, so adding a profile
+forces someone to say which graph it closes in at the moment it is declared
+rather than at run time.
+
+**The shape, measured before the code was written.** Over those 65 windows
+``gains`` is **9.596.563 rows**, the largest window 691.553 and the mean
+147.639. Six short columns at that count is the one place in this dataset where
+building a tuple per row would hurt, so the columns are six parallel lists
+appended to per window, and the order is stable by construction rather than by
+a final sort: windows in order, strata in their declared order, queries sorted,
+terms sorted.
+
 The window is the join key, and it is the full id
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -371,6 +405,21 @@ is computed rather than declared: a written value can disagree with the row it
 describes and nothing would see it. Measured over the 131 evaluation sets in
 the database, two values are enough and a third is not needed: **122 are
 ``native`` and 9 are ``pivot``**.
+
+**AND THE WRITER MADE EXACTLY THAT MISTAKE, twice, on 2026-11-08.** The first
+version of ``gains`` mapped ``projected`` to ``pivot`` and ``as_closed`` to
+``native``, in a constant named ``_CLOSURE_OF_PROFILE``, with a test that
+walked the values of ``TRUTH_PROFILES`` and therefore could not see it. The
+laboratory had made the same mapping a day earlier and withdrawn it. Both times
+the paragraph below was already in this record, written by an earlier PR of
+this same project: the warning was not missing, it was not read.
+
+So the derivation now compares the two natives against the pivot and against
+each end's corpus ontology, the way the window inventory already does, a third
+combination is refused rather than named, and the test walks combinations of
+NATIVES. The case that settles it is in the database: the twins of
+``160 -> 177`` are both ``projected`` and differ only here, so under the
+mapping the (B) one would have been written as ``pivot``.
 
 **It is NOT ``truth_profile``.** That field says how the truth is derived,
 ``projected`` or ``as_closed``; ``closure`` says which graphs the two ends
