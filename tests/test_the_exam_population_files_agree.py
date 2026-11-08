@@ -16,20 +16,22 @@ noticed. So the convention is verified against the data, not read.
 
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from protea_contracts import compute_sequence_hash
 
 from protea.core.operations import _exam_population_checks as C
 
 ACC = ["A0A001", "A0A002", "B0B001"]
 MITAD = {"A0A001": "selection", "A0A002": "confirmation", "B0B001": "selection"}
 SEQ = {"A0A001": "MKV" * 40, "A0A002": "MQQ" * 30, "B0B001": "MWW" * 50}
-MD5 = {a: hashlib.md5(s.encode()).hexdigest() for a, s in SEQ.items()}
+#: The platform's own function, so the test cannot agree with a convention
+#: production does not use.
+MD5 = {a: compute_sequence_hash(s) for a, s in SEQ.items()}
 
 
 def _parquet(**columnas) -> bytes:
@@ -240,3 +242,38 @@ def test_a_proteins_file_naming_one_accession_twice_is_refused():
                 "proteins.parquet": repetido,
             },
         )
+
+
+# ------------------- donde el md5 coincide, el tope se EXIGE y no se informa
+
+
+def test_a_label_past_the_sequence_of_an_agreeing_protein_is_refused():
+    """Where the md5 agrees, the stored sequence IS the exam's.
+
+    So a label past its length cannot be a sequence that moved. It is the
+    position convention or a corrupt file, and the declaration refuses.
+    """
+    with pytest.raises(ValueError, match="md5\\s+AGREES|AGREES with this platform"):
+        C.labels_must_fit_where_the_sequence_agrees(
+            "sitios",
+            _sites(accs=["A0A001"], pos=[999]),
+            ("position",),
+            {"A0A001": 120},
+            {"A0A001"},
+        )
+
+
+def test_the_same_label_is_only_reported_when_the_md5_differs():
+    """The other side of the same column, and why they are two functions.
+
+    Measured on the delivered populations: every one of the 38 site rows and 8
+    domain instances outside belongs to an accession whose md5 differs, so the
+    requirement above passes today and this one carries the figure.
+    """
+    C.labels_must_fit_where_the_sequence_agrees(
+        "sitios", _sites(accs=["A0A001"], pos=[999]), ("position",), {"A0A001": 120}, set()
+    )
+    medida = C.labels_outside_this_platform(
+        _sites(accs=["A0A001"], pos=[999]), ("position",), {"A0A001": 120}
+    )
+    assert medida == {"rows": 1, "accessions": ["A0A001"]}

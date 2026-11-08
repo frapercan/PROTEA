@@ -59,6 +59,7 @@ from protea.core.contracts.operation import (
 )
 from protea.core.operations._exam_population_checks import (
     counted_roles,
+    labels_must_fit_where_the_sequence_agrees,
     labels_outside_this_platform,
     labels_stay_inside_the_population,
     positions_count_from_one,
@@ -426,6 +427,22 @@ def _outside(leidos: dict[str, bytes], got: _Resolved) -> dict[str, Any]:
     }
 
 
+def _must_fit(exam: str, leidos: dict[str, bytes], pop: _Population, got: _Resolved) -> int:
+    """Require the upper bound where the md5 agrees, which is where it is knowable.
+
+    Separate from ``_outside`` because they are different claims about the same
+    column: one refuses and one reports, and which it is depends on whether the
+    sequence stored here is the sequence the labels were made against.
+    """
+    de_acuerdo = {a for a in pop.accessions if got.hash_of.get(a) == pop.md5_of[a]}
+    for nombre, columnas in ETIQUETAS.items():
+        if nombre in leidos:
+            labels_must_fit_where_the_sequence_agrees(
+                exam, leidos[nombre], columnas, got.length_of, de_acuerdo
+            )
+    return len(de_acuerdo)
+
+
 class DeclareExamPopulationOperation(Operation):
     name = "declare_exam_population"
     description = (
@@ -458,6 +475,7 @@ class DeclareExamPopulationOperation(Operation):
                 f"sequence in this platform, the first being {got.missing[:5]}. A population "
                 "whose members this platform cannot resolve is not a set it can declare"
             )
+        _must_fit(m.exam, leidos, pop, got)
         _refuse_a_second_row(session, m.digest)
         row = _declare(session, m, pop, got, job_id_from_payload(payload))
         result = {

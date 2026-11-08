@@ -32,12 +32,12 @@ the md5 is what the exam excludes by.
 
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 from typing import Any
 
 import pyarrow.parquet as pq
+from protea_contracts import compute_sequence_hash
 
 from protea.core.row_alignment import lookup_by
 
@@ -163,7 +163,12 @@ def the_sequences_are_the_ones_the_md5_names(
     for acc, seq in zip(t["accession"], t["sequence"], strict=True):
         if acc not in md5_of:
             continue
-        propio = hashlib.md5(seq.encode()).hexdigest()
+        # THE PLATFORM'S OWN FUNCTION and not an md5 written again here: the
+        # value being compared is what ``sequence.sequence_hash`` holds, so a
+        # second implementation of the convention is a second place for it to
+        # drift. It is also what keeps bandit quiet about a digest that is an
+        # identity and not a security primitive.
+        propio = compute_sequence_hash(seq)
         if propio != md5_of[acc]:
             malas.append((acc, md5_of[acc][:12], propio[:12]))
     if malas:
@@ -198,6 +203,44 @@ def counted_roles(exam: str, concepts: bytes) -> dict[str, int]:
         f"{exam}: concepts.json has no per-concept mapping carrying a 'role', so the "
         "roles cannot be counted and would have to be believed"
     )
+
+
+def labels_must_fit_where_the_sequence_agrees(
+    exam: str,
+    labels: bytes,
+    column: tuple[str, ...],
+    length_of: dict[str, int],
+    agreeing: set[str],
+) -> int:
+    """Require the upper bound for the proteins the exam will actually read.
+
+    WHERE THE MD5 AGREES, THE PLATFORM'S SEQUENCE **IS** THE EXAM'S. So a label
+    past its length is not a sequence that moved: it is a convention written
+    wrong or a corrupt file, and the declaration refuses rather than reports it.
+
+    For the rest, the upper bound stays a measure
+    (:func:`labels_outside_this_platform`), because a label outside a sequence
+    that changed is exactly what the md5 exclusion is for. Measured on the
+    delivered populations: every one of the 38 site rows and 8 domain instances
+    that fall outside belongs to an accession whose md5 differs, so this
+    requirement passes today and closes the hole for the next manifest.
+    """
+    t = _table(labels)
+    fuera = []
+    for row in zip(t["accession"], *(t[c] for c in column), strict=True):
+        acc, valores = row[0], row[1:]
+        n = length_of.get(acc)
+        if acc in agreeing and n is not None and max(valores) > n:
+            fuera.append((acc, max(valores), n))
+    if fuera:
+        raise ValueError(
+            f"{exam}: {len(fuera)} labels fall past the sequence of a protein whose md5 "
+            f"AGREES with this platform, the first being {fuera[:3]} as (accession, "
+            "label, length). Where the md5 agrees the stored sequence is the exam's "
+            "own, so this is not a sequence that moved: it is the position convention "
+            "or the file"
+        )
+    return len(agreeing)
 
 
 def labels_outside_this_platform(
