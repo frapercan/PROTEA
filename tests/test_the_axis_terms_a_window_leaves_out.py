@@ -180,11 +180,11 @@ class TestWhatTheOperationRefuses:
     def test_a_table_declared_by_the_adr_but_not_written_yet(self):
         """Refused and not skipped, and the message says which of the two it is."""
         with pytest.raises(ValueError, match="does not write them yet"):
-            # ``gains`` landed, so the example moved to one of the four that
-            # have not: a test whose subject gets implemented has to move with
-            # it or it stops testing the refusal.
+            # ``query_state`` landed, so the example moved again, to one of
+            # the three that have not: a test whose subject gets implemented
+            # has to move with it or it stops testing the refusal.
             ExportTransitionsDatasetPayload(
-                windows=["w"], cut="c", cut_version="211", tables=["query_state"]
+                windows=["w"], cut="c", cut_version="211", tables=["neighbour_state"]
             )
 
     def test_a_table_no_adr_declares(self):
@@ -226,26 +226,26 @@ class TestWhatTheOperationRefuses:
         assert not hasattr(ExportTransitionsDatasetPayload, "accept_any_revision")
 
 
-def test_the_ten_tables_are_declared_and_six_are_written():
+def test_the_ten_tables_are_declared_and_seven_are_written():
     """The gap between the two lists is the honest state of this operation.
 
     Hard-coded on purpose: a table landing has to come with a line here, so
-    the list cannot drift into claiming more than is written. The four left
-    are ``query_state``, ``neighbourhood``, ``neighbour_state`` and
-    ``feature_tokens``.
+    the list cannot drift into claiming more than is written. The three left
+    are ``neighbourhood``, ``neighbour_state`` and ``feature_tokens``, and the
+    first two wait on the kNN rather than on a writer.
     """
     assert len(TABLES) == 10
     assert IMPLEMENTED == {
         "window_terms_out",
         "queries",
         "gains",
+        "query_state",
         "terms",
         "term_ancestors",
         "residue_refs",
     }
     assert IMPLEMENTED <= set(TABLES)
     assert set(TABLES) - IMPLEMENTED == {
-        "query_state",
         "neighbourhood",
         "neighbour_state",
         "feature_tokens",
