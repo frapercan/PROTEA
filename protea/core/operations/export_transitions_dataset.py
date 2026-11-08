@@ -47,6 +47,8 @@ from protea.core.contracts.operation import (
 )
 from protea.core.operations.export_evaluation_targets import SCORED_CATEGORIES
 from protea.core.training_dump._window_choice import _refuse_wrong_pivot, window_identity
+from protea.core.transitions_export._gains import WindowGains, gains_of, new_columns
+from protea.core.transitions_export._gains import write_table as write_gains
 from protea.core.transitions_export._queries import WindowQueries, queries_of
 from protea.core.transitions_export._queries import write_table as write_queries
 from protea.core.transitions_export._residue_refs import refs_of
@@ -91,7 +93,7 @@ TABLES: tuple[str, ...] = (
 #: the refusal can say "declared but not written yet" instead of "unknown",
 #: which are different answers for whoever reads the error.
 IMPLEMENTED: frozenset[str] = frozenset(
-    {"window_terms_out", "queries", "terms", "term_ancestors", "residue_refs"}
+    {"window_terms_out", "queries", "terms", "term_ancestors", "residue_refs", "gains"}
 )
 
 #: Tables that depend on NO window, so a run asking only for these needs no
@@ -104,7 +106,13 @@ WINDOWLESS: frozenset[str] = frozenset({"terms", "term_ancestors", "residue_refs
 #: Tables that need the axis read. ``window_terms_out`` is keyed by a window
 #: and still needs it, which is why this is not the complement of
 #: :data:`AXIS_ONLY`.
-_NEEDS_AXIS: frozenset[str] = frozenset({"window_terms_out", "terms", "term_ancestors"})
+_NEEDS_AXIS: frozenset[str] = frozenset({"window_terms_out", "terms", "term_ancestors", "gains"})
+
+#: Tables whose population IS the query population, so asking for either makes
+#: it worth computing once. ``gains`` does not write ``queries`` and still
+#: needs its population: a gain for a protein ``queries`` excludes would be a
+#: gain for a query the loader does not know.
+_NEEDS_QUERIES: frozenset[str] = frozenset({"queries", "gains"})
 
 
 class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
@@ -296,6 +304,11 @@ class _Computed(NamedTuple):
 
     terms: list[WindowTerms]
     queries: list[WindowQueries]
+    gains: list[WindowGains]
+    #: The six parallel lists ``gains`` accumulates into. Built once and
+    #: appended per window, because a tuple per row over 9,6 million rows is
+    #: the one avoidable cost in that table.
+    gain_columns: dict[str, list]
 
 
 def _emit_terms(r: WindowTerms, eset: Any, emit: EmitFn) -> WindowTerms:
@@ -343,6 +356,26 @@ def _emit_queries(q: WindowQueries, facts: WindowFacts, emit: EmitFn) -> WindowQ
     return q
 
 
+def _emit_gains(g: WindowGains, emit: EmitFn) -> WindowGains:
+    emit(
+        "transitions.gains",
+        f"{g.window[:8]}: {g.rows} gains over {g.distinct_terms} terms, {g.closure} closure",
+        {
+            "window": g.window,
+            "gains": g.rows,
+            # Per stratum, so a bundle whose strata shifted is visible from the
+            # event instead of from a diff of two parquets.
+            **{f"gains_{k}": v for k, v in g.by_stratum.items()},
+            "distinct_terms": g.distinct_terms,
+            # Which graph the gain is expressed in. The same window under two
+            # closures is two different truths.
+            "closure": g.closure,
+        },
+        "info",
+    )
+    return g
+
+
 def _refuse_disagreeing_windows(
     hecho: _Computed, p: ExportTransitionsDatasetPayload, emit: EmitFn
 ) -> None:
@@ -374,6 +407,50 @@ def _refuse_disagreeing_windows(
         "them by that string, so a disagreement does not fail there, it silently "
         "stops restricting the negatives"
     )
+
+
+def _write_all(
+    store: Any,
+    p: ExportTransitionsDatasetPayload,
+    tmp: str,
+    lote: _Bundle,
+    vector_uri: str | None,
+) -> dict[str, dict[str, Any]]:
+    """Write every requested table into ``tmp`` and publish each one.
+
+    One function per table would read better and would also mean six more
+    signatures taking the same five things. This stays one place where the set
+    of tables a run writes can be read off in order.
+    """
+    hecho, axis = lote.hecho, lote.axis
+    tablas: dict[str, dict[str, Any]] = {}
+    if "window_terms_out" in p.tables and axis is not None:
+        tablas["window_terms_out"] = _write_one(
+            store, p, tmp, "window_terms_out", lambda path: write_table(hecho.terms, path)
+        )
+    if "queries" in p.tables:
+        tablas["queries"] = _write_one(
+            store, p, tmp, "queries", lambda path: write_queries(hecho.queries, path)
+        )
+    if "gains" in p.tables:
+        tablas["gains"] = _write_one(
+            store, p, tmp, "gains", lambda path: write_gains(hecho.gain_columns, path)
+        )
+    if "terms" in p.tables and axis is not None and vector_uri is not None:
+        sha = p.term_vectors_sha256 or ""
+        tablas["terms"] = _write_one(
+            store, p, tmp, "terms", lambda path: write_terms(axis, vector_uri, sha, path)
+        )
+    if "term_ancestors" in p.tables and axis is not None:
+        tablas["term_ancestors"] = _write_one(
+            store, p, tmp, "term_ancestors", lambda path: write_ancestors(axis, path)
+        )
+    if "residue_refs" in p.tables and lote.refs is not None:
+        refs = lote.refs
+        tablas["residue_refs"] = _write_one(
+            store, p, tmp, "residue_refs", lambda path: write_refs(refs, path)
+        )
+    return tablas
 
 
 class ExportTransitionsDatasetOperation(Operation):
@@ -408,7 +485,6 @@ class ExportTransitionsDatasetOperation(Operation):
                 },
                 "info",
             )
-        vivos = set(axis.aspect) if axis is not None else set()
         refs = (
             refs_of(session, uuid.UUID(p.codes_config_id))
             if "residue_refs" in p.tables and p.codes_config_id
@@ -429,7 +505,7 @@ class ExportTransitionsDatasetOperation(Operation):
                 },
                 "info",
             )
-        hecho = self._per_window(session, p, vivos, running, emit)
+        hecho = self._per_window(session, p, axis, running, emit)
         _refuse_disagreeing_windows(hecho, p, emit)
         return self._publish(p, _Bundle(hecho=hecho, axis=axis, refs=refs), running, payload, emit)
 
@@ -437,12 +513,12 @@ class ExportTransitionsDatasetOperation(Operation):
         self,
         session: Session,
         p: ExportTransitionsDatasetPayload,
-        axis: set[str],
+        axis: Axis | None,
         running: str,
         emit: EmitFn,
     ) -> _Computed:
         """Check and compute every window before anything is written."""
-        hecho = _Computed(terms=[], queries=[])
+        hecho = _Computed(terms=[], queries=[], gains=[], gain_columns=new_columns())
         for raw in p.windows:
             eset = _window_or_refuse(session, raw)
             _refuse_wrong_pivot(eset, p.cut, f"window {raw}")
@@ -452,11 +528,17 @@ class ExportTransitionsDatasetOperation(Operation):
             # slightly different reads.
             facts = facts_of(session, eset)
             refuse_after_the_cut(facts, p.cut_version)
-            if "window_terms_out" in p.tables:
-                hecho.terms.append(_emit_terms(terms_out(session, facts, axis), eset, emit))
-            if "queries" in p.tables:
-                hecho.queries.append(
-                    _emit_queries(queries_of(session, facts, p.categories), facts, emit)
+            if "window_terms_out" in p.tables and axis is not None:
+                hecho.terms.append(
+                    _emit_terms(terms_out(session, facts, set(axis.aspect)), eset, emit)
+                )
+            q = queries_of(session, facts, p.categories) if _NEEDS_QUERIES & set(p.tables) else None
+            if q is not None and "queries" in p.tables:
+                hecho.queries.append(_emit_queries(q, facts, emit))
+            if q is not None and "gains" in p.tables and axis is not None:
+                poblacion = {r.query for r in q.rows}
+                hecho.gains.append(
+                    _emit_gains(gains_of(facts, axis.aspect, poblacion, hecho.gain_columns), emit)
                 )
         return hecho
 
@@ -470,8 +552,6 @@ class ExportTransitionsDatasetOperation(Operation):
     ) -> OperationResult:
         """Write every requested table, publish it, and report its digest."""
         store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
-        hecho, axis = lote.hecho, lote.axis
-        tablas: dict[str, dict[str, Any]] = {}
         # Verified BEFORE anything is written: those two columns are the reason
         # the vectors are carried by reference at all, and a sha nobody checked
         # is worse in a table than absent from one.
@@ -481,28 +561,7 @@ class ExportTransitionsDatasetOperation(Operation):
             else None
         )
         with tempfile.TemporaryDirectory(prefix="transitions-") as tmp:
-            if "window_terms_out" in p.tables:
-                tablas["window_terms_out"] = _write_one(
-                    store, p, tmp, "window_terms_out", lambda path: write_table(hecho.terms, path)
-                )
-            if "queries" in p.tables:
-                tablas["queries"] = _write_one(
-                    store, p, tmp, "queries", lambda path: write_queries(hecho.queries, path)
-                )
-            if "terms" in p.tables and axis is not None and vector_uri is not None:
-                sha = p.term_vectors_sha256 or ""
-                tablas["terms"] = _write_one(
-                    store, p, tmp, "terms", lambda path: write_terms(axis, vector_uri, sha, path)
-                )
-            if "term_ancestors" in p.tables and axis is not None:
-                tablas["term_ancestors"] = _write_one(
-                    store, p, tmp, "term_ancestors", lambda path: write_ancestors(axis, path)
-                )
-            if "residue_refs" in p.tables and lote.refs is not None:
-                refs = lote.refs
-                tablas["residue_refs"] = _write_one(
-                    store, p, tmp, "residue_refs", lambda path: write_refs(refs, path)
-                )
+            tablas = _write_all(store, p, tmp, lote, vector_uri)
         result = {
             "tables": tablas,
             "windows": len(p.windows),

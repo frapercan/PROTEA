@@ -273,7 +273,11 @@ class TestTheTwoTablesAgreeAboutTheirWindows:
         from protea.core.operations.export_transitions_dataset import _Computed
         from protea.core.transitions_export._window_terms_out import WindowTerms
 
+        from protea.core.transitions_export._gains import new_columns
+
         return _Computed(
+            gains=[],
+            gain_columns=new_columns(),
             terms=[
                 WindowTerms(
                     window=w,
