@@ -19,6 +19,21 @@ WEIGHT_KINDS = (
     "reader",
     "generator",
     "method_bundle",
+    #: One vector per GO term of an ontology axis, from a text embedding of the
+    #: term's name and definition. ADR-D56's ``terms`` table carries them by
+    #: reference (``vector_uri`` plus ``vector_sha256``) rather than inline,
+    #: because 2560 floats over 43.558 terms is a file and not a column, so the
+    #: file has to be registered somewhere with its digest and this is the
+    #: registry that does that.
+    #:
+    #: A NEW KIND RATHER THAN ONE OF THE SIX, and that is the decision this
+    #: line records. None of the others describes it: it is not a vocabulary of
+    #: residues, not an encoder, not a world model, not a reader, not a
+    #: generator and not a method's bundle. Registering it under a name that
+    #: does not fit would make the ``kind`` column stop answering "what is
+    #: this", which is the one question it exists for, and would break the
+    #: project's rule that every set is DESCRIBED.
+    "term_text_vectors",
 )
 
 
