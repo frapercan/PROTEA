@@ -91,31 +91,51 @@ class TestTheRule:
 
 
 class TestTheSeam:
-    def test_the_only_reader_goes_through_the_checked_path(self) -> None:
+    def test_the_api_reader_comes_through_the_same_door(self) -> None:
+        # THE TEST BELOW WAS CALLED "the only reader" AND ONLY LOOKED AT ONE.
+        # ``api/routers/graph.py`` split the SAVED uri and fetched it with
+        # store.get, verifying nothing, while the core derived the key from
+        # the id: one object, two locators, nothing comparing them. Found by
+        # the desktop session reading the diff, not by this file.
+        from protea.api.routers import graph
+
+        code = _code_of(graph._counted_units)
+        assert "read_groundtruth" in code
+        assert "store.get(" not in code, "la API volvio a leer sin verificar"
+
+    def test_the_locator_in_the_row_is_checked_against_the_derived_key(self) -> None:
+        # Refused rather than resolved by preferring either: the derived key
+        # would hide a row pointing elsewhere, the stored uri would hide a
+        # renamed object.
+        from protea.core.evaluation import read_groundtruth
+
+        code = _code_of(read_groundtruth)
+        assert "groundtruth_key_for" in code and "endswith" in code
+        assert "ArtifactMismatch" in code
+
+    def test_the_core_reader_goes_through_the_checked_path(self) -> None:
         # Imported from ``protea.core.evaluation`` and NOT from the module it
         # lives in. That is not style: ``_evaluation_groundtruth`` imports
         # ``evaluation`` for ``EvaluationData`` and ``evaluation`` imports it
         # back at the end of its own file, so entering by the module raises
-        # ImportError on a partially initialised cycle. Its docstring already
-        # says the re-exported names are the public surface; this test found
-        # out what happens when you do not believe it.
+        # ImportError on a partially initialised cycle.
         from protea.core.evaluation import load_evaluation_data_for_set
 
         code = _code_of(load_evaluation_data_for_set)
-        assert "fetch_and_verify" in code
+        assert "read_groundtruth" in code
         assert "store.get(" not in code, "vuelve a leer sin verificar"
 
     def test_it_passes_the_row_s_digest_and_not_something_else(self) -> None:
-        from protea.core.evaluation import load_evaluation_data_for_set
+        from protea.core.evaluation import read_groundtruth
 
-        assert "groundtruth_sha256" in _code_of(load_evaluation_data_for_set)
+        assert "groundtruth_sha256" in _code_of(read_groundtruth)
 
     def test_a_row_one_migration_behind_still_reads(self) -> None:
         # The column arrives in b4c17e2a9f08. A dump run against a database
         # that has not migrated must report, not crash on the attribute.
-        from protea.core.evaluation import load_evaluation_data_for_set
+        from protea.core.evaluation import read_groundtruth
 
-        assert "getattr(eval_set" in _code_of(load_evaluation_data_for_set)
+        assert "getattr(eval_set" in _code_of(read_groundtruth)
 
     def test_the_writer_hashes_what_it_sends_not_what_comes_back(self) -> None:
         # A digest taken after the round trip would agree with whatever the
@@ -152,9 +172,9 @@ class TestItWarnsRatherThanWhispers:
     def test_the_reader_raises_a_warning_for_an_unverified_row(self) -> None:
         # Asserted because the callback is the whole mechanism: wire it to
         # nothing and the silence comes back.
-        from protea.core.evaluation import load_evaluation_data_for_set
+        from protea.core.evaluation import read_groundtruth
 
-        code = _code_of(load_evaluation_data_for_set)
+        code = _code_of(read_groundtruth)
         assert "on_unverified" in code and "warnings.warn" in code
 
     def test_a_plain_warning_does_not_stop_a_read(self) -> None:

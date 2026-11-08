@@ -22,9 +22,17 @@ WHAT A MISSING EXPECTATION MEANS, because this is the part that could rot.
 ``expected`` is ``None`` for every row written before its table had the
 column, and those rows are real: 133 evaluation sets predate this one. A
 ``None`` therefore CANNOT raise, or the fix would break reading every
-existing window. It is reported instead, through ``on_unverified``, so a
-caller can decide: the generator refuses, a reader warns. What it must never
-do is pass silently, which is what the code did before this module.
+existing window. It is reported instead, through ``on_unverified``.
+
+AND HERE IS WHAT THIS DOCSTRING USED TO CLAIM AND THE CODE DID NOT DO. It
+said "the generator refuses, a reader warns". No generator path calls this at
+all: the generator WRITES the digest, it never reads one back. Every caller
+today is a reader and every one of them warns. The sentence described a
+design, not the code, which is the same thing the reuse docstring did two
+files away. What is still missing, and is a separate change with its own
+name, is that a caller which PRODUCES A NUMBER should record whether it
+verified, in its own row rather than in a warning: a warning in a worker
+reaches the journal and in the API reaches nobody.
 """
 
 from __future__ import annotations
