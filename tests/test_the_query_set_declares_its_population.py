@@ -115,6 +115,11 @@ def test_the_vocabulary_is_closed_and_says_what_it_cannot_say():
         "evaluation_targets",
         "fasta_upload",
         "quick_annotation",
+        # Added on 2026-11-08, and the list is hard-coded on purpose so that a
+        # fifth kind has to come with a line here: the corpus's own proteins,
+        # which is neither an upload nor a window's delta, and which no value
+        # of the first four could say.
+        "corpus_population",
         "legacy_undeclared",
     }
 

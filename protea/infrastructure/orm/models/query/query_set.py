@@ -33,6 +33,13 @@ QUERY_SET_SOURCES: tuple[str, ...] = (
     "evaluation_targets",
     "fasta_upload",
     "quick_annotation",
+    #: The corpus's own proteins: the one population everything else is
+    #: measured over. It is not an upload, not a window's delta, and
+    #: ``legacy_undeclared`` would say "we looked and it cannot be
+    #: established" about the only population that CAN be established
+    #: exactly. A vector bank is a RECIPE applied to a POPULATION, and until
+    #: this value existed only the recipe had an identity.
+    "corpus_population",
     "legacy_undeclared",
 )
 
@@ -108,7 +115,25 @@ class QuerySet(Base):
         ),
         # Idempotence: one window plus one set of bytes is ONE population. A
         # re-export of the same delta must find this row, not make a second.
+        #
+        # IT DOES NOT COVER A CORPUS POPULATION, and that is worth knowing
+        # rather than discovering: that kind has ``evaluation_set_id`` NULL by
+        # its own CHECK, and in Postgres two NULLs do not collide, so this
+        # constraint would admit a second row with the SAME sha. The operation
+        # that writes one therefore looks for an existing row by (kind, sha)
+        # and refuses, because the constraint cannot.
         UniqueConstraint("evaluation_set_id", "content_sha256", name="uq_query_set_window_content"),
+        # The four criteria of the set guard as a constraint. The last clause
+        # is the one that carries work: a corpus population is not a window's
+        # delta, so naming an evaluation set here would be a category error
+        # with a foreign key behind it.
+        CheckConstraint(
+            "source_kind <> 'corpus_population' OR ("
+            "artifact_uri IS NOT NULL AND content_sha256 IS NOT NULL "
+            "AND description IS NOT NULL AND job_id IS NOT NULL "
+            "AND evaluation_set_id IS NULL)",
+            name="ck_query_set_corpus_is_declared",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

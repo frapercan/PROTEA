@@ -75,6 +75,9 @@ from protea.core.operations.compute_information_accretion import (
 from protea.core.operations.count_backend_parameters import (
     CountBackendParametersPayload,
 )
+from protea.core.operations.declare_corpus_population import (
+    DeclareCorpusPopulationPayload,
+)
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenancePayload,
 )
@@ -605,6 +608,12 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         # Sin modo "todas las que estan sin declarar": esta operacion ESCRIBE
         # la procedencia, y ahi un alcance por defecto es lo contrario de una
         # declaracion.
+        "declare_corpus_population",
+        DeclareCorpusPopulationPayload,
+        {"output_name": ""},
+        ("output_name",),
+    ),
+    (
         "declare_query_set_provenance",
         DeclareQuerySetProvenancePayload,
         {"query_set_ids": []},
