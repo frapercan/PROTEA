@@ -3972,8 +3972,8 @@ t5 = ["sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-backends.git"
-reference = "5fec3f59453714fb18d31d3bd43a502ad244c5d7"
-resolved_reference = "5fec3f59453714fb18d31d3bd43a502ad244c5d7"
+reference = "2cb6b479e5a2f2009915412b0e888676e4f9b199"
+resolved_reference = "2cb6b479e5a2f2009915412b0e888676e4f9b199"
 
 [[package]]
 name = "protea-contracts"
@@ -4014,9 +4014,9 @@ pandas = ">=2.0"
 protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "dd335182a6624a82e3285df9d04a7ace3402effd"}
 
 [package.extras]
-esm = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@5fec3f59453714fb18d31d3bd43a502ad244c5d7", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
+esm = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@2cb6b479e5a2f2009915412b0e888676e4f9b199", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
 mil = ["torch (>=2.0,<3.0)"]
-t5 = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@5fec3f59453714fb18d31d3bd43a502ad244c5d7", "sentencepiece (>=0.2)", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
+t5 = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@2cb6b479e5a2f2009915412b0e888676e4f9b199", "sentencepiece (>=0.2)", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
 
 [package.source]
 type = "git"
@@ -7011,4 +7011,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "d66bd64cf6e5b33afbfe8a64e7b81ae13ef25b892cf4dc8ba23ff90c42a49c44"
+content-hash = "ec228d48c607ccbff15d8ad0467a4f992a03e6e52ce60bd6400686a1fe8d4412"
