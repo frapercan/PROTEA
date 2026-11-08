@@ -75,6 +75,9 @@ from protea.core.operations.compute_information_accretion import (
 from protea.core.operations.count_backend_parameters import (
     CountBackendParametersPayload,
 )
+from protea.core.operations.declare_query_set_provenance import (
+    DeclareQuerySetProvenancePayload,
+)
 from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
@@ -596,6 +599,16 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ExportEvaluationTargetsPayload,
         {"evaluation_set_id": "e", "categories": ["removed"]},
         ("categories",),
+    ),
+    (
+        # invariant: una derivacion que nadie nombro es una que nadie comprobo.
+        # Sin modo "todas las que estan sin declarar": esta operacion ESCRIBE
+        # la procedencia, y ahi un alcance por defecto es lo contrario de una
+        # declaracion.
+        "declare_query_set_provenance",
+        DeclareQuerySetProvenancePayload,
+        {"query_set_ids": []},
+        ("query_set_ids",),
     ),
     (
         # invariant: el alcance de un conjunto de entrenamiento no se deja a un

@@ -174,6 +174,18 @@ def _load_sequences(session: Session, accessions: list[str]) -> dict[str, str]:
     return {accession: sequence for accession, sequence in rows}
 
 
+def targets_key_for(evaluation_set_id: str, output_name: str, digest: str) -> str:
+    """Storage key for an exported target FASTA.
+
+    ONE SPELLING, like ``groundtruth_key_for``. A later reader that needed
+    these bytes would otherwise split the saved uri to get at them, which is
+    exactly the second door the ground truth had: the uri is a locator a row
+    carries, and the key is a function of what the export DECLARED. Derived,
+    not parsed.
+    """
+    return f"eval_targets/{evaluation_set_id}/{output_name}-{digest[:12]}.fasta"
+
+
 def _sequence_ids(session: Session, accessions: list[str]) -> dict[str, int]:
     """Accession to the id of the sequence row the PROTEIN already points at.
 
@@ -449,7 +461,7 @@ class ExportEvaluationTargetsOperation(Operation):
         # same walk generate_evaluation_set does for the ground truth beside this.
         project_root = Path(__file__).resolve().parents[3]
         store = get_artifact_store(load_settings(project_root))
-        key = f"eval_targets/{p.evaluation_set_id}/{p.output_name}-{digest[:12]}.fasta"
+        key = targets_key_for(p.evaluation_set_id, p.output_name, digest)
         uri = store.put(key, raw)
 
         emit(
