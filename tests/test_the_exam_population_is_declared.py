@@ -51,6 +51,14 @@ def _manifiesto(poblacion: bytes, **cambios: Any) -> dict[str, Any]:
         "partition": {"selection": 2, "confirmation": 2},
         "concepts": {"selection": 79, "reserved": 42},
         "population_file": "poblacion.tsv",
+        # Required since the root key that lied was removed: the convention has
+        # to be stated per file and per column, and the halves have to say which
+        # one is sealed.
+        "position_conventions": {"poblacion.tsv": {"accession": "UniProt accession"}},
+        "halves": {
+            "selection": {"state": "readable"},
+            "confirmation": {"state": "sealed"},
+        },
         "files": {
             "poblacion.tsv": {
                 "key": "exam-population/sitios/poblacion-aaaaaaaaaaaa.tsv",
@@ -131,7 +139,10 @@ def test_a_manifest_that_does_not_list_its_own_population_file_is_refused():
         D._manifest(_payload(clave, sha), store)
 
 
-@pytest.mark.parametrize("falta", ["exam", "files", "partition", "concepts", "population_file"])
+@pytest.mark.parametrize(
+    "falta",
+    ["exam", "files", "partition", "concepts", "population_file", "position_conventions", "halves"],
+)
 def test_a_manifest_missing_a_required_field_is_refused(falta):
     poblacion = _tsv()
     man = _manifiesto(poblacion)
@@ -262,7 +273,12 @@ def _m_y_pop():
 def test_the_row_reaches_its_flush_already_carrying_its_job():
     """What ``ck_query_set_exam_is_declared`` requires, asserted where it bites."""
     m, pop = _m_y_pop()
-    got = D._Resolved(sequence_of={a: i for i, a in enumerate(ACC, 1)}, hash_of=MD5, missing=[])
+    got = D._Resolved(
+        sequence_of={a: i for i, a in enumerate(ACC, 1)},
+        hash_of=MD5,
+        length_of=dict.fromkeys(ACC, 300),
+        missing=[],
+    )
     job = uuid.uuid4()
     s = _SesionQueRecuerda()
 
@@ -296,7 +312,10 @@ def test_the_md5_agreement_is_reported_with_the_accessions_that_differ():
     movidas = dict(MD5)
     movidas["C0C001"] = "f" * 32
     got = D._Resolved(
-        sequence_of={a: i for i, a in enumerate(ACC, 1)}, hash_of=movidas, missing=[]
+        sequence_of={a: i for i, a in enumerate(ACC, 1)},
+        hash_of=movidas,
+        length_of=dict.fromkeys(ACC, 300),
+        missing=[],
     )
 
     medida = D._agreement(pop, got)
