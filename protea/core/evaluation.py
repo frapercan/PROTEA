@@ -79,6 +79,7 @@ from protea.core._truth_rules import (
     _sides_of,
     _terms_of_interest,
     refuse_unknown_rules,
+    toi_restricts_the_gain,
 )
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
 
@@ -93,7 +94,6 @@ _EXP_CODES: list[str] = list(
 )
 
 _NAMESPACES = ("F", "P", "C")
-
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +113,6 @@ class EvalContext(NamedTuple):
     old_annotation_set_id: uuid.UUID
     new_annotation_set_id: uuid.UUID
     ontology_snapshot_id: uuid.UUID
-
-
 
 
 @dataclass
@@ -461,18 +459,14 @@ def _load_not_raw_go_ids(
     return dict(out)
 
 
-def _drop_binding_only(
-    session: Session, snapshot_id: uuid.UUID, raw: dict[str, set[str]]
-) -> int:
+def _drop_binding_only(session: Session, snapshot_id: uuid.UUID, raw: dict[str, set[str]]) -> int:
     """Apply the protein-binding rule to one side's DIRECT annotations.
 
     The binding subtree is resolved per snapshot rather than hardcoded, because
     it is not a constant: 920 terms under the snapshot behind GOA 220, and the
     ontology prunes and grows across the series this campaign spans.
     """
-    binding = _bfs_closure(
-        {PROTEIN_BINDING}, _load_children_by_go_id(session, snapshot_id)
-    )
+    binding = _bfs_closure({PROTEIN_BINDING}, _load_children_by_go_id(session, snapshot_id))
     _, aspect_by_go_id = _load_pivot_term_universe(session, snapshot_id)
     return drop_binding_only_mfo(raw, binding, aspect_by_go_id)
 
@@ -508,9 +502,7 @@ def _reconcile_experimental_side(
             # ``frame.live``, never ``project.target``: the map and the
             # liveness test are ONE snapshot's answer, and this side's
             # snapshot is not where the landings come from.
-            remapped = apply_remap(
-                raw, side.frame.remap, side.frame.live, spare=project.graph.live
-            )
+            remapped = apply_remap(raw, side.frame.remap, side.frame.live, spare=project.graph.live)
         projection = project_direct_annotations(raw, project.graph, project.target)
     # The return was discarded here. It is the number of proteins whose ENTIRE
     # F side the binding rule empties, which is some 26,000 a window: computed
@@ -664,9 +656,7 @@ def _reconcile_both_sides(
     same-snapshot path does: a term a protein is known NOT to have at either
     end is not a gain at the other.
     """
-    project = (
-        _projection_request(session, window) if window.truth_profile == "projected" else None
-    )
+    project = _projection_request(session, window) if window.truth_profile == "projected" else None
     old, new = _sides_of(session, window, project)
 
     old_exp, (_, old_remapped, old_binding) = _reconcile_experimental_side(
@@ -752,10 +742,8 @@ def compute_evaluation_data_reconciled(
 
     old_by_ns = _apply_negatives(sides.old_exp, sides.negatives)
     new_by_ns = _apply_negatives(sides.new_exp, sides.negatives)
-    if window.toi_rule == "live_in_both_ends":
-        new_by_ns = _keep_within_toi(
-            new_by_ns, old_by_ns, _terms_of_interest(session, window)
-        )
+    if toi_restricts_the_gain(window.toi_rule):
+        new_by_ns = _keep_within_toi(new_by_ns, old_by_ns, _terms_of_interest(session, window))
     nk, lk, pk, pk_known, removed = _classify_protein_deltas(old_by_ns, new_by_ns)
     known = {
         p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()

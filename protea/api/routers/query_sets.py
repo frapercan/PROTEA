@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 from uuid import UUID
@@ -90,6 +91,13 @@ def _query_set_to_dict(qs: QuerySet, entry_count: int) -> dict[str, Any]:
         "description": qs.description,
         "entry_count": entry_count,
         "created_at": qs.created_at.isoformat(),
+        # The declaration, because a client that cannot see it has to go and
+        # read the description to find out what population this is.
+        "source_kind": qs.source_kind,
+        "evaluation_set_id": str(qs.evaluation_set_id) if qs.evaluation_set_id else None,
+        "content_sha256": qs.content_sha256,
+        "job_id": str(qs.job_id) if qs.job_id else None,
+        "code_revision": qs.code_revision,
     }
 
 
@@ -174,7 +182,16 @@ async def create_query_set(
         hashes = [Sequence.compute_hash(seq) for _, seq, _ in records]
         hash_to_seq_id = _upsert_sequences(session, records, hashes)
 
-        qs = QuerySet(name=name, description=description)
+        # The sha of the FASTA that produced these entries. It is what lets a
+        # user ask "is this the population I uploaded" and get an answer, and
+        # it is the same quantity the derived sets carry: the digest of the
+        # bytes the entries were parsed from.
+        qs = QuerySet(
+            name=name,
+            description=description,
+            source_kind="fasta_upload",
+            content_sha256=hashlib.sha256(raw).hexdigest(),
+        )
         session.add(qs)
         session.flush()
 
