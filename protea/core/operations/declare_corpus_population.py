@@ -39,6 +39,7 @@ that the next release makes stale.
 from __future__ import annotations
 
 import hashlib
+import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -205,9 +206,21 @@ def _coverage(session: Session, sequences: int) -> list[dict[str, Any]]:
 
 
 def _declare(
-    session: Session, p: DeclareCorpusPopulationPayload, got: _Extracted, pub: _Published
+    session: Session,
+    p: DeclareCorpusPopulationPayload,
+    got: _Extracted,
+    pub: _Published,
+    job_id: uuid.UUID | None,
 ) -> QuerySet:
-    """The row, built from what was actually written, and its entries."""
+    """The row, built from what was actually written, and its entries.
+
+    ``job_id`` IS AN ARGUMENT AND NOT ASSIGNED AFTERWARDS, which is the bug this
+    signature fixes. The first version built the row, flushed it, and set
+    ``row.job_id`` after: so the INSERT went in without it and
+    ``ck_query_set_corpus_is_declared`` refused the row, because that CHECK
+    requires the job for this kind. The constraint caught it on the first real
+    run, which is the constraint doing its job and a test failing to do mine.
+    """
     sequences = len(set(got.sequence_of.values()))
     row = QuerySet(
         name=f"{p.output_name}-{pub.digest[:12]}",
@@ -221,6 +234,7 @@ def _declare(
         ),
         artifact_uri=pub.uri,
         content_sha256=pub.digest,
+        job_id=job_id,
         code_revision=code_revision(),
     )
     session.add(row)
@@ -261,8 +275,7 @@ class DeclareCorpusPopulationOperation(Operation):
             )
         pub = _publish(_serialise(got.accessions))
         _refuse_a_second_row(session, pub.digest)
-        row = _declare(session, p, got, pub)
-        row.job_id = job_id_from_payload(payload)
+        row = _declare(session, p, got, pub, job_id_from_payload(payload))
         sequences = len(set(got.sequence_of.values()))
         result = {
             "query_set_id": str(row.id),
