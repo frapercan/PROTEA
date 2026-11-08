@@ -18,11 +18,14 @@ from __future__ import annotations
 
 import io
 import uuid
+import warnings
 from collections import defaultdict
 from pathlib import Path
+from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 
+from protea.core._artifact_identity import ArtifactMismatch, fetch_and_verify
 from protea.core.evaluation import _GROUNDTRUTH_BUCKETS, EvaluationData
 
 
@@ -105,6 +108,62 @@ def deserialize_evaluation_data_from_bytes(blob: bytes) -> EvaluationData:
     return _dataframe_to_eval_data(df)
 
 
+class GroundTruthRead(NamedTuple):
+    """The bytes of a window's truth, and what could be said about them.
+
+    ``verified`` is the field that matters and it is THREE-valued in effect:
+    True when the row's sha matched, False when the row has no sha, and no
+    value at all when something raised. A caller that produces a number has
+    to record it; see :func:`read_groundtruth`.
+    """
+
+    blob: bytes
+    verified: bool
+    key: str
+
+
+def read_groundtruth(session: Session, eval_set) -> GroundTruthRead:
+    """THE door to a window's truth parquet. Core and API both come through here.
+
+    THERE WERE TWO, WITH TWO DIFFERENT LOCATORS, which is worse than one
+    unverified door. The core recomputed the key from
+    :func:`groundtruth_key_for`; ``api/routers/graph.py`` split the SAVED
+    ``groundtruth_uri`` and fetched that. So the row's uri was used by exactly
+    one reader and ignored by the other, and nothing compared them. A test
+    here was called "the only reader" and only looked at the core one.
+
+    THE LOCATOR IS CHECKED AGAINST THE ROW. The key is derived, and then the
+    stored uri has to end in it. They cannot disagree without one of them
+    being wrong about which object this window's truth is, and a mismatch is
+    refused rather than resolved by preferring either: preferring the derived
+    key hides a row that points elsewhere, and preferring the uri hides a
+    renamed object.
+    """
+    from protea.infrastructure.settings import load_settings
+    from protea.infrastructure.storage import get_artifact_store
+
+    key = groundtruth_key_for(eval_set.id)
+    stored = (eval_set.groundtruth_uri or "").rstrip("/")
+    if stored and not stored.endswith(key):
+        raise ArtifactMismatch(
+            f"evaluation set {eval_set.id} stores groundtruth_uri {stored!r}, which does "
+            f"not name the key its id derives, {key!r}. One of the two is wrong about "
+            "which object holds this window's truth, and guessing which would hide "
+            "either a row pointing elsewhere or an object that was renamed."
+        )
+
+    store = get_artifact_store(load_settings(Path(__file__).resolve().parents[2]))
+    expected = getattr(eval_set, "groundtruth_sha256", None)
+    blob = fetch_and_verify(
+        store,
+        key,
+        expected,
+        f"the ground truth of evaluation set {eval_set.id}",
+        on_unverified=lambda msg: warnings.warn(msg, RuntimeWarning, stacklevel=2),
+    )
+    return GroundTruthRead(blob=blob, verified=expected is not None, key=key)
+
+
 def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[EvaluationData, uuid.UUID]:
     """Load ground-truth for an EvaluationSet row.
 
@@ -120,8 +179,6 @@ def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[Evaluation
     cafaeval, since propagated go_ids live in pivot term space.
     """
     from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-    from protea.infrastructure.settings import load_settings
-    from protea.infrastructure.storage import get_artifact_store
 
     ann_old = session.get(AnnotationSet, eval_set.old_annotation_set_id)
     ann_new = session.get(AnnotationSet, eval_set.new_annotation_set_id)
@@ -143,12 +200,10 @@ def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[Evaluation
             "the parquet artifact, or regenerate via /annotations/evaluation-sets/generate."
         )
 
-    project_root = Path(__file__).resolve().parents[2]
-    settings = load_settings(project_root)
-    store = get_artifact_store(settings)
-    key = groundtruth_key_for(eval_set.id)
-    blob = store.get(key)
-    data = deserialize_evaluation_data_from_bytes(blob)
+    # Through read_groundtruth and never store.get: it is the one door, and it
+    # also checks that the row's uri names the key its id derives.
+    read = read_groundtruth(session, eval_set)
+    data = deserialize_evaluation_data_from_bytes(read.blob)
     return data, pivot_id
 
 

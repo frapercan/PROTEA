@@ -152,6 +152,23 @@ class EvaluationSet(Base):
     )
     stats: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     groundtruth_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    #: The sha256 of the bytes ``groundtruth_uri`` points at.
+    #:
+    #: A uri is a LOCATOR and a sha is an IDENTITY, and this row carried the
+    #: first without the second: ``load_evaluation_data_for_set`` fetched the
+    #: parquet and verified nothing, because there was nothing to verify
+    #: against. The read looked exactly like a verified one. Five other
+    #: artefacts in this project do carry their digest -- ``obo_sha256``,
+    #: ``information_accretion_set.content_sha256`` -- and this was the odd
+    #: one out.
+    #:
+    #: NULL on every row written before the column, which is 133 of them, and
+    #: it cannot be backfilled from here: it would mean fetching 133 parquets
+    #: out of the object store inside a migration. NULL means "nothing can
+    #: say whether these are the right bytes", never "they are fine".
+    #: :func:`protea.core._artifact_identity.fetch_and_verify` reports that
+    #: case instead of passing it in silence.
+    groundtruth_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # ADR D40: rolling-origin protocol window this set is bound to.
     # ``"valid"`` | ``"test"`` | ``None`` (unbound). Nullable so legacy
     # rows and ad-hoc episodes carry no role; a CHECK constraint keeps
@@ -184,6 +201,12 @@ class EvaluationSet(Base):
     #: gain CAN be and this decides which gains COUNT. Four combinations, not
     #: two, and folding them into one field would be the single-field
     #: comparison this project keeps paying for.
+    #:
+    #: ``live_in_both_ends`` ASKS FOR THE ID AND NOT FOR THE IDENTITY, which
+    #: is a declared limitation and not an oversight: measured on the window
+    #: furthest from the pivot, a version by identity would recover 3 terms
+    #: over 11 proteins. See
+    #: :func:`protea.core._truth_rules._terms_of_interest`.
     toi_rule: Mapped[str] = mapped_column(
         String(24), nullable=False, server_default="pivot_terms"
     )
