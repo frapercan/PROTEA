@@ -121,6 +121,19 @@ from protea.core.operations.verify_window_against_reference import (
 )
 
 
+def _register_window_maintenance(registry: OperationRegistry) -> None:
+    """The two operations that act ON windows rather than building one.
+
+    Grouped like the residue encoders below, and for the same prosaic reason:
+    ``build_operation_registry`` hit the 60-line ceiling. Grouped TOGETHER
+    because they are the pair that touches an already-written window, one to
+    give it the digest it never had and one to retire it, and both leave a job
+    precisely because they change what a row says about itself.
+    """
+    registry.register(RetireEvaluationSetsOperation())
+    registry.register(SealEvaluationGroundtruthOperation())
+
+
 def _register_residue_encoders(registry: OperationRegistry) -> None:
     """The per-residue operations: coordinators, card batches, the node's upload and the write."""
     registry.register(EncodeResidueSparseOperation())
@@ -171,8 +184,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(ArchiveOntologySnapshotOperation())
     registry.register(CountBackendParametersOperation())
     registry.register(ExportEvaluationTargetsOperation())
-    registry.register(RetireEvaluationSetsOperation())
-    registry.register(SealEvaluationGroundtruthOperation())
+    _register_window_maintenance(registry)
     registry.register(IngestMethodPredictionsOperation())
     registry.register(RunLabMethodOperation())
     registry.register(LoadOntologyAliasesOperation())
