@@ -9,6 +9,7 @@ from pydantic import field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evaluation import (
     GAIN_RULES,
@@ -240,6 +241,10 @@ class GenerateEvaluationSetOperation:
             not_codes=p.not_codes,
             stats=stats,
             window_role=p.window_role,
+            # Stamped at import, not read from the tree now: the fleet runs out
+            # of a working tree that is edited between runs, so the tree can
+            # have moved since this process loaded its code.
+            code_revision=code_revision(),
             job_id=job_id_from_payload(payload),
         )
         session.add(eval_set)
