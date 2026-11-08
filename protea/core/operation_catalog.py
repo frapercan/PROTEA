@@ -43,6 +43,9 @@ from protea.core.operations.count_backend_parameters import (
 from protea.core.operations.declare_corpus_population import (
     DeclareCorpusPopulationOperation,
 )
+from protea.core.operations.declare_exam_population import (
+    DeclareExamPopulationOperation,
+)
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenanceOperation,
 )
@@ -140,6 +143,7 @@ def _register_window_maintenance(registry: OperationRegistry) -> None:
     precisely because they change what a row says about itself.
     """
     registry.register(DeclareCorpusPopulationOperation())
+    registry.register(DeclareExamPopulationOperation())
     registry.register(DeclareQuerySetProvenanceOperation())
     registry.register(ExportTransitionsDatasetOperation())
     registry.register(RetireEvaluationSetsOperation())

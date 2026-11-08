@@ -78,6 +78,9 @@ from protea.core.operations.count_backend_parameters import (
 from protea.core.operations.declare_corpus_population import (
     DeclareCorpusPopulationPayload,
 )
+from protea.core.operations.declare_exam_population import (
+    DeclareExamPopulationPayload,
+)
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenancePayload,
 )
@@ -612,6 +615,17 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         DeclareCorpusPopulationPayload,
         {"output_name": ""},
         ("output_name",),
+    ),
+    (
+        # invariant: ocho caracteres de un sha coincidieron con la verdad dos
+        # veces en una hora el 2026-11-08 mientras la cosa detras no, asi que
+        # un prefijo no se acepta donde se quiere una identidad. El servidor
+        # verifica el manifiesto contra ESTE valor antes de leer una fila.
+        "declare_exam_population",
+        DeclareExamPopulationPayload,
+        {"manifest_key": "exam-population/sitios/manifest-524f1133208d.json",
+         "manifest_sha256": "524f1133208d"},
+        ("manifest_sha256",),
     ),
     (
         "declare_query_set_provenance",
