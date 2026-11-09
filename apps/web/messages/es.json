@@ -131,7 +131,6 @@
     "annotatePausedIngest": "En marcha ahora, a fecha de {asOf}: {read, number} de {releases, number} versiones de GOA leídas, de los {gigabytes, number} GB que componen la serie.",
     "annotatePausedApi": "Explora la API",
     "annotatePausedInstrument": "Mira la campaña en marcha",
-    "annotateCpuModeNotice": "No hay GPU disponible ahora mismo, así que anotar una secuencia que no esté ya en la base de datos se ejecuta en CPU y puede tardar bastante más.",
     "annotateDescription": "Pega tus secuencias de proteínas en formato FASTA y obtén anotaciones funcionales automáticamente con el mejor metodo disponible.",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
     "annotateInputAriaLabel": "Entrada de secuencia en formato FASTA",

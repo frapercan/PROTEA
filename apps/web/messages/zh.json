@@ -132,7 +132,6 @@
     "annotatePausedIngest": "当前进行中（截至 {asOf}）：已读取 {releases, number} 个 GOA 版本中的 {read, number} 个（全系列共 {gigabytes, number} GB）。",
     "annotatePausedApi": "探索 API",
     "annotatePausedInstrument": "查看运行中的数据流程",
-    "annotateCpuModeNotice": "当前没有可用的 GPU，因此对数据库中尚不存在的序列进行注释将在 CPU 上运行，可能会明显变慢。",
     "annotateDescription": "粘贴FASTA格式的蛋白质序列，使用最佳可用方法自动获取功能注释。",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
     "annotateInputAriaLabel": "FASTA 格式的序列输入",

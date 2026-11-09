@@ -229,9 +229,6 @@ export function AnnotateForm() {
     };
   }, []);
 
-  // Surface CPU-only mode so users understand why a novel sequence is slow.
-  // `gpu_present` is undefined on older backends; only warn when explicitly false.
-  const cpuOnly = gpu?.gpu_present === false;
   const isRunning = stage === "uploading" || stage === "embedding" || stage === "predicting";
   // A running local annotation flow already owns the UI; don't double-block.
   // Only block on genuinely-active GPU work (backend `busy`), never on
@@ -336,21 +333,6 @@ export function AnnotateForm() {
                 </ul>
               )}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* CPU-only notice: no CUDA GPU is visible to the workers, so embedding
-          a sequence not already in the database runs on CPU and is slower.
-          Purely informational, never blocks submission. */}
-      {cpuOnly && !isQueueBlocked && (
-        <div
-          role="status"
-          className="mb-5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
-        >
-          <div className="flex items-start gap-2">
-            <span aria-hidden className="text-base leading-none">🖥️</span>
-            <p className="flex-1 min-w-0">{t("annotateCpuModeNotice" as any)}</p>
           </div>
         </div>
       )}
