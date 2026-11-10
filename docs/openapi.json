@@ -2711,7 +2711,7 @@
   "paths": {
     "/health": {
       "get": {
-        "description": "Liveness, and WHICH REVISION THIS PROCESS SERVES.\n\n``revision_matches_declaration`` is ``None`` when the question cannot\nbe answered, which is NOT ``True``. See :func:`_declared_revision`\nfor why this reports and never enforces.",
+        "description": "Liveness, and WHICH REVISIONS THIS INSTANCE SERVES.\n\nSee :func:`_revisions` for what each field answers and why a\n``None`` there must never be read as agreement.",
         "operationId": "health_check_health_get",
         "responses": {
           "200": {
