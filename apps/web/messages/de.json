@@ -153,6 +153,7 @@
     "annotateQueueShowDetails": "Technische Details",
     "annotateQueueHideDetails": "Technische Details ausblenden",
     "annotateQueueRunningLabel": "läuft",
+    "annotateNoComputeNotice": "Diese Instanz rechnet auf der CPU: die Maschine, die sie bereitstellt, hat keine Grafikkarte. Eine Sequenz, die noch nicht in der Datenbank ist, zu kodieren dauert daher einige Sekunden laenger, und ein Stapel dauert so lange wie er dauert. Schneller wird es, wenn Sie <guia>einen Rechenknoten anbinden</guia>.",
     "annotateQueueWaitingLabel": "Jobs in der Warteschlange",
     "shareCopy": "Teilen",
     "shareCopied": "Link kopiert"

@@ -153,6 +153,7 @@
     "annotateQueueShowDetails": "Detalhes tecnicos",
     "annotateQueueHideDetails": "Ocultar detalhes tecnicos",
     "annotateQueueRunningLabel": "executando",
+    "annotateNoComputeNotice": "Esta instancia calcula em CPU: a maquina que a serve nao tem placa grafica, por isso codificar uma sequencia que ainda nao esteja na base demora alguns segundos mais, e um lote demora o que demorar. Para a acelerar pode <guia>ligar um no de computacao</guia>.",
     "annotateQueueWaitingLabel": "Trabalhos aguardando",
     "shareCopy": "Compartilhar",
     "shareCopied": "Link copiado"

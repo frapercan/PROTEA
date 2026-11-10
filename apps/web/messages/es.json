@@ -152,6 +152,7 @@
     "annotateQueueShowDetails": "Detalles tecnicos",
     "annotateQueueHideDetails": "Ocultar detalles tecnicos",
     "annotateQueueRunningLabel": "en ejecucion",
+    "annotateNoComputeNotice": "Esta instancia calcula en CPU: la maquina que la sirve no tiene tarjeta, asi que codificar una secuencia que no este ya en la base tarda unos segundos mas y un lote tarda lo que tarde. Si quieres acelerarla, puedes <guia>conectar un nodo de computo</guia>.",
     "annotateQueueWaitingLabel": "Trabajos esperando",
     "shareCopy": "Compartir",
     "shareCopied": "Enlace copiado"

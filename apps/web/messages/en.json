@@ -152,6 +152,7 @@
     "annotateQueueShowDetails": "Technical details",
     "annotateQueueHideDetails": "Hide technical details",
     "annotateQueueRunningLabel": "running",
+    "annotateNoComputeNotice": "This instance computes on CPU: the machine serving it has no graphics card, so encoding a sequence it has not seen before takes a few seconds longer, and a batch takes as long as it takes. To make it faster you can <guia>lend it a compute node</guia>.",
     "annotateQueueWaitingLabel": "Jobs waiting",
     "shareCopy": "Share",
     "shareCopied": "Link copied"
