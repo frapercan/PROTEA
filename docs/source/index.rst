@@ -94,6 +94,7 @@ metadata enrichment, and job orchestration.
    results
    ablation
    operate/reproduce-the-sealed-board
+   operate/join-a-compute-node
    appendix/index
    runbooks/index
    quality/index
