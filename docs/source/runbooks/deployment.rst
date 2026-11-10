@@ -506,6 +506,47 @@ To run migrations manually:
      ghcr.io/frapercan/protea:latest \
      alembic upgrade head
 
+The documentation ships with the revision it documents
+------------------------------------------------------
+
+**Every deploy publishes the documentation of the revision it deploys.** This
+is a step, not a habit, because as a habit it failed: on 2026-11-10 this
+instance served code revision ``9f09e2c`` while ``/sphinx/`` served a build
+from October 7th, five weeks and eight architecture decision records behind,
+and nothing anywhere said so.
+
+.. code-block:: bash
+
+   bash scripts/deploy-docs.sh            # build this tree's revision and swap it in
+   bash scripts/deploy-docs.sh --check    # what is served right now, building nothing
+
+Run it after the tree moves to the deployed revision and before or after the
+restart; it does not need the API, and it refuses rather than guessing when the
+tree carries uncommitted changes under ``docs/`` or ``protea/``.
+
+Three properties worth knowing, each one the reason a line of that script
+exists:
+
+* **It never leaves the served build empty.** It builds elsewhere, checks the
+  result (``index.html``, ``adr/index.html``, a page floor), swaps, and puts
+  the previous build back if the swap does not answer a request. ``sphinx-build``
+  writes into its output directory, and the output directory is what FastAPI
+  mounted at ``/sphinx``, so a failed in-place build publishes a broken site:
+  the same outage shape as a failed ``next build``, which is what
+  ``scripts/deploy-frontend.sh`` exists for.
+* **It does not use the platform's virtualenv.** Sphinx is not installed there
+  and must not be: that environment holds a hand-pinned torch. The build needs
+  far less anyway, because ``docs/source/conf.py`` mocks torch, numpy,
+  transformers and eighteen more for autodoc. The script assembles its own
+  environment from ``docs/requirements.txt``, four light runtime packages and
+  the ``protea-contracts`` sibling.
+* **The build carries the revision it was made from**, stamped at
+  ``docs/build/html/_static/protea-revision.txt``, and ``GET /health`` reports
+  it as ``docs_revision`` with ``docs_match_code`` beside it. A skipped build is
+  therefore visible from outside instead of silent. ``docs_match_code`` is
+  ``None``, never ``False``, when the served build carries no stamp, which is
+  every build made before this script.
+
 See also
 ---------
 
