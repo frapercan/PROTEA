@@ -336,26 +336,70 @@ def _declared_revision() -> str | None:
     return None
 
 
-def _register_health_endpoints(app: FastAPI, factory, settings) -> None:
+#: Where ``scripts/deploy-docs.sh`` stamps the revision it built from. Inside
+#: ``_static`` because Sphinx copies that directory verbatim and nothing else
+#: in the build is guaranteed to survive a theme change.
+_DOCS_STAMP = Path("docs") / "build" / "html" / "_static" / "protea-revision.txt"
+
+
+def _docs_revision(project_root: Path) -> str | None:
+    """The revision the SERVED documentation was built from, or ``None``.
+
+    Read at request time rather than at startup, because a docs swap replaces
+    the directory under a running process and a value cached at import would
+    outlive it. ``None`` means the build carries no stamp, which is what every
+    build made before this script existed looks like: it is not agreement and
+    must not be reported as any.
+    """
+    try:
+        crudo = (project_root / _DOCS_STAMP).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return crudo if is_identifying(crudo) and len(crudo) == 40 else None
+
+
+def _revisions(project_root: Path) -> dict[str, str | bool | None]:
+    """The three revisions this instance can be asked about, and their agreement.
+
+    ``revision_matches_declaration`` compares the code this process LOADED
+    against the revision the fleet declares it is running, and
+    ``docs_match_code`` compares the documentation this instance SERVES against
+    that same loaded code. Both are ``None`` when the question cannot be
+    answered, which is NOT ``True``: one reports an absent agent-farm clone, the
+    other a build made before ``scripts/deploy-docs.sh`` stamped anything.
+
+    The second field exists because its answer was no for five weeks and
+    nothing said so. ``/health`` reported agreement with the declaration all
+    along, truthfully, because that field is about the code; the documentation
+    was a month behind and no field was about it.
+    """
+    served = code_revision()
+    declared = _declared_revision()
+    matches: bool | None = None
+    if declared is not None and is_identifying(served):
+        matches = served == declared
+    docs = _docs_revision(project_root)
+    docs_match: bool | None = None
+    if docs is not None and is_identifying(served):
+        docs_match = docs == served
+    return {
+        "code_revision": served,
+        "declared_revision": declared,
+        "revision_matches_declaration": matches,
+        "docs_revision": docs,
+        "docs_match_code": docs_match,
+    }
+
+
+def _register_health_endpoints(app: FastAPI, factory, settings, project_root: Path) -> None:
     @app.get("/health", tags=["health"])
     def health_check() -> dict[str, str | bool | None]:
-        """Liveness, and WHICH REVISION THIS PROCESS SERVES.
+        """Liveness, and WHICH REVISIONS THIS INSTANCE SERVES.
 
-        ``revision_matches_declaration`` is ``None`` when the question cannot
-        be answered, which is NOT ``True``. See :func:`_declared_revision`
-        for why this reports and never enforces.
+        See :func:`_revisions` for what each field answers and why a
+        ``None`` there must never be read as agreement.
         """
-        served = code_revision()
-        declared = _declared_revision()
-        matches: bool | None = None
-        if declared is not None and is_identifying(served):
-            matches = served == declared
-        return {
-            "status": "ok",
-            "code_revision": served,
-            "declared_revision": declared,
-            "revision_matches_declaration": matches,
-        }
+        return {"status": "ok", **_revisions(project_root)}
 
     @app.get("/health/ready", tags=["health"])
     def readiness_check() -> dict[str, str]:
@@ -599,7 +643,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     install_rate_limiter(app)
     register_problem_handlers(app)
     install_problem_openapi_schema(app)
-    _register_health_endpoints(app, factory, settings)
+    _register_health_endpoints(app, factory, settings, project_root)
     _register_routers(app)
     _register_thesis_pdf(app, project_root)
     _mount_static_assets(app, project_root)
