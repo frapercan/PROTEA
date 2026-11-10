@@ -12,7 +12,7 @@ ADRs come in two layers:
   PROTEA. They explain trade-offs of concrete code paths (KNN
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
-- **Strategic decisions** (``D1``-``D56``): plan-level decisions. The
+- **Strategic decisions** (``D1``-``D58``): plan-level decisions. The
   ``D1``-``D31`` block was taken in the master plan revision 3 (2026-05-05)
   and drives the structure of the project, the deployment story, and the
   thesis writing cadence. Later records (``D34`` onward) were added as the
@@ -313,12 +313,22 @@ later revision) or *Superseded* (a named later decision replaces it).
      - T-PLATFORM
    * - D54
      - :doc:`Model weights in one registry, uploaded or registered, and used from the instrument <D54-model-weights-registry>`
+     - Accepted
+     - T-PLATFORM
    * - D55
      - :doc:`Evaluated explorations, one unit for a hypothesis, its rules, its arms, its report and its review <D55-evaluated-explorations>`
+     - Accepted in principle
+     - T-PLATFORM
    * - D56
      - :doc:`The transitions dataset is tables keyed by what they depend on <D56-transitions-dataset-is-tables-keyed-by-what-they-depend-on>`
+     - Proposed
+     - T-WORLD-MODEL
    * - D57
      - :doc:`The vocabulary exams run inside the platform, on the codes it stores <D57-vocabulary-exams-inside-the-platform>`
+     - Proposed
+     - T-PLATFORM
+   * - D58
+     - :doc:`Every cited entity carries a short descriptor and a long one <D58-every-entity-carries-a-short-and-a-long-descriptor>`
      - Proposed
      - T-PLATFORM
 
@@ -390,3 +400,4 @@ later revision) or *Superseded* (a named later decision replaces it).
    D55-evaluated-explorations
    D56-transitions-dataset-is-tables-keyed-by-what-they-depend-on
    D57-vocabulary-exams-inside-the-platform
+   D58-every-entity-carries-a-short-and-a-long-descriptor
