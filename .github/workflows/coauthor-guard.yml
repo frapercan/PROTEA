@@ -6,17 +6,26 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
+      # No `ref:`. The default is the merge commit this workflow was read
+      # from, so scripts/check_coauthor.py comes from the same tree as the
+      # steps that call it. Checking out the head would run whatever copy the
+      # branch carries, and a branch cut before the script existed carries
+      # none. The scan names its range by sha and fetches both ends below, so
+      # it does not depend on what is checked out.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Fetch base commit
+      - name: Fetch the scanned range
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=200 origin "${BASE_SHA}"
+          # The head by sha too: the merge commit checked out above normally
+          # carries it as a parent, but the scan must not rest on that.
+          git fetch --no-tags origin "${HEAD_SHA}"
           # also need origin/main so the scan can exclude commits already on
           # the mainline (we never re-flag released history we cannot rewrite)
           git fetch --no-tags origin main
@@ -33,8 +42,8 @@ jobs:
           # exclude commits already reachable from origin/main: only NEW commits
           # introduced by this PR are subject to the guard.
           git log --format='commit %H%n%B%n---END---' "${range}" --not origin/main > "${tmp}"
-          pattern='co-authored-by:[[:space:]]*.*(claude|anthropic|noreply@anthropic)|generated[[:space:]]+with[[:space:]]+\[?claude|generated[[:space:]]+by[[:space:]]+\[?anthropic'
-          if grep -iEn "${pattern}" "${tmp}"; then
+          # The patterns live in the script, the same ones the body scan reads.
+          if ! python3 scripts/check_coauthor.py "${tmp}"; then
             echo "ERROR: commit message contains forbidden Claude/Anthropic attribution."
             echo "Fix: rebase the offending commit(s) and force-push the PR branch."
             exit 1
@@ -46,8 +55,9 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
-          if printf '%s' "${PR_BODY:-}" | grep -iE "(co-authored-by:[[:space:]]*.*(claude|anthropic)|generated[[:space:]]+with[[:space:]]+claude|generated[[:space:]]+by[[:space:]]+anthropic)" > /dev/null; then
-            echo "::error::PR body contains Claude/Anthropic co-author mention."
+          # Piped through the environment, never interpolated into the script.
+          if ! printf '%s' "${PR_BODY:-}" | python3 scripts/check_coauthor.py -; then
+            echo "::error::PR body contains Claude/Anthropic attribution."
             exit 1
           fi
           echo "OK: no forbidden attribution found in PR body."
