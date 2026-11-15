@@ -116,7 +116,7 @@ function predLabel(p: PredictionSet) {
   const parts: string[] = [];
   if (p.embedding_config_name) parts.push(p.embedding_config_name);
   if (p.annotation_set_label) parts.push(p.annotation_set_label);
-  parts.push(`k=${p.limit_per_entry}`);
+  if (p.limit_per_entry != null) parts.push(`k=${p.limit_per_entry}`);
   if (p.prediction_count != null) parts.push(`${formatCount(p.prediction_count)} preds`);
   const date = formatDate(p.created_at);
   return `${parts.join(" · ")} · ${date} (${p.id.slice(0, 8)}…)`;
@@ -659,7 +659,7 @@ function EvaluationSetCard({
                                   <div className="font-semibold text-slate-700 border-b border-slate-100 pb-1 mb-1">Prediction Set</div>
                                   <div className="flex justify-between gap-3">
                                     <span className="text-slate-600">Config</span>
-                                    <span className="text-right">{pred.embedding_config_name ?? pred.embedding_config_id.slice(0, 8) + "…"}</span>
+                                    <span className="text-right">{pred.embedding_config_name ?? (pred.embedding_config_id ? pred.embedding_config_id.slice(0, 8) + "…" : "method")}</span>
                                   </div>
                                   <div className="flex justify-between gap-3">
                                     <span className="text-slate-600">Annotations</span>
@@ -675,7 +675,7 @@ function EvaluationSetCard({
                                   </div>
                                   <div className="flex justify-between gap-3">
                                     <span className="text-slate-600">Limit/entry</span>
-                                    <span>{pred.limit_per_entry}</span>
+                                    <span>{pred.limit_per_entry ?? "-"}</span>
                                   </div>
                                 </div>
                               </RichTooltip>

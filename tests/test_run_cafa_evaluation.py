@@ -93,6 +93,10 @@ def _make_eval_set(eval_set_id=None):
 def _make_pred_set(pred_set_id=None):
     ps = MagicMock()
     ps.id = uuid.UUID(pred_set_id or PRED_SET_ID)
+    # A set no method row produced, as every set before ADR-D60's method
+    # tables is. Left to the mock, method_id would be a truthy MagicMock and the
+    # leakage guard would read it as a method the record does not hold.
+    ps.method_id = None
     return ps
 
 

@@ -326,13 +326,13 @@ export type EmbeddingConfig = {
 
 export type PredictionSet = {
   id: string;
-  embedding_config_id: string;
+  embedding_config_id: string | null;
   embedding_config_name?: string;
   annotation_set_id: string;
   annotation_set_label?: string;
   ontology_snapshot_id: string;
   ontology_snapshot_version?: string;
-  limit_per_entry: number;
+  limit_per_entry: number | null;
   distance_threshold?: number | null;
   created_at: string;
   prediction_count?: number;

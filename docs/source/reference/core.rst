@@ -82,6 +82,40 @@ across coordinators.
    :undoc-members:
    :show-inheritance:
 
+Method contract
+---------------
+
+ADR-D60 gives a method an identity of its own, so it stops passing as an
+embedding configuration. ``protea.core.contracts.method`` defines what a
+method declares: its ``Family`` (``embedding-reranker``, ``world-model`` or
+``explainable-units``), its code, the ``InstanceCut`` it lives at (a release
+and an ontology snapshot), its recipe, the ``Pin`` values it depends on (a
+role, a sha256 and the references that locate the bytes), its runtime and
+whether it explains its predictions. ``MethodSpec.method_id`` is ``uuid5``
+over the spec's canonical JSON (sorted keys, compact separators, ASCII
+escapes) in the pinned namespace ``METHOD_NAMESPACE``, so the same spec is
+the same method on any machine. A ``TrainingIdentity`` says how a method's
+fitted pins were trained: its ``TrainingWindow`` values by evaluation set id,
+with the role ``fit`` or ``holdout``, its data digests, the revisions of the
+code that trained it, whether it read no label at all and the pretrained
+weights it took as declared exceptions. The module imports nothing outside
+the standard library.
+
+.. automodule:: protea.core.contracts.method
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+The family registry gives each of the three families the two descriptors of
+ADR-D58 and a slot for its introduction, which is the author's text and stays
+empty until he writes it. ``families_without_introduction`` lists the slots
+still empty, one of the conditions of the promotion milestone.
+
+.. automodule:: protea.core.families
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Retry middleware
 ----------------
 

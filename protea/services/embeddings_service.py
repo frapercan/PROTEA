@@ -28,6 +28,7 @@ from protea.infrastructure.orm.models.annotation.ontology_snapshot import Ontolo
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.orm.models.method.method import Method
 
 # VALID_* sets canonically defined in _embeddings_validation_helpers; re-exported
 # here so existing callers and ``__all__`` consumers keep working.
@@ -197,6 +198,31 @@ def assert_prediction_set_exists(session: Session, prediction_set_id: uuid.UUID)
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
 
 
+def _id_text(value: uuid.UUID | None) -> str | None:
+    """A nullable id as text, without turning an absent one into the word None."""
+    return None if value is None else str(value)
+
+
+def _prediction_sets_query(session: Session) -> Any:
+    """The 100 most recent prediction sets with their producer and references.
+
+    The producer is joined OUTER, both halves of it: a method's prediction set
+    has no embedding configuration (ADR-D60, decision 3), and an inner join
+    would drop it from the listing while the row sat in the table. The corpus
+    and the ontology stay inner joins, because both columns are NOT NULL and
+    restricted, so they cannot lose a row.
+    """
+    return (
+        session.query(PredictionSet, EmbeddingConfig, Method, AnnotationSet, OntologySnapshot)
+        .outerjoin(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
+        .outerjoin(Method, PredictionSet.method_id == Method.id)
+        .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
+        .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
+        .order_by(PredictionSet.created_at.desc())
+        .limit(100)
+    )
+
+
 def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
     """Top 100 most-recent ``PredictionSet`` rows joined with their context.
 
@@ -207,24 +233,12 @@ def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
     correlated subquery; for ~10⁷-row tables Postgres' planner falls
     into a per-row index probe with the correlated form (~30s per
     outer row). The grouped form returns all 100 counts at once.
-    """
-    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-    from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 
-    rows = (
-        session.query(
-            PredictionSet,
-            EmbeddingConfig,
-            AnnotationSet,
-            OntologySnapshot,
-        )
-        .join(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
-        .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
-        .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
-        .order_by(PredictionSet.created_at.desc())
-        .limit(100)
-        .all()
-    )
+    A set produced by a method carries ``method_id`` and ``method_code``;
+    one with no embedding configuration carries None in both configuration
+    fields rather than being left out (:func:`_prediction_sets_query`).
+    """
+    rows = _prediction_sets_query(session).all()
     counts = {
         set_id: cnt
         for set_id, cnt in session.query(
@@ -237,8 +251,10 @@ def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
     return [
         {
             "id": str(ps.id),
-            "embedding_config_id": str(ps.embedding_config_id),
-            "embedding_config_name": ec.model_name,
+            "embedding_config_id": _id_text(ps.embedding_config_id),
+            "embedding_config_name": ec.model_name if ec is not None else None,
+            "method_id": _id_text(ps.method_id),
+            "method_code": method.code if method is not None else None,
             "annotation_set_id": str(ps.annotation_set_id),
             "annotation_set_label": (
                 f"{ann.source} {ann.source_version}" if ann.source_version else ann.source
@@ -251,7 +267,7 @@ def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
             "created_at": ps.created_at.isoformat(),
             "prediction_count": int(counts.get(ps.id, 0)),
         }
-        for ps, ec, ann, snap in rows
+        for ps, ec, method, ann, snap in rows
     ]
 
 
@@ -282,7 +298,8 @@ def get_prediction_set_data(
 
     return {
         "id": str(ps.id),
-        "embedding_config_id": str(ps.embedding_config_id),
+        "embedding_config_id": _id_text(ps.embedding_config_id),
+        "method_id": _id_text(ps.method_id),
         "annotation_set_id": str(ps.annotation_set_id),
         "ontology_snapshot_id": str(ps.ontology_snapshot_id),
         "query_set_id": str(ps.query_set_id) if ps.query_set_id else None,

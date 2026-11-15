@@ -47,7 +47,7 @@ function predLabel(p: PredictionSet) {
   const parts: string[] = [];
   if (p.embedding_config_name) parts.push(p.embedding_config_name);
   if (p.annotation_set_label) parts.push(p.annotation_set_label);
-  parts.push(`k=${p.limit_per_entry}`);
+  if (p.limit_per_entry != null) parts.push(`k=${p.limit_per_entry}`);
   if (p.prediction_count != null) parts.push(`${formatCount(p.prediction_count)} preds`);
   return `${parts.join(" · ")} (${shortId(p.id)}…)`;
 }
