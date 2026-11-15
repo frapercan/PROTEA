@@ -27,7 +27,13 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        # The engine the stack runs, by the same reference: docker-compose.yml
+        # pins this image by digest and tests/conftest.py defaults to it. This
+        # said pg16 for two months after the stack moved to pg18 (2026-09-14),
+        # and a suite on an older engine than the stack stays green through the
+        # failures only the stack's engine has.
+        # tests/test_ci_services_match_the_stack.py fails when they disagree.
+        image: pgvector/pgvector:pg18@sha256:1d50c689b0a6511b9ea0a15615281c81a59fd04a08eb35057ec8646fb3a2118a
         env:
           POSTGRES_USER: protea
           POSTGRES_PASSWORD: protea
@@ -39,6 +45,31 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+      rabbitmq:
+        # The broker the stack runs, pinned like docker-compose.yml. NO TEST
+        # USES IT YET: it is here for the executor tests of the refactor's
+        # phase 3 (bounded retries, the broker's confirm before the ack), which
+        # will read PROTEA_TEST_AMQP_URL below and carry @pytest.mark.broker.
+        # Until one does, the autouse `_no_live_broker` fixture in
+        # tests/conftest.py refuses every pika connection a test opens, so the
+        # service changes no test outcome. It runs the image's defaults, not
+        # docker/rabbitmq/rabbitmq.conf: service containers start before the
+        # checkout, so the repository's file cannot be mounted.
+        image: rabbitmq:4.3.5-management@sha256:6e83d26931219c9e088e6eefcc877bcca2adc3690c7603f24f4ece8968b13262
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        ports:
+          - 5672:5672
+        # The stack's health check. More retries than postgres because nothing
+        # reads the broker yet: a slow boot must not fail a job that does not
+        # use it.
+        options: >-
+          --health-cmd "rabbitmq-diagnostics ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@v6
@@ -82,4 +113,6 @@ jobs:
           # destructive-test guard added in this PR (which otherwise refuses
           # drop_all/create_all against a loopback:5432 target).
           PROTEA_ALLOW_DESTRUCTIVE_TESTS: "1"
+          # The rabbitmq service above. No test reads it yet (see the service).
+          PROTEA_TEST_AMQP_URL: amqp://guest:guest@localhost:5672/
         run: poetry run pytest --with-postgres -q

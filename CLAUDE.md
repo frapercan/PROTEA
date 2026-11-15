@@ -192,7 +192,7 @@ Related HTTP routers: `protea/api/routers/datasets.py` (dataset registry), `prot
 
 ### Testing
 
-Integration tests require `--with-postgres`. The `conftest.py` `postgres_url` session-scoped fixture pulls `pgvector/pgvector:pg16` via Docker, waits for readiness, enables the `vector` extension, yields the connection URL, then tears down the container. Configurable via: `PROTEA_PG_IMAGE`, `PROTEA_PG_USER`, `PROTEA_PG_PASSWORD`, `PROTEA_PG_DB`, `PROTEA_PG_PORT`, `PROTEA_PG_TIMEOUT`.
+Integration tests require `--with-postgres`. The `conftest.py` `postgres_url` session-scoped fixture pulls the Postgres image `docker-compose.yml` pins (`pgvector/pgvector:pg18` by digest, `_DEFAULT_PG_IMAGE`) via Docker, waits for readiness, enables the `vector` extension, yields the connection URL, then tears down the container. Configurable via: `PROTEA_PG_IMAGE`, `PROTEA_PG_USER`, `PROTEA_PG_PASSWORD`, `PROTEA_PG_DB`, `PROTEA_PG_PORT`, `PROTEA_PG_TIMEOUT`. The integration workflow runs the same reference as its service container, and `tests/test_ci_services_match_the_stack.py` fails when the compose file, the workflow and the fixture disagree. The workflow also starts the stack's RabbitMQ, pinned the same way, and exposes it as `PROTEA_TEST_AMQP_URL`; no test reads it yet, and a test that must reach a real broker has to be marked `broker`, because the autouse `_no_live_broker` fixture refuses every other pika connection.
 
 ## Architecture Decision Records (recent)
 

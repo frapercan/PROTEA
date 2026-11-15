@@ -172,8 +172,10 @@ The Docker-based integration test fixture is controlled by:
      - Default
      - Description
    * - ``PROTEA_PG_IMAGE``
-     - ``pgvector/pgvector:pg16``
-     - Docker image for the ephemeral Postgres container.
+     - ``pgvector/pgvector:pg18`` (pinned by digest)
+     - Docker image for the ephemeral Postgres container. The default is the
+       image ``docker-compose.yml`` pins, tag and digest, which the integration
+       workflow also runs.
    * - ``PROTEA_PG_USER``
      - ``protea``
      - Database user.

@@ -234,7 +234,7 @@ Run tests
    # Unit tests (no external services required)
    poetry run pytest
 
-   # Integration tests (pulls a pgvector/pg16 Docker image)
+   # Integration tests (pulls the pgvector pg18 image docker-compose.yml pins)
    poetry run pytest --with-postgres
 
    # Single test
