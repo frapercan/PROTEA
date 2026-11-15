@@ -56,8 +56,8 @@ def refuse_a_uniprot_release_at_or_after_the_ceiling(
     if is_at_or_after_the_uniprot_ceiling(release):
         raise SourceGuardError(
             f"{source} {release} is at or after {UNIPROT_CEILING}, the first UniProt "
-            f"release the universe may not read: it lies past the mark {MARK_RELEASE}, "
-            "whose test was spent"
+            f"release the universe may not read (the mark is GOA {MARK_RELEASE}, whose "
+            "test was spent)"
         )
 
 

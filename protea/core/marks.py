@@ -9,8 +9,9 @@ a model fitted in it or a choice made with it:
 - ``MARK_RELEASE`` is that cut, the GOA release of the 227 instance. A frame may
   end at the mark; no cut, photo or source may come after it.
 - ``UNIPROT_CEILING`` is the first UniProt release nothing in the universe may
-  read. Cut 227 pairs with UniProt 2025_03 by this mark (ADR-D59, the five
-  pairings), so every release from 2025_04 on lies past it.
+  read. Cut 227 pairs with UniProt 2025_03 by this mark (the author's decision
+  recorded in ADR-D60), so no release from 2025_04 on is read, whatever its
+  publication date.
 
 Every module that needs either value imports it from here, and
 ``tests/test_the_mark_is_stated_once.py`` fails when another module restates
