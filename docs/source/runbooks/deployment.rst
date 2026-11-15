@@ -547,12 +547,114 @@ exists:
   ``None``, never ``False``, when the served build carries no stamp, which is
   every build made before this script.
 
+Workers start only on the declared revision
+-------------------------------------------
+
+**A worker unit refuses to start on a revision nobody declared.** Each
+``protea-worker@`` unit in ``deploy/systemd/`` runs
+``deploy/systemd/protea-guard-revision.sh`` as an ``ExecStartPre``. The guard
+only reads. When it refuses it exits 1, the unit fails and the worker stays
+down, because a silent wrong consumer is worse than no consumer. Its journal
+line starts with ``protea-guard-revision: REFUSING`` and says why.
+
+It takes its inputs from the unit's environment:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 26 46
+
+   * - Variable
+     - Default
+     - What it names
+   * - ``DEPLOY``
+     - (required)
+     - The tree the worker will load. It must equal the unit's
+       ``WorkingDirectory``, and it must be a clone: a worktree, whose
+       ``.git`` is a file, is refused.
+   * - ``AGENT_FARM_ROOT``
+     - (required)
+     - The agent-farm clone that holds the declaration.
+   * - ``PROTEA_DECL_PATH``
+     - ``plans/DECLARED-REVISION.txt``
+     - The declaration, as a path inside that clone, read from its
+       ``origin/main`` and never from a checkout. The name and the default are
+       the ones agent-farm's ``protea-node-sync.sh`` reads.
+   * - ``PROTEA_GUARD_UNDECLARED``
+     - (unset)
+     - ``1`` declares the host outside the revision protocol, and its workers
+       start without any check.
+
+It refuses when either path is unset or is not a clone, when the unit does not
+run in ``DEPLOY``, when the declaration cannot be read from ``origin/main``,
+when the declaration carries no 40 character ``coordinator`` sha, and when the
+tree's ``HEAD`` is behind, ahead of or diverged from that sha, or has
+uncommitted changes.
+
+**A declaration that cannot be read is a refusal.** It used to let the worker
+start, read as "nothing declared". With the path handed in by the unit, a typo
+there, a declaration not merged yet and a clone without ``origin/main`` would
+all read the same way, so the only way to run undeclared is
+``PROTEA_GUARD_UNDECLARED=1``, set on purpose.
+
+The guard never fetches. A declaration merged on the remote stays invisible
+until somebody fetches the agent-farm clone, so after moving one, compare what
+the guard will read with the tree:
+
+.. code-block:: bash
+
+   git -C "$AGENT_FARM_ROOT" fetch origin
+   git -C "$AGENT_FARM_ROOT" show "origin/main:${PROTEA_DECL_PATH:-plans/DECLARED-REVISION.txt}" \
+     | grep -E '^(coordinator|schema-applied) '
+   git -C "$DEPLOY" rev-parse HEAD
+
+Move a declaration only when the server it describes has no job ``QUEUED`` or
+``RUNNING`` and no prediction set being written.
+
+The development instance
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+The development instance runs commits of the integration branch, which the
+production declaration never names: that file tracks the tip of ``develop``.
+So it has a declaration of its own in agent-farm,
+``plans/DECLARED-REVISION-DEV.txt``, with the same two lines as the production
+one:
+
+.. code-block:: text
+
+   coordinator <sha>      the commit the dev workers run
+   schema-applied <sha>   the commit whose migrations the dev database holds
+
+Every dev worker unit hands that file to the guard beside the two paths:
+
+.. code-block:: text
+
+   Environment=DEPLOY=<the dev clone>
+   Environment=AGENT_FARM_ROOT=<the agent-farm clone>
+   Environment=PROTEA_DECL_PATH=plans/DECLARED-REVISION-DEV.txt
+   ExecStartPre=<the dev clone>/deploy/systemd/protea-guard-revision.sh
+
+Three rules come with it:
+
+* **The dev tree is a clone of its own**, never a worktree of a clone somebody
+  works in, because the guard refuses a worktree.
+* **The dev declaration moves only between bootstrap phases**, with no job
+  ``QUEUED`` or ``RUNNING`` on the dev server.
+* **The guard reads only the coordinator line.** ``schema-applied`` is the
+  server's word that the migrations of that commit are applied, and
+  agent-farm's ``protea-node-sync.sh`` will not move a node across a migration
+  without it.
+
+A dev unit that forgets ``PROTEA_DECL_PATH`` reads the production declaration,
+and it is refused, naming that file, as soon as the two declarations differ.
+
 See also
 ---------
 
 - ``deploy/swarm/README.md`` for Swarm-specific prerequisites and secret rotation.
 - ``deploy/helm/protea/values.yaml`` for the full Helm value reference.
 - ``scripts/deploy.sh`` (in-file comments) for dev-stack behaviour details.
+- ``deploy/systemd/protea-guard-revision.sh`` (in-file comments) for why each
+  of the revision guard's refusals exists.
 - :doc:`observability` for telemetry environment variables (``PROTEA_OTEL_*``)
   that apply across all deployment modes.
 - :doc:`ngrok-deploy-recovery` if the public demo endpoint becomes unreachable.
