@@ -2066,13 +2066,19 @@ Registering a new operation
 1. Create a module under ``protea/core/operations/``.
 2. Define a payload class extending ``ProteaPayload``.
 3. Implement the ``Operation`` protocol (``name`` attribute + ``execute``).
-4. Register the instance in the worker startup script:
+4. Add one row to ``CATALOG`` in ``protea/core/operation_catalog.py``: the class
+   and the ``OperationSpec`` it declares (ADR-D60, decision 6). The registry
+   refuses an operation without one.
 
    .. code-block:: python
 
-      registry.register(MyOperation())
+      (MyOperation, OperationSpec(
+          domain="method", kind="job", queue=queues.JOBS,
+          purity="database", resource="cpu",
+      )),
 
-5. Route jobs to the correct queue by setting ``queue_name`` in the ``POST /jobs``
-   request body.
+5. Route jobs to the queue the spec names by setting ``queue_name`` in the
+   ``POST /jobs`` request body. A new queue name goes in
+   ``protea/core/queues.py`` first.
 
 No changes to ``BaseWorker``, the API, or the infrastructure layer are required.

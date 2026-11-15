@@ -77,7 +77,7 @@ logs/worker-jobs.log            ← Worker for protea.jobs queue (insert_protein
 logs/frontend.log               ← Next.js dev server
 ```
 
-**Queue routing:**
+**Queue routing** (a summary: each operation's queue is declared by its `OperationSpec` in `protea/core/operation_catalog.py`, and `tests/test_every_operation_declares_its_spec.py` pins all of them):
 - `protea.ping` → ping operation (smoke test)
 - `protea.jobs` → insert_proteins, extract_goa_universe, resolve_protein_sequences, fetch_uniprot_metadata, load_ontology_snapshot, load_goa_annotations, load_quickgo_annotations, generate_evaluation_set, load_interpro_go_mapping, run_interproscan_batch, predict_go_terms_from_interpro, refresh_goa_release_dates, compute_information_accretion
 - `protea.embeddings` → compute_embeddings coordinator (serialized: one at a time, retries with 60s delay if GPU busy)
@@ -108,7 +108,7 @@ The frontend (`apps/web/`) is a Next.js 16 app with Tailwind v4. API URL is conf
 
 **`Operation` protocol** (`contracts/operation.py`): every unit of domain logic implements `name: str` and `execute(session, payload, *, emit) -> OperationResult`. Progress and structured events are reported through the `emit` callback (`EmitFn`), which writes `JobEvent` rows to the DB in real time. Operations are pure domain logic: they receive a session and emit events; they do not manage sessions or queues themselves. Long-running bulk-load operations (`load_goa_annotations`, `load_quickgo_annotations`, `fetch_uniprot_metadata`, `run_cafa_evaluation`) are explicitly allowed to call `session.commit()` per page so that an interrupted job leaves a partial-but-consistent dataset rather than rolling everything back; `BaseWorker` still owns the final transition commit.
 
-**`OperationRegistry`** (`contracts/registry.py`): a dict-backed registry. Operations are registered at startup; `BaseWorker` resolves them by name at dispatch time.
+**`OperationRegistry`** (`contracts/registry.py`): a dict-backed registry. Operations are registered at startup; `BaseWorker` resolves them by name at dispatch time. Every operation is registered with an **`OperationSpec(domain, kind, queue, purity, resource, family, publishes_to, status)`** (`core/operation_spec.py`, ADR-D60 decision 6), one row per operation in `core/operation_catalog.py`'s `CATALOG`; the registry refuses an operation without one and a queue that would carry both Job ids and operation messages. Queue names live in `core/queues.py` and nowhere else.
 
 **`core/utils.py`**: small set of shared utilities (`utcnow()`, `chunks(seq, n)`). The previous `UniProtHttpMixin` is gone. HTTP retry / backoff / Retry-After / cursor handling lives in the `protea-sources` plugins, which every networked operation delegates to; `protea/core/operations/_universe_http.py` was the last in-tree copy and ADR-D49 deleted it. Protein and sequence storage is shared through `core/operations/_protein_store.py` (`store_records`), used by `insert_proteins` and `resolve_protein_sequences`.
 

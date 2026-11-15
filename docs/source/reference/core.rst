@@ -59,10 +59,11 @@ re-publishes the message after a configurable delay.
    :undoc-members:
    :show-inheritance:
 
-``OperationRegistry`` is a simple dict-backed mapping from operation name
-strings to instances. Workers resolve the correct operation at message
-dispatch time; new operations are registered at process startup in
-``scripts/worker.py`` without modifying any worker code.
+``OperationRegistry`` maps each operation name to its instance and to the
+``OperationSpec`` it declared (ADR-D60, decision 6). Workers resolve the
+correct operation at message dispatch time. ``register`` refuses an operation
+without a spec, and a spec whose queue already carries the other kind of
+message, since one queue has one consumer.
 
 .. automodule:: protea.core.contracts.registry
    :members:
@@ -106,16 +107,34 @@ Operation catalogue
 -------------------
 
 ``protea.core.operation_catalog`` builds the singleton
-``OperationRegistry`` that workers consult at message dispatch. The
-public function ``build_operation_registry()`` instantiates each
-operation class and registers it under its canonical name. Adding a
-new operation is a one-line edit here plus a new module under
-``protea/core/operations/``.
+``OperationRegistry`` that workers consult at message dispatch. Its
+``CATALOG`` holds one row per operation: the class and the
+``OperationSpec`` it declares. ``build_operation_registry()`` instantiates
+each class and registers it with its spec. Adding a new operation is a new
+module under ``protea/core/operations/`` plus one row here.
 
 .. automodule:: protea.core.operation_catalog
    :members:
    :undoc-members:
    :show-inheritance:
+
+Operation descriptor
+--------------------
+
+``protea.core.operation_spec`` defines ``OperationSpec(domain, kind, queue,
+purity, resource, family, publishes_to, status)`` and what derives from it:
+the queues an ``OperationConsumer`` serves, the checks of ``POST /jobs`` and
+the operations a cluster pilot may run. ``protea.core.queues`` holds every
+broker name, so a queue is written once.
+
+.. automodule:: protea.core.operation_spec
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.queues
+   :members:
+   :undoc-members:
 
 Plugin discovery
 ----------------
