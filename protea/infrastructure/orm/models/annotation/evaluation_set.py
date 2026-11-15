@@ -230,7 +230,11 @@ class EvaluationSet(Base):
     #: legacy. It is not backfilled: what a past build applied is a question
     #: about the code that ran then, and ``code_revision`` is NULL on most of
     #: those rows.
-    truth_rules: Mapped[dict[str, str] | None] = mapped_column(JSONB, nullable=True)
+    #: ``none_as_null`` keeps a Python None as SQL NULL (legacy) instead of a JSON null,
+    #: which ``ck_evaluation_set_truth_rules`` would refuse.
+    truth_rules: Mapped[dict[str, str] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
     #: How this window's t1 truth was built. ``as_closed`` is what every row
     #: written before this column existed did: a term the pivot cannot name
     #: is dropped by the closure intersection and the gain goes with it.
@@ -264,9 +268,7 @@ class EvaluationSet(Base):
     #: furthest from the pivot, a version by identity would recover 3 terms
     #: over 11 proteins. See
     #: :func:`protea.core._truth_rules._terms_of_interest`.
-    toi_rule: Mapped[str] = mapped_column(
-        String(24), nullable=False, server_default="pivot_terms"
-    )
+    toi_rule: Mapped[str] = mapped_column(String(24), nullable=False, server_default="pivot_terms")
     #: Which NOT annotations may take truth away. ``any`` is what every row
     #: written before this column did: every NOT row whatever its evidence,
     #: so a ``NOT|IBA`` removes a term from a truth whose positives are

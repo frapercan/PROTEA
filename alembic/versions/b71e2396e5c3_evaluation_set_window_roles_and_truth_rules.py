@@ -19,7 +19,7 @@ what a past build applied is a question about the code that ran then, and most
 of those rows cannot even say which code that was.
 
 Revision ID: b71e2396e5c3
-Revises: b7c3f91d2a04
+Revises: 89802d1624f8
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from alembic import op
 
 revision = "b71e2396e5c3"
-down_revision = "b7c3f91d2a04"
+down_revision = "89802d1624f8"
 branch_labels = None
 depends_on = None
 

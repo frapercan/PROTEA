@@ -692,9 +692,18 @@ class GenerateEvaluationSetOperation:
 
         No-op unless a ``window_role`` is supplied and differs from the
         current one. Metadata only: the delta is never recomputed.
+
+        A spent test stays spent: a window marked ``test_spent`` is refused any
+        other role, because its truth was read once and no later rebind can make
+        it unread (ADR-D60, decision 5).
         """
         if window_role is None or existing.window_role == window_role:
             return
+        if existing.window_role == "test_spent":
+            raise ValueError(
+                f"evaluation set {existing.id} is a spent test (window_role 'test_spent'); "
+                f"it cannot be re-designated as {window_role!r}"
+            )
         existing.window_role = window_role
         session.flush()
         emit(
