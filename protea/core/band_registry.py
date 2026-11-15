@@ -7,8 +7,10 @@ single canonical pair:
 * an ``OntologySnapshot`` (identified by its ``obo_version``) that governs
   True-Path propagation, the term universe / terms-of-interest, and orphan
   handling, and
-* an Information Accretion (IA) artifact, identified by a stable file token,
-  computed from that same snapshot plus the band's t0 corpus.
+* an Information Accretion (IA) artifact computed from that same snapshot plus
+  the band's t0 corpus. A table this platform computed is identified by the
+  sha256 of its content (``InformationAccretionSet.content_sha256``); a
+  supplied table, by its file name.
 
 These are DERIVED, pinned values: a cell never free-floats its snapshot or
 its IA. Mixing a snapshot or IA from one band into a cell declared for
@@ -41,6 +43,7 @@ __all__ = [
     "CutoffViolationError",
     "assert_band_consistency",
     "assert_release_not_after_cutoff",
+    "band_for_ia_sha256",
     "band_for_ia_token",
     "band_for_obo_version",
     "cutoff_violations_for_cell",
@@ -80,9 +83,20 @@ class Band:
 
     ``obo_versions`` is the closed set of ``OntologySnapshot.obo_version``
     values that legitimately back this band (the snapshot governs
-    propagation / term universe / orphans). ``ia_tokens`` is the closed set
-    of IA-artifact file tokens (basename, case-insensitive) that legitimately
-    weight this band. Both are derived constants, not free payload values.
+    propagation / term universe / orphans). The IA tables that legitimately
+    weight it are named three ways, each a closed set of derived constants and
+    never a free payload value:
+
+    * ``ia_sha256s``: a table this platform computed, by the content sha256 its
+      ``InformationAccretionSet`` row records. The digest is the identity
+      because the row id is a uuid4 minted by the database that computed it:
+      the same table rebuilt in another universe gets another id and the same
+      digest.
+    * ``ia_tokens``: a table supplied from outside (LAFA's own, the historical
+      benchmark's), by its file name, case-insensitive.
+    * ``legacy_ia_set_ids``: the production rows a band pinned by set id
+      before the digest was the identity. Kept so the evaluations that pinned
+      them still resolve to their band; nothing new is ever added here.
     """
 
     name: str
@@ -94,6 +108,8 @@ class Band:
     #: this (the no-future-data rule). ``None`` means the band does not
     #: yet declare a cutoff and the temporal guard is skipped for it.
     t0_cutoff: date | None = None
+    ia_sha256s: frozenset[str] = field(default_factory=frozenset)
+    legacy_ia_set_ids: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
         """Refuse a band whose window opens after the mark.
@@ -114,9 +130,19 @@ class Band:
         return obo_version is not None and obo_version in self.obo_versions
 
     def accepts_ia_token(self, token: str | None) -> bool:
+        """A supplied table by its file name, or a legacy row by its set id."""
         if token is None:
             return False
-        return token.lower() in {t.lower() for t in self.ia_tokens}
+        key = token.lower()
+        return key in {t.lower() for t in self.ia_tokens} or key in self.legacy_ia_set_ids
+
+    def accepts_ia_sha256(self, sha256: str | None) -> bool:
+        """A table this platform computed, by the content sha256 its row records."""
+        return sha256 is not None and sha256.lower() in self.ia_sha256s
+
+    def ia_identities(self) -> list[str]:
+        """Every IA identity the band accepts, for a refusal to list."""
+        return sorted(self.ia_sha256s | self.ia_tokens | self.legacy_ia_set_ids)
 
 
 # Canonical per-band bindings. The ontology per band is the GO OBO release
@@ -144,6 +170,14 @@ class Band:
 # Each band now pins its own congruent OBO. obo_versions is a closed set (not a
 # single value) so an interim ontology refresh inside one GOA window does not
 # force a new band. New bands (CAFA7, ...) add a row here; nothing else changes.
+#
+# NO TABLE IS PINNED BY CONTENT YET. The two tables this platform computed for
+# v211 and v227 were pinned by the uuid4 of their production rows, which names
+# a row of one database and nothing in another; they stay as legacy set ids so
+# the evaluations that pinned them keep resolving. A table enters ia_sha256s
+# with the digest its own row records: the production rows' digests read from
+# that database, or the rebuilt universe's tables once
+# compute_information_accretion has run there (ADR-D60).
 BANDS: dict[str, Band] = {
     "v226": Band(
         name="v226",
@@ -160,8 +194,8 @@ BANDS: dict[str, Band] = {
     "v211": Band(
         name="v211",
         obo_versions=frozenset({"releases/2022-07-01"}),
-        ia_tokens=frozenset({"80bbc9e4-c037-4416-a06e-4982eba58008"}),
         t0_cutoff=date(2022, 9, 16),
+        legacy_ia_set_ids=frozenset({"80bbc9e4-c037-4416-a06e-4982eba58008"}),
         description=(
             "Long validation window (GOA v211 to v227, t0 2022-09-16). Congruent "
             "GO ontology = releases/2022-07-01, the latest release on or before "
@@ -181,10 +215,11 @@ BANDS: dict[str, Band] = {
             {
                 "IA.tsv",  # LAFA's own lafa_t0_Sep_2025/IA.tsv, supplied
                 "IA-swissprot-exp-v227.txt",  # the lab recompute, r=0.98
-                "1aaff913-46b6-4c44-b7f7-13de0e4676c5",  # ours, 39906 terms
             }
         ),
         t0_cutoff=date(2025, 9, 4),
+        # Ours, 39906 terms, pinned by its production row before the digest.
+        legacy_ia_set_ids=frozenset({"1aaff913-46b6-4c44-b7f7-13de0e4676c5"}),
         description=(
             "Deployed LAFA window (GOA v227 to v230, t0 2025-09-04). Congruent "
             "GO ontology = releases/2025-07-22 (the data-version in LAFA's own "
@@ -233,9 +268,12 @@ def ia_token(ia_ref: str | None) -> str | None:
     docstring says it rejects "a cell whose snapshot or IA come from a foreign
     band" rejected the snapshot and admitted the IA.
 
-    The set id closes it because the id IS the identity: it is minted per
-    ``(ontology_snapshot_id, annotation_set_id, evidence_regime)``, which is the
-    table's own unique constraint.
+    The set id closed it inside one database, where it is minted per
+    ``(ontology_snapshot_id, annotation_set_id, evidence_regime)``, the table's
+    own unique constraint. It names nothing in another database, so a band now
+    pins a computed table by its content sha256 (``Band.ia_sha256s``), which the
+    caller reads from the row; the set id returned here still resolves the rows
+    pinned before (``Band.legacy_ia_set_ids``).
     """
     if not ia_ref:
         return None
@@ -277,12 +315,27 @@ def band_for_obo_version(obo_version: str | None) -> str | None:
 
 
 def band_for_ia_token(token: str | None) -> str | None:
-    """Reverse lookup: the band name whose canonical IA tokens contain
-    ``token``, or ``None`` if no band claims it."""
+    """Reverse lookup: the band name whose canonical IA tokens or legacy set
+    ids contain ``token``, or ``None`` if no band claims it."""
     for band in BANDS.values():
         if band.accepts_ia_token(token):
             return band.name
     return None
+
+
+def band_for_ia_sha256(sha256: str | None) -> str | None:
+    """Reverse lookup: the band name that pins a computed IA table with this
+    content sha256, or ``None`` if no band claims it."""
+    for band in BANDS.values():
+        if band.accepts_ia_sha256(sha256):
+            return band.name
+    return None
+
+
+def _ia_owners(token: str | None, sha256: str | None) -> set[str]:
+    """The bands that claim an IA table by any of the identities it was given."""
+    owners = {band_for_ia_token(token), band_for_ia_sha256(sha256)}
+    return {owner for owner in owners if owner is not None}
 
 
 def assert_band_consistency(
@@ -290,12 +343,15 @@ def assert_band_consistency(
     *,
     obo_version: str | None,
     ia_ref: str | None,
+    ia_sha256: str | None = None,
 ) -> Band:
     """Reject a cell whose snapshot or IA come from a foreign band.
 
     ``declared_band`` is the band/cutoff the cell declares. ``obo_version`` is
     the resolved pivot ``OntologySnapshot.obo_version`` (governs propagation /
-    term universe / orphans). ``ia_ref`` is the resolved IA path or URL.
+    term universe / orphans). ``ia_ref`` is the resolved IA path or URL, and
+    ``ia_sha256`` the content sha256 of a table this platform computed, read
+    from its ``InformationAccretionSet`` row.
 
     Raises ``BandMismatchError`` when:
 
@@ -303,7 +359,7 @@ def assert_band_consistency(
     * the snapshot ``obo_version`` is not in the declared band's universe,
     * the IA is missing (would fall back to uniform IC=1, never allowed for a
       band-declared cell), or
-    * the IA token belongs to a different band.
+    * no identity of the IA is the declared band's, or one is another band's.
 
     Returns the resolved ``Band`` on success. This is the single guard called
     both at runtime (in ``run_cafa_evaluation``) and in CI.
@@ -321,27 +377,41 @@ def assert_band_consistency(
             f"inflates a fake PROTEA-vs-LAFA gap. Canonical obo_versions for "
             f"{band.name!r}: {sorted(band.obo_versions)}."
         )
+    _refuse_a_foreign_ia(band, ia_token(ia_ref), ia_sha256)
+    return band
 
-    token = ia_token(ia_ref)
-    if token is None:
+
+def _refuse_a_foreign_ia(band: Band, token: str | None, sha256: str | None) -> None:
+    """The IA half of :func:`assert_band_consistency`.
+
+    A table is the band's when the band claims it by at least one identity (its
+    content sha256, its file name or a legacy set id) and no other band claims
+    it by any. A computed table no band claims is refused, never assumed: its
+    digest is registered first.
+    """
+    if token is None and sha256 is None:
         raise BandMismatchError(
             f"Phantom-gap guard: cell declares band {band.name!r} but no IA "
             f"artifact resolved (snapshot ia_url and payload ia_file are both "
             f"unset). A band-declared cell must never fall back to uniform "
             f"IC=1. Pin the canonical IA for {band.name!r}: "
-            f"{sorted(band.ia_tokens)}."
+            f"{band.ia_identities()}."
         )
-    if not band.accepts_ia_token(token):
-        other = band_for_ia_token(token)
-        suffix = f" (it belongs to band {other!r})" if other else ""
-        raise BandMismatchError(
-            f"Phantom-gap guard: cell declares band {band.name!r} but its IA "
-            f"artifact {token!r} is not canonical for that band{suffix}. A "
-            f"cross-band IA reweights the metric against a foreign corpus and "
-            f"inflates a fake PROTEA-vs-LAFA gap. Canonical IA tokens for "
-            f"{band.name!r}: {sorted(band.ia_tokens)}."
-        )
-    return band
+    owners = _ia_owners(token, sha256)
+    if owners == {band.name}:
+        return
+    others = sorted(owners - {band.name})
+    suffix = f" (it belongs to band {others[0]!r})" if len(others) == 1 else ""
+    if len(others) > 1:
+        suffix = f" (it belongs to bands {others})"
+    shown = " with sha256 ".join(part for part in (token, sha256) if part)
+    raise BandMismatchError(
+        f"Phantom-gap guard: cell declares band {band.name!r} but its IA "
+        f"artifact {shown!r} is not canonical for that band{suffix}. A "
+        f"cross-band IA reweights the metric against a foreign corpus and "
+        f"inflates a fake PROTEA-vs-LAFA gap. Canonical IA identities for "
+        f"{band.name!r}: {band.ia_identities()}."
+    )
 
 
 # A GO OBO release version is self-dating: ``releases/YYYY-MM-DD`` (the GO

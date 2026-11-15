@@ -378,9 +378,14 @@ band binds two derived artefacts that are pinned rather than free-floated:
 1. An ``OntologySnapshot`` identified by its ``obo_version``. The snapshot
    governs True-Path propagation, the term universe, and orphan handling.
    Every cell in the band scores against the same snapshot.
-2. An Information Accretion (IA) artefact identified by a stable file token.
-   The IA weights each GO term by its information content on the t0 corpus of
-   that band.
+2. An Information Accretion (IA) artefact. The IA weights each GO term by its
+   information content on the t0 corpus of that band. A table this platform
+   computed is identified by its content sha256, the
+   ``InformationAccretionSet.content_sha256`` its row records
+   (``Band.ia_sha256s``): the row id is a uuid4 minted by the database that
+   computed it, so the same table rebuilt in another universe keeps its digest
+   and gets another id. A table supplied from outside is identified by its
+   file name (``Band.ia_tokens``).
 
 The registry is ``protea.core.band_registry.BANDS``. Authoritative pairs:
 
@@ -391,19 +396,33 @@ The registry is ``protea.core.band_registry.BANDS``. Authoritative pairs:
    * - Band
      - GOA t0
      - Canonical ``obo_version``
-     - Canonical IA token
+     - Canonical IA
    * - v226
      - goa 226 (2025-05-03)
      - ``releases/2025-03-16``
      - ``IA_cafa6.tsv``
+   * - v211
+     - goa 211 (2022-09-16)
+     - ``releases/2022-07-01``
+     - the production row ``80bbc9e4``, by set id (legacy)
    * - v227
      - goa 227 (2025-09-04)
      - ``releases/2025-07-22``
-     - ``IA.tsv`` / ``IA-swissprot-exp-v227.txt``
+     - ``IA.tsv`` / ``IA-swissprot-exp-v227.txt``; the production row
+       ``1aaff913``, by set id (legacy)
+
+No computed table is pinned by content yet. The two production tables were
+pinned by the set id of their rows before the digest was the identity; those
+ids stay in ``Band.legacy_ia_set_ids`` so the evaluations that pinned them keep
+resolving, and nothing new is added there. When a run pins its IA by
+``information_accretion_set_id``, the guard reads that row's digest and checks
+the band by it; the set id still resolves a legacy row.
 
 Adding a new band requires one new ``Band`` row in ``BANDS``. No
-``obo_version`` and no IA token may be shared by two bands; the CI guard
+``obo_version`` and no IA identity may be shared by two bands; the CI guard
 (``scripts/check_band_registry.py``, wired into ``lint.yml``) enforces this.
+No band may open after the mark (227): a ``Band`` named for a later release
+cannot be built.
 
 **Why a snapshot/IA mismatch inflates a phantom gap.** If a cell declared for
 one band is scored with the snapshot or IA of another band, the comparison

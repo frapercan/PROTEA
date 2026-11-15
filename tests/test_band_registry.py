@@ -6,6 +6,9 @@ phantom-gap guard (cross-band snapshot / IA rejection + the never-IC=1 rule).
 
 from __future__ import annotations
 
+import re
+import uuid
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -17,6 +20,7 @@ from protea.core.band_registry import (
     CutoffViolationError,
     assert_band_consistency,
     assert_release_not_after_cutoff,
+    band_for_ia_sha256,
     band_for_ia_token,
     band_for_obo_version,
     cutoff_violations_for_cell,
@@ -166,18 +170,18 @@ class TestRegistryWellFormed:
                 assert ver not in seen, f"{ver} shared by {seen.get(ver)} and {name}"
                 seen[ver] = name
 
-    def test_no_shared_ia_token(self):
+    def test_no_shared_ia_identity(self):
         seen: dict[str, str] = {}
         for name, band in BANDS.items():
-            for tok in band.ia_tokens:
-                key = tok.lower()
-                assert key not in seen, f"{tok} shared by {seen.get(key)} and {name}"
+            for identity in band.ia_identities():
+                key = identity.lower()
+                assert key not in seen, f"{identity} shared by {seen.get(key)} and {name}"
                 seen[key] = name
 
     def test_every_band_pins_both(self):
         for name, band in BANDS.items():
             assert band.obo_versions, f"{name} pins no obo_version"
-            assert band.ia_tokens, f"{name} pins no IA token"
+            assert band.ia_identities(), f"{name} pins no IA table"
 
     def test_band_is_frozen(self):
         band = Band(name="x", obo_versions=frozenset({"a"}), ia_tokens=frozenset({"b"}))
@@ -393,6 +397,98 @@ class TestPlatformIaIsIdentifiedByItsSetId:
             assert_band_consistency(
                 "v211", obo_version="releases/2022-07-01", ia_ref=self.IA_227
             )
+
+
+class TestAComputedTableIsIdentifiedByItsContent:
+    """The digest names a computed table in every database; a set id names a row of one.
+
+    The digests below are synthetic: no band pins a table by content until the
+    digest is read from the row that owns it, so these tests register their own.
+    """
+
+    SHA_211 = "a" * 64
+    SHA_227 = "b" * 64
+    #: The production rows pinned before the digest was the identity.
+    LEGACY_211 = "80bbc9e4-c037-4416-a06e-4982eba58008"
+    LEGACY_227 = "1aaff913-46b6-4c44-b7f7-13de0e4676c5"
+    OBO_211 = "releases/2022-07-01"
+
+    @pytest.fixture
+    def pinned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name, sha in (("v211", self.SHA_211), ("v227", self.SHA_227)):
+            monkeypatch.setitem(BANDS, name, replace(BANDS[name], ia_sha256s=frozenset({sha})))
+
+    @staticmethod
+    def _row(set_id: str) -> str:
+        return f"s3://protea/information_accretion/{set_id}/IA.tsv"
+
+    def test_the_same_content_under_a_new_row_is_the_bands(self, pinned: None) -> None:
+        # A rebuilt universe mints another id for the same bytes.
+        band = assert_band_consistency(
+            "v211",
+            obo_version=self.OBO_211,
+            ia_ref=self._row(str(uuid.uuid4())),
+            ia_sha256=self.SHA_211,
+        )
+        assert band.name == "v211"
+
+    def test_the_digest_alone_names_the_table(self, pinned: None) -> None:
+        assert band_for_ia_sha256(self.SHA_227) == "v227"
+        band = assert_band_consistency(
+            "v211", obo_version=self.OBO_211, ia_ref=None, ia_sha256=self.SHA_211
+        )
+        assert band.name == "v211"
+
+    def test_another_bands_content_is_refused_by_name(self, pinned: None) -> None:
+        with pytest.raises(BandMismatchError, match="belongs to band 'v227'"):
+            assert_band_consistency(
+                "v211",
+                obo_version=self.OBO_211,
+                ia_ref=self._row(str(uuid.uuid4())),
+                ia_sha256=self.SHA_227,
+            )
+
+    def test_content_no_band_claims_is_refused(self) -> None:
+        # Fails closed: a computed table is registered before it can pass.
+        with pytest.raises(BandMismatchError, match="not canonical for that band"):
+            assert_band_consistency(
+                "v211",
+                obo_version=self.OBO_211,
+                ia_ref=self._row(str(uuid.uuid4())),
+                ia_sha256="c" * 64,
+            )
+
+    def test_an_old_row_still_resolves_by_its_set_id(self) -> None:
+        band = assert_band_consistency(
+            "v211",
+            obo_version=self.OBO_211,
+            ia_ref=self._row(self.LEGACY_211),
+            ia_sha256="c" * 64,
+        )
+        assert band.name == "v211"
+
+    def test_an_old_row_carrying_another_bands_content_is_refused(self, pinned: None) -> None:
+        with pytest.raises(BandMismatchError, match="belongs to band 'v227'"):
+            assert_band_consistency(
+                "v211",
+                obo_version=self.OBO_211,
+                ia_ref=self._row(self.LEGACY_211),
+                ia_sha256=self.SHA_227,
+            )
+
+    def test_no_band_names_a_row_id_as_its_identity(self) -> None:
+        row_id = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+        for name, band in BANDS.items():
+            assert not any(row_id.fullmatch(t.lower()) for t in band.ia_tokens), name
+            assert all(re.fullmatch(r"[0-9a-f]{64}", sha) for sha in band.ia_sha256s), name
+
+    def test_the_legacy_ids_are_the_two_production_rows_and_nothing_else(self) -> None:
+        legacy = {name: band.legacy_ia_set_ids for name, band in BANDS.items()}
+        assert legacy == {
+            "v226": frozenset(),
+            "v211": frozenset({self.LEGACY_211}),
+            "v227": frozenset({self.LEGACY_227}),
+        }
 
 
 class TestNoBandOpensAfterTheMark:
