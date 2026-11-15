@@ -67,8 +67,10 @@ production uses, told the dev ports through `PROTEA_WAIT_ENDPOINTS`.
   the single card, and two models on one 12 GB card is an out-of-memory for
   whichever loads second. Do not enable `protea.embeddings.batch`,
   `protea.methods` or the residue-encoding queues for dev until the author
-  decides who owns the card. `protea.methods` launches containers that
-  request the device directly, so the empty variable does not cover it.
+  decides who owns the card. Hidden is not refused: with no card in sight
+  `compute_embeddings` runs on the processors with only a warning event.
+  And `protea.methods` launches containers that request the device
+  directly, so the empty variable does not cover it.
 
 ## Prerequisites
 

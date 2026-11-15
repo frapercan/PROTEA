@@ -34,8 +34,11 @@ Environment=PROTEA_ENVIRONMENT=dev
 # THE CARD IS NOT DEV'S UNTIL THE AUTHOR SAYS SO. The production GPU worker
 # shares this machine's single card, and two models on one 12 GB card is an
 # OOM for whichever loads second. An empty list hides every GPU from CUDA, so
-# a dev worker fails loudly instead of competing. Granting the card is a
-# per-instance drop-in, after that decision (README).
+# a dev worker never takes the card. It does not always fail, though: an
+# operation that asks for the card may run on the processors instead
+# (compute_embeddings does, with a warning event), which is why the GPU
+# queues stay off for dev. They get a unit of their own, with its own
+# gates, after that decision (README, "Not wired yet").
 Environment=CUDA_VISIBLE_DEVICES=
 
 # The clock gate. This machine dual-boots and comes up with the clock hours
