@@ -209,6 +209,18 @@ class TestTheSettingsDeclareTheNames:
             "other-dev",
         )
 
+    def test_a_dev_written_only_in_the_env_file_turns_the_check_on(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The settings read the project's .env, which the rate limiter does not."""
+        from protea.api.rate_limit import _is_test_env
+
+        for name in self._VARIABLES:
+            monkeypatch.delenv(name, raising=False)
+        (tmp_path / ".env").write_text("PROTEA_ENVIRONMENT=dev\n", encoding="utf-8")
+        assert check.declares_dev(load_settings(tmp_path))
+        assert not _is_test_env()
+
 
 class _Opened(Exception):
     """Raised by the stand-in session factory: startup got past the check."""

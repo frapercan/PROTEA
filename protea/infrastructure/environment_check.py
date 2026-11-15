@@ -5,11 +5,12 @@ own Postgres, RabbitMQ and bucket, on their own ports, with their own
 credentials. That layer fails open on a single wrong line: an env file that
 kept a production URL, or a unit pointed at the wrong file, connects a dev
 worker to production's broker, and the first message it takes runs against
-production's database. This is the second layer, in code. A process started
-with ``PROTEA_ENVIRONMENT=dev`` reads the database name and the AMQP vhost out
-of the URLs it was given and refuses to start unless both are the names dev
-declares: ``PROTEA_DEV_DATABASE_NAME`` (default ``protea_dev``) and
-``PROTEA_DEV_AMQP_VHOST`` (default ``protea-dev``).
+production's database. This is the second layer, in code. The API or a
+worker started with ``PROTEA_ENVIRONMENT=dev`` reads the database name and the
+AMQP vhost out of the URLs it was given and refuses to start unless both are
+the names dev declares: ``PROTEA_DEV_DATABASE_NAME`` (default ``protea_dev``)
+and ``PROTEA_DEV_AMQP_VHOST`` (default ``protea-dev``). Other entry points,
+such as Alembic and the one-off scripts, do not run this check.
 
 The refusal exits with ``EX_CONFIG`` (78) and one line on stderr, so a dev
 unit with ``RestartPreventExitStatus=78`` stops instead of restarting into the
@@ -47,8 +48,11 @@ if TYPE_CHECKING:
 EX_CONFIG = 78
 
 #: The ``PROTEA_ENVIRONMENT`` value that turns the check on. Compared after
-#: ``strip().lower()``, the reading ``protea.api.rate_limit`` gives the same
-#: variable, so the two never disagree about whether a process is dev.
+#: ``strip().lower()``, as ``protea.api.rate_limit`` compares the same
+#: variable. The two read it from different places, though: the rate limiter
+#: reads the process environment only, while the settings also read the
+#: project's ``.env``, so a ``dev`` written only in ``.env`` turns this check
+#: on and leaves the rate limits as they are.
 DEV_ENVIRONMENT = "dev"
 
 _REFUSAL = "refusing to start:"

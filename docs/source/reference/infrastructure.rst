@@ -40,11 +40,12 @@ usable across local development, CI, and production deployments.
 Environment check
 -----------------
 
-A process started with ``PROTEA_ENVIRONMENT=dev`` refuses to start unless the
-database and the AMQP vhost in its URLs carry the dev names. It is the second
-layer of the dev isolation, after the separate stack, and it exits with status
-78 (``EX_CONFIG``) and one line on stderr. The variables are in
-:doc:`/appendix/configuration`.
+The API and every worker started with ``PROTEA_ENVIRONMENT=dev``, the reaper
+included, refuse to start unless the database and the AMQP vhost in their URLs
+carry the dev names. It is the second layer of the dev isolation, after the
+separate stack, and it exits with status 78 (``EX_CONFIG``) and one line on
+stderr. Other entry points, such as Alembic and the one-off scripts, do not
+check. The variables are in :doc:`/appendix/configuration`.
 
 .. automodule:: protea.infrastructure.environment_check
    :members:
