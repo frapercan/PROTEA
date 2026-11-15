@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,17 @@ from protea.core.evaluation import (
 )
 from protea.core.operations._holdout_guard import Claim, refuse_if_the_set_reads_the_holdout
 from protea.core.utils import contract_payload, job_id_from_payload
+from protea.core.window_declarations import (
+    SAME_SNAPSHOT_RULES,
+    WINDOW_ROLES,
+    TruthRules,
+    WindowGraphs,
+    closing_graphs_by_default,
+    closure_applied,
+    named_truth_rules,
+    payload_with_named_rules,
+    refuse_unless_named_rules_apply,
+)
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -77,8 +88,17 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     # ADR D40: bind the produced set to a rolling-origin protocol window.
     # ``"valid"`` (selection + threshold tuning) | ``"test"`` (report once)
     # | ``None`` (unbound). Defaults to None so existing callers are
-    # unaffected.
+    # unaffected. ADR-D60 adds the roles of a frame: ``"training"``,
+    # ``"validation"`` and ``"test_spent"``.
     window_role: str | None = None
+    # A named set of truth rules (``protea.core.window_declarations``), e.g.
+    # ``"october-headline-frame"``. It fills ``truth_profile``, ``toi_rule``
+    # and ``not_codes`` and refuses a payload that asks for others, and it
+    # fixes the closure: under the October rules both sides close under the
+    # graph the t0 corpus was loaded under, so both natives (and with them the
+    # pivot) default to that graph. A build that would apply anything else is
+    # refused before the delta is computed. None leaves every default as it was.
+    truth_rule_set: str | None = None
     # How the t1 side's truth is built. ``as_closed`` (the default) is what
     # every stored window did: a term the pivot cannot name is dropped by the
     # closure. ``projected`` replaces it by its first live ancestors at t0,
@@ -159,9 +179,20 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     def window_role_in_vocab(cls, v):
         if v is None:
             return None
-        if not isinstance(v, str) or v not in ("valid", "test"):
-            raise ValueError("must be one of 'valid', 'test', or null")
+        if not isinstance(v, str) or v not in WINDOW_ROLES:
+            raise ValueError(f"must be one of {WINDOW_ROLES}, or null")
         return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_from_named_rule_set(cls, data: Any) -> Any:
+        """Fill the three rule fields from ``truth_rule_set`` before they validate.
+
+        Before and not after, because after validation a field left out and a
+        field sent with its default look the same, and only the first may be
+        filled from the set.
+        """
+        return payload_with_named_rules(data) if isinstance(data, dict) else data
 
 
 def _reuse_verdict(served: str | None) -> tuple[str, str]:
@@ -202,6 +233,130 @@ def _reuse_verdict(served: str | None) -> tuple[str, str]:
             "agreement."
         )
     return "info", "the row served was built by the code running now."
+
+
+class _Ask(NamedTuple):
+    """What a call asks of the row it gets, beside the identity that finds it.
+
+    ``rules`` is what THIS call's build applies, which a served row is compared
+    against; ``rule_set`` is the name the payload gave, if any.
+    """
+
+    window_role: str | None
+    rules: TruthRules
+    rule_set: str | None = None
+
+
+def _rules_applied(
+    mode: str, ident: _Identity, ends: tuple[AnnotationSet, AnnotationSet]
+) -> TruthRules:
+    """The truth rules the path ``mode`` applies to this identity.
+
+    Read from the path and not from the payload. ``same_snapshot`` runs
+    ``compute_evaluation_data``, which takes none of the three rules, so the
+    request in ``ident`` does not reach it. ``reconciled`` hands all three to
+    ``compute_evaluation_data_reconciled``, and its closure is how the three
+    resolved graphs relate to the two corpora's own ontologies.
+    """
+    if mode == "same_snapshot":
+        return SAME_SNAPSHOT_RULES
+    old_set, new_set = ends
+    graphs = WindowGraphs(
+        old_set.ontology_snapshot_id,
+        new_set.ontology_snapshot_id,
+        ident.old_native,
+        ident.new_native,
+        ident.pivot_id,
+    )
+    return TruthRules(ident.truth_profile, ident.toi_rule, ident.not_codes, closure_applied(graphs))
+
+
+def _declared_rules(
+    rule_set: str | None,
+    mode: str,
+    ident: _Identity,
+    ends: tuple[AnnotationSet, AnnotationSet],
+    emit: EmitFn,
+) -> TruthRules:
+    """The rules this build applies, refused or reported when they are not the asked ones.
+
+    A named rule set is a promise, so a build that would break it is refused
+    before anything is computed. Three fields sent loose are a request, and the
+    same-snapshot path does not read them: that build goes ahead, as it always
+    did, and says out loud that the row's rule columns hold a request it did
+    not apply. The row's ``truth_rules`` holds what it did.
+    """
+    applied = _rules_applied(mode, ident, ends)
+    refuse_unless_named_rules_apply(rule_set, applied)
+    asked = {
+        "profile": ident.truth_profile,
+        "toi_rule": ident.toi_rule,
+        "not_codes": ident.not_codes,
+    }
+    if asked != {key: value for key, value in applied.as_json().items() if key in asked}:
+        emit(
+            "generate_evaluation_set.rules_not_applied",
+            None,
+            {
+                "mode": mode,
+                "asked": asked,
+                "applied": applied.as_json(),
+                "note": (
+                    "both corpora and every graph are one snapshot, so the same-snapshot "
+                    "path ran and it reads none of the three rules"
+                ),
+            },
+            "warning",
+        )
+    return applied
+
+
+def _served_rules(row: Any) -> dict[str, str] | None:
+    """The stored rules of a served row, or None when it holds none (legacy)."""
+    stored = getattr(row, "truth_rules", None)
+    return dict(stored) if isinstance(stored, dict) else None
+
+
+def _served_result(row: EvaluationSet) -> dict[str, Any]:
+    """The result a re-submission gets: the served row's id, uri and stats."""
+    return {
+        "evaluation_set_id": str(row.id),
+        "groundtruth_uri": row.groundtruth_uri,
+        **dict(row.stats or {}),
+    }
+
+
+def _identity_fields(row_id: uuid.UUID, ident: _Identity) -> dict[str, str]:
+    """The ids of a served row's identity, as the reuse event names them."""
+    return {
+        "evaluation_set_id": str(row_id),
+        "old_annotation_set_id": str(ident.old_set_id),
+        "new_annotation_set_id": str(ident.new_set_id),
+        "pivot_snapshot_id": str(ident.pivot_id),
+        "old_native_snapshot_id": str(ident.old_native),
+        "new_native_snapshot_id": str(ident.new_native),
+    }
+
+
+def _reuse_rules_note(served: dict[str, str] | None, ask: _Ask) -> str | None:
+    """A sentence when the served row's rules are not what this call applies.
+
+    A legacy row is only worth a sentence when a rule set was named: then the
+    caller asked for a promise the row cannot show, and a frame will refuse it.
+    """
+    if served is None:
+        if ask.rule_set is None:
+            return None
+        return (
+            f"The row served predates declared truth rules, so it cannot show it was built "
+            f"under {ask.rule_set!r}, and a frame will refuse it as legacy."
+        )
+    if served != ask.rules.as_json():
+        return (
+            f"The row served declares {served} and this revision applies "
+            f"{ask.rules.as_json()} for the same identity."
+        )
+    return None
 
 
 class GenerateEvaluationSetOperation:
@@ -268,36 +423,52 @@ class GenerateEvaluationSetOperation:
             p.toi_rule,
             p.not_codes,
         )
-        short = self._maybe_reuse_existing(session, ident, p.window_role, emit)
+        # Before the reuse lookup, so a served row is compared with these.
+        applied = _declared_rules(p.truth_rule_set, mode, ident, (old_set, new_set), emit)
+        ask = _Ask(p.window_role, applied, p.truth_rule_set)
+        short = self._maybe_reuse_existing(session, ident, ask, emit)
         if short is not None:
             return short
 
         data, stats = self._compute_delta(session, ident, mode, emit)
         self._refuse_empty_delta(session, ident, stats)
 
-        eval_set = EvaluationSet(
-            old_annotation_set_id=old_set_id,
-            new_annotation_set_id=new_set_id,
-            pivot_snapshot_id=pivot_id,
-            old_native_snapshot_id=old_native,
-            new_native_snapshot_id=new_native,
-            truth_profile=p.truth_profile,
-            toi_rule=p.toi_rule,
-            not_codes=p.not_codes,
-            stats=stats,
-            window_role=p.window_role,
-            # Stamped at import, not read from the tree now: the fleet runs out
-            # of a working tree that is edited between runs, so the tree can
-            # have moved since this process loaded its code.
-            code_revision=code_revision(),
-            job_id=job_id_from_payload(payload),
-        )
+        eval_set = self._new_row(ident, ask, stats, job_id_from_payload(payload))
         session.add(eval_set)
         session.flush()
         uri = self._persist_groundtruth(eval_set, data, emit)
         result = {"evaluation_set_id": str(eval_set.id), "groundtruth_uri": uri, **stats}
         emit("generate_evaluation_set.done", None, result, "info")
         return OperationResult(result=result)
+
+    @staticmethod
+    def _new_row(
+        ident: _Identity, ask: _Ask, stats: dict[str, Any], job_id: uuid.UUID | None
+    ) -> EvaluationSet:
+        """The row this build inserts: its identity, its role and the rules it APPLIED.
+
+        ``truth_rules`` comes from ``ask.rules``, which :func:`_declared_rules`
+        read from the path taken, and never from the payload's three fields,
+        which are the request and go to the identity columns as before.
+        """
+        return EvaluationSet(
+            old_annotation_set_id=ident.old_set_id,
+            new_annotation_set_id=ident.new_set_id,
+            pivot_snapshot_id=ident.pivot_id,
+            old_native_snapshot_id=ident.old_native,
+            new_native_snapshot_id=ident.new_native,
+            truth_profile=ident.truth_profile,
+            toi_rule=ident.toi_rule,
+            not_codes=ident.not_codes,
+            stats=stats,
+            window_role=ask.window_role,
+            truth_rules=ask.rules.as_json(),
+            # Stamped at import, not read from the tree now: the fleet runs out
+            # of a working tree that is edited between runs, so the tree can
+            # have moved since this process loaded its code.
+            code_revision=code_revision(),
+            job_id=job_id,
+        )
 
     @staticmethod
     def _delta_mode(
@@ -458,7 +629,7 @@ class GenerateEvaluationSetOperation:
         self,
         session: Session,
         ident: _Identity,
-        window_role: str | None,
+        ask: _Ask,
         emit: EmitFn,
     ) -> OperationResult | None:
         """Return the existing EvaluationSet's result, or None if absent.
@@ -483,30 +654,27 @@ class GenerateEvaluationSetOperation:
         not: see :func:`_reuse_verdict`. It still SERVES it, because refusing
         would change what every re-submission does and that is the
         researcher's call; what was wrong was the silence, not the serving.
+        And under which truth rules, the same way: see :func:`_reuse_rules_note`.
         """
         existing = self._existing_set(session, ident)
         if existing is None:
             return None
-        self._rebind_window_role(session, existing, window_role, emit)
+        self._rebind_window_role(session, existing, ask.window_role, emit)
         level, nota = _reuse_verdict(getattr(existing, "code_revision", None))
-        stats = dict(existing.stats or {})
-        result = {
-            "evaluation_set_id": str(existing.id),
-            "groundtruth_uri": existing.groundtruth_uri,
-            **stats,
-        }
+        served = _served_rules(existing)
+        rules_note = _reuse_rules_note(served, ask)
+        if rules_note is not None:
+            level, nota = "warning", f"{nota} {rules_note}"
+        result = _served_result(existing)
         emit(
             "generate_evaluation_set.idempotent_reuse",
             None,
             {
-                "evaluation_set_id": str(existing.id),
-                "old_annotation_set_id": str(ident.old_set_id),
-                "new_annotation_set_id": str(ident.new_set_id),
-                "pivot_snapshot_id": str(ident.pivot_id),
-                "old_native_snapshot_id": str(ident.old_native),
-                "new_native_snapshot_id": str(ident.new_native),
+                **_identity_fields(existing.id, ident),
                 "served_code_revision": getattr(existing, "code_revision", None),
                 "running_code_revision": code_revision(),
+                "served_truth_rules": served,
+                "truth_rules_applied_now": ask.rules.as_json(),
                 "note": nota,
             },
             level,
@@ -548,6 +716,12 @@ class GenerateEvaluationSetOperation:
         Returns ``(old_set, new_set, old_native, new_native, pivot)``. Each native
         defaults to its annotation set's stored ``ontology_snapshot_id`` but can be
         overridden explicitly (cross-OBO), and the pivot defaults to ``new_native``.
+
+        A named rule set moves the natives' DEFAULTS to its closure, and nothing
+        else: under ``october-headline-frame`` both default to the graph the t0
+        corpus was loaded under, so the pivot follows them there. An explicit
+        override still wins, and the build is then refused if it moves the
+        closure the set names.
         """
         old_set = session.get(AnnotationSet, old_set_id)
         if old_set is None:
@@ -564,8 +738,12 @@ class GenerateEvaluationSetOperation:
                 raise ValueError(f"OntologySnapshot {sid} not found")
             return sid
 
-        old_native = _resolve_snapshot(p.old_native_snapshot_id, old_set.ontology_snapshot_id)
-        new_native = _resolve_snapshot(p.new_native_snapshot_id, new_set.ontology_snapshot_id)
+        closure = named_truth_rules(p.truth_rule_set).closure if p.truth_rule_set else "per_side"
+        old_default, new_default = closing_graphs_by_default(
+            closure, old_set.ontology_snapshot_id, new_set.ontology_snapshot_id
+        )
+        old_native = _resolve_snapshot(p.old_native_snapshot_id, old_default)
+        new_native = _resolve_snapshot(p.new_native_snapshot_id, new_default)
         pivot_id = _resolve_snapshot(p.pivot_ontology_snapshot_id, new_native)
         return old_set, new_set, old_native, new_native, pivot_id
 
