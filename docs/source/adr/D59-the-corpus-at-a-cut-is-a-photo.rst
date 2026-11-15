@@ -29,7 +29,8 @@ an entry name in 164 to 178, 0% in 179 and 180, 5% in 231. The rule now demands
 positive evidence, so it fails closed: from 179 on, new proteins enter through two
 tiers, not three. Proteins admitted up to 178 stay, so the loss is the reviewed
 entries that arrived later. Measured at 211 against Swiss-Prot 2022_03 (568,002
-entries, step 1 of this record): 539,295 (94,9%) are in the corpus, 536,264 of
+entries) with this record's step-1 tool but run OUTSIDE the platform, so an order
+of magnitude until a platform run declares it: 539,295 (94,9%) are in the corpus, 536,264 of
 them admitted by 178, and **28,707 are not**: 9,415 whose only GOA 211 rows are
 electronic or phylogenetic, 113 with only ``ND`` and 19,179 with no GOA 211 row at
 all. Every reviewed entry with a truth or curated row is in.
@@ -86,6 +87,15 @@ UniRef50 cluster of the paired UniRef release that holds a ``superset`` protein,
 the photo stores how many members carry each GO term in each RECIPE channel
 (``truth``, ``curated``, ``phylogenetic``, ``orthology_electronic``), optionally
 split by a coarse taxon group. Membership is UniRef's, with no hand-set parameter.
+
+A profile depends on TWO releases, and neither derives from the other: the GOA
+cut whose rows are counted and the UniRef release whose clustering defines the
+groups. Both are named on the profile set; naming only the cut would make two
+profiles built on different clusterings look like the same quantity, the defect
+ADR-D56 closed for windows. The clustering must be published on or before the
+cut, or the groups would know sequences that did not exist at the cut. At 211 it
+is: UniRef 2022_03 was released on 03-Aug-2022 (its release note) and GOA 211 on
+2022-09-16 (EBI index).
 Measured at 211 outside the platform, so as an order of magnitude only: the
 196,353 clusters holding a reviewed protein have 38,185,820 other members carrying
 370,4 million GOA 211 rows, 98% of them in mirror channels; 903,248 of those
@@ -159,6 +169,11 @@ already holds is copied.**
 - ``cut_photo_cluster_profile``: one row per (photo, cluster, GO term, channel,
   taxon group) with the number of members carrying it. It is the only part of
   the photo no existing table can derive, and it holds counts, not proteins.
+  Under ADR-D58 its rows are COUNTED entities, named by their set and carrying no
+  descriptors; the profile SET (one per photo, naming the GOA cut and the UniRef
+  release) is a CITED entity: its short and long descriptors are derived by the
+  operation that creates it, and the entity is declared in the descriptor guard's
+  list in the same change that adds it.
 - ``protein``: a member that is not yet in the table enters as an accession-only
   row; ``first_admitted_release`` is written as a minimum, as ADR-D49 does.
 - ``protein_go_annotation``: the GOA t rows of the new members are appended to
@@ -224,7 +239,8 @@ What this record does not settle
 
 - **Protein-level neighbours.** If a low-homology method later needs
   protein-to-protein transfer from neighbours, the candidates are the members
-  with a recipe-channel row (903,248 at 211); adding them is a separate decision.
+  with a recipe-channel row (903,248 at 211, measured outside the platform: an
+  order of magnitude, not a declared count); adding them is a separate decision.
 - **Bridges.** UniRef members with no annotation at all could link a query to
   distant annotated proteins through intermediate sequences. They are not members
   under this record.
