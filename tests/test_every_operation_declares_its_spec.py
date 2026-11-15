@@ -204,6 +204,59 @@ PUBLISHED_IN_CODE: tuple[tuple[str, str, str], ...] = (
     ),
 )
 
+#: Where the code names the queue it sends each operation to: (operation, module,
+#: constant), read from the API routes and the operations that create its Job row or
+#: publish its message. :data:`TODAY` pins the specs once; this reads the code on every
+#: run, so a route moved without its spec fails here. The two routes that write
+#: ``queues.X`` inline (``compute_embeddings`` in api/routers/annotate.py, the exports
+#: in api/routers/datasets.py) are pinned by :data:`TODAY` alone.
+SENT_IN_CODE: tuple[tuple[str, str, str], ...] = (
+    ("load_ontology_snapshot", "protea.api.routers.annotations._common", "JOBS_QUEUE"),
+    ("load_goa_annotations", "protea.api.routers.annotations._common", "JOBS_QUEUE"),
+    ("load_quickgo_annotations", "protea.api.routers.annotations._common", "JOBS_QUEUE"),
+    ("generate_evaluation_set", "protea.api.routers.annotations._common", "JOBS_QUEUE"),
+    ("generate_evaluation_set", "protea.core.operations.load_goa_annotations", "_AUTO_EVAL_QUEUE"),
+    ("run_cafa_evaluation", "protea.api.routers.annotations._common", "EVALUATIONS_QUEUE"),
+    ("predict_go_terms", "protea.api.routers.embeddings", "_PREDICTIONS_QUEUE"),
+    (
+        "compute_embeddings_batch",
+        "protea.core.operations._compute_embeddings_helpers",
+        "_BATCH_QUEUE",
+    ),
+    ("store_embeddings", "protea.core.operations._compute_embeddings_helpers", "_WRITE_QUEUE"),
+    (
+        "encode_residue_vocabulary_batch",
+        "protea.core.operations.encode_residue_vocabulary",
+        "_BATCH_QUEUE",
+    ),
+    (
+        "encode_residue_sparse_batch",
+        "protea.core.operations.encode_residue_sparse",
+        "_BATCH_QUEUE",
+    ),
+    ("upload_residue_shard", "protea.core.operations._residue_shard_spool", "UPLOAD_QUEUE"),
+    ("store_residue_codes", "protea.core.operations.store_residue_codes", "WRITE_QUEUE"),
+    ("predict_go_terms_batch", "protea.core.operations.predict_go_terms._common", "_BATCH_QUEUE"),
+    ("store_predictions", "protea.core.operations.predict_go_terms._common", "_WRITE_QUEUE"),
+    ("run_lab_method", "protea.core.operations.run_lab_method", "NODE_QUEUE"),
+    ("ingest_method_predictions", "protea.core.operations.run_lab_method", "INGEST_QUEUE"),
+    (
+        "export_knn_batch",
+        "protea.core.operations.export_minijobs.export_coordinator",
+        "_KNN_BATCH_QUEUE",
+    ),
+    (
+        "export_features_batch",
+        "protea.core.operations.export_minijobs._export_knn_batch",
+        "_FEATURES_QUEUE",
+    ),
+    (
+        "export_write",
+        "protea.core.operations.export_minijobs._export_features_batch",
+        "_WRITE_QUEUE",
+    ),
+)
+
 
 @pytest.fixture(scope="module")
 def specs() -> dict[str, OperationSpec]:
@@ -231,6 +284,14 @@ def test_each_spec_routes_where_the_code_routes_today(specs: dict[str, Operation
 
 def test_the_plan_routes_only_what_nothing_else_routes() -> None:
     assert ROUTED_BY_THE_PLAN <= set(TODAY)
+    assert not ROUTED_BY_THE_PLAN & {operation for operation, _, _ in SENT_IN_CODE}
+
+
+@pytest.mark.parametrize(("operation", "module", "constant"), SENT_IN_CODE)
+def test_the_code_sends_each_operation_to_the_queue_its_spec_names(
+    specs: dict[str, OperationSpec], operation: str, module: str, constant: str
+) -> None:
+    assert _constant(module, constant) == specs[operation].queue
 
 
 @pytest.mark.parametrize(("operation", "module", "constant"), PUBLISHED_IN_CODE)
