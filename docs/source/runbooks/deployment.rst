@@ -1,7 +1,7 @@
 Deployment Guide
 ================
 
-PROTEA supports five deployment modes. Choose the mode that matches your
+PROTEA supports four deployment modes. Choose the mode that matches your
 infrastructure; all modes run the same service set (postgres, rabbitmq,
 api, workers, frontend) with the same environment variables.
 
@@ -31,9 +31,6 @@ Deployment modes at a glance
    * - **Helm / Kubernetes**
      - Kubernetes cluster (T-OPS.3, CI pending)
      - ``helm install protea deploy/helm/protea/`` (see :ref:`deploy-helm`)
-   * - **SLURM**
-     - HPC cluster, Slurm workload manager (T-OPS.5, in flight)
-     - ``deploy/slurm/`` templates (see :ref:`deploy-slurm`)
 
 Telemetry variables apply across all modes; see
 :doc:`observability` for the ``PROTEA_OTEL_*`` variable reference.
@@ -394,29 +391,6 @@ your values override:
          value: "http://otel-collector:4318"
 
 See :doc:`observability` for the full variable reference.
-
-.. _deploy-slurm:
-
-Mode 5: SLURM templates (T-OPS.5, in flight)
-----------------------------------------------
-
-HPC/SLURM deployment templates will land in ``deploy/slurm/`` as part
-of T-OPS.5. This section is a placeholder; it will be filled in when
-T-OPS.5 merges.
-
-The templates will provide Slurm job scripts for:
-
-- Running the API as a Slurm batch job (or ``salloc`` interactive session).
-- Launching worker processes as Slurm array jobs with per-task queue
-  assignments.
-- The GPU embedding worker on a GPU partition.
-
-Once T-OPS.5 is merged, refer to ``deploy/slurm/`` for the canonical
-template files and update this section with the ``sbatch`` invocation
-commands.
-
-Telemetry applies identically to SLURM deployments; see
-:doc:`observability`.
 
 Common operations
 ------------------

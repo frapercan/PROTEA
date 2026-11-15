@@ -138,8 +138,9 @@ class TestTheDropActuallyHappens:
     the paths call; this pins what goes wrong when they call the other pair,
     and it is worse than a short list: with more than one twin in the bank,
     the accession-based drop finds nothing to drop and the query is returned
-    as its own donor. That is the state the 95.0-per-cent measurement in
-    ``_self_neighbour`` says makes a depth sweep meaningless.
+    as its own donor. That is the state that makes a depth sweep meaningless:
+    measured on 2026-08-28 with self-retrieval allowed, the query was its own
+    nearest neighbour for 95.0 per cent of candidate rows at depth 1.
     """
 
     @staticmethod

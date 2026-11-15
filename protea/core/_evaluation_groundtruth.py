@@ -170,9 +170,10 @@ def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[Evaluation
     Strict reuse path: if ``eval_set.groundtruth_uri`` is set, deserializes the
     persisted parquet via the configured ArtifactStore and returns it. If not
     set, raises — recomputation on-the-fly is intentionally not allowed (see
-    the project's "no on-the-fly reuse" rule). Use
-    ``scripts/backfill_evaluation_groundtruth.py`` to materialize artifacts for
-    legacy EvaluationSet rows that predate this column.
+    the project's "no on-the-fly reuse" rule). ``generate_evaluation_set``
+    persists the parquet in the transaction that inserts the row, so a row
+    without it predates the column. Re-submitting that row's window does not
+    repair it: the operation serves an existing row as it stands.
 
     Returns the EvaluationData plus the pivot OntologySnapshot ID — the caller
     should use the pivot snapshot (not the old set's) when loading the OBO for
@@ -195,9 +196,10 @@ def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[Evaluation
 
     if not eval_set.groundtruth_uri:
         raise RuntimeError(
-            f"EvaluationSet {eval_set.id} has no groundtruth_uri. "
-            "Run scripts/backfill_evaluation_groundtruth.py to materialize "
-            "the parquet artifact, or regenerate via /annotations/evaluation-sets/generate."
+            f"EvaluationSet {eval_set.id} has no groundtruth_uri: the row "
+            "predates the persisted ground truth. Re-submitting its window to "
+            "/annotations/evaluation-sets/generate serves this row as it "
+            "stands and writes no parquet."
         )
 
     # Through read_groundtruth and never store.get: it is the one door, and it

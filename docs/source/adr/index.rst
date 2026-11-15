@@ -205,7 +205,7 @@ later revision) or *Superseded* (a named later decision replaces it).
      - F0 (closed)
    * - D25
      - :doc:`HPC operation mode <D25-hpc-mode>`
-     - Pending
+     - Superseded by D60
      - gate at F-OPS
    * - D26
      - :doc:`Container runtime: OCI plus Apptainer <D26-container-runtime>`

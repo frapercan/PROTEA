@@ -207,7 +207,7 @@ curl -s http://localhost:8000/runners | jq '.plugins[].name'
 
 ## Deployment
 
-The same service set (api, workers, Postgres, RabbitMQ, optional MinIO, frontend) runs under **five deployment modes**; pick the entry point that matches your infrastructure. Per-mode assets live under [`deploy/`](deploy/README.md); the narrative guide is in the [docs](https://protea.readthedocs.io).
+The same service set (api, workers, Postgres, RabbitMQ, optional MinIO, frontend) runs under **four deployment modes**; pick the entry point that matches your infrastructure. Per-mode assets live under [`deploy/`](deploy/README.md); the narrative guide is in the [docs](https://protea.readthedocs.io).
 
 | Mode | Best for | Entry point |
 |---|---|---|
@@ -215,7 +215,6 @@ The same service set (api, workers, Postgres, RabbitMQ, optional MinIO, frontend
 | **Compose bundle** | Smoke test from pre-built images, laptop or CI | `docker compose -f docker-compose.bundle.yml --env-file .env.bundle up -d` |
 | **Docker Swarm** | Multi-host production cluster without Kubernetes | `docker stack deploy -c deploy/swarm/stack.yml protea` |
 | **Helm / Kubernetes** | Existing K8s cluster, GitOps-style rollouts | `helm install protea deploy/helm/protea/` |
-| **SLURM** | HPC batch site, worker fleet on a scheduler | `sbatch deploy/slurm/<worker>.sbatch` |
 
 For bare-metal development without a Docker daemon, `bash scripts/manage.sh start` runs the api, worker fleet, and frontend as supervised host processes (see [Getting started](#getting-started)).
 
