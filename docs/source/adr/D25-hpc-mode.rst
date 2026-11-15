@@ -1,7 +1,10 @@
 ADR-D25: HPC operation mode
 =============================
 
-:Status: Accepted (mode B primary, mode C deferred)
+:Status: Superseded by ADR-D60 (2026-11-15). It was Accepted (mode B primary,
+         mode C deferred). Its only implementation, ``deploy/slurm``, was
+         removed in the phase-0 deletions; a cluster now runs PROTEA's own
+         workers as pilots on the shared queues (ADR-D60, decision 4).
 :Date: 2026-05-05
 :Decided: 2026-05-06 (user confirmation)
 :Phase: F-OPS
