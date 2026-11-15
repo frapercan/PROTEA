@@ -42,3 +42,11 @@ def test_integration_ci_runs_the_stack_postgres() -> None:
 
 def test_the_suite_defaults_to_the_stack_postgres() -> None:
     assert _DEFAULT_PG_IMAGE == _stack_image("postgres")
+
+
+def test_the_stack_pins_the_broker_by_digest() -> None:
+    assert "@sha256:" in _stack_image("rabbitmq")
+
+
+def test_integration_ci_runs_the_stack_broker() -> None:
+    assert _ci_image("rabbitmq") == _stack_image("rabbitmq")
