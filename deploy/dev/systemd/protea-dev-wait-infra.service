@@ -6,6 +6,9 @@ Description=PROTEA dev infra readiness gate (127.0.0.1:26432, 26672, 26900)
 PartOf=protea-dev.target
 Wants=protea-dev-postgres.service protea-dev-rabbitmq.service protea-dev-minio.service
 After=protea-dev-postgres.service protea-dev-rabbitmq.service protea-dev-minio.service
+# Like every dev unit. Without the dev volume the containers this gate wants
+# refuse to start, and it would sit out its whole deadline waiting for them.
+AssertPathIsMountPoint=/srv/protea-dev
 
 [Service]
 Type=oneshot

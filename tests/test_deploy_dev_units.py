@@ -94,6 +94,17 @@ def test_every_dev_process_is_capped_inside_the_dev_slice(path):
     assert len(keys["MemoryMax"]) == 1
 
 
+@pytest.mark.parametrize(
+    "path",
+    [*CONTAINERS, *(p for p in UNITS if p.suffix == ".service")],
+    ids=lambda p: p.name,
+)
+def test_every_dev_service_refuses_to_start_without_the_dev_volume(path):
+    # Without the mount, /srv/protea-dev is a plain directory on the root
+    # filesystem the production worker lives on (README, Prerequisites).
+    assert _keys(path)["AssertPathIsMountPoint"] == ["/srv/protea-dev"]
+
+
 def test_the_slice_is_the_dev_ceiling():
     keys = _keys(SYSTEMD / "protea-dev.slice")
     assert keys["MemoryMax"] == ["9G"]
