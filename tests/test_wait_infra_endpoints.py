@@ -47,9 +47,10 @@ def _closed_port() -> int:
         return probe.getsockname()[1]
 
 
-def _answers(host: str, port: int) -> bool:
+def _answers(endpoint: str) -> bool:
+    host, _, port = endpoint.rpartition(":")
     try:
-        with socket.create_connection((host, port), timeout=1):
+        with socket.create_connection((host, int(port)), timeout=1):
             return True
     except OSError:
         return False
@@ -89,9 +90,27 @@ def test_a_malformed_endpoint_is_a_configuration_error(endpoints):
     assert result.returncode == 78, result.stderr
 
 
-def test_unset_it_still_waits_on_the_production_postgres_first():
-    if _answers("127.0.0.1", 5432):
-        pytest.skip("something listens on 127.0.0.1:5432 here, so the default cannot fail")
+#: What production's units wait on, in this order, since none of them sets
+#: PROTEA_WAIT_ENDPOINTS: the Postgres, then the RabbitMQ.
+PRODUCTION_DEFAULTS = ("127.0.0.1:5432", "127.0.0.1:5672")
+
+
+def test_unset_it_waits_on_the_production_postgres_then_rabbitmq():
+    # The gate stops at the first endpoint that does not answer, so the one
+    # it must name depends on what listens on this machine; with both up it
+    # must name both. Every branch asserts: none of them skips.
+    down = [hp for hp in PRODUCTION_DEFAULTS if not _answers(hp)]
     result = _run(PROTEA_WAIT_DEADLINE="0")
-    assert result.returncode == 1
-    assert "127.0.0.1:5432 not answering" in result.stderr
+    if down:
+        assert result.returncode == 1
+        assert f"{down[0]} not answering" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert " ".join(PRODUCTION_DEFAULTS) in result.stdout
+
+
+def test_the_default_list_is_exactly_the_production_pair():
+    # Read from the script as well, because a run on a machine where the
+    # Postgres is down never reaches the second endpoint.
+    default = " ".join(PRODUCTION_DEFAULTS)
+    assert f'"${{PROTEA_WAIT_ENDPOINTS:-{default}}}"' in SCRIPT.read_text()
