@@ -192,6 +192,10 @@ def create(session: Session, draft: Draft, actor: Actor) -> Exploration:
     session.add(row)
     session.flush()
     _event(session, row, "created", actor, {"kind": draft.kind, "number": number})
+    # The platform's sessions do not autoflush, so without this the answer to
+    # the request that created the exploration read its log before the event
+    # reached it, and showed an exploration with no "created".
+    session.flush()
     return row
 
 
