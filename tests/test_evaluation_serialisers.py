@@ -134,3 +134,27 @@ def test_an_absent_snapshot_serialises_as_null_and_not_as_the_string_none():
     body = evaluation_set_to_dict(_window(old_native_snapshot_id=None))
 
     assert body["old_native_snapshot_id"] is None
+
+
+def test_a_window_serves_the_truth_rules_its_build_applied():
+    """ADR-D60: the rules a window was built under travel with it, beside the
+    three it was asked for, because on the same-snapshot path the two differ."""
+    applied = {
+        "profile": "projected",
+        "toi_rule": "live_in_both_ends",
+        "not_codes": "experimental",
+        "closure": "t0_graph",
+    }
+    body = evaluation_set_to_dict(_window(truth_rules=applied, window_role="training"))
+
+    assert body["truth_rules"] == applied
+    assert body["window_role"] == "training"
+
+
+def test_a_legacy_window_serves_null_rules_and_not_the_defaults():
+    """A row built before the column says nothing about what it applied, and
+    the API must not fill that silence with the defaults."""
+    body = evaluation_set_to_dict(_window())
+
+    assert "truth_rules" in body
+    assert body["truth_rules"] is None

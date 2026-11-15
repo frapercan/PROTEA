@@ -311,6 +311,30 @@ Data model
    JSONB ``stats`` dict with delta/NK/LK/PK protein and annotation counts.
    Created by ``generate_evaluation_set``.
 
+   Two fields make it a window of a frame (ADR-D60, decision 1):
+
+   - ``window_role``: ADR-D40's ``valid`` and ``test``, and the three roles of a
+     frame, ``training`` (its gains may be fitted on), ``validation`` (a method
+     instance is selected and read on it, never fitted on it) and
+     ``test_spent`` (a test window whose single read has happened).
+   - ``truth_rules``: the rules the build applied, as ``profile``,
+     ``toi_rule``, ``not_codes`` and ``closure``. They are read from the path
+     the build took and the graphs it resolved, never copied from the payload:
+     when both corpora and every graph are one snapshot, the same-snapshot path
+     reads none of the three payload rules, and the row says so. The closure
+     says how the graphs relate to the window's own ends (``per_side``,
+     ``t0_graph``, ``t1_graph``), which is the form that compares across cuts.
+     Rows built before the column hold NULL and read as legacy.
+
+   A payload can name a rule set instead of spelling the rules out.
+   ``truth_rule_set: "october-headline-frame"`` is the author's choice of
+   2026-11-15 for the four training windows, the rules of the October headline
+   window ``ea0f4334``: ``projected``, ``live_in_both_ends``, ``experimental``,
+   and both sides closed under the graph of t0, which is also the pivot. A build
+   that would apply anything else is refused before the delta is computed.
+   :func:`protea.core.window_declarations.common_truth_rules` refuses a list of
+   windows whose stored rules differ, or cannot be compared at all.
+
 ``EvaluationResult``
    Stores per-setting (NK/LK/PK) and per-namespace (MFO/BPO/CCO) metrics:
    Fmax, precision, recall, τ (threshold), and coverage. Created by
