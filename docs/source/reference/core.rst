@@ -472,6 +472,21 @@ different namespaces simultaneously (e.g., LK in CCO and PK in BPO).
    :undoc-members:
    :show-inheritance:
 
+Window declarations
+-------------------
+
+``protea.core.window_declarations`` holds what an evaluation set declares as a
+window of a frame (ADR-D60, decision 1): its role (``training``,
+``validation``, ``test_spent``, beside ADR-D40's ``valid`` and ``test``) and
+the truth rules its build applied. It also holds the named rule sets a
+``generate_evaluation_set`` payload can select (``october-headline-frame``)
+and ``common_truth_rules``, which refuses a list of windows whose stored rules
+differ, are legacy, or cannot be compared across cuts.
+
+.. automodule:: protea.core.window_declarations
+   :members:
+   :show-inheritance:
+
 Provenance
 ----------
 

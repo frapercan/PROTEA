@@ -193,6 +193,10 @@ def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
         "created_at": e.created_at.isoformat(),
         "stats": e.stats,
         "window_role": e.window_role,
+        # What the build APPLIED, beside the three rules above, which are what
+        # it was asked for. ``None`` on a row built before the column: legacy,
+        # nothing says. See ``protea.core.window_declarations``.
+        "truth_rules": e.truth_rules,
     }
 
 

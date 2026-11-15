@@ -234,6 +234,9 @@ def _tombstone(eset: EvaluationSet, blob: bytes, archivo: str) -> dict[str, Any]
         "toi_rule": eset.toi_rule,
         "not_codes": eset.not_codes,
         "window_role": eset.window_role,
+        # The rules the build APPLIED (ADR-D60), beside the three it was asked
+        # for; None on a row built before the column, which is legacy.
+        "truth_rules": getattr(eset, "truth_rules", None),
         "code_revision": getattr(eset, "code_revision", None),
         "groundtruth_uri": eset.groundtruth_uri,
         "created_at": eset.created_at.isoformat() if eset.created_at else None,
