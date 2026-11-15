@@ -91,11 +91,20 @@ class CrossedMethodAxes(ValueError):
 #: ever fetched, which ``_arm_identity`` separates from an evaluation cut for
 #: the same reason it is identity here. ``distance_threshold`` decides which of
 #: the fetched neighbours are allowed to vote.
+#:
+#: ``method_id`` is the method row that produced the set (ADR-D60, decision 3).
+#: Its id is derived from the method's whole spec (family, code, instance cut,
+#: recipe and pins), so two sets under different ids ran different methods even
+#: when every other column agrees, and a set produced by a method without an
+#: embedding configuration differs from a configuration's set in both fields.
+#: Two NULLs agree and correctly: neither set was produced by a method row,
+#: which is every set written before the method tables existed.
 _IDENTITY_COLUMNS: tuple[str, ...] = (
     "annotation_set_id",
     "distance_threshold",
     "embedding_config_id",
     "limit_per_entry",
+    "method_id",
     "ontology_snapshot_id",
     "query_set_id",
 )

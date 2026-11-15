@@ -30,6 +30,8 @@ from .exploration.exploration_event import ExplorationEvent  # noqa: F401
 from .exploration.exploration_link import ExplorationLink  # noqa: F401
 from .exploration.external_reference import ExternalReference  # noqa: F401
 from .job import Job, JobEvent  # noqa: F401
+from .method.method import Method, MethodPin, MethodTrainingWindow  # noqa: F401
+from .method.prediction_explanation import PredictionExplanation  # noqa: F401
 from .protein.protein import Protein  # noqa: F401
 from .protein.protein_metadata import ProteinUniProtMetadata  # noqa: F401
 from .protein.swissprot_release import (  # noqa: F401
