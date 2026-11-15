@@ -892,8 +892,8 @@ export default function FunctionalAnnotationPage() {
                         <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-600">
                           {t("resultsTab.tableHeaders.config")}
                         </span>
-                        <span className="text-slate-700 truncate block" title={ps.embedding_config_id}>
-                          {ps.embedding_config_name ?? shortId(ps.embedding_config_id)}
+                        <span className="text-slate-700 truncate block" title={ps.embedding_config_id ?? undefined}>
+                          {ps.embedding_config_name ?? (ps.embedding_config_id ? shortId(ps.embedding_config_id) : "method")}
                         </span>
                       </div>
                       <div>
@@ -969,7 +969,7 @@ export default function FunctionalAnnotationPage() {
                           {shortId(ps.id)}…
                         </Link>
                       </div>
-                      <div className="text-xs text-slate-700" title={ps.embedding_config_id}>{ps.embedding_config_name ?? shortId(ps.embedding_config_id)}</div>
+                      <div className="text-xs text-slate-700" title={ps.embedding_config_id ?? undefined}>{ps.embedding_config_name ?? (ps.embedding_config_id ? shortId(ps.embedding_config_id) : "method")}</div>
                       <div className="text-xs text-slate-700" title={ps.annotation_set_id}>{ps.annotation_set_label ?? shortId(ps.annotation_set_id)}</div>
                       <div className="text-xs text-slate-700" title={ps.ontology_snapshot_id}>{ps.ontology_snapshot_version ?? shortId(ps.ontology_snapshot_id)}</div>
                       <div className="text-slate-700">{ps.prediction_count ?? 0}</div>
