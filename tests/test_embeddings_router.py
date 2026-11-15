@@ -254,6 +254,7 @@ def _make_prediction_set(ps_id=None):
     ps = MagicMock()
     ps.id = ps_id or uuid4()
     ps.embedding_config_id = uuid4()
+    ps.method_id = None
     ps.annotation_set_id = uuid4()
     ps.ontology_snapshot_id = uuid4()
     ps.query_set_id = None
@@ -777,9 +778,10 @@ class TestListPredictionSets:
 
         The endpoint executes:
 
-        1. ``query(PredictionSet, EmbeddingConfig, AnnotationSet, OntologySnapshot)
-           .join(...).join(...).join(...).order_by(...).limit(...).all()`` — for
-           the metadata 4-tuples.
+        1. ``query(PredictionSet, EmbeddingConfig, Method, AnnotationSet,
+           OntologySnapshot).outerjoin(...).outerjoin(...).join(...).join(...)
+           .order_by(...).limit(...).all()``, for the metadata 5-tuples. The
+           producer is outer-joined, so a legacy set carries None as its method.
         2. ``query(GOPrediction.prediction_set_id, count(GOPrediction.id))
            .group_by(...).all()`` — for the per-set counts.
 
@@ -788,7 +790,7 @@ class TestListPredictionSets:
         on a tiny dispatch helper.
         """
         list_query = MagicMock()
-        list_query.join.return_value.join.return_value.join.return_value.order_by.return_value.limit.return_value.all.return_value = rows
+        list_query.outerjoin.return_value.outerjoin.return_value.join.return_value.join.return_value.order_by.return_value.limit.return_value.all.return_value = rows
 
         count_query = MagicMock()
         count_query.group_by.return_value.all.return_value = list(count_pairs)
@@ -807,7 +809,7 @@ class TestListPredictionSets:
 
         self._wire_list_query(
             session,
-            rows=[(ps, ec, ann, snap)],
+            rows=[(ps, ec, None, ann, snap)],
             count_pairs=[(ps.id, 100)],
         )
 
@@ -831,7 +833,7 @@ class TestListPredictionSets:
         snap = MagicMock()
         snap.obo_version = "2024-01-01"
 
-        self._wire_list_query(session, rows=[(ps, ec, ann, snap)])
+        self._wire_list_query(session, rows=[(ps, ec, None, ann, snap)])
 
         resp = client.get("/embeddings/prediction-sets")
         assert resp.status_code == 200
