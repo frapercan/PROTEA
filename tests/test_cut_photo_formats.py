@@ -168,3 +168,18 @@ class TestUniRefClusters:
 
     def test_an_empty_stream_has_no_clusters(self) -> None:
         assert list(iter_uniref_clusters([])) == []
+
+
+class TestSwissProtHelpersMoved:
+    """The three Swiss-Prot helpers moved to ``protea.core.swissprot_table`` (ADR-D59)
+    and stay importable from the operation. Both routes must give the SAME object,
+    so a later cleanup of the re-export fails here instead of breaking an outside
+    importer in silence."""
+
+    def test_both_import_routes_are_one_object(self) -> None:
+        from protea.core import swissprot_table as table
+        from protea.core.operations import load_swissprot_release as op
+
+        assert op.canonical_table is table.canonical_table
+        assert op.parse_swissprot_fasta is table.parse_swissprot_fasta
+        assert op.read_local_table is table.read_local_table
