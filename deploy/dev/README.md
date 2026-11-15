@@ -309,6 +309,14 @@ every dev worker and of the API:
   `PROTEA_ENVIRONMENT=dev` refuses any vhost or database that is not dev's.
 - A taxonomy path that never downloads.
 - A unit for the GPU queues, after the decision on the card.
+- CPU priority for production. `CPUWeight=50` on `protea-dev.slice` only
+  weighs against the other children of `protea.slice`, and it has none.
+  `protea.slice` itself competes with `app.slice`, where the production
+  worker runs, at the default weight of 100 each, so when both are busy dev
+  gets as large a share as everything in `app.slice` together, production
+  included. Production wins only with a weight at that level, on
+  `protea.slice` or on a dev slice that is not nested under it, which is the
+  author's decision.
 
 ## Remove
 
