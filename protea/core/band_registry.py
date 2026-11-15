@@ -32,6 +32,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 
+from protea.core.marks import MARK_RELEASE
+
 __all__ = [
     "Band",
     "BANDS",
@@ -68,6 +70,10 @@ class CutoffViolationError(ValueError):
     """
 
 
+#: A band named for the release its window opens at, ``v<release>``.
+_BAND_T0 = re.compile(r"v(\d+)")
+
+
 @dataclass(frozen=True)
 class Band:
     """Canonical (ontology snapshot, IA) binding for one evaluation window.
@@ -88,6 +94,21 @@ class Band:
     #: this (the no-future-data rule). ``None`` means the band does not
     #: yet declare a cutoff and the temporal guard is skipped for it.
     t0_cutoff: date | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a band whose window opens after the mark.
+
+        A band named ``v<release>`` opens its window at that release. One that
+        opens after the mark would score a window the universe may not read,
+        so it cannot be registered at all (ADR-D60). A name with no release in
+        it is not checked here.
+        """
+        named = _BAND_T0.fullmatch(self.name)
+        if named is not None and int(named.group(1)) > MARK_RELEASE:
+            raise ValueError(
+                f"band {self.name!r} opens after the mark {MARK_RELEASE}; no band may "
+                "score a window the universe is not allowed to read"
+            )
 
     def accepts_obo_version(self, obo_version: str | None) -> bool:
         return obo_version is not None and obo_version in self.obo_versions

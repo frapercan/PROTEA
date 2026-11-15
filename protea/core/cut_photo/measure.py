@@ -56,11 +56,8 @@ from protea.core.cut_photo.formats import (
     iter_uniref_clusters,
     reference_class,
 )
+from protea.core.marks import MARK_RELEASE
 from protea.core.swissprot_table import canonical_table, parse_swissprot_fasta
-
-#: The last GOA release a photo may be built from: the 227 instance. Every later
-#: release holds the truth of the test, which no photo reads.
-MARK_RELEASE = 227
 
 #: The member of UniProt's ``uniprot_sprot-only`` archive that carries the
 #: canonical sequences; the same one ``load_swissprot_release`` reads, pinned

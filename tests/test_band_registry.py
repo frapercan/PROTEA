@@ -395,6 +395,27 @@ class TestPlatformIaIsIdentifiedByItsSetId:
             )
 
 
+class TestNoBandOpensAfterTheMark:
+    """A band opening after the mark would score a window the universe may not read."""
+
+    def test_a_band_opening_at_228_cannot_be_registered(self):
+        with pytest.raises(ValueError, match="after the mark 227"):
+            Band(name="v228", obo_versions=frozenset({"a"}), ia_tokens=frozenset({"b"}))
+
+    def test_the_band_at_the_mark_is_allowed(self):
+        # 227 -> 230 opens AT the mark: it is the spent test, not a later window.
+        assert Band(name="v227").name == "v227"
+
+    def test_a_name_without_a_release_is_not_read_as_one(self):
+        assert Band(name="bench-v1-K5-v999").name == "bench-v1-K5-v999"
+
+    def test_every_registered_band_opens_at_or_before_the_mark(self):
+        from protea.core.marks import MARK_RELEASE
+
+        for name in BANDS:
+            assert int(name.removeprefix("v")) <= MARK_RELEASE, name
+
+
 class TestV211IsTheWindowWhereSelectionBelongs:
     def test_it_ends_on_the_board_mark_so_it_needs_no_waiver(self):
         from datetime import date
