@@ -10,6 +10,10 @@ breaks one fails in CI instead of on the machine:
 * the infra images are the digests docker-compose.yml pins;
 * every published port is loopback and in the 26xxx range, and the
   readiness gate waits on exactly those ports;
+* every unit needs the dev data root on the system disk, and every service
+  runs the disk gate first, so dev stops before it can fill the disk
+  production runs on (the author's decision of 2026-11-15: no new disk);
+* the always-on processes fit their caps inside the slice;
 * the dev processes carry the clock gate, RestartPreventExitStatus=78, and a
   start timeout above the gate's cap;
 * no secret value is written into a unit.
@@ -34,6 +38,9 @@ PROCESS_UNITS = [SYSTEMD / "protea-dev-worker@.service", SYSTEMD / "protea-dev-a
 
 # The clock gate's own ceiling on its wait (protea-dev-clock-gate.sh).
 GATE_CAP_SECONDS = 600
+
+DATA_ROOT = "%h/protea-dev"
+DISK_GATE = f"/bin/bash {DATA_ROOT}/deploy/PROTEA/deploy/dev/protea-dev-disk-gate.sh {DATA_ROOT} %n"
 
 
 def _keys(path: Path) -> dict[str, list[str]]:
@@ -99,10 +106,41 @@ def test_every_dev_process_is_capped_inside_the_dev_slice(path):
     [*CONTAINERS, *(p for p in UNITS if p.suffix == ".service")],
     ids=lambda p: p.name,
 )
-def test_every_dev_service_refuses_to_start_without_the_dev_volume(path):
-    # Without the mount, /srv/protea-dev is a plain directory on the root
-    # filesystem the production worker lives on (README, Prerequisites).
-    assert _keys(path)["AssertPathIsMountPoint"] == ["/srv/protea-dev"]
+def test_every_dev_service_needs_the_dev_data_root(path):
+    # The data root lives on the system disk, beside production (README, Disk).
+    assert _keys(path)["AssertPathIsDirectory"] == [DATA_ROOT]
+    assert "AssertPathIsMountPoint" not in _keys(path)
+
+
+@pytest.mark.parametrize("path", [*CONTAINERS, *PROCESS_UNITS], ids=lambda p: p.name)
+def test_every_dev_process_runs_the_disk_gate_first_and_does_not_loop(path):
+    keys = _keys(path)
+    assert keys["ExecStartPre"][0] == DISK_GATE
+    assert keys["StartLimitBurst"] == ["3"]
+    assert keys["StartLimitIntervalSec"] == ["900"]
+
+
+def test_no_unit_names_a_mounted_dev_volume():
+    for path in [*CONTAINERS, *UNITS]:
+        assert "/srv/protea-dev" not in path.read_text(), path.name
+
+
+def _bytes(value: str) -> int:
+    match = re.fullmatch(r"(\d+)([KMG])", value)
+    assert match, value
+    return int(match.group(1)) * {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30}[match.group(2)]
+
+
+def test_the_always_on_processes_and_one_worker_fit_in_the_slice():
+    caps = [
+        _keys(QUADLET / "protea-dev-postgres.container")["MemoryMax"][0],
+        _keys(QUADLET / "protea-dev-rabbitmq.container")["MemoryMax"][0],
+        _keys(QUADLET / "protea-dev-minio.container")["MemoryMax"][0],
+        _keys(SYSTEMD / "protea-dev-api.service")["MemoryMax"][0],
+        _keys(SYSTEMD / "protea-dev-worker@.service")["MemoryMax"][0],
+    ]
+    ceiling = _keys(SYSTEMD / "protea-dev.slice")["MemoryMax"][0]
+    assert sum(_bytes(cap) for cap in caps) <= _bytes(ceiling)
 
 
 def test_the_slice_is_the_dev_ceiling():
@@ -113,9 +151,9 @@ def test_the_slice_is_the_dev_ceiling():
 
 def test_postgres_is_sized_as_planned():
     keys = _keys(QUADLET / "protea-dev-postgres.container")
-    assert keys["MemoryMax"] == ["4G"]
+    assert keys["MemoryMax"] == ["3G"]
     (command,) = keys["Exec"]
-    for setting in ("shared_buffers=1GB", "max_wal_size=8GB", "temp_file_limit=100GB"):
+    for setting in ("shared_buffers=768MB", "max_wal_size=8GB", "temp_file_limit=100GB"):
         assert f"-c {setting}" in command
 
 
@@ -163,8 +201,9 @@ def test_the_readiness_gate_waits_on_the_published_ports():
 @pytest.mark.parametrize("path", PROCESS_UNITS, ids=lambda p: p.name)
 def test_dev_processes_are_clock_gated_and_stop_on_exit_78(path):
     keys = _keys(path)
-    (pre,) = keys["ExecStartPre"]
-    assert pre.split()[1].endswith("/deploy/dev/protea-dev-clock-gate.sh")
+    disk, clock = keys["ExecStartPre"]
+    assert disk == DISK_GATE
+    assert clock.split()[1].endswith("/deploy/dev/protea-dev-clock-gate.sh")
     assert keys["RestartPreventExitStatus"] == ["78"]
     (timeout,) = keys["TimeoutStartSec"]
     assert _seconds(timeout) > GATE_CAP_SECONDS
