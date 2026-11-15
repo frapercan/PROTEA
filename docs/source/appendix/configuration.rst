@@ -60,6 +60,24 @@ Environment variable overrides
        string using the ``postgresql+psycopg`` driver.
    * - ``PROTEA_AMQP_URL``
      - Overrides ``queue.amqp_url``. Standard AMQP URL format.
+   * - ``PROTEA_ENVIRONMENT``
+     - The environment the process declares. ``test`` and ``dev`` relax the
+       API rate limits to 9999/hour (:mod:`protea.api.rate_limit`). ``dev``
+       also makes the API and every worker, the reaper included, refuse to
+       start unless the database in ``PROTEA_DB_URL`` and the vhost in
+       ``PROTEA_AMQP_URL`` are the two dev names below. The refusal is one
+       line on stderr and exit status 78 (``EX_CONFIG``), so a unit with
+       ``RestartPreventExitStatus=78`` stays down instead of restarting.
+       Unset, or any other value, starts as before. Read by
+       :mod:`protea.infrastructure.environment_check`.
+   * - ``PROTEA_DEV_DATABASE_NAME``
+     - The database a ``dev`` process must find in ``PROTEA_DB_URL``. A
+       ``dbname`` query parameter counts over the path, as it does for the
+       driver. Default ``protea_dev``.
+   * - ``PROTEA_DEV_AMQP_VHOST``
+     - The vhost a ``dev`` process must find in ``PROTEA_AMQP_URL``, read as
+       pika reads it: a URL with no path means ``/``. Default
+       ``protea-dev``.
    * - ``PROTEA_ARTIFACTS_DIR``
      - Overrides ``storage.artifacts_dir`` (the ``cafaeval`` artefacts
        directory used by ``run_cafa_evaluation``).
@@ -139,6 +157,26 @@ Environment variable overrides
        ``protea/artifacts/align_cache`` inside the project root. Set to
        an empty string to disable caching entirely. Read by
        :mod:`protea.core._pair_feature_compute`.
+   * - ``PROTEA_SKIP_TAXONOMY_WARMUP``
+     - ``1``, ``true`` or ``yes`` keeps the NCBI taxonomy warm-up out of
+       worker startup. Without it the workers on ``protea.jobs``,
+       ``protea.predictions.batch`` and ``protea.training`` load the
+       taxonomy before they consume anything, which, with
+       ``PROTEA_TAXONOMY_DB_PATH`` unset, downloads today's NCBI dump
+       (about 100 MB) when ete3's file under ``$HOME`` is absent. Skipping
+       only moves that load to the first taxonomy feature. Read by
+       ``scripts/worker.py``.
+   * - ``PROTEA_TAXONOMY_DB_PATH``
+     - A declared ete3 taxonomy database (``taxa.sqlite``). Unset, ete3
+       opens its default under ``$HOME`` and downloads the current NCBI
+       dump when that file is absent or in a format it does not read. Set,
+       that file is loaded as it is and never downloaded or rebuilt. A
+       missing or unreadable file, or an interpreter that cannot import
+       ete3, raises ``DeclaredTaxonomyUnavailable``, so the computation that
+       asked for taxonomy fails instead of recording the pair as unrelated.
+       Pointing it at a file that does not exist yet is how a deployment
+       forbids the download before a taxonomy is declared. Read by
+       :mod:`protea.core.feature_engineering`.
 
 Frontend
 --------
