@@ -502,7 +502,7 @@ UUID in the ``predict_go_terms`` payload:
      -H "Content-Type: application/json" \
      -d '{
        "operation": "predict_go_terms",
-       "queue_name": "protea.jobs",
+       "queue_name": "protea.predictions",
        "payload": {
          "embedding_config_id": "<config-uuid>",
          "annotation_set_id": "<annotation-set-uuid>",

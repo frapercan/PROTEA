@@ -19,7 +19,9 @@ from protea.api.deps import (
 )
 from protea.api.rate_limit import jobs_limit, limiter
 from protea.api.roles import ROLE_ADMIN, ROLE_OPERATOR, require_role, role_of
+from protea.core import queues
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.operation_spec import refuse_job_request
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.api_key import ApiKey
 from protea.infrastructure.orm.models.job import (
@@ -160,7 +162,8 @@ class CreateJobRequest(BaseModel):
     """Body for ``POST /jobs``.
 
     Tells PROTEA which registered operation to run (``operation``) and
-    which RabbitMQ queue to publish the work onto (``queue_name``). The
+    which RabbitMQ queue to publish the work onto (``queue_name``), which
+    must be the queue the operation's spec names (ADR-D60, decision 6). The
     ``payload`` blob is op-specific; the operation registry validates it
     on dequeue. ``description`` / ``tags`` are the D11 narrative fields
     surfaced in the UI run detail.
@@ -171,14 +174,14 @@ class CreateJobRequest(BaseModel):
         "json_schema_extra": {
             "example": {
                 "operation": "compute_embeddings",
-                "queue_name": "protea.embedding",
+                "queue_name": queues.EMBEDDINGS,
                 "payload": {
-                    "embedding_config_id": "00000000-0000-0000-0000-000000000001",
-                    "annotation_set_id": "00000000-0000-0000-0000-000000000002",
+                    "embedding_config_ids": ["00000000-0000-0000-0000-000000000001"],
+                    "query_set_id": "00000000-0000-0000-0000-000000000002",
                     "batch_size": 1,
                 },
                 "meta": {},
-                "description": "Recompute ESM-2 embeddings for the GOA 2024-04 set.",
+                "description": "Compute ESM-2 embeddings for one query set.",
                 "tags": ["ablation", "benchmark-v1"],
             }
         },
@@ -188,7 +191,12 @@ class CreateJobRequest(BaseModel):
         ..., min_length=1, description="Registered operation name, e.g. `insert_proteins`."
     )
     queue_name: str = Field(
-        ..., min_length=1, description="RabbitMQ queue to publish the job to, e.g. `protea.jobs`."
+        ...,
+        min_length=1,
+        description=(
+            "RabbitMQ queue to publish the job to: the one the operation's spec names, "
+            "e.g. `protea.jobs`. Any other queue is refused with 422."
+        ),
     )
     payload: dict[str, Any] = Field(
         default_factory=dict, description="Operation-specific configuration object."
@@ -226,14 +234,44 @@ class _CreateJobDeps(NamedTuple):
     factory: sessionmaker[Session]
     amqp_url: str
     quota_map: dict[str, int]
+    registry: OperationRegistry
 
 
 def _create_job_deps(
     factory: sessionmaker[Session] = Depends(get_session_factory),
     amqp_url: str = Depends(get_amqp_url),
     quota_map: dict[str, int] = Depends(get_user_quota_per_day),
+    registry: OperationRegistry = Depends(get_operation_registry),
 ) -> _CreateJobDeps:
-    return _CreateJobDeps(factory=factory, amqp_url=amqp_url, quota_map=quota_map)
+    return _CreateJobDeps(
+        factory=factory, amqp_url=amqp_url, quota_map=quota_map, registry=registry
+    )
+
+
+def _refuse_what_the_spec_does_not_admit(
+    registry: OperationRegistry, body: CreateJobRequest
+) -> None:
+    """422 unless the operation is registered, is a job, and goes to its spec's queue.
+
+    ADR-D60, decision 6. An unknown operation would only fail on dequeue. A
+    message stage or a write never gets a Job row: its consumer reads an
+    operation message and cannot read a job id. And a queue other than the
+    spec's leaves the job where no consumer, or the wrong one, takes it. The
+    one latitude is the probe (``ping``), which any job queue accepts.
+    """
+    refusal = refuse_job_request(registry.specs(), body.operation, body.queue_name)
+    if refusal is None:
+        return
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "error": refusal.error,
+            "message": refusal.message,
+            "operation": body.operation,
+            "queue_name": body.queue_name,
+            "expected_queue": refusal.expected_queue,
+        },
+    )
 
 
 def _maybe_enforce_user_quota(
@@ -341,11 +379,16 @@ def create_job(
 ) -> dict[str, Any]:
     """Create a Job row and publish its ID to the specified RabbitMQ queue.
 
-    Expensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are
-    subject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.
-    Duplicate POSTs (same operation + payload while the previous job is active)
-    return 409 with the existing job_id (F-OPS-JOBS.1 dedup).
+    Refused with 422 before anything is written or counted: an operation the
+    registry does not know, one whose kind never gets a Job row (a message
+    stage or a write), and a queue other than the one its spec names (ADR-D60,
+    decision 6). Expensive operations (``export_research_dataset``,
+    ``run_cafa_evaluation``) are subject to per-user daily quota limits
+    (FARM-AUTH.7). Admins are exempt. Duplicate POSTs (same operation + payload
+    while the previous job is active) return 409 with the existing job_id
+    (F-OPS-JOBS.1 dedup).
     """
+    _refuse_what_the_spec_does_not_admit(deps.registry, body)
     _maybe_enforce_user_quota(principal, body, deps.quota_map, deps.factory)
     dedup_key = compute_dedup_key(body.operation, body.payload)
     with session_scope(deps.factory) as session:

@@ -40,6 +40,8 @@ from typing import Any
 
 import requests
 
+from protea.core import queues
+
 # ---------------------------------------------------------------------------
 # Typing helpers
 # ---------------------------------------------------------------------------
@@ -231,7 +233,8 @@ class ProteaClient:
 
         body: JsonDict = {
             "operation": "predict_go_terms",
-            "queue_name": "protea.jobs",
+            # The queue predict_go_terms' spec names: POST /jobs refuses any other.
+            "queue_name": queues.PREDICTIONS,
             "payload": payload,
             "meta": meta or {"experiment_label": spec.label},
         }

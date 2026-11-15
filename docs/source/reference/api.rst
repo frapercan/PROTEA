@@ -998,6 +998,14 @@ the ``Job`` row and never interpreted by the API. ``description`` and
 attach human intent and ad-hoc grouping tokens at submission time
 without round-tripping through a separate metadata endpoint.
 
+``queue_name`` must be the queue the operation's spec names (ADR-D60,
+decision 6). The endpoint answers 422 before it writes anything when the
+operation is not registered (``unknown_operation``), when its kind never gets
+a ``Job`` row, as a message stage or a write does (``not_a_job``), and when
+the queue is another one (``wrong_queue``, with the right one in
+``expected_queue``). The ``ping`` probe is the one operation any job queue
+accepts.
+
 .. code-block:: json
 
    {

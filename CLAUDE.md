@@ -153,7 +153,7 @@ Every state transition is recorded as a `JobEvent` row for a full audit trail. T
 
 ### HTTP API (`protea/api/routers/jobs.py`)
 
-FastAPI router at `/jobs`. The `session_factory` is injected via `app.state.session_factory` (set at app startup: not hardcoded in the router). Endpoints: `POST /jobs`, `GET /jobs` (filterable by `status`/`operation`), `GET /jobs/{id}`, `GET /jobs/{id}/events`, `POST /jobs/{id}/cancel`.
+FastAPI router at `/jobs`. The `session_factory` is injected via `app.state.session_factory` (set at app startup: not hardcoded in the router). Endpoints: `POST /jobs`, `GET /jobs` (filterable by `status`/`operation`), `GET /jobs/{id}`, `GET /jobs/{id}/events`, `POST /jobs/{id}/cancel`. `POST /jobs` answers 422 before writing anything for an unregistered operation, an operation whose kind never gets a Job row (a message stage or a write), and a `queue_name` other than the one its `OperationSpec` names; only the `ping` probe may go to any job queue.
 
 ### Data Model (`protea/infrastructure/orm/models/`)
 

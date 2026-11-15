@@ -398,17 +398,19 @@
       },
       "CreateJobRequest": {
         "additionalProperties": false,
-        "description": "Body for ``POST /jobs``.\n\nTells PROTEA which registered operation to run (``operation``) and\nwhich RabbitMQ queue to publish the work onto (``queue_name``). The\n``payload`` blob is op-specific; the operation registry validates it\non dequeue. ``description`` / ``tags`` are the D11 narrative fields\nsurfaced in the UI run detail.",
+        "description": "Body for ``POST /jobs``.\n\nTells PROTEA which registered operation to run (``operation``) and\nwhich RabbitMQ queue to publish the work onto (``queue_name``), which\nmust be the queue the operation's spec names (ADR-D60, decision 6). The\n``payload`` blob is op-specific; the operation registry validates it\non dequeue. ``description`` / ``tags`` are the D11 narrative fields\nsurfaced in the UI run detail.",
         "example": {
-          "description": "Recompute ESM-2 embeddings for the GOA 2024-04 set.",
+          "description": "Compute ESM-2 embeddings for one query set.",
           "meta": {},
           "operation": "compute_embeddings",
           "payload": {
-            "annotation_set_id": "00000000-0000-0000-0000-000000000002",
             "batch_size": 1,
-            "embedding_config_id": "00000000-0000-0000-0000-000000000001"
+            "embedding_config_ids": [
+              "00000000-0000-0000-0000-000000000001"
+            ],
+            "query_set_id": "00000000-0000-0000-0000-000000000002"
           },
-          "queue_name": "protea.embedding",
+          "queue_name": "protea.embeddings",
           "tags": [
             "ablation",
             "benchmark-v1"
@@ -446,7 +448,7 @@
             "type": "object"
           },
           "queue_name": {
-            "description": "RabbitMQ queue to publish the job to, e.g. `protea.jobs`.",
+            "description": "RabbitMQ queue to publish the job to: the one the operation's spec names, e.g. `protea.jobs`. Any other queue is refused with 422.",
             "minLength": 1,
             "title": "Queue Name",
             "type": "string"
@@ -8923,7 +8925,7 @@
         ]
       },
       "post": {
-        "description": "Create a Job row and publish its ID to the specified RabbitMQ queue.\n\nExpensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are\nsubject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.\nDuplicate POSTs (same operation + payload while the previous job is active)\nreturn 409 with the existing job_id (F-OPS-JOBS.1 dedup).",
+        "description": "Create a Job row and publish its ID to the specified RabbitMQ queue.\n\nRefused with 422 before anything is written or counted: an operation the\nregistry does not know, one whose kind never gets a Job row (a message\nstage or a write), and a queue other than the one its spec names (ADR-D60,\ndecision 6). Expensive operations (``export_research_dataset``,\n``run_cafa_evaluation``) are subject to per-user daily quota limits\n(FARM-AUTH.7). Admins are exempt. Duplicate POSTs (same operation + payload\nwhile the previous job is active) return 409 with the existing job_id\n(F-OPS-JOBS.1 dedup).",
         "operationId": "create_job_v1_jobs_post",
         "parameters": [
           {

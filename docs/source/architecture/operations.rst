@@ -2078,7 +2078,9 @@ Registering a new operation
       )),
 
 5. Route jobs to the queue the spec names by setting ``queue_name`` in the
-   ``POST /jobs`` request body. A new queue name goes in
-   ``protea/core/queues.py`` first.
+   ``POST /jobs`` request body. The endpoint refuses with 422 any other queue
+   (only the ``ping`` probe may go to any job queue), and any operation whose
+   kind never gets a Job row (``message_stage``, ``write`` and ``file_stage``).
+   A new queue name goes in ``protea/core/queues.py`` first.
 
 No changes to ``BaseWorker``, the API, or the infrastructure layer are required.
