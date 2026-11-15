@@ -17,6 +17,7 @@ from pathlib import Path
 
 from protea.config.tuning import WorkerTuning
 from protea.core.operation_catalog import build_operation_registry
+from protea.core.operation_spec import message_queues
 from protea.infrastructure.environment_check import exit_on_environment_mismatch
 from protea.infrastructure.queue.consumer import (
     ConsumerOptions,
@@ -82,21 +83,11 @@ def main() -> None:
 
     registry = build_operation_registry()
 
-    # Queues that carry ephemeral operation messages (no DB Job row per message)
-    # use OperationConsumer.  All other queues use the standard QueueConsumer.
-    _OPERATION_QUEUES = {
-        "protea.embeddings.batch",
-        "protea.embeddings.write",
-        # The node's own upload stage: shards a card batch spooled on this disk (ADR-D51).
-        "protea.embeddings.upload",
-        "protea.predictions.batch",
-        "protea.predictions.write",
-        # Export minijob pipeline sub-queues (PROTEA_EXPORT_MINIJOBS=1).
-        # No DB Job row per message; parent Job progress tracked by coordinator.
-        "protea.training.knn-batch",
-        "protea.training.features",
-        "protea.training.write",
-    }
+    # A queue whose operations travel as their own message, with no Job row per
+    # message (the message stages and the writes), takes an OperationConsumer;
+    # every other queue takes the standard QueueConsumer. The operation specs say
+    # which (ADR-D60, decision 6), so a new stage brings its consumer with it.
+    operation_queues = message_queues(registry.specs().values())
 
     # Special mode: stale job reaper (no queue, just periodic DB check).
     if args.queue == "reaper":
@@ -126,7 +117,7 @@ def main() -> None:
         return
 
     options = ConsumerOptions(requeue_on_failure=args.requeue_on_failure)
-    if args.queue in _OPERATION_QUEUES:
+    if args.queue in operation_queues:
         consumer: QueueConsumer | OperationConsumer = OperationConsumer(
             amqp_url=settings.amqp_url,
             queue_name=args.queue,

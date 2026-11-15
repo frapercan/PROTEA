@@ -71,8 +71,11 @@ operation routed to its queue.
 QueueConsumer vs OperationConsumer
 -----------------------------------
 
-Two consumer patterns exist in ``protea/infrastructure/queue/consumer.py``,
-selected by the queue configuration in ``scripts/worker.py``:
+Two consumer patterns exist in ``protea/infrastructure/queue/consumer.py``.
+``scripts/worker.py`` picks one from the operation specs (ADR-D60, decision 6):
+a queue whose operations are message stages or writes, which never get a
+``Job`` row, takes an ``OperationConsumer``; every other queue takes a
+``QueueConsumer``.
 
 **QueueConsumer**
    Reads a job UUID from the queue and delegates to
@@ -103,6 +106,9 @@ selected by the queue configuration in ``scripts/worker.py``:
      shards its batches spooled in the artifact store (``upload_residue_shard``)
    - ``protea.predictions.batch``: KNN search + GO transfer
    - ``protea.predictions.write``: bulk GOPrediction insert
+   - ``protea.training.knn-batch``, ``protea.training.features`` and
+     ``protea.training.write``: the export minijob stages
+     (``PROTEA_EXPORT_MINIJOBS=1``)
 
 .. rubric:: Graceful shutdown
 
