@@ -5,7 +5,7 @@ Usage (the database URL comes from the environment, never from argv)::
     ( set -a; . ~/.secrets/protea-dev.env; set +a
       umask 077
       python scripts/bootstrap_operator_key.py --name dev-operator \\
-          > ~/.secrets/protea-dev-operator.key )
+          > ~/.secrets/protea-dev/operator-key )
 
 The new key goes to stdout, once, and nothing else does. The target (with
 its password masked), the key's id and prefix, and any refusal go to stderr,
