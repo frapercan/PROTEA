@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from protea.config.tuning import WorkerTuning
+from protea.core import queues
 from protea.core.operation_catalog import build_operation_registry
 from protea.core.operation_spec import message_queues
 from protea.infrastructure.environment_check import exit_on_environment_mismatch
@@ -47,7 +48,7 @@ def _build_reaper_config(worker_settings: WorkerTuning) -> StaleJobReaperConfig:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="PROTEA queue worker")
-    parser.add_argument("--queue", default="protea.jobs", help="Queue name to consume")
+    parser.add_argument("--queue", default=queues.JOBS, help="Queue name to consume")
     parser.add_argument("--requeue-on-failure", action="store_true")
     parser.add_argument(
         "--log-format",
@@ -183,7 +184,7 @@ def main() -> None:
     )
     if skip_warmup:
         logging.info("Taxonomy DB warmup skipped: PROTEA_SKIP_TAXONOMY_WARMUP is set")
-    elif args.queue in ("protea.predictions.batch", "protea.jobs", "protea.training"):
+    elif args.queue in (queues.PREDICTIONS_BATCH, queues.JOBS, queues.TRAINING):
         try:
             from protea.core.feature_engineering import warmup_taxonomy_db
 

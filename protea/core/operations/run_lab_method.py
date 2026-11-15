@@ -80,6 +80,7 @@ from typing import Annotated, Any
 from pydantic import AfterValidator, Field
 from sqlalchemy.orm import Session
 
+from protea.core import queues
 from protea.core._evaluation_leakage import _release
 from protea.core.contracts.operation import (
     EmitFn,
@@ -96,9 +97,9 @@ from protea.infrastructure.orm.models.embedding.embedding_config import (
 from protea.infrastructure.orm.models.job import Job, JobEvent
 
 #: The job queue the node with the card consumes for method runs.
-NODE_QUEUE = "protea.methods"
+NODE_QUEUE = queues.METHODS
 #: Where the server ingests a method's predictions (a job queue).
-INGEST_QUEUE = "protea.methods.write"
+INGEST_QUEUE = queues.METHODS_WRITE
 #: Seconds between the events the job emits while the container runs.
 HEARTBEAT_SECONDS = 600
 #: Seconds the container gets to stop when the wall-clock limit is reached.

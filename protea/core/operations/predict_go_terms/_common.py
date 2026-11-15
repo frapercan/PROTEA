@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from protea.core import queues
 from protea.core.feature_enricher import NEW_V6_FEATURE_KEYS as _NEW_V6_FEATURE_KEYS
 from protea.core.jsonb_dual_write import maybe_jsonb
 
@@ -21,8 +22,8 @@ from protea.core.jsonb_dual_write import maybe_jsonb
 # the streaming reference query fetches ~5 MB per cursor round-trip,
 # keeping Python object pressure negligible.
 
-_BATCH_QUEUE = "protea.predictions.batch"
-_WRITE_QUEUE = "protea.predictions.write"
+_BATCH_QUEUE = queues.PREDICTIONS_BATCH
+_WRITE_QUEUE = queues.PREDICTIONS_WRITE
 
 
 @dataclass(frozen=True)

@@ -14,12 +14,13 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.core import queues
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.session import session_scope
 from protea.services.annotations_service import EntityNotFoundError, iter_groundtruth_tsv
 
-JOBS_QUEUE = "protea.jobs"
-EVALUATIONS_QUEUE = "protea.evaluations"
+JOBS_QUEUE = queues.JOBS
+EVALUATIONS_QUEUE = queues.EVALUATIONS
 
 #: Characters to accumulate before handing a block to the socket in
 #: :func:`stream_groundtruth`. A GT row is ``<accession>\t<go_id>\n``, pure

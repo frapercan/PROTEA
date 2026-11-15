@@ -10,6 +10,7 @@ from uuid import UUID
 import pika
 
 from protea.config.tuning import get_tuning
+from protea.core import queues
 from protea.infrastructure.telemetry import get_tracer, inject_trace_context
 
 logger = logging.getLogger(__name__)
@@ -89,7 +90,7 @@ def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
             channel.queue_declare(
                 queue=queue_name,
                 durable=True,
-                arguments={"x-dead-letter-exchange": "protea.dlx"},
+                arguments={"x-dead-letter-exchange": queues.DEAD_LETTER_EXCHANGE},
             )
             _publish_with_span(channel, queue_name, body)
             return
