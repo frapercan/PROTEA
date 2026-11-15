@@ -39,6 +39,8 @@ FORBIDDEN: tuple[re.Pattern[str], ...] = (
     # The footer, with or without the bracket of its Markdown link.
     re.compile(r"generated\s+with\s+\[?claude", re.IGNORECASE),
     re.compile(r"generated\s+by\s+\[?anthropic", re.IGNORECASE),
+    # A bare session link, the line that follows the footer in a pull request body.
+    re.compile(r"claude\.ai/code/session_", re.IGNORECASE),
 )
 
 
