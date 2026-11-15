@@ -68,18 +68,6 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc
     faiss_nlist: int = 256
     faiss_nprobe: int = 32
 
-    # LightGBM parameters
-    num_boost_round: int = 1000
-    early_stopping_rounds: int = 50
-    val_fraction: float = 0.2
-    neg_pos_ratio: float | None = None
-
-    # Reranker objective: "binary" (default, classic logloss+AUC) or
-    # "lambdarank" (listwise ranking loss with groups keyed by query
-    # protein). LambdaRank optimizes ranking order directly and tends to
-    # improve Fmax on retrieval-style tasks.
-    reranker_objective: str = "binary"
-
     # Feature computation
     compute_alignments: bool = False
     compute_taxonomy: bool = False

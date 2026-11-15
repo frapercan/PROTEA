@@ -350,8 +350,6 @@ class TrainRerankerAutoOperation:
             bits.append(f"train={train[0]}→{train[-1]} (n={len(train)})")
         if test:
             bits.append(f"test={','.join(str(v) for v in test)}")
-        if p.get("num_boost_round"):
-            bits.append(f"rounds={p['num_boost_round']}")
         return " · ".join(bits)
 
     @staticmethod
