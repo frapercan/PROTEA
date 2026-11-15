@@ -26,11 +26,13 @@ Context: the third tier went empty at release 179, and nothing declares what a c
 reads the entry name GOA used to write first in DB Object Synonym. Measured on
 2026-10-06 over the cached releases (``_universe_sources.py``): 100% of rows carry
 an entry name in 164 to 178, 0% in 179 and 180, 5% in 231. The rule now demands
-positive evidence, so it fails closed: at 194, 211 and 227 the corpus is admitted
-through two tiers, not three, and **a reviewed protein whose only annotations are
-electronic or phylogenetic is not in the corpus at those cuts.** The corpus the
-campaign describes as *reviewed plus experimental* is, after 178, *experimental
-plus curated inference*.
+positive evidence, so it fails closed: from 179 on, new proteins enter through two
+tiers, not three. Proteins admitted up to 178 stay, so the loss is the reviewed
+entries that arrived later. Measured at 211 against Swiss-Prot 2022_03 (568,002
+entries, step 1 of this record): 539,295 (94,9%) are in the corpus, 536,264 of
+them admitted by 178, and **28,707 are not**: 9,415 whose only GOA 211 rows are
+electronic or phylogenetic, 113 with only ``ND`` and 19,179 with no GOA 211 row at
+all. Every reviewed entry with a truth or curated row is in.
 
 **No cut declares the set it is asked to annotate.** In CAFA and LAFA a target set
 is published at the cut and only what changes inside it is evaluated; LAFA's
