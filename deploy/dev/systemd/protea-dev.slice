@@ -1,0 +1,18 @@
+[Unit]
+# Every dev process lives here: the three infra containers, the workers and
+# the API. The production worker on this machine may take up to 48 GiB of
+# the 61, so dev gets a hard memory ceiling of its own, and half the default
+# CPU weight so that production wins when both want the processors.
+#
+# systemd nests slices by dash, so this one sits under protea.slice. No
+# production unit uses protea.slice today; if one ever does, its limits will
+# bound this slice too.
+#
+# No ordering against slices.target: the user manager has none (LoadState
+# not-found on this machine), and the slice is created when the first unit
+# placed in it starts.
+Description=PROTEA development stack (containers, workers, API)
+
+[Slice]
+MemoryMax=9G
+CPUWeight=50
