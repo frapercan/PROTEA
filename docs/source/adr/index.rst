@@ -401,3 +401,4 @@ later revision) or *Superseded* (a named later decision replaces it).
    D56-transitions-dataset-is-tables-keyed-by-what-they-depend-on
    D57-vocabulary-exams-inside-the-platform
    D58-every-entity-carries-a-short-and-a-long-descriptor
+   D59-the-corpus-at-a-cut-is-a-photo
