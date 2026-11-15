@@ -222,6 +222,10 @@ def test_a_value_with_no_single_json_spelling_is_refused(recipe: dict[Any, Any])
         {"recipe": ["not", "a", "mapping"]},
         {"pins": (Pin("plm", _PLM_SHA), Pin("plm", _PLM_SHA, ("s3://elsewhere",)))},
         {"pins": ("plm",)},
+        # An empty string iterates as no pins at all, so it read as a method
+        # that depends on nothing.
+        {"pins": ""},
+        {"pins": Pin("plm", _PLM_SHA)},
     ],
     ids=[
         "code-with-capitals-and-space",
@@ -233,6 +237,8 @@ def test_a_value_with_no_single_json_spelling_is_refused(recipe: dict[Any, Any])
         "recipe-not-mapping",
         "pin-twice",
         "pin-not-a-pin",
+        "pins-an-empty-string",
+        "pins-one-pin-not-a-tuple",
     ],
 )
 def test_a_spec_that_declares_something_impossible_is_refused(change: dict[str, Any]) -> None:
@@ -339,6 +345,12 @@ class TestATrainingIdentity:
             {"sibling_revisions": {"protea-method": ""}},
             {"pretrained_exceptions": ("",)},
             {"label_free": "no"},
+            # One string where a tuple belongs iterates as its characters:
+            # "ankh-base" was nine one-letter exceptions, all of them valid.
+            {"pretrained_exceptions": "ankh-base"},
+            {"data": "d" * 64},
+            {"windows": TrainingWindow(uuid.UUID(int=1), "fit")},
+            {"sibling_revisions": [("protea-method", "a120f613b9d2")]},
         ],
         ids=[
             "fit-list-holds-a-holdout",
@@ -351,6 +363,10 @@ class TestATrainingIdentity:
             "empty-sibling-revision",
             "empty-exception",
             "label-free-not-bool",
+            "exceptions-a-string",
+            "data-a-string",
+            "windows-one-window",
+            "siblings-not-a-mapping",
         ],
     )
     def test_an_impossible_identity_is_refused(self, change: dict[str, Any]) -> None:

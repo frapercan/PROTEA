@@ -138,6 +138,18 @@ def _text(value: object, what: str) -> str:
     return value
 
 
+def _sequence(value: object, what: str) -> tuple[Any, ...]:
+    """``value`` as a tuple, refusing a string, which iterates as its characters.
+
+    A field that holds several values and is given one string would otherwise
+    be read character by character: ``pretrained_exceptions="ankh-base"`` was
+    nine exceptions, and ``pins=""`` was a method with no pins.
+    """
+    if isinstance(value, (str, bytes)) or not isinstance(value, (tuple, list)):
+        raise ValueError(f"{what} must be a tuple, not a {type(value).__name__}")
+    return tuple(value)
+
+
 def _as_uuid(value: object, what: str) -> uuid.UUID:
     if isinstance(value, uuid.UUID):
         return value
@@ -260,9 +272,8 @@ class Pin:
     def __post_init__(self) -> None:
         _slug(self.role, "the pin role")
         _digest(self.sha256, f"the {self.role} pin's sha256")
-        if isinstance(self.refs, str) or not isinstance(self.refs, (tuple, list)):
-            raise ValueError(f"the {self.role} pin's refs must be a tuple of strings")
-        refs = tuple(_one_spelling(_text(ref, f"a {self.role} pin reference")) for ref in self.refs)
+        given = _sequence(self.refs, f"the {self.role} pin's refs")
+        refs = tuple(_one_spelling(_text(ref, f"a {self.role} pin reference")) for ref in given)
         if len(set(refs)) != len(refs):
             raise ValueError(f"the {self.role} pin lists a reference more than once: {refs}")
         object.__setattr__(self, "refs", tuple(sorted(refs)))
@@ -318,21 +329,23 @@ class TrainingIdentity:
         if not isinstance(self.label_free, bool):
             raise ValueError(f"label_free {self.label_free!r} is not a boolean")
         self._check_windows()
-        object.__setattr__(
-            self, "data", tuple(_digest(d, "a training data digest") for d in self.data)
-        )
+        data = _sequence(self.data, "the training data digests")
+        object.__setattr__(self, "data", tuple(_digest(d, "a training data digest") for d in data))
         _text(self.code_revision, "the code_revision")
         _text(self.evaluator_revision, "the evaluator_revision")
+        if not isinstance(self.sibling_revisions, Mapping):
+            raise ValueError("the sibling revisions must be a mapping of package to revision")
         siblings = {
             _text(name, "a sibling package"): _text(rev, f"the {name} revision")
             for name, rev in self.sibling_revisions.items()
         }
         object.__setattr__(self, "sibling_revisions", MappingProxyType(siblings))
-        exceptions = tuple(_text(e, "a pretrained exception") for e in self.pretrained_exceptions)
+        given = _sequence(self.pretrained_exceptions, "the pretrained exceptions")
+        exceptions = tuple(_text(e, "a pretrained exception") for e in given)
         object.__setattr__(self, "pretrained_exceptions", exceptions)
 
     def _check_windows(self) -> None:
-        windows = tuple(self.windows)
+        windows = _sequence(self.windows, "the training windows")
         object.__setattr__(self, "windows", windows)
         given = (*windows, self.holdout) if self.holdout is not None else windows
         if not all(isinstance(w, TrainingWindow) for w in given):
@@ -395,9 +408,10 @@ class MethodSpec:
         if not isinstance(self.recipe, Mapping):
             raise ValueError("the recipe must be a mapping")
         object.__setattr__(self, "recipe", _freeze(_plain(self.recipe, "the recipe")))
-        if not all(isinstance(p, Pin) for p in self.pins):
+        given = _sequence(self.pins, "the pins")
+        if not all(isinstance(p, Pin) for p in given):
             raise ValueError("the pins must be Pin values")
-        pins = tuple(sorted(self.pins, key=lambda p: (p.role, p.sha256, p.refs)))
+        pins = tuple(sorted(given, key=lambda p: (p.role, p.sha256, p.refs)))
         named = [(p.role, p.sha256) for p in pins]
         if len(set(named)) != len(named):
             raise ValueError("a pin is listed twice with one role and one sha256")
