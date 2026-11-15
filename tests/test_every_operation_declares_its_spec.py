@@ -74,17 +74,17 @@ TODAY: dict[str, str] = {
     "export_evaluation_targets": queues.JOBS,
     "declare_query_set_provenance": queues.JOBS,
     "export_transitions_dataset": queues.TRAINING,
-    # Docs and dispatchers: the coordinators of the residue codes (architecture/
-    # operations.rst; the weights dialog posts them), build_go_cooccurrence
+    # Docs and dispatchers: the residue vocabulary's coordinator (architecture/
+    # operations.rst; the weights dialog posts it), build_go_cooccurrence
     # (runbooks/lafa-native-parity.rst), batch_rescore_evaluation
     # (scripts/hpo_champion_score.py) and apply_learned_encoder (its pull request:
     # "Registered on protea.jobs").
     "encode_residue_vocabulary": queues.EMBEDDINGS,
-    "encode_residue_sparse": queues.EMBEDDINGS,
     "build_go_cooccurrence": queues.JOBS,
     "batch_rescore_evaluation": queues.EVALUATIONS,
     "apply_learned_encoder": queues.JOBS,
     # The plan's section C table: see ROUTED_BY_THE_PLAN.
+    "encode_residue_sparse": queues.EMBEDDINGS,
     "stratify_evaluation": queues.EVALUATIONS,
     "compare_paired_panels": queues.EVALUATIONS,
     "seal_evaluation_frames": queues.EVALUATIONS,
@@ -104,11 +104,14 @@ TODAY: dict[str, str] = {
 }
 
 #: The operations nothing in the code, CLAUDE.md or the docs routes today, whose
-#: queue is the plan's: the evaluation jobs on protea.evaluations, the one job that
-#: runs a model on protea.methods (the GPU node, with its device ``cuda``), and the
-#: rest on the general queue.
+#: queue is the plan's: the sparse residue coordinator on protea.embeddings beside the
+#: other two coordinators whose batches go to the card (the docs route its batches, not
+#: the coordinator), the evaluation jobs on protea.evaluations, the one job that runs a
+#: model on protea.methods (the GPU node, with its device ``cuda``), and the rest on the
+#: general queue.
 ROUTED_BY_THE_PLAN: frozenset[str] = frozenset(
     {
+        "encode_residue_sparse",
         "stratify_evaluation",
         "compare_paired_panels",
         "seal_evaluation_frames",
