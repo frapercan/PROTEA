@@ -1571,9 +1571,10 @@ source_version)`` means that re-running for the same release is a no-op.
 
 The three dating fields go together: all three or none. Given, the payload
 refuses a cut after the mark (227) and a mapping published after its cut,
-before anything is downloaded (ADR-D60). Left out, the load runs as before. The
-default URL serves today's file, so a load for a cut names a file dated on or
-before it.
+before anything is downloaded (ADR-D60). Left out, the load runs as before. A
+dated load must also name its file: the default URL serves whatever file is
+current when the job runs, so nothing would tie its bytes to ``published_at``,
+and the payload refuses it.
 
 The result dict reports ``rows_parsed``, ``rows_inserted``, and
 ``rows_skipped_duplicate``.

@@ -38,7 +38,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.source_guards import refuse_a_dated_source
+from protea.core.source_guards import SourceGuardError, refuse_a_dated_source
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.interpro_go_mapping import (
     InterProGoMapping,
@@ -48,6 +48,10 @@ PositiveInt = Annotated[int, Field(gt=0)]
 
 _DEFAULT_MAPPING_URL = "https://ftp.ebi.ac.uk/pub/databases/GO/goa/external2go/interpro2go"
 _DEFAULT_EVIDENCE = "IEA"
+
+#: The default endpoint without its scheme: it serves whatever file is current
+#: when the job runs, so a load dated against a cut cannot read from it.
+_CURRENT_FILE = _DEFAULT_MAPPING_URL.split("://", 1)[1]
 
 # InterPro2GO line:  InterPro:IPR000001 <label> > GO:<label> ; GO:0005515
 _LINE_RE = re.compile(r"^InterPro:(?P<ipr>IPR\d{6,7})\s+.*>\s*GO:.*;\s*(?P<go>GO:\d{7})\s*$")
@@ -65,8 +69,9 @@ class LoadInterProGoMappingPayload(ProteaPayload, frozen=True):
     the cut it serves: when the file was published, and the GOA release of the
     cut with that release's publication date. All three or none. Given, the
     payload refuses a cut after the mark and a mapping published after its cut
-    (ADR-D60); left out, the load runs as it always has. The default URL serves
-    today's file, so a load for a cut also names a file dated on or before it.
+    (ADR-D60); left out, the load runs as it always has. A dated load must also
+    name its file: the default URL serves whatever file is current when the job
+    runs, so nothing would tie the bytes to ``published_at``, and it is refused.
     """
 
     source_version: str
@@ -115,6 +120,12 @@ class LoadInterProGoMappingPayload(ProteaPayload, frozen=True):
             cut_release=self.cut_release,
             cut_date=date.fromisoformat(self.cut_date),
         )
+        if self.mapping_url.split("://", 1)[-1].rstrip("/") == _CURRENT_FILE:
+            raise SourceGuardError(
+                f"a mapping dated against cut {self.cut_release} must name its own file: "
+                f"{_DEFAULT_MAPPING_URL} serves whatever file is current when the job "
+                "runs, so nothing ties its bytes to published_at"
+            )
         return self
 
 

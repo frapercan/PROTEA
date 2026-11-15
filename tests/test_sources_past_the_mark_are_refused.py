@@ -182,6 +182,9 @@ class TestThePhotoPassesStopBelowTheCeiling:
 
 
 class TestAnInterProMappingDatedAgainstItsCut:
+    #: A file that names its own release, unlike the default endpoint.
+    ARCHIVED = "https://example.org/archive/2022-07-01/interpro2go"
+
     def _payload(self, **dating: object) -> dict[str, object]:
         return {"source_version": "go-2022-07-01", **dating}
 
@@ -199,9 +202,36 @@ class TestAnInterProMappingDatedAgainstItsCut:
 
     def test_a_mapping_dated_on_or_before_its_cut_is_accepted(self) -> None:
         p = LoadInterProGoMappingPayload.model_validate(
-            self._payload(published_at="2022-07-01", cut_release=211, cut_date="2022-09-16")
+            self._payload(
+                mapping_url=self.ARCHIVED,
+                published_at="2022-07-01",
+                cut_release=211,
+                cut_date="2022-09-16",
+            )
         )
         assert (p.published_at, p.cut_release, p.cut_date) == ("2022-07-01", 211, "2022-09-16")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            None,
+            "https://ftp.ebi.ac.uk/pub/databases/GO/goa/external2go/interpro2go",
+            "http://ftp.ebi.ac.uk/pub/databases/GO/goa/external2go/interpro2go/",
+        ],
+        ids=["left out", "named", "another scheme"],
+    )
+    def test_a_dated_load_from_the_default_url_is_refused(self, url: str | None) -> None:
+        # The default endpoint serves whatever file is current when the job
+        # runs, so a date declared for it says nothing about the bytes read.
+        dating: dict[str, object] = {
+            "published_at": "2022-07-01",
+            "cut_release": 211,
+            "cut_date": "2022-09-16",
+        }
+        if url is not None:
+            dating["mapping_url"] = url
+        with pytest.raises(ValidationError, match="must name its own file"):
+            LoadInterProGoMappingPayload.model_validate(self._payload(**dating))
 
     @pytest.mark.parametrize(
         "partial",
@@ -233,7 +263,12 @@ class TestAnInterProMappingDatedAgainstItsCut:
             events.append((event, fields))
 
         response = MagicMock(text="", status_code=200)
-        payload = self._payload(published_at="2022-07-01", cut_release=211, cut_date="2022-09-16")
+        payload = self._payload(
+            mapping_url=self.ARCHIVED,
+            published_at="2022-07-01",
+            cut_release=211,
+            cut_date="2022-09-16",
+        )
         with patch(
             "protea.core.operations.load_interpro_go_mapping.requests.get",
             return_value=response,
