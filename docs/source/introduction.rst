@@ -139,8 +139,7 @@ single workstation with one GPU. PROTEA currently consolidates eighteen
 registered operations covering ingestion, embedding, prediction, evaluation,
 re-ranking and provenance maintenance, as well as a one-click ``/annotate``
 endpoint that takes a FASTA upload and returns ranked GO predictions. The
-authoritative list is the body of
-``protea.core.operation_catalog.build_operation_registry``.
+authoritative list is ``protea.core.operation_catalog.CATALOG``.
 
 **C2.** A quantitative data-leakage analysis of Pannzer2, InterProScan, and
 eggNOG-mapper against a GOA 220 → 229 temporal holdout. The analysis measures
@@ -207,7 +206,8 @@ Current capabilities
 
 PROTEA currently provides the following registered operations across
 the protein functional annotation pipeline (the authoritative list is
-the body of ``protea.core.operation_catalog.build_operation_registry``):
+``protea.core.operation_catalog.CATALOG``, one row per operation with the
+spec it declares):
 
 - **Data ingestion**: ``insert_proteins``, ``fetch_uniprot_metadata``,
   ``load_ontology_snapshot``, ``load_goa_annotations``,

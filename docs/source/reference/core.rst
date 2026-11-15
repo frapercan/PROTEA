@@ -465,7 +465,8 @@ Operations
 
 PROTEA ships a curated set of registered operation instances at worker
 startup via ``protea.core.operation_catalog.build_operation_registry``,
-which is the authoritative list (read the function body for the live
+which registers every row of ``CATALOG``, the authoritative list (one row
+per operation with the spec it declares; count the rows for the live
 count).
 The catalog splits into job-backed entries (reachable through
 ``POST /jobs``) and ephemeral consumers (dispatched internally by the

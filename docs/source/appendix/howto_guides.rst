@@ -131,14 +131,21 @@ Add a new operation
               # ... domain logic ...
               return OperationResult(result={"done": True})
 
-2. Register it in the worker entry point (``scripts/worker.py``):
+2. Add one row to ``CATALOG`` in ``protea/core/operation_catalog.py``: the class
+   and the ``OperationSpec`` it declares (ADR-D60, decision 6). The registry
+   refuses an operation without one.
 
    .. code-block:: python
 
       from protea.core.operations.my_operation import MyOperation
-      registry.register(MyOperation())
 
-3. Route jobs to the appropriate queue (``protea.jobs`` or a new dedicated queue).
+      (MyOperation, OperationSpec(
+          domain="method", kind="job", queue=queues.JOBS,
+          purity="database", resource="cpu",
+      )),
+
+3. Post its jobs to the queue its spec names: ``POST /jobs`` refuses any other
+   with 422. A new dedicated queue is named in ``protea/core/queues.py`` first.
 
 No changes to ``BaseWorker``, the FastAPI router, or the DB schema are needed.
 
