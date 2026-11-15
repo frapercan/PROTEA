@@ -22,6 +22,7 @@ from protea.api.auth.anon_quota import require_anon_quota
 from protea.api.cache import cached
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.routers.query_sets import _parse_fasta, _upsert_sequences
+from protea.core import queues
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
@@ -236,7 +237,7 @@ async def annotate(
         )
         embed_job_id = _enqueue_embed_job(session, config_id, query_set_id)
 
-    publish_job(amqp_url, "protea.embeddings", embed_job_id)
+    publish_job(amqp_url, queues.EMBEDDINGS, embed_job_id)
 
     predict_payload = _predict_payload(
         config_id, annotation_set_id, ontology_snapshot_id, query_set_id, options
@@ -473,7 +474,7 @@ def _enqueue_embed_job(
     Returns the new job id; the AMQP publish happens after the session commits."""
     job = Job(
         operation="compute_embeddings",
-        queue_name="protea.embeddings",
+        queue_name=queues.EMBEDDINGS,
         payload={
             "embedding_config_id": str(config_id),
             "query_set_id": str(query_set_id),

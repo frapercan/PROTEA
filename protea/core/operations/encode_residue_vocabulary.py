@@ -50,6 +50,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.config.tuning import get_tuning
+from protea.core import queues
 from protea.core.contracts.operation import (
     EmitFn,
     Operation,
@@ -92,7 +93,7 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence
 TARGET_BACKEND = "residue-vocabulary"
 
 #: The queue a worker with a card consumes, as for every other per-residue pass.
-_BATCH_QUEUE = "protea.embeddings.batch"
+_BATCH_QUEUE = queues.EMBEDDINGS_BATCH
 
 PositiveInt = Annotated[int, Field(gt=0)]
 

@@ -38,6 +38,7 @@ from protea.api.routers.datasets_detail import (
     presigned_redirect,
     stream_local_file,
 )
+from protea.core import queues
 from protea.core.schema_sha_v2 import maybe_v2
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -246,7 +247,7 @@ def create_dataset(
                 detail=f"Dataset {body.output_name!r} already exists",
             )
 
-        queue_name = "protea.training"
+        queue_name = queues.TRAINING
         operation_name = (
             "export_coordinator"
             if os.environ.get("PROTEA_EXPORT_MINIJOBS", "0") == "1"

@@ -10,6 +10,7 @@ from pydantic import Field, field_validator
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from protea.core import queues
 from protea.core.contracts.operation import (
     EmitFn,
     OperationResult,
@@ -37,7 +38,7 @@ from protea.infrastructure.orm.models.annotation.protein_go_annotation import Pr
 from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.protein.protein import Protein
 
-_AUTO_EVAL_QUEUE = "protea.jobs"
+_AUTO_EVAL_QUEUE = queues.JOBS
 
 
 def _append_attempt(annotation_set: AnnotationSet, job_id: uuid.UUID | None) -> None:

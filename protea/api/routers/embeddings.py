@@ -12,6 +12,7 @@ from protea.api.auth.anon_quota import require_anon_quota
 from protea.api.cache import cached, refresh
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
+from protea.core import queues
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
@@ -42,7 +43,7 @@ from protea.services.residue_codes_service import residue_code_summaries, residu
 
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
-_PREDICTIONS_QUEUE = "protea.predictions"
+_PREDICTIONS_QUEUE = queues.PREDICTIONS
 
 PREDICTION_SETS_CACHE_KEY = "embeddings:prediction-sets"
 PREDICTION_SETS_TTL_SECONDS = 300.0

@@ -29,10 +29,11 @@ import pika
 from pika.adapters.blocking_connection import BlockingChannel
 
 from protea.config.tuning import get_tuning
+from protea.core import queues
 
 logger = logging.getLogger(__name__)
 
-_DLQ_NAME = "protea.dead-letter"
+_DLQ_NAME = queues.DEAD_LETTER_QUEUE
 
 
 class _DlqGroup(TypedDict):

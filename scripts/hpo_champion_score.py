@@ -44,6 +44,7 @@ from typing import Any
 
 import requests
 
+from protea.core import queues
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHTS,
 )
@@ -61,7 +62,7 @@ IA_FILE = (
     "/home/frapercan/Thesis2/repositories/PROTEA/data/benchmarks/"
     "ia_select_220/IA_35c3ad67_goa220.tsv"
 )
-EVAL_QUEUE = "protea.evaluations"
+EVAL_QUEUE = queues.EVALUATIONS
 
 CATS = ("NK", "LK", "PK")
 ASPECTS = ("MFO", "BPO", "CCO")
