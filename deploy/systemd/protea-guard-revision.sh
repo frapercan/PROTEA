@@ -2,7 +2,8 @@
 # protea-guard-revision.sh
 #
 # Exit 0 if the deploy tree is at the revision agent-farm declares. Exit 1 if it
-# is not, so systemd fails the unit and the worker stays DOWN.
+# is not, or if the declaration cannot be read, so systemd fails the unit and
+# the worker stays DOWN.
 #
 # WHY THIS EXISTS. On 2026-09-02 three revisions were live on one queue at once:
 # this machine's worker processes had loaded their code on 30 August and never
@@ -26,11 +27,40 @@
 # whatever a human or an agent was working on. A worker may read the tree. It
 # may never move it.
 #
+# WHICH DECLARATION IT READS IS THE UNIT'S TO SAY. PROTEA_DECL_PATH names it as
+# a path inside the agent-farm clone, read from origin/main like everything
+# else here and never from a checkout. Unset, it is plans/DECLARED-REVISION.txt,
+# the declaration the production workers follow. The name and the default are
+# the ones agent-farm's protea-node-sync.sh reads, so a node's sync and its
+# guard cannot end up on two declarations because one was told and the other
+# was not.
+#
+# THE DEVELOPMENT INSTANCE HAS A DECLARATION OF ITS OWN. Its tree runs commits
+# of the integration branch, which the production declaration never names: that
+# file tracks the tip of develop. So the dev units set
+#     Environment=PROTEA_DECL_PATH=plans/DECLARED-REVISION-DEV.txt
+# and that agent-farm file carries the same two lines as the production one:
+#     coordinator <sha>      the commit the dev workers run
+#     schema-applied <sha>   the commit whose migrations the dev database holds
+# It moves only between bootstrap phases, with no job QUEUED or RUNNING on the
+# dev server. This guard reads the coordinator line only. schema-applied is the
+# server's word that the migrations are in, and protea-node-sync.sh will not
+# move a node across a migration without it. The dev tree is a clone of its
+# own and never a worktree, because this guard refuses a worktree: a worktree's
+# .git is a file, and the clone checks below require a directory.
+#
+# THIS PATH MAY HAVE A DEFAULT WHERE THE TWO ROOTS BELOW MAY NOT, because a
+# wrong one cannot fail open. A declaration that is not on origin/main is a
+# refusal, and one that names another commit is refused with its path in the
+# message, so a dev unit that forgot the variable is refused, naming the
+# production file, as soon as the two declarations differ.
+#
 # READ-ONLY: two git reads and a string comparison. Starts nothing, kills
 # nothing, moves nothing.
 set -euo pipefail
 
-DECL_PATH="plans/DECLARED-REVISION.txt"
+# A path inside the agent-farm clone, read at origin/main. See the header.
+DECL_PATH="${PROTEA_DECL_PATH:-plans/DECLARED-REVISION.txt}"
 
 refuse() { echo "protea-guard-revision: REFUSING, $*" >&2; exit 1; }
 allow()  { echo "protea-guard-revision: $*" >&2; exit 0; }
@@ -54,7 +84,10 @@ allow()  { echo "protea-guard-revision: $*" >&2; exit 0; }
 # it is a report about something else. A default is exactly how the two come
 # apart without anyone choosing it, because a default is a guess that never
 # announces itself. So both paths must be handed in, and an absent one is a
-# refusal rather than an assumption.
+# refusal rather than an assumption. The declaration's path inside the clone is
+# the one input with a default, and the header says why a wrong one there
+# cannot fail open.
+#
 # A HOST OUTSIDE THE PROTOCOL SAYS SO, IT IS NOT INFERRED.
 #
 # Some host may legitimately run workers without participating in the
@@ -118,12 +151,26 @@ fi
 # `git show origin/main:<path>` reads the committed file. A checkout cannot be
 # trusted: the whole failure this guards against is a tree that says one thing
 # and a process that runs another.
-DECL="$(git -C "${FARM}" show "origin/main:${DECL_PATH}" 2>/dev/null)" \
-  || allow "no ${DECL_PATH} on agent-farm origin/main; nothing declared, nothing to enforce"
+#
+# A DECLARATION THAT CANNOT BE READ IS A REFUSAL. Until 2026-11-15 this line
+# allowed, reading the absence as "nothing declared, nothing to enforce". That
+# was the last way left for this guard to fail open, and a path handed in by the
+# unit widens it: a mistyped PROTEA_DECL_PATH, a dev declaration not merged or
+# not fetched yet, a clone with no origin/main and a git that cannot read the
+# clone all look exactly like a host with nothing declared. A host that really
+# sits outside the protocol says so with PROTEA_GUARD_UNDECLARED=1, above.
+if ! DECL="$(git -C "${FARM}" show "origin/main:${DECL_PATH}" 2>/dev/null)"; then
+  why="$(git -C "${FARM}" show "origin/main:${DECL_PATH}" 2>&1 >/dev/null | head -n 1 || true)"
+  refuse "cannot read ${DECL_PATH} from origin/main of the agent-farm clone at ${FARM} \
+(git: ${why:-no message}). A missing declaration is not a host with nothing declared: it is as \
+likely a mistyped PROTEA_DECL_PATH, or a declaration not merged or not fetched yet, and starting \
+the worker on it would fail open. Commit the declaration and fetch agent-farm; a host outside the \
+revision protocol sets PROTEA_GUARD_UNDECLARED=1 in its unit instead."
+fi
 
 WANT="$(printf '%s\n' "${DECL}" | awk '$1=="coordinator"{print $2; exit}')"
 [[ "${WANT}" =~ ^[0-9a-f]{40}$ ]] \
-  || refuse "the declaration carries no 40 character coordinator sha"
+  || refuse "${DECL_PATH} on agent-farm origin/main carries no 40 character coordinator sha"
 
 HAVE="$(git -C "${SLOT}" rev-parse HEAD 2>/dev/null)" \
   || refuse "cannot read HEAD of the deploy tree at ${SLOT}"
@@ -139,7 +186,8 @@ if [[ "${HAVE}" != "${WANT}" ]]; then
   elif git -C "${SLOT}" merge-base --is-ancestor "${WANT}" "${HAVE}" 2>/dev/null; then
     rel="AHEAD of"
   fi
-  refuse "the deploy tree at ${SLOT} is ${HAVE:0:12}, which is ${rel} the declared ${WANT:0:12}. \
+  refuse "the deploy tree at ${SLOT} is ${HAVE:0:12}, which is ${rel} the ${WANT:0:12} \
+declared in ${DECL_PATH}. \
 A worker started here would stamp a revision the declaration does not name. Move the tree to the \
 declared commit, or move the declaration -- and the check before moving the declaration is on the \
 SERVER: no job in QUEUED or RUNNING, and no prediction set being written."
@@ -151,4 +199,4 @@ if ! git -C "${SLOT}" diff --quiet HEAD -- 2>/dev/null; then
 so the code a worker would import is not the code the sha names"
 fi
 
-allow "deploy tree is at the declared ${WANT:0:12}"
+allow "deploy tree is at ${WANT:0:12}, declared in ${DECL_PATH}"
