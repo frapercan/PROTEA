@@ -598,7 +598,8 @@ all read the same way, so the only way to run undeclared is
 
 The guard never fetches. A declaration merged on the remote stays invisible
 until somebody fetches the agent-farm clone, so after moving one, compare what
-the guard will read with the tree:
+the guard will read with the tree, with ``AGENT_FARM_ROOT``, ``DEPLOY`` and
+``PROTEA_DECL_PATH`` set as in the unit:
 
 .. code-block:: bash
 
@@ -624,10 +625,15 @@ one:
    coordinator <sha>      the commit the dev workers run
    schema-applied <sha>   the commit whose migrations the dev database holds
 
-Every dev worker unit hands that file to the guard beside the two paths:
+Until that file is on ``origin/main`` of the agent-farm clone the units name,
+every dev worker is refused.
+
+Every dev worker unit runs in its clone and hands that file to the guard
+beside the two paths:
 
 .. code-block:: text
 
+   WorkingDirectory=<the dev clone>
    Environment=DEPLOY=<the dev clone>
    Environment=AGENT_FARM_ROOT=<the agent-farm clone>
    Environment=PROTEA_DECL_PATH=plans/DECLARED-REVISION-DEV.txt
