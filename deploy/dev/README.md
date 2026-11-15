@@ -76,9 +76,17 @@ production uses, told the dev ports through `PROTEA_WAIT_ENDPOINTS`.
    there while the disk is pending (which disk backs it is still to be
    decided). Every dev unit asserts it (`AssertPathIsMountPoint`), so with the
    volume missing dev stays down instead of writing hundreds of GB onto the
-   root filesystem that production lives on. Create the data directories:
+   root filesystem that production lives on.
+
+   The volume's root must belong to the user that runs the units. A fresh
+   file system's root belongs to root, so the `mkdir` below would fail, and
+   the Postgres and RabbitMQ images change the owner of their data directory
+   from inside the container, which rootless podman allows only on
+   directories this user owns. Hand it over once, after the first mount, and
+   create the data directories:
 
    ```bash
+   sudo chown "$USER": /srv/protea-dev
    mkdir -p /srv/protea-dev/{postgres,rabbitmq,minio,cache,deploy}
    ```
 
@@ -170,8 +178,10 @@ What each line is for:
   start without it.
 - `PROTEA_ALLOWED_ORIGINS` is a JSON list. The single quotes keep its inner
   double quotes, both for systemd and for a shell that sources the file.
-- `PROTEA_SKIP_TAXONOMY_WARMUP=1`: without it a worker downloads today's
-  taxonomy at every start.
+- `PROTEA_SKIP_TAXONOMY_WARMUP=1`: without it the workers of
+  `protea.jobs`, `protea.predictions.batch` and `protea.training` open the
+  NCBI taxonomy before consuming anything, and download today's when the
+  file is missing (see "Not wired yet").
 - `HF_HOME` and `HF_HUB_OFFLINE=1`: models come from the dev cache, never
   from a download at run time.
 - The cache variables keep every cache on the dev volume.
@@ -307,7 +317,11 @@ every dev worker and of the API:
   units take it once it reads the declaration path from the unit.
 - The in-code environment check, where a process with
   `PROTEA_ENVIRONMENT=dev` refuses any vhost or database that is not dev's.
-- A taxonomy path that never downloads.
+- A taxonomy path that never downloads. Until then a dev process that needs
+  taxonomy opens the NCBI database ete3 keeps in the home directory
+  (`~/.etetoolkit/taxa.sqlite`), which is the same file the production
+  worker on this machine reads, and downloads it there if it is missing.
+  `PROTEA_SKIP_TAXONOMY_WARMUP=1` only skips the warm-up at start.
 - A unit for the GPU queues, after the decision on the card.
 - CPU priority for production. `CPUWeight=50` on `protea-dev.slice` only
   weighs against the other children of `protea.slice`, and it has none.
