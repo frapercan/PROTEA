@@ -90,7 +90,9 @@ def _round_trips() -> list[str]:
                 errors.append(f"band_for_ia_token({tok!r}) != {name!r}; registry self-inconsistent")
         for sha in band.ia_sha256s:
             if band_for_ia_sha256(sha) != name:
-                errors.append(f"band_for_ia_sha256({sha!r}) != {name!r}; registry self-inconsistent")
+                errors.append(
+                    f"band_for_ia_sha256({sha!r}) != {name!r}; registry self-inconsistent"
+                )
         if not band.obo_versions or not band.ia_identities():
             continue
         ref_obo = next(iter(band.obo_versions))

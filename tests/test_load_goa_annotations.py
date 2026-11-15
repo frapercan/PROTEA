@@ -1209,9 +1209,7 @@ class TestTheFrameAgainstThePriorReleaseIsOptIn:
     def test_on_does_what_every_load_did_before(self):
         prior = MagicMock(id=uuid.uuid4(), source="goa", source_version="215")
         session, child_id = self._session(prior)
-        result, events, new_set = self._execute(
-            session, enqueue_evaluation_set_against_prior=True
-        )
+        result, events, new_set = self._execute(session, enqueue_evaluation_set_against_prior=True)
         job, audit = (call.args[0] for call in session.add.call_args_list)
         assert job.operation == "generate_evaluation_set"
         assert job.queue_name == "protea.jobs"
