@@ -210,12 +210,12 @@ photo adds rows and never rewrites an earlier one.
 the cut and any cut after the instance mark (227); the loader refuses a manifest
 that names one.
 
-**5. Sequences follow ADR-D49 decision 4, with one exception.** A member UniProt
-still serves gets today's sequence through ``resolve_protein_sequences``. A
-superset member's md5 in the paired release is already in
-``SwissProtMembership``, so drift against today's sequence is measurable instead
-of assumed. A member UniProt no longer serves takes the sequence of the paired
-release and says so.
+**5. Sequences come from the paired release** (the author, 2026-11-15). A
+superset member takes the sequence its paired Swiss-Prot release carries, which
+``SwissProtMembership`` already records by md5. A base protein outside the
+superset takes its sequence from the paired release's files. A photo never uses
+today's sequence (ADR-D49 decision 4 still governs the series loaded before this
+record), and the drift against today's is measurable from the md5s.
 
 The five pairings
 ~~~~~~~~~~~~~~~~~

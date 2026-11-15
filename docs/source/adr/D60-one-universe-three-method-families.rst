@@ -251,17 +251,25 @@ Implementation order
 7. The front door and the documentation, with the three introductions.
 8. The cluster pilots.
 
-Open decisions
-~~~~~~~~~~~~~~
+Decisions taken by the author (2026-11-15)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Each of these is the author's, and none blocks step 0:
+- **Weights.** Label-free pretrained weights (PLMs, lexicons, vocabularies)
+  enter as declared exceptions with a manifest. Weights fitted on GO labels are
+  refit inside the platform.
+- **Truth rules of the four windows.** Those of the October headline window:
+  experimental gains between t0 and t1, terms live at both ends, NOT rows only
+  when experimental, closure under the graph of t0 on both sides.
+- **Sequences.** A photo carries the sequences of its paired release (ADR-D59,
+  decision 5).
+- **Cuts.** Cut 160 takes the ontology its pairing rule gives (2016-10-29). Cut
+  205 carries the Swiss-Prot list of its paired release. Cut 227 pairs with
+  2025_03, by the mark.
+- **The public instrument** stays on the production machine after the
+  milestone.
+- **Storage.** Every machine works with the disk it has, and nothing is backed
+  up: the development universe is rebuilt from public sources. No new hardware.
 
-- **Weights.** The recommendation is that label-free pretrained weights (PLMs,
-  lexicons, vocabularies) enter as declared exceptions with a manifest, and that
-  weights fitted on GO labels are refit inside the platform.
-- **Truth rules of the four windows.** The recommendation is those of the
-  October headline window, with the graph of t0 on both sides.
-- **Sequences.** Whether a photo carries the sequences of the paired release
-  (the recommendation) or today's.
-- **The public instrument.** Which instance it serves after the milestone.
-- **Storage.** The development disk and the backup target.
+Still open: which method instance the public instrument serves. The plan
+recommends the 227 instance, trained on the four windows and validated through
+the 211 instance.
