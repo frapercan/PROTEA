@@ -19,7 +19,9 @@ The guard was right about what it could see and wrong about what had happened.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -136,14 +138,62 @@ class TestTheGuardReadsTheDigestTheRowRecords:
         with pytest.raises(ValueError, match="not found"):
             self._refuse(session, _IA_211)
 
-    def test_the_batch_rescore_hands_the_guard_the_set_id_too(self) -> None:
-        # It used to hand over ia_file alone, so a band-declared batch whose IA
-        # was pinned by set id reached the guard with no IA and was refused.
-        import inspect
 
-        from protea.core.operations.batch_rescore_evaluation import (
-            BatchRescoreEvaluationOperation,
-        )
+class _GuardReached(Exception):
+    """Raised by the spy guard, so a caller stops right after handing it the IA."""
 
-        source = inspect.getsource(BatchRescoreEvaluationOperation._stage_shared_inputs)
-        assert "ia_set_id=base_payload.information_accretion_set_id" in source
+
+def _spy_guard(seen: dict[str, object]) -> Callable[..., None]:
+    def guard(
+        band: str | None,
+        _snapshot: object,
+        ia_file: str | None,
+        _emit: object,
+        *,
+        session: object = None,
+        ia_set_id: str | None = None,
+    ) -> None:
+        seen.update(band=band, ia_file=ia_file, session=session, ia_set_id=ia_set_id)
+        raise _GuardReached
+
+    return guard
+
+
+class TestBothCallersHandTheGuardTheSetId:
+    """The single run and the batch give the guard the session and the set id.
+
+    The batch used to hand over ``ia_file`` alone. For a band-declared batch
+    whose IA was pinned by set id, the guard then checked the snapshot's
+    ``ia_url`` instead of the table being scored, or refused when the snapshot
+    had none.
+    """
+
+    _PAYLOAD = {"band": "v211", "ia_file": None, "information_accretion_set_id": _IA_211}
+
+    def test_the_single_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from protea.core.operations import run_cafa_evaluation as single
+
+        seen: dict[str, object] = {}
+        monkeypatch.setattr(single, "resolve_ia_file", lambda *_a, **_k: "ia.tsv")
+        monkeypatch.setattr(single, "refuse_if_the_band_is_foreign", _spy_guard(seen))
+        session = MagicMock()
+        with pytest.raises(_GuardReached):
+            single.RunCafaEvaluationOperation._resolve_and_gate_ia(
+                "tmp", MagicMock(), MagicMock(**self._PAYLOAD), MagicMock(), session
+            )
+        assert seen == {"band": "v211", "ia_file": None, "session": session, "ia_set_id": _IA_211}
+
+    def test_the_batch(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from protea.core.operations import batch_rescore_evaluation as batch
+
+        seen: dict[str, object] = {}
+        monkeypatch.setattr(batch, "resolve_obo", lambda *_a, **_k: "go.obo")
+        monkeypatch.setattr(batch, "resolve_ia_file", lambda *_a, **_k: "ia.tsv")
+        monkeypatch.setattr(batch, "refuse_if_the_band_is_foreign", _spy_guard(seen))
+        ctx = batch._StageCtx(base_payload=MagicMock(**self._PAYLOAD), inputs=MagicMock())
+        session = MagicMock()
+        with pytest.raises(_GuardReached):
+            batch.BatchRescoreEvaluationOperation()._stage_shared_inputs(
+                session, ctx, tmp_path, MagicMock()
+            )
+        assert seen == {"band": "v211", "ia_file": None, "session": session, "ia_set_id": _IA_211}
