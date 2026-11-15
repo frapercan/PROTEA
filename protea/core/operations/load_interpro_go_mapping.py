@@ -29,14 +29,16 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Iterator
+from datetime import date
 from typing import Annotated, Any
 
 import requests
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.source_guards import refuse_a_dated_source
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.interpro_go_mapping import (
     InterProGoMapping,
@@ -58,6 +60,13 @@ class LoadInterProGoMappingPayload(ProteaPayload, frozen=True):
     can dispatch the op without a payload body in the common case.
     ``source_version`` is required so the snapshot is queryable later;
     pass the InterPro release tag (e.g. ``"InterPro-104.0"``) here.
+
+    ``published_at``, ``cut_release`` and ``cut_date`` date the mapping against
+    the cut it serves: when the file was published, and the GOA release of the
+    cut with that release's publication date. All three or none. Given, the
+    payload refuses a cut after the mark and a mapping published after its cut
+    (ADR-D60); left out, the load runs as it always has. The default URL serves
+    today's file, so a load for a cut also names a file dated on or before it.
     """
 
     source_version: str
@@ -65,6 +74,10 @@ class LoadInterProGoMappingPayload(ProteaPayload, frozen=True):
     evidence: str = _DEFAULT_EVIDENCE
     timeout_seconds: PositiveInt = 120
     chunk_size: PositiveInt = 1000
+    #: ISO dates, as strings: a job's payload arrives as JSON, which has no date.
+    published_at: str | None = None
+    cut_release: PositiveInt | None = None
+    cut_date: str | None = None
 
     @field_validator("source_version", "mapping_url", "evidence", mode="before")
     @classmethod
@@ -72,6 +85,37 @@ class LoadInterProGoMappingPayload(ProteaPayload, frozen=True):
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
         return v.strip()
+
+    @field_validator("published_at", "cut_date", mode="before")
+    @classmethod
+    def _iso_date(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("must be an ISO date string, e.g. '2022-09-16'")
+        try:
+            return date.fromisoformat(v.strip()).isoformat()
+        except ValueError as exc:
+            raise ValueError(f"must be an ISO date, got {v!r}") from exc
+
+    @model_validator(mode="after")
+    def _dated_against_its_cut(self) -> LoadInterProGoMappingPayload:
+        """Refuse a mapping the universe may not read, before anything is fetched."""
+        dating = (self.published_at, self.cut_release, self.cut_date)
+        if all(value is None for value in dating):
+            return self
+        if self.published_at is None or self.cut_release is None or self.cut_date is None:
+            raise ValueError(
+                "published_at, cut_release and cut_date date the mapping together: "
+                "give all three or none"
+            )
+        refuse_a_dated_source(
+            source=f"InterPro2GO {self.source_version}",
+            published=date.fromisoformat(self.published_at),
+            cut_release=self.cut_release,
+            cut_date=date.fromisoformat(self.cut_date),
+        )
+        return self
 
 
 class LoadInterProGoMappingOperation:
@@ -101,12 +145,15 @@ class LoadInterProGoMappingOperation:
         p = LoadInterProGoMappingPayload.model_validate(contract_payload(payload))
 
         t0 = time.perf_counter()
-        emit(
-            "load_interpro_go_mapping.start",
-            None,
-            {"mapping_url": p.mapping_url, "source_version": p.source_version},
-            "info",
-        )
+        started: dict[str, Any] = {
+            "mapping_url": p.mapping_url,
+            "source_version": p.source_version,
+        }
+        if p.cut_release is not None:
+            started.update(
+                published_at=p.published_at, cut_release=p.cut_release, cut_date=p.cut_date
+            )
+        emit("load_interpro_go_mapping.start", None, started, "info")
 
         text = self._download(p, emit)
         rows = list(self._parse(text, p))

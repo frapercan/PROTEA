@@ -17,6 +17,14 @@ and refuses the load unless the digest matches ``expected_sha256``. A download
 and a handed-over table are therefore interchangeable and each is evidence
 about the other: the same release loaded by either route produces the same row,
 or one of them is wrong and the job says so instead of writing.
+
+The ceiling
+-----------
+
+The 227->230 window was spent on 2026-10-27, and the universe reads nothing
+past its mark (ADR-D60). So the payload refuses any release from
+:data:`protea.core.marks.UNIPROT_CEILING` on, before anything is downloaded or
+written; 2025_03, the release cut 227 pairs with, is the last one it accepts.
 """
 
 from __future__ import annotations
@@ -35,6 +43,7 @@ from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.source_guards import refuse_a_uniprot_release_at_or_after_the_ceiling
 from protea.core.swissprot_table import (
     canonical_table,
     parse_swissprot_fasta,
@@ -115,6 +124,9 @@ class LoadSwissProtReleasePayload(ProteaPayload, frozen=True):
         year, _, number = text.partition("_")
         if not (year.isdigit() and len(year) == 4 and number.isdigit()):
             raise ValueError(f"release must look like '2025_03', got {text!r}")
+        # The universe reads no UniProt release from the ceiling on (ADR-D60):
+        # refused here, before anything is downloaded or written.
+        refuse_a_uniprot_release_at_or_after_the_ceiling(text, source="Swiss-Prot")
         return text
 
     @field_validator("expected_sha256", mode="before")

@@ -8,9 +8,9 @@ on a declared channel table, never a property of the stored data.
 
 The package is the half that runs away from the server. It imports the standard
 library, ``pyarrow`` and the pure platform modules it needs
-(``protea.core.evidence_codes``, ``protea.core.marks`` and
-``protea.core.swissprot_table``), so a compute node can run it from a bare
-checkout with no database stack.
+(``protea.core.evidence_codes``, ``protea.core.marks``,
+``protea.core.source_guards`` and ``protea.core.swissprot_table``), so a compute
+node can run it from a bare checkout with no database stack.
 
 - :mod:`.formats`: the GAF row, the UniRef XML member and the reference field.
 - :mod:`.measure`: step 1 of ADR-D59, the inventory of a cut before any photo is

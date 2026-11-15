@@ -1549,6 +1549,22 @@ source_version)`` means that re-running for the same release is a no-op.
    * - ``chunk_size``
      - ``1000``
      - Upsert batch size.
+   * - ``published_at``
+     - ``null``
+     - ISO date the mapping file was published. With ``cut_release`` and
+       ``cut_date`` it dates the mapping against the cut it serves.
+   * - ``cut_release``
+     - ``null``
+     - GOA release of the cut the mapping serves.
+   * - ``cut_date``
+     - ``null``
+     - ISO date that GOA release was published.
+
+The three dating fields go together: all three or none. Given, the payload
+refuses a cut after the mark (227) and a mapping published after its cut,
+before anything is downloaded (ADR-D60). Left out, the load runs as before. The
+default URL serves today's file, so a load for a cut names a file dated on or
+before it.
 
 The result dict reports ``rows_parsed``, ``rows_inserted``, and
 ``rows_skipped_duplicate``.

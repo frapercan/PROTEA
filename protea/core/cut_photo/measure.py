@@ -19,7 +19,8 @@ archive) and be re-run alone:
     the keys each protein carries. The channel table is written FROM this
     inventory; nothing here assigns a channel.
 
-Every pass refuses a cut after the mark and a source published after its cut.
+Every pass refuses a cut after the mark and a source published after its cut,
+and the two UniProt passes also refuse a release from the UniProt ceiling on.
 """
 
 from __future__ import annotations
@@ -57,6 +58,10 @@ from protea.core.cut_photo.formats import (
     reference_class,
 )
 from protea.core.marks import MARK_RELEASE
+from protea.core.source_guards import (
+    SourceGuardError,
+    refuse_a_uniprot_release_at_or_after_the_ceiling,
+)
 from protea.core.swissprot_table import canonical_table, parse_swissprot_fasta
 
 #: The member of UniProt's ``uniprot_sprot-only`` archive that carries the
@@ -65,6 +70,10 @@ from protea.core.swissprot_table import canonical_table, parse_swissprot_fasta
 SWISSPROT_FASTA_MEMBER = "uniprot_sprot.fasta.gz"
 
 _GAF_PREFIX = "UniProtKB\t"
+
+#: The passes whose release is a UniProt release name, and so falls under the
+#: UniProt ceiling: UniRef is published with UniProt and numbered the same way.
+_UNIPROT_FAMILIES = frozenset({"UniProt", "UniRef"})
 
 #: One bit per code family, to summarise what a protein carries.
 FAMILY_BITS: dict[str, int] = {
@@ -77,7 +86,7 @@ FAMILY_BITS: dict[str, int] = {
 }
 
 
-class PhotoGuardError(ValueError):
+class PhotoGuardError(SourceGuardError):
     """A source or a cut the photo is not allowed to read."""
 
 
@@ -103,6 +112,11 @@ class PassSource:
             cut_release=self.cut_release,
             cut_date=self.cut_date,
         )
+        if family in _UNIPROT_FAMILIES:
+            try:
+                refuse_a_uniprot_release_at_or_after_the_ceiling(str(self.release), source=family)
+            except SourceGuardError as exc:
+                raise PhotoGuardError(str(exc)) from exc
 
     def head(self, pass_name: str) -> dict[str, Any]:
         """The fields every pass record starts with."""
