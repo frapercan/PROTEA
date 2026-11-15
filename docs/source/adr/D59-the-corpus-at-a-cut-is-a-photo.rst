@@ -67,7 +67,9 @@ t.**
    * - ``superset``
      - The Swiss-Prot accessions of the last UniProt release published on or
        before GOA t's publication date (the date
-       ``refresh_goa_release_dates`` reads from the EBI index).
+       ``refresh_goa_release_dates`` reads from the EBI index), as
+       ``load_swissprot_release`` already stores them for the 227->230 window
+       (``SwissProtRelease`` and ``SwissProtMembership``).
      - Reviewed AT THIS CUT. This is the set the cut is asked to annotate, and
        the only one that can hold an evaluation target.
    * - ``truth``, ``curated_inference``
@@ -132,14 +134,19 @@ Channels are not tiers. ``IKR`` and ``IRD`` still admit a protein through
 ADR-D49's curated tier, and are classed as ``phylogenetic`` here because PAINT
 produces them.
 
-**3. Storage is append-only and accumulates across cuts.**
+**3. Storage is append-only and accumulates across cuts, and nothing the store
+already holds is copied.**
 
 - ``cut_photo``: one row per cut, with a short and a long descriptor (ADR-D58),
-  the GOA annotation set of t, the paired UniProt, UniRef, taxonomy and GO_REF
-  versions, the manifest URI and its sha256, the job and the code revision.
-- ``cut_photo_member``: one row per (photo, accession, set), with whether the
-  entry is reviewed at t, its NCBI taxon, its UniRef50 cluster and the md5 of its
-  sequence in the paired release.
+  the GOA annotation set of t, the paired ``SwissProtRelease``, the UniRef,
+  taxonomy and GO_REF versions, the manifest URI and its sha256, the job and the
+  code revision.
+- The superset is the paired release's ``SwissProtMembership``, accession and
+  sequence md5 included; it is referenced, not copied.
+- The live tiers are read from the annotations, as ADR-D49 already does; no tier
+  column is stored.
+- ``cut_photo_neighbour``: one row per (photo, accession) with its UniRef50
+  cluster. It is the only member set that no existing table can derive.
 - ``protein``: a member that is not yet in the table enters as an accession-only
   row; ``first_admitted_release`` is written as a minimum, as ADR-D49 does.
 - ``protein_go_annotation``: the GOA t rows of the new members are appended to
@@ -153,6 +160,15 @@ photo adds rows and never rewrites an earlier one.
 
 **4. The tool has two halves, because they run in two places.**
 
+- Step 1, the measurement, is ``protea.core.cut_photo.measure``: three passes
+  (``superset``, ``neighbours``, ``gaf``), each a pure function of its source
+  that writes its own record. It counts the superset by what it carries (truth,
+  curated, only electronic or phylogenetic, only ``ND``, no rows), the
+  neighbours the same way, and every member row by (code, reference,
+  ``assigned_by``, negation): the inventory the channel table is written from.
+  The Swiss-Prot pass writes the canonical table ``load_swissprot_release``
+  verifies, with the same parser, now in ``protea.core.swissprot_table`` so a
+  node without the database stack can import it.
 - ``build_cut_photo`` is a pure function of five downloaded, dated sources: GOA
   t, the paired UniProt release, the paired UniRef release, the NCBI taxonomy
   archive of t's month and the GO_REF list as of t. It opens no database
@@ -168,9 +184,10 @@ the cut and any cut after the instance mark (227); the loader refuses a manifest
 that names one.
 
 **5. Sequences follow ADR-D49 decision 4, with one exception.** A member UniProt
-still serves gets today's sequence through ``resolve_protein_sequences``; the md5
-of its sequence in the paired release is recorded on its member row, so drift is
-measurable instead of assumed. A member UniProt no longer serves, which is common
+still serves gets today's sequence through ``resolve_protein_sequences``. A
+superset member's md5 in the paired release is already in
+``SwissProtMembership``, so drift against today's sequence is measurable instead
+of assumed. A member UniProt no longer serves, which is common
 for neighbours of older releases, takes the sequence of the paired release and
 says so.
 
@@ -211,5 +228,9 @@ References
 - ADR-D49 (tiers and the release-179 break documented in
   ``protea/core/operations/_universe_sources.py``), ADR-D40, ADR-D46, ADR-D56,
   ADR-D58
+- ``protea/core/cut_photo/`` (formats and the measurement),
+  ``protea/core/swissprot_table.py`` (the parser and canonical table shared with
+  ``load_swissprot_release``), ``tests/test_cut_photo_formats.py``,
+  ``tests/test_cut_photo_measure.py``
 - The laboratory card ``compresion/fichas/fotos-cinco-cortes.md`` (sf-jepa), which
   fixes the parity checks before any photo is built
