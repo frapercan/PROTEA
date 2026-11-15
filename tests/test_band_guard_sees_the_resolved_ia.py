@@ -18,14 +18,22 @@ The guard was right about what it could see and wrong about what had happened.
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
+from unittest.mock import MagicMock
+
 import pytest
 
 from protea.core.band_registry import (
+    BANDS,
     BandMismatchError,
     assert_band_consistency,
     ia_token,
     resolve_band,
 )
+from protea.core.operations._band_guard import refuse_if_the_band_is_foreign
 from protea.core.operations.compute_information_accretion import ia_key_for
 
 _IA_211 = "80bbc9e4-c037-4416-a06e-4982eba58008"
@@ -74,3 +82,118 @@ class TestTheCanonicalKeyCarriesTheIdentity:
                 obo_version="releases/2022-07-01",
                 ia_ref=ia_key_for(_IA_227),
             )
+
+
+class TestTheGuardReadsTheDigestTheRowRecords:
+    """A set id names a row of one database; the band pins a computed table by content.
+
+    Given ``ia_set_id``, the guard reads the row's ``content_sha256`` and checks
+    the band by it, while the set id still resolves the rows pinned before.
+    """
+
+    _OBO_211 = "releases/2022-07-01"
+
+    @staticmethod
+    def _session(sha256: str) -> MagicMock:
+        session = MagicMock()
+        session.get.return_value = MagicMock(content_sha256=sha256)
+        return session
+
+    def _refuse(self, session: MagicMock | None, ia_set_id: str) -> list[tuple]:
+        events: list[tuple] = []
+        refuse_if_the_band_is_foreign(
+            "v211",
+            MagicMock(obo_version=self._OBO_211, ia_url=None),
+            None,
+            lambda *event: events.append(event),
+            session=session,
+            ia_set_id=ia_set_id,
+        )
+        return events
+
+    def test_a_new_row_holding_the_bands_content_passes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sha = "d" * 64
+        monkeypatch.setitem(BANDS, "v211", replace(BANDS["v211"], ia_sha256s=frozenset({sha})))
+        events = self._refuse(self._session(sha), str(uuid.uuid4()))
+        (verified,) = [e for e in events if e[0] == "run_cafa_evaluation.band_verified"]
+        assert verified[2]["ia_sha256"] == sha
+
+    def test_an_old_row_still_passes_by_its_set_id(self) -> None:
+        events = self._refuse(self._session("e" * 64), _IA_211)
+        assert [e[0] for e in events] == ["run_cafa_evaluation.band_verified"]
+
+    def test_a_new_row_no_band_claims_is_refused(self) -> None:
+        with pytest.raises(BandMismatchError, match="not canonical for that band"):
+            self._refuse(self._session("e" * 64), str(uuid.uuid4()))
+
+    def test_a_set_id_needs_a_session(self) -> None:
+        with pytest.raises(ValueError, match="requires a database session"):
+            self._refuse(None, _IA_211)
+
+    def test_a_set_id_with_no_row_is_refused(self) -> None:
+        session = MagicMock()
+        session.get.return_value = None
+        with pytest.raises(ValueError, match="not found"):
+            self._refuse(session, _IA_211)
+
+
+class _GuardReached(Exception):
+    """Raised by the spy guard, so a caller stops right after handing it the IA."""
+
+
+def _spy_guard(seen: dict[str, object]) -> Callable[..., None]:
+    def guard(
+        band: str | None,
+        _snapshot: object,
+        ia_file: str | None,
+        _emit: object,
+        *,
+        session: object = None,
+        ia_set_id: str | None = None,
+    ) -> None:
+        seen.update(band=band, ia_file=ia_file, session=session, ia_set_id=ia_set_id)
+        raise _GuardReached
+
+    return guard
+
+
+class TestBothCallersHandTheGuardTheSetId:
+    """The single run and the batch give the guard the session and the set id.
+
+    The batch used to hand over ``ia_file`` alone. For a band-declared batch
+    whose IA was pinned by set id, the guard then checked the snapshot's
+    ``ia_url`` instead of the table being scored, or refused when the snapshot
+    had none.
+    """
+
+    _PAYLOAD = {"band": "v211", "ia_file": None, "information_accretion_set_id": _IA_211}
+
+    def test_the_single_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from protea.core.operations import run_cafa_evaluation as single
+
+        seen: dict[str, object] = {}
+        monkeypatch.setattr(single, "resolve_ia_file", lambda *_a, **_k: "ia.tsv")
+        monkeypatch.setattr(single, "refuse_if_the_band_is_foreign", _spy_guard(seen))
+        session = MagicMock()
+        with pytest.raises(_GuardReached):
+            single.RunCafaEvaluationOperation._resolve_and_gate_ia(
+                "tmp", MagicMock(), MagicMock(**self._PAYLOAD), MagicMock(), session
+            )
+        assert seen == {"band": "v211", "ia_file": None, "session": session, "ia_set_id": _IA_211}
+
+    def test_the_batch(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from protea.core.operations import batch_rescore_evaluation as batch
+
+        seen: dict[str, object] = {}
+        monkeypatch.setattr(batch, "resolve_obo", lambda *_a, **_k: "go.obo")
+        monkeypatch.setattr(batch, "resolve_ia_file", lambda *_a, **_k: "ia.tsv")
+        monkeypatch.setattr(batch, "refuse_if_the_band_is_foreign", _spy_guard(seen))
+        ctx = batch._StageCtx(base_payload=MagicMock(**self._PAYLOAD), inputs=MagicMock())
+        session = MagicMock()
+        with pytest.raises(_GuardReached):
+            batch.BatchRescoreEvaluationOperation()._stage_shared_inputs(
+                session, ctx, tmp_path, MagicMock()
+            )
+        assert seen == {"band": "v211", "ia_file": None, "session": session, "ia_set_id": _IA_211}

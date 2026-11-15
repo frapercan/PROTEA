@@ -555,6 +555,13 @@ Payload fields
    * - ``total_limit``
      - ``null``
      - Stop after this many annotation rows (for testing).
+   * - ``enqueue_evaluation_set_against_prior``
+     - ``false``
+     - When the load ends, enqueue a ``generate_evaluation_set`` between the
+       latest prior ``goa`` release and this one, as every load did before
+       the flag existed. Off by default: the universe of ADR-D60 declares
+       every frame with its role and its truth rules, and a frame opened by
+       every load declares neither.
 
 Execution flow
 ~~~~~~~~~~~~~~
@@ -570,8 +577,10 @@ Execution flow
       d. resolve go_term_id from go_id; skip if term unknown in snapshot
       e. buffer ProteinGOAnnotation rows
       f. flush + commit every page_size rows
-   4. emit("load_goa_annotations.done", ...)
-   5. return OperationResult(result={annotation_set_id, inserted, skipped})
+   4. only with enqueue_evaluation_set_against_prior: enqueue the frame
+      (prior goa release -> this one) as a generate_evaluation_set child job
+   5. emit("load_goa_annotations.done", ...)
+   6. return OperationResult(result={annotation_set_id, inserted, skipped})
 
 load_quickgo_annotations
 -------------------------
@@ -1549,6 +1558,23 @@ source_version)`` means that re-running for the same release is a no-op.
    * - ``chunk_size``
      - ``1000``
      - Upsert batch size.
+   * - ``published_at``
+     - ``null``
+     - ISO date the mapping file was published. With ``cut_release`` and
+       ``cut_date`` it dates the mapping against the cut it serves.
+   * - ``cut_release``
+     - ``null``
+     - GOA release of the cut the mapping serves.
+   * - ``cut_date``
+     - ``null``
+     - ISO date that GOA release was published.
+
+The three dating fields go together: all three or none. Given, the payload
+refuses a cut after the mark (227) and a mapping published after its cut,
+before anything is downloaded (ADR-D60). Left out, the load runs as before. A
+dated load must also name its file: the default URL serves whatever file is
+current when the job runs, so nothing would tie its bytes to ``published_at``,
+and the payload refuses it.
 
 The result dict reports ``rows_parsed``, ``rows_inserted``, and
 ``rows_skipped_duplicate``.

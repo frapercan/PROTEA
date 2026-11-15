@@ -199,6 +199,12 @@ class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
     commit_every_page: bool = True
     total_limit: PositiveInt | None = None
     allow_unverified_ontology: bool = False
+    #: Enqueue a ``generate_evaluation_set`` between the latest prior ``goa``
+    #: release and this one when the load ends. Off by default: the universe of
+    #: ADR-D60 declares every frame with its role and its truth rules, and a
+    #: frame opened by every load declares neither. ``True`` does exactly what
+    #: every load did before the flag existed.
+    enqueue_evaluation_set_against_prior: bool = False
 
     @field_validator("ontology_snapshot_id", "gaf_url", "source_version", mode="before")
     @classmethod
@@ -206,6 +212,21 @@ class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
         return v.strip()
+
+
+def _frame_asked_for(p: LoadGOAAnnotationsPayload, emit: EmitFn) -> bool:
+    """Whether this load enqueues the frame against the prior release.
+
+    Until the flag existed every load did, so every load of the series opened a
+    frame nobody declared. ADR-D60's universe declares its frames, so the
+    default is off, and the load says it skipped one; on, it runs
+    :meth:`LoadGOAAnnotationsOperation._maybe_enqueue_atomic_eval`, which is
+    what every load used to run. Cascade cumulative deltas (V_K -> V_target)
+    remain manual via ``scripts/materialize_lab_intervals.py --mode cascade``.
+    """
+    if not p.enqueue_evaluation_set_against_prior:
+        emit("load_goa_annotations.auto_eval_skipped", None, {"reason": "not_requested"}, "info")
+    return p.enqueue_evaluation_set_against_prior
 
 
 class LoadGOAAnnotationsOperation:
@@ -295,12 +316,11 @@ class LoadGOAAnnotationsOperation:
             elapsed=time.perf_counter() - t0,
         )
 
-        # Auto-trigger an atomic generate_evaluation_set against the latest
-        # prior goa AnnotationSet (numeric source_version sort).  Cascade
-        # cumulative deltas (V_K → V_target) remain manual via
-        # scripts/materialize_lab_intervals.py --mode cascade.
+        # The frame against the prior release, only when the payload asks.
         publish_after_commit: list[tuple[str, uuid.UUID]] = []
-        child_job_id = self._maybe_enqueue_atomic_eval(session, annotation_set, emit)
+        child_job_id = None
+        if _frame_asked_for(p, emit):
+            child_job_id = self._maybe_enqueue_atomic_eval(session, annotation_set, emit)
         if child_job_id is not None:
             publish_after_commit.append((_AUTO_EVAL_QUEUE, child_job_id))
             result["auto_eval_job_id"] = str(child_job_id)

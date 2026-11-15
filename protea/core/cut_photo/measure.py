@@ -19,7 +19,8 @@ archive) and be re-run alone:
     the keys each protein carries. The channel table is written FROM this
     inventory; nothing here assigns a channel.
 
-Every pass refuses a cut after the mark and a source published after its cut.
+Every pass refuses a cut after the mark and a source published after its cut,
+and the two UniProt passes also refuse a release from the UniProt ceiling on.
 """
 
 from __future__ import annotations
@@ -56,11 +57,15 @@ from protea.core.cut_photo.formats import (
     iter_uniref_clusters,
     reference_class,
 )
-from protea.core.swissprot_table import canonical_table, parse_swissprot_fasta
 
-#: The last GOA release a photo may be built from: the 227 instance. Every later
-#: release holds the truth of the test, which no photo reads.
-MARK_RELEASE = 227
+# Re-exported: the measurement's callers and tests read the mark from here.
+from protea.core.marks import MARK_RELEASE  # noqa: F401
+from protea.core.source_guards import (
+    SourceGuardError,
+    refuse_a_dated_source,
+    refuse_a_uniprot_release_at_or_after_the_ceiling,
+)
+from protea.core.swissprot_table import canonical_table, parse_swissprot_fasta
 
 #: The member of UniProt's ``uniprot_sprot-only`` archive that carries the
 #: canonical sequences; the same one ``load_swissprot_release`` reads, pinned
@@ -68,6 +73,10 @@ MARK_RELEASE = 227
 SWISSPROT_FASTA_MEMBER = "uniprot_sprot.fasta.gz"
 
 _GAF_PREFIX = "UniProtKB\t"
+
+#: The passes whose release is a UniProt release name, and so falls under the
+#: UniProt ceiling: UniRef is published with UniProt and numbered the same way.
+_UNIPROT_FAMILIES = frozenset({"UniProt", "UniRef"})
 
 #: One bit per code family, to summarise what a protein carries.
 FAMILY_BITS: dict[str, int] = {
@@ -80,7 +89,7 @@ FAMILY_BITS: dict[str, int] = {
 }
 
 
-class PhotoGuardError(ValueError):
+class PhotoGuardError(SourceGuardError):
     """A source or a cut the photo is not allowed to read."""
 
 
@@ -106,6 +115,11 @@ class PassSource:
             cut_release=self.cut_release,
             cut_date=self.cut_date,
         )
+        if family in _UNIPROT_FAMILIES:
+            try:
+                refuse_a_uniprot_release_at_or_after_the_ceiling(str(self.release), source=family)
+            except SourceGuardError as exc:
+                raise PhotoGuardError(str(exc)) from exc
 
     def head(self, pass_name: str) -> dict[str, Any]:
         """The fields every pass record starts with."""
@@ -141,14 +155,19 @@ class _ParquetBuffer:
 
 
 def check_dates(*, source: str, published: date, cut_release: int, cut_date: date) -> None:
-    """Refuse a cut after the mark and a source published after its cut."""
-    if cut_release > MARK_RELEASE:
-        raise PhotoGuardError(f"cut {cut_release} is after the mark {MARK_RELEASE}")
-    if published > cut_date:
-        raise PhotoGuardError(
-            f"{source} was published on {published.isoformat()}, "
-            f"after the cut ({cut_date.isoformat()})"
+    """Refuse a cut after the mark and a source published after its cut.
+
+    The rules are :func:`protea.core.source_guards.refuse_a_dated_source`, the
+    ones every loader of the universe asks, so the half that builds a photo and
+    the half that loads one cannot drift apart. Only the error type is the
+    photo's own.
+    """
+    try:
+        refuse_a_dated_source(
+            source=source, published=published, cut_release=cut_release, cut_date=cut_date
         )
+    except SourceGuardError as exc:
+        raise PhotoGuardError(str(exc)) from exc
 
 
 def code_family(code: str) -> str:

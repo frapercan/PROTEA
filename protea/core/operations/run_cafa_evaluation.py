@@ -57,7 +57,6 @@ from protea.core.operations._run_cafa_setup import (  # noqa: F401
     _PipelineCtx,
     bundle_run_context,
 )
-from protea.core.operations.compute_information_accretion import ia_key_for
 from protea.core.operations.seal_evaluation_frames import seal_one
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -492,17 +491,19 @@ class RunCafaEvaluationOperation:
             session,
             p.information_accretion_set_id,
         )
-        # The guard gets the SOURCE reference, not the tempfile: a downloaded
-        # copy is always called ia.tsv and would tokenise to that. When the IA
-        # was pinned by set id, the canonical key for that set is the reference,
-        # and ia_key_for is the same builder compute_information_accretion wrote
-        # it with, so the two cannot drift.
-        band_ref = (
-            ia_key_for(p.information_accretion_set_id)
-            if p.information_accretion_set_id
-            else p.ia_file
+        # The guard gets the SOURCE, not the tempfile: a downloaded copy is
+        # always called ia.tsv and would tokenise to that. A set pinned by id is
+        # checked by the content sha256 its row records (the digest
+        # resolve_ia_from_set has just verified the bytes against), and its
+        # canonical key, which still resolves the rows pinned before the digest.
+        refuse_if_the_band_is_foreign(
+            p.band,
+            snapshot,
+            p.ia_file,
+            emit,
+            session=session,
+            ia_set_id=p.information_accretion_set_id,
         )
-        refuse_if_the_band_is_foreign(p.band, snapshot, band_ref, emit)
         return ia_path
 
     @staticmethod

@@ -347,7 +347,12 @@ class BatchRescoreEvaluationOperation:
             session, base_payload.information_accretion_set_id,
         )
         refuse_if_the_band_is_foreign(
-            base_payload.band, inputs.snapshot, base_payload.ia_file, emit
+            base_payload.band,
+            inputs.snapshot,
+            base_payload.ia_file,
+            emit,
+            session=session,
+            ia_set_id=base_payload.information_accretion_set_id,
         )
 
         data = self._restrict_cohort(
