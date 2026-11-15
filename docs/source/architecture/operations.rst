@@ -555,6 +555,13 @@ Payload fields
    * - ``total_limit``
      - ``null``
      - Stop after this many annotation rows (for testing).
+   * - ``enqueue_evaluation_set_against_prior``
+     - ``false``
+     - When the load ends, enqueue a ``generate_evaluation_set`` between the
+       latest prior ``goa`` release and this one, as every load did before
+       the flag existed. Off by default: the universe of ADR-D60 declares
+       every frame with its role and its truth rules, and a frame opened by
+       every load declares neither.
 
 Execution flow
 ~~~~~~~~~~~~~~
@@ -570,8 +577,10 @@ Execution flow
       d. resolve go_term_id from go_id; skip if term unknown in snapshot
       e. buffer ProteinGOAnnotation rows
       f. flush + commit every page_size rows
-   4. emit("load_goa_annotations.done", ...)
-   5. return OperationResult(result={annotation_set_id, inserted, skipped})
+   4. only with enqueue_evaluation_set_against_prior: enqueue the frame
+      (prior goa release -> this one) as a generate_evaluation_set child job
+   5. emit("load_goa_annotations.done", ...)
+   6. return OperationResult(result={annotation_set_id, inserted, skipped})
 
 load_quickgo_annotations
 -------------------------

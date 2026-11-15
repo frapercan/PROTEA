@@ -1133,6 +1133,111 @@ class TestMaybeEnqueueAtomicEval:
         assert skipped[0]["fields"]["existing_evaluation_set_id"] == str(existing_id)
 
 
+class TestTheFrameAgainstThePriorReleaseIsOptIn:
+    """A load opens no frame unless its payload asks for one (ADR-D60).
+
+    Every load used to enqueue a ``generate_evaluation_set`` between its release
+    and the latest prior one. The universe declares its frames, so the flag
+    defaults to off. On, the load does exactly what every load did before: the
+    same child job, the same audit row, the same result key and the same
+    publication after commit.
+    """
+
+    def _session(self, prior):
+        """Answer the prior-set lookup with ``prior`` (none when ``None``) and the
+        existing-frame lookup with none, and give the child job an id on flush."""
+        from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+
+        sets = MagicMock()
+        sets.filter.return_value = sets
+        sets.all.return_value = [] if prior is None else [prior]
+        frames = MagicMock()
+        frames.filter.return_value = frames
+        frames.first.return_value = None
+        session = MagicMock()
+        session.query.side_effect = lambda target: sets if target is AnnotationSet else frames
+        child_id = uuid.uuid4()
+
+        def _flush():
+            for call in session.add.call_args_list:
+                row = call.args[0]
+                if hasattr(row, "queue_name") and getattr(row, "id", None) is None:
+                    row.id = child_id
+
+        session.flush.side_effect = _flush
+        return session, child_id
+
+    def _execute(self, session, **flag):
+        from protea.core.operations._goa_load_report import _GoaPageTotals
+
+        op = LoadGOAAnnotationsOperation()
+        new_set = MagicMock(id=uuid.uuid4(), source="goa", source_version="220")
+        emit, events = _make_emit()
+        payload = {
+            "ontology_snapshot_id": _SNAPSHOT_ID,
+            "gaf_url": "https://example.invalid/goa_uniprot_all.gaf.220.gz",
+            "source_version": "220",
+            **flag,
+        }
+        with (
+            patch.object(op, "_check_declared_ontology", return_value={}),
+            patch.object(op, "_load_accessions", return_value={"P12345"}),
+            patch.object(op, "_load_go_term_map", return_value={"GO:0003674": 1}),
+            patch.object(op, "_create_annotation_set", return_value=new_set),
+            patch.object(op, "_stream_and_store", return_value=_GoaPageTotals()),
+        ):
+            result = op.execute(session, payload, emit=emit)
+        return result, events, new_set
+
+    def test_the_flag_defaults_to_off(self):
+        payload = LoadGOAAnnotationsPayload.model_validate(
+            {"ontology_snapshot_id": _SNAPSHOT_ID, "gaf_url": "u", "source_version": "220"}
+        )
+        assert payload.enqueue_evaluation_set_against_prior is False
+
+    def test_off_opens_no_frame_and_says_so(self):
+        prior = MagicMock(id=uuid.uuid4(), source="goa", source_version="215")
+        session, _ = self._session(prior)
+        result, events, _ = self._execute(session)
+        session.add.assert_not_called()
+        session.query.assert_not_called()
+        assert result.publish_after_commit == []
+        assert "auto_eval_job_id" not in result.result
+        skipped = [e for e in events if e["event"] == "load_goa_annotations.auto_eval_skipped"]
+        assert [e["fields"] for e in skipped] == [{"reason": "not_requested"}]
+
+    def test_on_does_what_every_load_did_before(self):
+        prior = MagicMock(id=uuid.uuid4(), source="goa", source_version="215")
+        session, child_id = self._session(prior)
+        result, events, new_set = self._execute(
+            session, enqueue_evaluation_set_against_prior=True
+        )
+        job, audit = (call.args[0] for call in session.add.call_args_list)
+        assert job.operation == "generate_evaluation_set"
+        assert job.queue_name == "protea.jobs"
+        assert job.payload == {
+            "old_annotation_set_id": str(prior.id),
+            "new_annotation_set_id": str(new_set.id),
+        }
+        assert audit.event == "job.created"
+        assert audit.fields["trigger"] == "load_goa_annotations.auto"
+        assert result.result["auto_eval_job_id"] == str(child_id)
+        assert result.publish_after_commit == [("protea.jobs", child_id)]
+        enqueued = [e for e in events if e["event"] == "load_goa_annotations.auto_eval_enqueued"]
+        assert len(enqueued) == 1
+
+    def test_on_still_skips_when_there_is_no_prior_release(self):
+        session, _ = self._session(prior=None)
+        result, events, _ = self._execute(session, enqueue_evaluation_set_against_prior=True)
+        assert result.publish_after_commit == []
+        reasons = [
+            e["fields"]["reason"]
+            for e in events
+            if e["event"] == "load_goa_annotations.auto_eval_skipped"
+        ]
+        assert reasons == ["no_prior_goa_annotation_set"]
+
+
 # ---------------------------------------------------------------------------
 # Operation name
 # ---------------------------------------------------------------------------
