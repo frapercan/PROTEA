@@ -263,10 +263,12 @@ def gaf_pass(
     negation), ``keys.tsv`` and ``protein_keys.parquet`` (the keys each protein
     carries, with their row counts) and ``gaf.json``.
 
-    The per-protein summary of the superset is exact whatever the order of the
-    file. The neighbours' is exact when GOA lists each accession in one run,
-    which ``order_breaks`` reports; a protein split across runs would be counted
-    once per run.
+    Both per-protein summaries are exact whatever the order of the file. GOA is
+    not strictly ordered by accession (GOA 211: 276,053 places where the order
+    goes back, reported as ``order_breaks``), so a run of rows is not a protein:
+    ``runs_by_set`` counts runs, ``proteins_by_set`` counts proteins, and
+    ``protein_keys.parquet`` holds one row per (run, key), to be summed by
+    (accession, key).
     """
     check_dates(
         source=f"GOA {release}", published=published, cut_release=cut_release, cut_date=cut_date
@@ -276,10 +278,10 @@ def gaf_pass(
     key_ids: dict[tuple[str, str, str, bool], int] = {}
     outside_codes: Counter[str] = Counter()
     unknown_codes: Counter[str] = Counter()
-    neighbour_patterns: Counter[str] = Counter()
     superset_masks: dict[str, int] = {}
+    neighbour_masks: dict[str, int] = {}
     counters = Counter(lines=0, uniprot_rows=0, malformed=0, order_breaks=0)
-    seen_by_set: Counter[str] = Counter()
+    runs_by_set: Counter[str] = Counter()
     schema = pa.schema([("accession", pa.string()), ("key_id", pa.int32()), ("rows", pa.int64())])
     buf_acc: list[str] = []
     buf_key: list[int] = []
@@ -305,11 +307,9 @@ def gaf_pass(
                 buf_acc.append(current)
                 buf_key.append(kid)
                 buf_rows.append(n)
-            seen_by_set[current_set] += 1
-            if current_set == "superset":
-                superset_masks[current] = superset_masks.get(current, 0) | current_mask
-            else:
-                neighbour_patterns[pattern_of(current_mask)] += 1
+            runs_by_set[current_set] += 1
+            masks = superset_masks if current_set == "superset" else neighbour_masks
+            masks[current] = masks.get(current, 0) | current_mask
             if len(buf_acc) >= batch_rows:
                 flush_buffers()
 
@@ -359,6 +359,7 @@ def gaf_pass(
 
     superset_patterns = Counter(pattern_of(mask) for mask in superset_masks.values())
     superset_patterns["no_rows"] = len(superset) - len(superset_masks)
+    neighbour_patterns = Counter(pattern_of(mask) for mask in neighbour_masks.values())
     _write_tsv(
         out / "groups.tsv",
         ("set", "code", "reference", "assigned_by", "negated", "rows"),
@@ -384,12 +385,13 @@ def gaf_pass(
         "cut_date": cut_date.isoformat(),
         **dict(counters),
         "rows_by_set": dict(rows_by_set),
-        "proteins_seen_by_set": dict(seen_by_set),
+        "runs_by_set": dict(runs_by_set),
+        "proteins_by_set": {"superset": len(superset_masks), "neighbour": len(neighbour_masks)},
         "superset_members": len(superset),
         "superset_by_pattern": dict(superset_patterns),
         "neighbours_listed": len(neighbours),
         "neighbours_by_pattern": dict(neighbour_patterns),
-        "neighbours_with_no_rows": len(neighbours) - seen_by_set["neighbour"],
+        "neighbours_with_no_rows": len(neighbours) - len(neighbour_masks),
         "outside_rows_by_code": dict(outside_codes),
         "unknown_codes": dict(unknown_codes),
         "keys": len(key_ids),

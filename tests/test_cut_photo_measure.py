@@ -290,6 +290,22 @@ class TestGafPass:
             "no_rows": 0,
         }
 
+    def test_a_neighbour_split_across_runs_is_one_protein(self, tmp_path: Path) -> None:
+        record = gaf_pass(
+            [_row("A0A000", "IBA"), _row("B0B000", "IEA"), _row("A0A000", "IEA")],
+            superset=frozenset(),
+            neighbours=frozenset({"A0A000", "B0B000", "C0C000"}),
+            release=CUT,
+            published=CUT_DATE,
+            cut_release=CUT,
+            cut_date=CUT_DATE,
+            out=tmp_path,
+        )
+        assert record["runs_by_set"] == {"neighbour": 3}
+        assert record["proteins_by_set"] == {"superset": 0, "neighbour": 2}
+        assert record["neighbours_by_pattern"] == {"only_electronic_or_phylogenetic": 2}
+        assert record["neighbours_with_no_rows"] == 1
+
     def test_an_unknown_code_of_a_member_is_reported_by_name(self, tmp_path: Path) -> None:
         record = gaf_pass(
             [_row("P11111", "QQQ")],
