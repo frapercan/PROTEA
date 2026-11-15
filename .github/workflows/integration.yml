@@ -27,7 +27,13 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        # The engine the stack runs, by the same reference: docker-compose.yml
+        # pins this image by digest and tests/conftest.py defaults to it. This
+        # said pg16 for two months after the stack moved to pg18 (2026-09-14),
+        # and a suite on an older engine than the stack stays green through the
+        # failures only the stack's engine has.
+        # tests/test_ci_services_match_the_stack.py fails when they disagree.
+        image: pgvector/pgvector:pg18@sha256:1d50c689b0a6511b9ea0a15615281c81a59fd04a08eb35057ec8646fb3a2118a
         env:
           POSTGRES_USER: protea
           POSTGRES_PASSWORD: protea

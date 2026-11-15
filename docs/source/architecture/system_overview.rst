@@ -402,10 +402,11 @@ The test suite is split into two categories:
    across 17 test files; coverage enforced at 70 % by ``pytest-cov``.
 
 **Integration tests**
-   Run with ``pytest --with-postgres``. The ``conftest.py`` fixture pulls a
-   ``pgvector/pgvector:pg16`` Docker image, initialises the schema, and tears
-   down the container after the session. These tests exercise the full
-   round-trip from job submission to database state.
+   Run with ``pytest --with-postgres``. The ``conftest.py`` fixture pulls the
+   ``pgvector/pgvector:pg18`` image ``docker-compose.yml`` pins (by digest),
+   initialises the schema, and tears down the container after the session.
+   These tests exercise the full round-trip from job submission to database
+   state.
 
 .. code-block:: bash
 

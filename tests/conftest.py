@@ -396,6 +396,15 @@ def pytest_sessionstart(session: pytest.Session) -> None:
             )
 
 
+# The Postgres the stack runs, by the reference docker-compose.yml pins: tag AND
+# digest, because a tag can be repointed under a restart. The integration workflow
+# runs the same reference as its service container, and
+# tests/test_ci_services_match_the_stack.py fails when the three disagree.
+_DEFAULT_PG_IMAGE = (
+    "pgvector/pgvector:pg18@sha256:1d50c689b0a6511b9ea0a15615281c81a59fd04a08eb35057ec8646fb3a2118a"
+)
+
+
 @pytest.fixture(scope="session")
 def postgres_url(pytestconfig: pytest.Config) -> str:
     if not pytestconfig.getoption("--with-postgres"):
@@ -437,7 +446,7 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
     # green through exactly that failure, because it never runs the engine that
     # broke. Testing an older engine than production does not lower risk; it
     # moves the risk to where nothing is watching.
-    image = os.getenv("PROTEA_PG_IMAGE", "pgvector/pgvector:pg18")
+    image = os.getenv("PROTEA_PG_IMAGE", _DEFAULT_PG_IMAGE)
     if host_port is None:
         host_port = str(55000 + (uuid.uuid4().int % 1000))
 
