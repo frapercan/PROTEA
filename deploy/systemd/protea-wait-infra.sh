@@ -45,6 +45,10 @@ for hp in "${PORTS[@]}"; do
     fi
     sleep 2
   done
-  exec 3<&- 2>/dev/null || true
+  # The probe opened its connection inside the subshell above, and it closed
+  # with it. There used to be an `exec 3<&- 2>/dev/null` here: an `exec` with
+  # nothing but redirections applies them to this shell for good, so after
+  # the first endpoint answered every later message went to /dev/null,
+  # "not answering" included.
 done
 echo "protea-wait-infra: infra ports ready (${PORTS[*]})"

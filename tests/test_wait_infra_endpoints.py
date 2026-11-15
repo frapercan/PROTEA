@@ -68,6 +68,18 @@ def test_an_endpoint_from_the_environment_that_does_not_answer_fails():
     assert f"127.0.0.1:{closed} not answering" in result.stderr
 
 
+def test_an_endpoint_that_fails_after_one_that_answered_is_still_named(listening_port):
+    # The gate used to close its probe with `exec 3<&- 2>/dev/null`, which
+    # silenced the shell's stderr for good once one endpoint had answered.
+    closed = _closed_port()
+    result = _run(
+        PROTEA_WAIT_ENDPOINTS=f"127.0.0.1:{listening_port} 127.0.0.1:{closed}",
+        PROTEA_WAIT_DEADLINE="0",
+    )
+    assert result.returncode == 1
+    assert f"127.0.0.1:{closed} not answering" in result.stderr
+
+
 @pytest.mark.parametrize(
     "endpoints",
     ["127.0.0.1", "127.0.0.1:", ":5432", "db:abc", "db:0", "db:70000", "   "],
