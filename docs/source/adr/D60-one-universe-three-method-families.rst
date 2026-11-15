@@ -61,6 +61,10 @@ a cluster, development on one machine and production on another:
   (``_OPERATION_QUEUES``), and ``POST /jobs`` checks neither the operation, the
   queue nor the kind it is given.
 
+And the cluster connects to nothing: its compute nodes have no route out, and
+no permission to open one will be given (2026-11-15). Whatever it computes has
+to leave as files.
+
 Decision
 ~~~~~~~~
 
@@ -130,7 +134,8 @@ an embedding configuration.
   id and its pins by sha256. The leakage guard reads them.
 
 **4. The compute-stage contract.** A heavy stage is a pure function of its
-message and the artifact store.
+inputs: a message and the artifact store on the platform's own nodes, files on
+the cluster.
 
 .. code-block:: python
 
@@ -138,21 +143,33 @@ message and the artifact store.
        def run(self, payload: Payload, ctx: StageContext) -> StageOutput: ...
        # StageOutput: the downstream messages, the files and the result
 
+   class FileStage(Protocol):
+       def run(self, inputs: Path, out: Path, seal: Seal) -> Manifest: ...
+       # Manifest: every output file with its sha256, and the seal
+
    # StageContext carries emit (buffered, never a session), a deadline, a
    # weights resolver and an optional store.
    check_revision_seal(seal) -> VERIFIED_EQUAL | FOREIGN | UNVERIFIABLE
-   StageExecutor(mode=DATABASE | PURE | PILOT)
+   StageExecutor(mode=DATABASE | PURE)
 
-- One executor with three modes: ``DATABASE`` (today's behaviour), ``PURE``
-  (no session) and ``PILOT`` (``PURE`` plus the pilot rules).
+- One executor with two modes: ``DATABASE`` (today's behaviour) and ``PURE`` (no
+  session).
 - A capped retry header. Connection errors are retries. The input is
   acknowledged only after the broker confirms the publication of the output.
 - Every message carries a revision seal: the code revision, the six sibling
   revisions and the tree revision. Only a ``FOREIGN`` verdict exits with 78; the
   consumer is cancelled and the message goes back to its queue without spending
   the cap.
-- Queues are named by the work and what it needs, never by a machine. A pilot
-  consumes the same queues as every worker and declares them passively.
+- Queues are named by the work and what it needs, never by a machine.
+- **The cluster runs file stages only.** A cluster job reads inputs placed
+  beforehand and writes files with a seal: the revision seal above, the recipe
+  and the digest of the configuration it was given, and the sha256 of every
+  output. The files reach the platform through the cluster's login node, the
+  way the public downloads already reach the cluster. An ingest operation on
+  the platform verifies the seal and writes the rows. ``ingest_method_predictions``
+  already does this for a method's predictions, and ``ingest_embeddings`` will
+  do it for vectors. The cluster never holds a platform credential and never
+  joins a queue.
 
 **5. The evaluation contract.** One evaluator answers an
 ``EvaluationRequest(prediction_set_id, frame, information_accretion_set_id,
@@ -172,8 +189,8 @@ evaluator's commit.
 **6. The operation descriptor.** Every operation declares
 ``OperationSpec(domain, kind, queue, purity, resource, family, publishes_to,
 status)``. Routing, the consumer kind, the validation of ``POST /jobs`` and the
-list of operations a pilot may run all derive from it, and the registry refuses
-an operation without one.
+list of stages the cluster may run as file stages all derive from it, and the
+registry refuses an operation without one.
 
 **7. Development from zero, beside production.** Development builds a new
 universe with PROTEA operations only, from public sources, in its own stack
@@ -226,6 +243,9 @@ Alternatives considered
 - **Merging the refactor into ``develop`` and suspending the declaration
   rule.** Rejected: an urgent production fix could only be declared after
   landing on a ``develop`` that carries refactor code.
+- **Workers on the cluster that join the platform's queues, through tunnels.**
+  Dropped on 2026-11-15: the cluster gives no connection and no permission to
+  open one, so it runs file stages instead (decision 4).
 - **A queue per machine for the cluster.** Rejected by the author: "No quiero
   que las colas sean especificas de picasso".
 
@@ -243,13 +263,15 @@ Implementation order
 1. The operation descriptor.
 2. The universe from zero.
 3. The executor rules, in database mode.
-4. The pure embeddings stage and the pilot mode.
+4. The pure embeddings stage, its file-stage form for the cluster and
+   ``ingest_embeddings``.
 5. The method contract and the first path of each family. The contract and the
    family registry can land right after step 1, because they do not depend on
    the universe's data.
 6. The unified evaluation.
 7. The front door and the documentation, with the three introductions.
-8. The cluster pilots.
+8. The cluster's runbook: the image, the weights placed beforehand and the
+   file-stage jobs, each with its ingest.
 
 Decisions taken by the author (2026-11-15)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -269,6 +291,8 @@ Decisions taken by the author (2026-11-15)
   milestone.
 - **Storage.** Every machine works with the disk it has, and nothing is backed
   up: the development universe is rebuilt from public sources. No new hardware.
+- **The cluster.** It will give no permission to connect, so it runs file
+  stages only, and the platform ingests their files (decision 4).
 
 Still open: which method instance the public instrument serves. The plan
 recommends the 227 instance, trained on the four windows and validated through
