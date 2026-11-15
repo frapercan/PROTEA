@@ -31,9 +31,9 @@
 # a path inside the agent-farm clone, read from origin/main like everything
 # else here and never from a checkout. Unset, it is plans/DECLARED-REVISION.txt,
 # the declaration the production workers follow. The name and the default are
-# the ones agent-farm's protea-node-sync.sh reads, so a node's sync and its
-# guard cannot end up on two declarations because one was told and the other
-# was not.
+# the ones agent-farm's protea-node-sync.sh reads, so on a host that runs both,
+# one line in an environment file they both read points them at the same
+# declaration.
 #
 # THE DEVELOPMENT INSTANCE HAS A DECLARATION OF ITS OWN. Its tree runs commits
 # of the integration branch, which the production declaration never names: that
@@ -50,10 +50,15 @@
 # .git is a file, and the clone checks below require a directory.
 #
 # THIS PATH MAY HAVE A DEFAULT WHERE THE TWO ROOTS BELOW MAY NOT, because a
-# wrong one cannot fail open. A declaration that is not on origin/main is a
-# refusal, and one that names another commit is refused with its path in the
-# message, so a dev unit that forgot the variable is refused, naming the
-# production file, as soon as the two declarations differ.
+# wrong one fails closed in every case but one. A path with no file on
+# origin/main is a refusal, and a tree at another commit is refused naming the
+# declaration it was compared with. A wrong path that does name a declaration
+# lets through only a tree at exactly the commit that declaration names, and
+# that is the one way it fails open: a dev unit that forgot the variable reads
+# the production declaration, so it is refused, naming that file, unless the
+# dev tree sits at the commit production declares. Then it starts, on a commit
+# the dev declaration may not name. This guard cannot tell which instance a
+# unit belongs to, so setting the variable is the dev unit's job.
 #
 # READ-ONLY: two git reads and a string comparison. Starts nothing, kills
 # nothing, moves nothing.
@@ -85,8 +90,8 @@ allow()  { echo "protea-guard-revision: $*" >&2; exit 0; }
 # apart without anyone choosing it, because a default is a guess that never
 # announces itself. So both paths must be handed in, and an absent one is a
 # refusal rather than an assumption. The declaration's path inside the clone is
-# the one input with a default, and the header says why a wrong one there
-# cannot fail open.
+# the one input with a default. The header says why it may have one and names
+# the one way a wrong one there fails open.
 #
 # A HOST OUTSIDE THE PROTOCOL SAYS SO, IT IS NOT INFERRED.
 #

@@ -280,9 +280,9 @@ class TestTheUnitNamesItsDeclaration:
     Its tree runs commits of the integration branch, which the production
     declaration never names, so its units hand the guard
     ``plans/DECLARED-REVISION-DEV.txt`` through ``PROTEA_DECL_PATH``, the
-    variable agent-farm's protea-node-sync.sh reads with the same default. Each
-    test is built so that a guard reading any other file, the production
-    declaration or a checkout's copy, could not pass.
+    variable agent-farm's protea-node-sync.sh reads with the same default.
+    Between them, the tests leave no way through for a guard that reads any
+    other file, the production declaration or a checkout's copy.
     """
 
     def test_it_allows_a_tree_at_the_commit_its_declaration_names(self, world) -> None:
@@ -308,6 +308,21 @@ class TestTheUnitNamesItsDeclaration:
         r = _run(tmp / "farm", tmp / "slot", env_overrides=DEV_UNIT)
         assert r.returncode == 1
         assert f"cannot read {DEV_DECLARATION}" in r.stderr
+
+    def test_a_forgotten_variable_is_refused_naming_the_production_file(self, world) -> None:
+        """A dev unit that hands the guard no path is refused, and the journal says why.
+
+        The dev declaration names the tree and the production one does not. The
+        unit sets no ``PROTEA_DECL_PATH``, so the guard reads the production
+        file, and its refusal names that file, which is how the slip shows. The
+        header names the one case this cannot catch: a dev tree that sits at the
+        commit production declares.
+        """
+        tmp, shas = world
+        _farm(tmp / "farm", shas[0], also={DEV_DECLARATION: shas[-1]})
+        r = _run(tmp / "farm", tmp / "slot")
+        assert r.returncode == 1
+        assert f"declared in {DECLARATION}" in r.stderr
 
     def test_a_declaration_committed_only_in_the_checkout_is_not_declared(self, world) -> None:
         """The guard reads origin/main, because a checkout is a tree that can say anything.

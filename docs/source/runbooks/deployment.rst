@@ -644,8 +644,12 @@ Three rules come with it:
   agent-farm's ``protea-node-sync.sh`` will not move a node across a migration
   without it.
 
-A dev unit that forgets ``PROTEA_DECL_PATH`` reads the production declaration,
-and it is refused, naming that file, as soon as the two declarations differ.
+A dev unit that forgets ``PROTEA_DECL_PATH`` reads the production declaration.
+It is refused, naming that file, whenever the dev tree is at a commit other
+than the one production declares. When the dev tree sits exactly at that
+commit, the worker starts, although the dev declaration may name another one.
+The guard cannot tell which instance a unit belongs to, so every dev unit sets
+the variable.
 
 See also
 ---------
