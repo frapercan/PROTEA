@@ -1,4 +1,4 @@
-ADR-D59: The corpus at a cut is a photo: its Swiss-Prot, its live tiers and their UniRef50 neighbours
+ADR-D59: The corpus at a cut is a photo: its Swiss-Prot, its live tiers and their UniRef50 profiles
 ======================================================================================================
 
 :Status: Proposed. The requirement is the author's, stated on 2026-11-15:
@@ -77,14 +77,21 @@ t.**
    * - ``truth``, ``curated_inference``
      - GOA t, unchanged from ADR-D49.
      - A measurement on this protein, or a curator's judgement about it.
-   * - ``neighbour``
-     - The UniRef50 release paired with t the same way.
-     - A member of the UniRef50 cluster of some ``superset`` protein, with at
-       least one row in GOA t other than ``ND``. No hand-set parameter:
-       membership is UniRef's.
-
 A protein can enter by several sets, and every set it entered by is recorded.
 ``ND``-only proteins stay out for the reason ADR-D49 gave.
+
+**UniRef50 neighbours never enter the corpus as proteins; they enter as a
+profile per cluster** (the author, 2026-11-15: "ok, perfil por grupo"). For every
+UniRef50 cluster of the paired UniRef release that holds a ``superset`` protein,
+the photo stores how many members carry each GO term in each RECIPE channel
+(``truth``, ``curated``, ``phylogenetic``, ``orthology_electronic``), optionally
+split by a coarse taxon group. Membership is UniRef's, with no hand-set parameter.
+Measured at 211 outside the platform, so as an order of magnitude only: the
+196,353 clusters holding a reviewed protein have 38,185,820 other members carrying
+370,4 million GOA 211 rows, 98% of them in mirror channels; 903,248 of those
+members carry a recipe-channel row (8,3 million rows: 663,165 by Ensembl
+orthology, 300,973 by PAINT). As proteins they would be 1,3 times the whole
+corpus; as a profile they are counts per (cluster, term, channel).
 
 **2. Every GOA t row of a member is kept, and its evidence channel is a declared
 table, not a column.** The channel is a pure function of the row's evidence code,
@@ -147,8 +154,11 @@ already holds is copied.**
   sequence md5 included; it is referenced, not copied.
 - The live tiers are read from the annotations, as ADR-D49 already does; no tier
   column is stored.
-- ``cut_photo_neighbour``: one row per (photo, accession) with its UniRef50
-  cluster. It is the only member set that no existing table can derive.
+- ``cut_photo_cluster``: one row per (photo, superset accession) with its
+  UniRef50 cluster, so a target finds its profile.
+- ``cut_photo_cluster_profile``: one row per (photo, cluster, GO term, channel,
+  taxon group) with the number of members carrying it. It is the only part of
+  the photo no existing table can derive, and it holds counts, not proteins.
 - ``protein``: a member that is not yet in the table enters as an accession-only
   row; ``first_admitted_release`` is written as a minimum, as ADR-D49 does.
 - ``protein_go_annotation``: the GOA t rows of the new members are appended to
@@ -189,9 +199,8 @@ that names one.
 still serves gets today's sequence through ``resolve_protein_sequences``. A
 superset member's md5 in the paired release is already in
 ``SwissProtMembership``, so drift against today's sequence is measurable instead
-of assumed. A member UniProt no longer serves, which is common
-for neighbours of older releases, takes the sequence of the paired release and
-says so.
+of assumed. A member UniProt no longer serves takes the sequence of the paired
+release and says so.
 
 Consequences
 ~~~~~~~~~~~~
@@ -207,15 +216,15 @@ Consequences
   before any other, and the sizes of each set and channel are reported before the
   rest are built.
 - **Cost moves to the compute node.** Each cut needs its GOA file (the largest
-  release is 24,28 GB, per ADR-D49), its Swiss-Prot list, its UniRef50 membership
-  and, for neighbours UniProt no longer serves, their release sequences.
+  release is 24,28 GB, per ADR-D49), its Swiss-Prot list and its UniRef50
+  membership, read once to build the cluster profiles and then discarded.
 
 What this record does not settle
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- **The size of the neighbour set.** If it is too large, a restriction (for
-  example, neighbours with at least one row in a channel the recipe uses) is the
-  author's decision, taken on the numbers of 211.
+- **Protein-level neighbours.** If a low-homology method later needs
+  protein-to-protein transfer from neighbours, the candidates are the members
+  with a recipe-channel row (903,248 at 211); adding them is a separate decision.
 - **Bridges.** UniRef members with no annotation at all could link a query to
   distant annotated proteins through intermediate sequences. They are not members
   under this record.
