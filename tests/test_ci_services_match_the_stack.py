@@ -1,6 +1,6 @@
 """Integration CI and the suite run the images the stack pins, by the same reference.
 
-docker-compose.yml pins its services by tag and digest. The integration workflow
+docker-compose.yml pins postgres and rabbitmq by tag and digest. The integration workflow
 went on running ``pgvector/pgvector:pg16`` for two months after the stack moved
 to pg18 on 2026-09-14, and the suite's own default named the pg18 tag with no
 digest. A suite on another engine than the stack stays green through the

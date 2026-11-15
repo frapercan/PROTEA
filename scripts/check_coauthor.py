@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Refuse Claude/Anthropic attribution in commit messages and pull request bodies.
 
-No commit and no pull request in this repository carries an AI attribution
-line. ``.github/workflows/coauthor-guard.yml`` runs this script twice, over the
-messages of the commits a pull request introduces and over its body, so both
-scans read the patterns below and nothing else.
+No commit a pull request introduces, and no pull request body, may carry a
+Claude or Anthropic attribution line. ``.github/workflows/coauthor-guard.yml``
+runs this script twice, over the messages of those commits and over the body,
+so both scans read the patterns below and nothing else.
 
 WHY ONE SCRIPT. The two scans used to carry their own regexes inline in the
 workflow, and they drifted apart: the body's lacked the optional bracket the
