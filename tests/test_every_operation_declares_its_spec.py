@@ -24,6 +24,8 @@ from protea.core import queues
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.operation_catalog import CATALOG, build_operation_registry
 from protea.core.operation_spec import (
+    JOB_KINDS,
+    KINDS,
     MESSAGE_KINDS,
     OperationSpec,
     job_queues,
@@ -276,6 +278,12 @@ def test_the_shared_domains_name_no_family(specs: dict[str, OperationSpec]) -> N
 # The spec refuses itself ---------------------------------------------------------------
 
 _VALID = OperationSpec("universe", "job", queues.JOBS, "database", "cpu")
+
+
+def test_every_kind_travels_as_a_job_or_as_a_message() -> None:
+    """The consumer a queue gets is decided by kind, so no kind may be left out."""
+    assert JOB_KINDS | MESSAGE_KINDS == set(KINDS)
+    assert not JOB_KINDS & MESSAGE_KINDS
 
 
 def test_a_consistent_spec_builds() -> None:
