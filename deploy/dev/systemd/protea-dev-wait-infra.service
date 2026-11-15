@@ -8,14 +8,14 @@ Wants=protea-dev-postgres.service protea-dev-rabbitmq.service protea-dev-minio.s
 After=protea-dev-postgres.service protea-dev-rabbitmq.service protea-dev-minio.service
 # Like every dev unit. Without the dev volume the containers this gate wants
 # refuse to start, and it would sit out its whole deadline waiting for them.
-AssertPathIsMountPoint=/srv/protea-dev
+AssertPathIsDirectory=%h/protea-dev
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 Slice=protea-dev.slice
 Environment="PROTEA_WAIT_ENDPOINTS=127.0.0.1:26432 127.0.0.1:26672 127.0.0.1:26900"
-ExecStart=/bin/bash /srv/protea-dev/deploy/PROTEA/deploy/systemd/protea-wait-infra.sh
+ExecStart=/bin/bash %h/protea-dev/deploy/PROTEA/deploy/systemd/protea-wait-infra.sh
 TimeoutStartSec=200
 
 [Install]

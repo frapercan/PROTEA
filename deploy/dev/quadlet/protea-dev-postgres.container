@@ -11,10 +11,15 @@
 [Unit]
 Description=PROTEA dev Postgres (pg18 + pgvector, 127.0.0.1:26432)
 PartOf=protea-dev.target
-# The dev universe is measured in hundreds of GB. Without the dev volume
-# mounted, this container would write all of it onto the root filesystem the
-# production worker lives on, so a missing mount stops the unit instead.
-AssertPathIsMountPoint=/srv/protea-dev
+# The dev data lives on the system disk, beside production (the author's
+# decision of 2026-11-15: no new disk, no copies). The directory must exist,
+# and the disk gate in [Service] stops the unit before the data can fill
+# the disk production runs on.
+AssertPathIsDirectory=%h/protea-dev
+# A refusal of the disk gate (exit 78) must not loop: at most three starts
+# in fifteen minutes.
+StartLimitIntervalSec=900
+StartLimitBurst=3
 
 [Container]
 ContainerName=protea-dev-postgres
@@ -24,7 +29,7 @@ Image=docker.io/pgvector/pgvector:pg18@sha256:1d50c689b0a6511b9ea0a15615281c81a5
 PublishPort=127.0.0.1:26432:5432
 # pg18 images keep data in a major-version subdirectory of this mount point
 # (docker-compose.yml explains the layout change).
-Volume=/srv/protea-dev/postgres:/var/lib/postgresql
+Volume=%h/protea-dev/postgres:/var/lib/postgresql
 Environment=POSTGRES_USER=protea_dev
 Environment=POSTGRES_DB=protea_dev
 # Created once from stdin (README). Never written in this file and never
@@ -40,14 +45,16 @@ ShmSize=1g
 # measurement). work_mem and maintenance_work_mem as in production. WAL and
 # temporary files are bounded so one runaway query cannot fill the dev
 # volume.
-Exec=postgres -c shared_buffers=1GB -c effective_cache_size=3GB -c work_mem=16MB -c maintenance_work_mem=512MB -c max_wal_size=8GB -c temp_file_limit=100GB
+Exec=postgres -c shared_buffers=768MB -c effective_cache_size=2GB -c work_mem=16MB -c maintenance_work_mem=512MB -c max_wal_size=8GB -c temp_file_limit=100GB
 # The image stops Postgres with SIGINT (fast shutdown). Give it time to
 # checkpoint before podman escalates; stays under the unit's stop timeout.
 StopTimeout=60
 
 [Service]
+# The disk gate (README, "Disk"): refuses to start below the free-space floor.
+ExecStartPre=/bin/bash %h/protea-dev/deploy/PROTEA/deploy/dev/protea-dev-disk-gate.sh %h/protea-dev %n
 Slice=protea-dev.slice
-MemoryMax=4G
+MemoryMax=3G
 # The first start pulls the image, which the default 90 s does not cover.
 TimeoutStartSec=900
 TimeoutStopSec=90

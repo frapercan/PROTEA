@@ -17,12 +17,12 @@ containers.
 
 | Unit | What | Listens on | Memory cap |
 | - | - | - | - |
-| `protea-dev-postgres` (Quadlet) | Postgres 18 with pgvector | `127.0.0.1:26432` | 4G |
-| `protea-dev-rabbitmq` (Quadlet) | RabbitMQ 4.3.5 | `127.0.0.1:26672` (AMQP), `127.0.0.1:26673` (management) | 2G |
-| `protea-dev-minio` (Quadlet) | MinIO | `127.0.0.1:26900` (API), `127.0.0.1:26901` (console) | 1G |
+| `protea-dev-postgres` (Quadlet) | Postgres 18 with pgvector | `127.0.0.1:26432` | 3G |
+| `protea-dev-rabbitmq` (Quadlet) | RabbitMQ 4.3.5 | `127.0.0.1:26672` (AMQP), `127.0.0.1:26673` (management) | 1G |
+| `protea-dev-minio` (Quadlet) | MinIO | `127.0.0.1:26900` (API), `127.0.0.1:26901` (console) | 768M |
 | `protea-dev-wait-infra.service` | waits until the three answer | | |
-| `protea-dev-worker@<queue>.service` | one queue worker per instance | | 4G each |
-| `protea-dev-api.service` | the API | `127.0.0.1:26800` | 1G |
+| `protea-dev-worker@<queue>.service` | one queue worker per instance | | 2G each |
+| `protea-dev-api.service` | the API | `127.0.0.1:26800` | 768M |
 | `protea-dev.slice` | holds all of the above | | 9G in total, CPUWeight 50 |
 | `protea-dev.target` | groups them | | |
 
@@ -36,6 +36,8 @@ Files:
   and the API unit.
 - `protea-dev-clock-gate.sh`: the clock gate every dev process runs before it
   starts (below).
+- `protea-dev-disk-gate.sh`: the disk gate every dev unit runs before it
+  starts ("Disk", below).
 
 The readiness gate is `deploy/systemd/protea-wait-infra.sh`, the same script
 production uses, told the dev ports through `PROTEA_WAIT_ENDPOINTS`.
@@ -74,32 +76,27 @@ production uses, told the dev ports through `PROTEA_WAIT_ENDPOINTS`.
 
 ## Prerequisites
 
-1. `/srv/protea-dev` is a mount point: the dev disk, or an image file mounted
-   there while the disk is pending (which disk backs it is still to be
-   decided). Every dev unit asserts it (`AssertPathIsMountPoint`), so with the
-   volume missing dev stays down instead of writing hundreds of GB onto the
-   root filesystem that production lives on.
-
-   The volume's root must belong to the user that runs the units. A fresh
-   file system's root belongs to root, so the `mkdir` below would fail, and
-   the Postgres and RabbitMQ images change the owner of their data directory
-   from inside the container, which rootless podman allows only on
-   directories this user owns. Hand it over once, after the first mount, and
-   create the data directories:
+1. The data root `~/protea-dev`, on the system disk. The author decided on
+   2026-11-15 to work with the disk each machine has: no new disk and no
+   copies. Every dev unit asserts that the directory exists, and runs the disk
+   gate first (below, "Disk"):
 
    ```bash
-   sudo chown "$USER": /srv/protea-dev
-   mkdir -p /srv/protea-dev/{postgres,rabbitmq,minio,cache,deploy}
+   mkdir -p ~/protea-dev/{postgres,rabbitmq,minio,cache,deploy}
    ```
 
-2. A dev clone at `/srv/protea-dev/deploy/PROTEA`, checked out detached at the
+   The Postgres and RabbitMQ images change the owner of their data directory
+   from inside the container, which rootless podman allows only on directories
+   this user owns, as these are.
+
+2. A dev clone at `~/protea-dev/deploy/PROTEA`, checked out detached at the
    dev revision. It is a separate clone, not a worktree of another tree, and
    it must hold no `.env` and no `protea/config/system.yaml`: settings read
    both, and anything the environment file leaves out would silently come
    from them. The units run two scripts from this clone
    (`deploy/dev/protea-dev-clock-gate.sh` and
    `deploy/systemd/protea-wait-infra.sh`), so its revision must contain both.
-3. A venv at `/srv/protea-dev/venv` with the clone's locked dependencies. The
+3. A venv at `~/protea-dev/venv` with the clone's locked dependencies. The
    units call it directly and never through `poetry run`.
 4. Rootless podman 5.x (Quadlet), and lingering enabled for the user, so that
    user units run without a login session.
@@ -159,14 +156,19 @@ PROTEA_MINIO_ACCESS_KEY=protea-dev-root
 PROTEA_MINIO_SECURE=false
 PROTEA_ALLOWED_ORIGINS='["http://127.0.0.1:26800"]'
 PROTEA_SKIP_TAXONOMY_WARMUP=1
-HF_HOME=/srv/protea-dev/cache/huggingface
 HF_HUB_OFFLINE=1
-PROTEA_REF_CACHE_DIR=/srv/protea-dev/cache/ref_cache
-PROTEA_PRED_CACHE_DIR=/srv/protea-dev/cache/pred_cache
-PROTEA_ALIGN_CACHE_DIR=/srv/protea-dev/cache/align_cache
-PROTEA_PCA_ARTIFACTS_DIR=/srv/protea-dev/cache/pca
-PROTEA_EXPORT_RESUME_DIR=/srv/protea-dev/cache/export_resume
 EOF
+# Paths are absolute in the file (systemd does not expand $HOME there), so
+# they are written from the shell, which does.
+{
+  printf 'HF_HOME=%s\n' "$HOME/protea-dev/cache/huggingface"
+  printf 'PROTEA_REF_CACHE_DIR=%s\n' "$HOME/protea-dev/cache/ref_cache"
+  printf 'PROTEA_PRED_CACHE_DIR=%s\n' "$HOME/protea-dev/cache/pred_cache"
+  printf 'PROTEA_ALIGN_CACHE_DIR=%s\n' "$HOME/protea-dev/cache/align_cache"
+  printf 'PROTEA_PCA_ARTIFACTS_DIR=%s\n' "$HOME/protea-dev/cache/pca"
+  printf 'PROTEA_EXPORT_RESUME_DIR=%s\n' "$HOME/protea-dev/cache/export_resume"
+  printf 'PROTEA_TAXONOMY_DB_PATH=%s\n' "$HOME/protea-dev/cache/taxonomy/taxa.sqlite"
+} >> ~/.secrets/protea-dev.env
 )
 ```
 
@@ -186,7 +188,14 @@ What each line is for:
   file is missing (see "Not wired yet").
 - `HF_HOME` and `HF_HUB_OFFLINE=1`: models come from the dev cache, never
   from a download at run time.
-- The cache variables keep every cache on the dev volume.
+- The cache variables keep every cache under `~/protea-dev/cache`.
+- `PROTEA_TAXONOMY_DB_PATH`: the declared taxonomy file. While it does not
+  exist, a taxonomy feature refuses instead of downloading today's NCBI
+  taxonomy into `~/.etetoolkit`, the file production on this machine reads.
+  The universe builds the taxonomy of each cut (phase 2).
+- `PROTEA_ENVIRONMENT=dev`: workers and the API refuse to start (exit 78)
+  against a database other than `protea_dev` or a vhost other than
+  `protea-dev`.
 
 Never set these in the file:
 
@@ -211,8 +220,8 @@ Copy the sources into place. Copying starts nothing:
 
 ```bash
 mkdir -p ~/.config/containers/systemd/protea-dev
-install -m 0644 /srv/protea-dev/deploy/PROTEA/deploy/dev/quadlet/* ~/.config/containers/systemd/protea-dev/
-install -m 0644 /srv/protea-dev/deploy/PROTEA/deploy/dev/systemd/* ~/.config/systemd/user/
+install -m 0644 ~/protea-dev/deploy/PROTEA/deploy/dev/quadlet/* ~/.config/containers/systemd/protea-dev/
+install -m 0644 ~/protea-dev/deploy/PROTEA/deploy/dev/systemd/* ~/.config/systemd/user/
 ```
 
 `rabbitmq.conf` goes with the Quadlet files on purpose: the broker reads it
@@ -243,7 +252,8 @@ is a separate decision.
 
 ## First start
 
-Every step below starts something, so each one waits for the author's word.
+Every step below starts something. The author allowed it on 2026-11-15, each
+step announced to him before it runs.
 
 1. The infrastructure alone (the gate pulls the three containers in; the
    first start also pulls the images):
@@ -257,7 +267,7 @@ Every step below starts something, so each one waits for the author's word.
 
    ```bash
    ( set -a; . ~/.secrets/protea-dev.env; set +a
-     cd /srv/protea-dev/deploy/PROTEA && /srv/protea-dev/venv/bin/alembic upgrade head )
+     cd ~/protea-dev/deploy/PROTEA && ~/protea-dev/venv/bin/alembic upgrade head )
    ```
 
 3. The first operator API key. `scripts/bootstrap_operator_key.py` reads the
@@ -268,8 +278,8 @@ Every step below starts something, so each one waits for the author's word.
    ```bash
    ( set -a; . ~/.secrets/protea-dev.env; set +a
      umask 077
-     cd /srv/protea-dev/deploy/PROTEA
-     /srv/protea-dev/venv/bin/python scripts/bootstrap_operator_key.py --name dev-operator \
+     cd ~/protea-dev/deploy/PROTEA
+     ~/protea-dev/venv/bin/python scripts/bootstrap_operator_key.py --name dev-operator \
          > ~/.secrets/protea-dev/operator-key )
    ```
 
@@ -288,6 +298,23 @@ Every step below starts something, so each one waits for the author's word.
        -d '{"operation": "ping", "queue_name": "protea.ping"}' \
        http://127.0.0.1:26800/v1/jobs
    ```
+
+## Disk
+
+Development shares the system disk with production on this machine, and
+nothing is backed up: the author decided on 2026-11-15 to work with the disk
+each machine has, with no copies. If the dev data is lost, the universe is
+rebuilt from public sources by the same operations that built it.
+
+`protea-dev-disk-gate.sh` runs first in every dev unit. It refuses to start,
+with exit status 78, when the file system that holds `~/protea-dev` has less
+than `PROTEA_DEV_MIN_FREE_GB` free (default 100), or when the directory is
+missing. The units also carry `StartLimitBurst=3` within 15 minutes, so a
+refusal does not loop. Its last line carries `disk=ok`:
+
+```bash
+journalctl --user -u 'protea-dev-*' | grep -E 'disk=ok|refused'
+```
 
 ## The clock gate
 
@@ -314,16 +341,11 @@ every dev worker and of the API:
 
 ## Not wired yet
 
-- The revision guard (`deploy/systemd/protea-guard-revision.sh`) reads only
-  the production declaration, so it would refuse every dev start. The dev
-  units take it once it reads the declaration path from the unit.
-- The in-code environment check, where a process with
-  `PROTEA_ENVIRONMENT=dev` refuses any vhost or database that is not dev's.
-- A taxonomy path that never downloads. Until then a dev process that needs
-  taxonomy opens the NCBI database ete3 keeps in the home directory
-  (`~/.etetoolkit/taxa.sqlite`), which is the same file the production
-  worker on this machine reads, and downloads it there if it is missing.
-  `PROTEA_SKIP_TAXONOMY_WARMUP=1` only skips the warm-up at start.
+- The revision guard (`deploy/systemd/protea-guard-revision.sh`). It takes
+  its declaration from `PROTEA_DECL_PATH`, but the dev units do not run it
+  yet: dev runs on one machine, from a clone checked out at the dev revision.
+  It joins them with the cluster pilots, together with a dev declaration in
+  agent-farm.
 - A unit for the GPU queues, after the decision on the card.
 - CPU priority for production. `CPUWeight=50` on `protea-dev.slice` only
   weighs against the other children of `protea.slice`, and it has none.
@@ -351,6 +373,6 @@ rm ~/.config/systemd/user/protea-dev.slice ~/.config/systemd/user/protea-dev.tar
 systemctl --user daemon-reload
 ```
 
-The data under `/srv/protea-dev`, the podman secrets
+The data under `~/protea-dev`, the podman secrets
 (`podman secret rm protea-dev-...`) and the files under `~/.secrets` stay
 until removed by hand.

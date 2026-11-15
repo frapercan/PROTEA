@@ -7,7 +7,7 @@
 # below) brings dev up at every boot, which is a separate decision; see
 # deploy/dev/README.md.
 Description=PROTEA development stack on this machine
-Documentation=file:///srv/protea-dev/deploy/PROTEA/deploy/dev/README.md
+Documentation=file://%h/protea-dev/deploy/PROTEA/deploy/dev/README.md
 
 [Install]
 WantedBy=default.target

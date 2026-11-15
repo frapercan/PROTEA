@@ -20,12 +20,16 @@ Description=PROTEA dev worker (queue %i)
 PartOf=protea-dev.target
 After=protea-dev-wait-infra.service
 Requires=protea-dev-wait-infra.service
-AssertPathIsMountPoint=/srv/protea-dev
+AssertPathIsDirectory=%h/protea-dev
+# A refusal of the disk gate (exit 78) must not loop: at most three starts
+# in fifteen minutes.
+StartLimitIntervalSec=900
+StartLimitBurst=3
 
 [Service]
 Type=exec
 Slice=protea-dev.slice
-WorkingDirectory=/srv/protea-dev/deploy/PROTEA
+WorkingDirectory=%h/protea-dev/deploy/PROTEA
 # Mode 0600, never committed, plain KEY=VALUE lines. A missing file fails the
 # unit rather than starting a worker on settings defaults. Values in the file
 # override the Environment= lines below, so the file must not set them.
@@ -41,18 +45,21 @@ Environment=PROTEA_ENVIRONMENT=dev
 # gates, after that decision (README, "Not wired yet").
 Environment=CUDA_VISIBLE_DEVICES=
 
+# The disk gate first: development shares the system disk with production
+# (README, "Disk"), so it refuses to start below the free-space floor.
+ExecStartPre=/bin/bash %h/protea-dev/deploy/PROTEA/deploy/dev/protea-dev-disk-gate.sh %h/protea-dev %n
 # The clock gate. This machine dual-boots and comes up with the clock hours
 # off until chronyd steps it; leases last 120 s. The gate waits for a
 # synchronised clock for a bounded time and never refuses. It runs here, as
 # ExecStartPre, so a waiting unit shows as "activating" instead of running
 # and consuming nothing; TimeoutStartSec must stay above the gate's cap of
 # 600 s, or systemd kills the wait and restarts into it.
-ExecStartPre=/bin/bash /srv/protea-dev/deploy/PROTEA/deploy/dev/protea-dev-clock-gate.sh %n
+ExecStartPre=/bin/bash %h/protea-dev/deploy/PROTEA/deploy/dev/protea-dev-clock-gate.sh %n
 TimeoutStartSec=660
 
 # The venv is used directly, never through poetry: a `poetry run` path can
 # reach `poetry install` and replace the torch build under a running worker.
-ExecStart=/srv/protea-dev/venv/bin/python scripts/worker.py --queue %i --log-format json
+ExecStart=%h/protea-dev/venv/bin/python scripts/worker.py --queue %i --log-format json
 
 Restart=on-failure
 RestartSec=30
@@ -60,7 +67,7 @@ RestartSec=30
 # not run. Restarting every thirty seconds would only repeat the refusal.
 RestartPreventExitStatus=78
 
-MemoryMax=4G
+MemoryMax=2G
 # The worker's own shutdown grace is 30 s (tuning: worker_shutdown_grace_seconds);
 # the in-flight job is requeued or failed before this runs out.
 TimeoutStopSec=120
