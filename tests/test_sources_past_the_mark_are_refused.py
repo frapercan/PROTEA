@@ -23,6 +23,7 @@ from protea.core.cut_photo.measure import (
     SWISSPROT_FASTA_MEMBER,
     PassSource,
     PhotoGuardError,
+    check_dates,
     neighbours_pass,
     superset_pass,
 )
@@ -96,6 +97,26 @@ class TestTheGuards:
 
     def test_the_photo_refusal_is_a_source_refusal(self) -> None:
         assert issubclass(PhotoGuardError, SourceGuardError)
+
+    @pytest.mark.parametrize(
+        ("published", "cut_release"),
+        [(CUT_227, 228), (date(2025, 9, 5), 227)],
+        ids=["a cut after the mark", "a source after its cut"],
+    )
+    def test_the_photo_refuses_what_the_loaders_refuse_in_the_same_words(
+        self, published: date, cut_release: int
+    ) -> None:
+        # One implementation of the rules where the photo is built and where
+        # the universe is loaded: two copies drift apart the day one is edited.
+        with pytest.raises(SourceGuardError) as loader:
+            refuse_a_dated_source(
+                source="GOA 227", published=published, cut_release=cut_release, cut_date=CUT_227
+            )
+        with pytest.raises(PhotoGuardError) as photo:
+            check_dates(
+                source="GOA 227", published=published, cut_release=cut_release, cut_date=CUT_227
+            )
+        assert str(photo.value) == str(loader.value)
 
 
 class TestSwissProtStopsBelowTheCeiling:
