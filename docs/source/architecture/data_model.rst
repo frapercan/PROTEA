@@ -202,15 +202,15 @@ Predictions
    │        PredictionSet         │──────────▶│          GOPrediction             │
    │──────────────────────────────│           │───────────────────────────────────│
    │ id (UUID, PK)                │           │ id (PK)                           │
-   │ embedding_config_id (FK)     │           │ prediction_set_id (FK)            │
-   │ annotation_set_id (FK)       │           │ protein_accession (query)         │
-   │ ontology_snapshot_id (FK)    │           │ go_term_id (FK)                   │
-   │ query_set_id (FK, nullable)  │           │ distance (cosine/L2)              │
-   │ limit_per_entry              │           │ ref_protein_accession             │
-   │ distance_threshold           │           │ qualifier, evidence_code          │
-   │ created_at                   │           │ ── alignment (NW) ──              │
-   └──────────────────────────────┘           │ identity_nw, similarity_nw        │
-                                              │ alignment_score_nw                │
+   │ embedding_config_id (FK,null)│           │ prediction_set_id (FK)            │
+   │ method_id (FK, null)         │           │ protein_accession (query)         │
+   │ annotation_set_id (FK)       │           │ go_term_id (FK)                   │
+   │ ontology_snapshot_id (FK)    │           │ distance (cosine/L2)              │
+   │ query_set_id (FK, nullable)  │           │ ref_protein_accession             │
+   │ limit_per_entry              │           │ qualifier, evidence_code          │
+   │ distance_threshold           │           │ ── alignment (NW) ──              │
+   │ created_at                   │           │ identity_nw, similarity_nw        │
+   └──────────────────────────────┘           │ alignment_score_nw                │
                                               │ gaps_pct_nw, alignment_length_nw  │
                                               │ ── alignment (SW) ──              │
                                               │ identity_sw, similarity_sw        │
@@ -231,6 +231,11 @@ Predictions
    Groups all GO predictions for one run of ``predict_go_terms``. References the
    ``EmbeddingConfig``, ``AnnotationSet``, and ``OntologySnapshot`` used.
    Optionally linked to a ``QuerySet`` when predictions were run from a FASTA upload.
+   A set produced by a method with a row of its own (ADR-D60) names it in
+   ``method_id``. ``embedding_config_id`` is NULL for a method that is not a vote
+   over one embedding, and ``ck_prediction_set_has_a_producer`` requires one of
+   the two; every set written before the method tables has a configuration and
+   no method.
 
 **GOPrediction**
    One row per (query protein, GO term, reference protein) triple. The alignment and
@@ -291,6 +296,39 @@ Predictions
 **ScoringConfig**
    Defines a named scoring recipe: a set of feature weights and parameters
    that can be applied to any prediction set. Immutable once created.
+
+Methods
+-------
+
+ADR-D60 gives a method an identity of its own, so it no longer has to pass as
+an embedding configuration. The contract it is stored from is
+``protea.core.contracts.method``.
+
+**Method**
+   One row per ``MethodSpec``: its family (``embedding-reranker``,
+   ``world-model`` or ``explainable-units``), its code, the instance cut it
+   lives at (``instance_release`` and ``ontology_snapshot_id``), its recipe as
+   JSONB, its runtime (``native`` or ``container``) and whether it explains its
+   predictions. ``id`` is the uuid5 of the spec's canonical JSON and
+   ``spec_sha256`` the sha256 of the same bytes, so the row is identity: a
+   method that changes is another method.
+
+**MethodPin**
+   The bytes a method depends on, one row per (method, role, sha256), with the
+   references that locate them as a JSON array. A reference spelled
+   ``annotation_set:<uuid>``, ``evaluation_set:<uuid>`` or
+   ``model_weights:<uuid>`` names a row the leakage guard can date.
+
+**MethodTrainingWindow**
+   The windows a method's fitted pins were trained on, by evaluation set id,
+   with the role ``fit`` or ``holdout``; at most one holdout per method. The
+   leakage guard refuses to score a method on a frame that starts before its
+   instance cut, any of these windows or any dated pin reference ends.
+
+**PredictionExplanation**
+   Why a method predicted a term for a protein: one row per (prediction set,
+   accession, GO term), the key ``go_prediction`` is unique on, with the
+   explanation as JSONB. Deleted with its prediction set.
 
 Re-ranker datasets
 ------------------
