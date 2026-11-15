@@ -1,0 +1,43 @@
+[Unit]
+# PROTEA dev API on 127.0.0.1:26800. Loopback only, because the API's reads
+# need no credential. Exposing it beyond this machine, for a review from the
+# laptop for instance, is a separate decision.
+Description=PROTEA dev API (uvicorn, 127.0.0.1:26800)
+PartOf=protea-dev.target
+After=protea-dev-wait-infra.service
+Requires=protea-dev-wait-infra.service
+AssertPathIsDirectory=%h/protea-dev
+# A refusal of the disk gate (exit 78) must not loop: at most three starts
+# in fifteen minutes.
+StartLimitIntervalSec=900
+StartLimitBurst=3
+
+[Service]
+Type=exec
+Slice=protea-dev.slice
+WorkingDirectory=%h/protea-dev/deploy/PROTEA
+# Same file as the workers; mode 0600, never committed. It must set
+# PROTEA_JWT_SECRET, because authentication stays on in dev (README).
+EnvironmentFile=%h/.secrets/protea-dev.env
+Environment=PROTEA_ENVIRONMENT=dev
+
+# Same clock gate as the workers, for the same reason: the API stamps job
+# rows and events. TimeoutStartSec stays above the gate's 600 s cap.
+# The disk gate first: development shares the system disk with production
+# (README, "Disk"), so it refuses to start below the free-space floor.
+ExecStartPre=/bin/bash %h/protea-dev/deploy/PROTEA/deploy/dev/protea-dev-disk-gate.sh %h/protea-dev %n
+ExecStartPre=/bin/bash %h/protea-dev/deploy/PROTEA/deploy/dev/protea-dev-clock-gate.sh %n
+TimeoutStartSec=660
+
+# The venv directly, never `poetry run` (see the worker template).
+ExecStart=%h/protea-dev/venv/bin/uvicorn protea.api.app:create_app --factory --host 127.0.0.1 --port 26800
+
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=78
+MemoryMax=768M
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=protea-dev.target
