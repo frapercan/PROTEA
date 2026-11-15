@@ -21,6 +21,7 @@ import pytest
 from protea.core.cut_photo.measure import (
     MARK_RELEASE,
     SWISSPROT_FASTA_MEMBER,
+    PassSource,
     PhotoGuardError,
     check_dates,
     code_family,
@@ -80,32 +81,38 @@ class TestGuard:
         with pytest.raises(PhotoGuardError):
             superset_pass(
                 _archive(tmp_path),
-                release="2022_04",
-                published=late,
-                cut_release=CUT,
-                cut_date=CUT_DATE,
-                out=tmp_path / "s",
+                source=PassSource(
+                    release="2022_04",
+                    published=late,
+                    cut_release=CUT,
+                    cut_date=CUT_DATE,
+                    out=tmp_path / "s",
+                ),
             )
         with pytest.raises(PhotoGuardError):
             neighbours_pass(
                 [],
                 superset=frozenset(),
-                release="2022_04",
-                published=late,
-                cut_release=CUT,
-                cut_date=CUT_DATE,
-                out=tmp_path / "n",
+                source=PassSource(
+                    release="2022_04",
+                    published=late,
+                    cut_release=CUT,
+                    cut_date=CUT_DATE,
+                    out=tmp_path / "n",
+                ),
             )
         with pytest.raises(PhotoGuardError):
             gaf_pass(
                 [],
                 superset=frozenset(),
                 neighbours=frozenset(),
-                release=MARK_RELEASE + 1,
-                published=CUT_DATE,
-                cut_release=MARK_RELEASE + 1,
-                cut_date=CUT_DATE,
-                out=tmp_path / "g",
+                source=PassSource(
+                    release=MARK_RELEASE + 1,
+                    published=CUT_DATE,
+                    cut_release=MARK_RELEASE + 1,
+                    cut_date=CUT_DATE,
+                    out=tmp_path / "g",
+                ),
             )
 
 
@@ -144,11 +151,13 @@ class TestSupersetPass:
         archive = _archive(tmp_path)
         record = superset_pass(
             archive,
-            release="2022_03",
-            published=UNIPROT_DATE,
-            cut_release=CUT,
-            cut_date=CUT_DATE,
-            out=tmp_path / "out",
+            source=PassSource(
+                release="2022_03",
+                published=UNIPROT_DATE,
+                cut_release=CUT,
+                cut_date=CUT_DATE,
+                out=tmp_path / "out",
+            ),
         )
         expected = canonical_table(parse_swissprot_fasta(io.BytesIO(FASTA)))
         written = (tmp_path / "out" / "superset.tsv").read_bytes()
@@ -176,11 +185,13 @@ class TestNeighboursPass:
         record = neighbours_pass(
             UNIREF_LINES,
             superset=frozenset({"P11111", "P22222"}),
-            release="2022_03",
-            published=UNIPROT_DATE,
-            cut_release=CUT,
-            cut_date=CUT_DATE,
-            out=tmp_path,
+            source=PassSource(
+                release="2022_03",
+                published=UNIPROT_DATE,
+                cut_release=CUT,
+                cut_date=CUT_DATE,
+                out=tmp_path,
+            ),
             batch_rows=1,
         )
         table = pq.read_table(tmp_path / "neighbours.parquet").to_pylist()
@@ -232,11 +243,13 @@ class TestGafPass:
             GAF_LINES,
             superset=frozenset({"P11111", "P22222", "P33333"}),
             neighbours=frozenset({"A0A000", "B0B000"}),
-            release=CUT,
-            published=CUT_DATE,
-            cut_release=CUT,
-            cut_date=CUT_DATE,
-            out=tmp_path,
+            source=PassSource(
+                release=CUT,
+                published=CUT_DATE,
+                cut_release=CUT,
+                cut_date=CUT_DATE,
+                out=tmp_path,
+            ),
             batch_rows=1,
         )
 
@@ -278,11 +291,13 @@ class TestGafPass:
             [_row("P22222", "IEA"), _row("P11111", "IEA"), _row("P22222", "IEA")],
             superset=frozenset({"P11111", "P22222"}),
             neighbours=frozenset(),
-            release=CUT,
-            published=CUT_DATE,
-            cut_release=CUT,
-            cut_date=CUT_DATE,
-            out=tmp_path,
+            source=PassSource(
+                release=CUT,
+                published=CUT_DATE,
+                cut_release=CUT,
+                cut_date=CUT_DATE,
+                out=tmp_path,
+            ),
         )
         assert record["order_breaks"] == 1
         assert record["superset_by_pattern"] == {
@@ -295,11 +310,13 @@ class TestGafPass:
             [_row("A0A000", "IBA"), _row("B0B000", "IEA"), _row("A0A000", "IEA")],
             superset=frozenset(),
             neighbours=frozenset({"A0A000", "B0B000", "C0C000"}),
-            release=CUT,
-            published=CUT_DATE,
-            cut_release=CUT,
-            cut_date=CUT_DATE,
-            out=tmp_path,
+            source=PassSource(
+                release=CUT,
+                published=CUT_DATE,
+                cut_release=CUT,
+                cut_date=CUT_DATE,
+                out=tmp_path,
+            ),
         )
         assert record["runs_by_set"] == {"neighbour": 3}
         assert record["proteins_by_set"] == {"superset": 0, "neighbour": 2}
@@ -311,11 +328,13 @@ class TestGafPass:
             [_row("P11111", "QQQ")],
             superset=frozenset({"P11111"}),
             neighbours=frozenset(),
-            release=CUT,
-            published=CUT_DATE,
-            cut_release=CUT,
-            cut_date=CUT_DATE,
-            out=tmp_path,
+            source=PassSource(
+                release=CUT,
+                published=CUT_DATE,
+                cut_release=CUT,
+                cut_date=CUT_DATE,
+                out=tmp_path,
+            ),
         )
         assert record["unknown_codes"] == {"QQQ": 1}
         assert record["superset_by_pattern"] == {"only_unknown": 1, "no_rows": 0}

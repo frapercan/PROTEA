@@ -33,6 +33,7 @@ import sys
 import tarfile
 from collections import Counter
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,62 @@ FAMILY_BITS: dict[str, int] = {
 
 class PhotoGuardError(ValueError):
     """A source or a cut the photo is not allowed to read."""
+
+
+@dataclass(frozen=True)
+class PassSource:
+    """The release a pass reads, when it was published, the cut it serves and where it writes.
+
+    ``release`` is UniProt's name (``2022_03``) for the superset and the
+    neighbours, and GOA's number (211) for the GAF pass; it is recorded as given.
+    """
+
+    release: str | int
+    published: date
+    cut_release: int
+    cut_date: date
+    out: Path
+
+    def check(self, family: str) -> None:
+        """Refuse the cut or the source, naming the source as ``<family> <release>``."""
+        check_dates(
+            source=f"{family} {self.release}",
+            published=self.published,
+            cut_release=self.cut_release,
+            cut_date=self.cut_date,
+        )
+
+    def head(self, pass_name: str) -> dict[str, Any]:
+        """The fields every pass record starts with."""
+        return {
+            "pass": pass_name,
+            "release": self.release,
+            "published": self.published.isoformat(),
+            "cut_release": self.cut_release,
+            "cut_date": self.cut_date.isoformat(),
+        }
+
+
+class _ParquetBuffer:
+    """Rows buffered column by column and written to a Parquet file in batches."""
+
+    def __init__(self, writer: pq.ParquetWriter, schema: pa.Schema, batch_rows: int) -> None:
+        self._writer = writer
+        self._schema = schema
+        self._batch_rows = batch_rows
+        self._columns: list[list[Any]] = [[] for _ in schema]
+
+    def append(self, *values: Any) -> None:
+        for column, value in zip(self._columns, values, strict=True):
+            column.append(value)
+        if len(self._columns[0]) >= self._batch_rows:
+            self.flush()
+
+    def flush(self) -> None:
+        if self._columns[0]:
+            self._writer.write_table(pa.table(self._columns, schema=self._schema))
+            for column in self._columns:
+                column.clear()
 
 
 def check_dates(*, source: str, published: date, cut_release: int, cut_date: date) -> None:
@@ -140,19 +197,9 @@ def read_neighbours(path: Path) -> frozenset[str]:
     return frozenset(keep.column("accession").to_pylist())
 
 
-def superset_pass(
-    archive: Path,
-    *,
-    release: str,
-    published: date,
-    cut_release: int,
-    cut_date: date,
-    out: Path,
-) -> dict[str, Any]:
+def superset_pass(archive: Path, source: PassSource) -> dict[str, Any]:
     """Write ``superset.tsv`` and ``superset.json`` for one archived release."""
-    check_dates(
-        source=f"UniProt {release}", published=published, cut_release=cut_release, cut_date=cut_date
-    )
+    source.check("UniProt")
     with tarfile.open(archive, "r:gz") as tar:
         handle = tar.extractfile(SWISSPROT_FASTA_MEMBER)
         if handle is None:
@@ -160,14 +207,10 @@ def superset_pass(
         with gzip.GzipFile(fileobj=handle) as fasta:
             members = parse_swissprot_fasta(fasta)
     blob = canonical_table(members)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "superset.tsv").write_bytes(blob)
+    source.out.mkdir(parents=True, exist_ok=True)
+    (source.out / "superset.tsv").write_bytes(blob)
     record = {
-        "pass": "superset",
-        "release": release,
-        "published": published.isoformat(),
-        "cut_release": cut_release,
-        "cut_date": cut_date.isoformat(),
+        **source.head("superset"),
         "accessions": len(members),
         "sha256": hashlib.sha256(blob).hexdigest(),
         "archive": {
@@ -176,7 +219,7 @@ def superset_pass(
             "sha256": _file_sha256(archive),
         },
     }
-    _write_record(out / "superset.json", record)
+    _write_record(source.out / "superset.json", record)
     return record
 
 
@@ -184,35 +227,19 @@ def neighbours_pass(
     lines: Iterable[str],
     *,
     superset: frozenset[str],
-    release: str,
-    published: date,
-    cut_release: int,
-    cut_date: date,
-    out: Path,
+    source: PassSource,
     batch_rows: int = 1_000_000,
 ) -> dict[str, Any]:
     """Write ``neighbours.parquet`` and ``neighbours.json`` from a filtered UniRef stream."""
-    check_dates(
-        source=f"UniRef {release}", published=published, cut_release=cut_release, cut_date=cut_date
-    )
-    out.mkdir(parents=True, exist_ok=True)
+    source.check("UniRef")
+    source.out.mkdir(parents=True, exist_ok=True)
     schema = pa.schema(
         [("cluster", pa.string()), ("accession", pa.string()), ("in_superset", pa.bool_())]
     )
     clusters = clusters_with = members_with = 0
     seen: set[str] = set()
-    buf_cluster: list[str] = []
-    buf_accession: list[str] = []
-    buf_flag: list[bool] = []
-    with pq.ParquetWriter(out / "neighbours.parquet", schema, compression="zstd") as writer:
-
-        def flush() -> None:
-            if buf_accession:
-                writer.write_table(pa.table([buf_cluster, buf_accession, buf_flag], schema=schema))
-                buf_cluster.clear()
-                buf_accession.clear()
-                buf_flag.clear()
-
+    with pq.ParquetWriter(source.out / "neighbours.parquet", schema, compression="zstd") as writer:
+        rows = _ParquetBuffer(writer, schema, batch_rows)
         for cluster, accessions in iter_uniref_clusters(lines):
             clusters += 1
             hits = [acc for acc in accessions if acc in superset]
@@ -222,18 +249,10 @@ def neighbours_pass(
             members_with += len(accessions)
             seen.update(hits)
             for acc in accessions:
-                buf_cluster.append(cluster)
-                buf_accession.append(acc)
-                buf_flag.append(acc in superset)
-            if len(buf_accession) >= batch_rows:
-                flush()
-        flush()
+                rows.append(cluster, acc, acc in superset)
+        rows.flush()
     record = {
-        "pass": "neighbours",
-        "release": release,
-        "published": published.isoformat(),
-        "cut_release": cut_release,
-        "cut_date": cut_date.isoformat(),
+        **source.head("neighbours"),
         "clusters": clusters,
         "clusters_with_superset": clusters_with,
         "members_in_those_clusters": members_with,
@@ -241,8 +260,137 @@ def neighbours_pass(
         "superset_in_a_cluster": len(seen),
         "superset_in_no_cluster": len(superset) - len(seen),
     }
-    _write_record(out / "neighbours.json", record)
+    _write_record(source.out / "neighbours.json", record)
     return record
+
+
+class _GafInventory:
+    """The running counts of the GAF pass, fed one line at a time.
+
+    A run is a stretch of consecutive rows of one accession. GOA is not strictly
+    ordered by accession, so one protein can come in several runs; its family
+    mask is OR-ed across them and its keys are written once per run, to be
+    summed by (accession, key).
+    """
+
+    def __init__(
+        self, superset: frozenset[str], neighbours: frozenset[str], keys_out: _ParquetBuffer
+    ) -> None:
+        self.superset = superset
+        self.neighbours = neighbours
+        self.keys_out = keys_out
+        self.groups: Counter[tuple[str, str, str, str, bool]] = Counter()
+        self.key_ids: dict[tuple[str, str, str, bool], int] = {}
+        self.outside_codes: Counter[str] = Counter()
+        self.unknown_codes: Counter[str] = Counter()
+        self.masks: dict[str, dict[str, int]] = {"superset": {}, "neighbour": {}}
+        self.counters = Counter(lines=0, uniprot_rows=0, malformed=0, order_breaks=0)
+        self.runs_by_set: Counter[str] = Counter()
+        self._current: str | None = None
+        self._current_set = ""
+        self._current_keys: Counter[int] = Counter()
+        self._current_mask = 0
+
+    def feed(self, line: str) -> None:
+        """Count one GAF line."""
+        self.counters["lines"] += 1
+        if not line.startswith(_GAF_PREFIX):
+            return
+        self.counters["uniprot_rows"] += 1
+        accession = line[len(_GAF_PREFIX) : line.index("\t", len(_GAF_PREFIX))]
+        if accession in self.superset:
+            member = "superset"
+        elif accession in self.neighbours:
+            member = "neighbour"
+        else:
+            head = line.split("\t", GAF_EVIDENCE + 1)
+            if len(head) > GAF_EVIDENCE:
+                self.outside_codes[head[GAF_EVIDENCE]] += 1
+            return
+        cols = line.rstrip("\n").split("\t")
+        if len(cols) <= GAF_ASSIGNED_BY:
+            self.counters["malformed"] += 1
+            return
+        self._count(accession, member, cols)
+
+    def _count(self, accession: str, member: str, cols: list[str]) -> None:
+        code = cols[GAF_EVIDENCE]
+        family = code_family(code)
+        if family == "unknown":
+            self.unknown_codes[code] += 1
+        key = (
+            code,
+            reference_class(cols[GAF_REFERENCE]),
+            cols[GAF_ASSIGNED_BY],
+            is_negated(cols[GAF_QUALIFIER]),
+        )
+        self.groups[(member, *key)] += 1
+        kid = self.key_ids.setdefault(key, len(self.key_ids))
+        if accession != self._current:
+            self._close_run()
+            if self._current is not None and accession < self._current:
+                self.counters["order_breaks"] += 1
+            self._current, self._current_set = accession, member
+            self._current_keys, self._current_mask = Counter(), 0
+        self._current_keys[kid] += 1
+        self._current_mask |= FAMILY_BITS[family]
+
+    def _close_run(self) -> None:
+        if self._current is None:
+            return
+        for kid, n in self._current_keys.items():
+            self.keys_out.append(self._current, kid, n)
+        self.runs_by_set[self._current_set] += 1
+        masks = self.masks[self._current_set]
+        masks[self._current] = masks.get(self._current, 0) | self._current_mask
+
+    def finish(self) -> None:
+        """Close the last run and write what the buffer still holds."""
+        self._close_run()
+        self._current = None
+        self.keys_out.flush()
+
+    def write_tables(self, out: Path) -> None:
+        """Write ``groups.tsv`` and ``keys.tsv``."""
+        _write_tsv(
+            out / "groups.tsv",
+            ("set", "code", "reference", "assigned_by", "negated", "rows"),
+            sorted(
+                ((*key, n) for key, n in self.groups.items()),
+                key=lambda row: (-row[-1], row[:-1]),
+            ),
+        )
+        _write_tsv(
+            out / "keys.tsv",
+            ("key_id", "code", "reference", "assigned_by", "negated"),
+            sorted(((kid, *key) for key, kid in self.key_ids.items()), key=lambda row: row[0]),
+        )
+
+    def summary(self) -> dict[str, Any]:
+        """The counts ``gaf.json`` records after the source fields."""
+        superset_masks, neighbour_masks = self.masks["superset"], self.masks["neighbour"]
+        superset_patterns = Counter(pattern_of(mask) for mask in superset_masks.values())
+        superset_patterns["no_rows"] = len(self.superset) - len(superset_masks)
+        rows_by_set: Counter[str] = Counter()
+        for (member, *_rest), n in self.groups.items():
+            rows_by_set[member] += n
+        rows_by_set["outside"] = sum(self.outside_codes.values())
+        return {
+            **dict(self.counters),
+            "rows_by_set": dict(rows_by_set),
+            "runs_by_set": dict(self.runs_by_set),
+            "proteins_by_set": {"superset": len(superset_masks), "neighbour": len(neighbour_masks)},
+            "superset_members": len(self.superset),
+            "superset_by_pattern": dict(superset_patterns),
+            "neighbours_listed": len(self.neighbours),
+            "neighbours_by_pattern": dict(
+                Counter(pattern_of(mask) for mask in neighbour_masks.values())
+            ),
+            "neighbours_with_no_rows": len(self.neighbours) - len(neighbour_masks),
+            "outside_rows_by_code": dict(self.outside_codes),
+            "unknown_codes": dict(self.unknown_codes),
+            "keys": len(self.key_ids),
+        }
 
 
 def gaf_pass(
@@ -250,11 +398,7 @@ def gaf_pass(
     *,
     superset: frozenset[str],
     neighbours: frozenset[str],
-    release: int,
-    published: date,
-    cut_release: int,
-    cut_date: date,
-    out: Path,
+    source: PassSource,
     batch_rows: int = 2_000_000,
 ) -> dict[str, Any]:
     """Count the GOA rows of the superset and the neighbours, and the keys of each protein.
@@ -270,133 +414,19 @@ def gaf_pass(
     ``protein_keys.parquet`` holds one row per (run, key), to be summed by
     (accession, key).
     """
-    check_dates(
-        source=f"GOA {release}", published=published, cut_release=cut_release, cut_date=cut_date
-    )
-    out.mkdir(parents=True, exist_ok=True)
-    groups: Counter[tuple[str, str, str, str, bool]] = Counter()
-    key_ids: dict[tuple[str, str, str, bool], int] = {}
-    outside_codes: Counter[str] = Counter()
-    unknown_codes: Counter[str] = Counter()
-    superset_masks: dict[str, int] = {}
-    neighbour_masks: dict[str, int] = {}
-    counters = Counter(lines=0, uniprot_rows=0, malformed=0, order_breaks=0)
-    runs_by_set: Counter[str] = Counter()
+    source.check("GOA")
+    source.out.mkdir(parents=True, exist_ok=True)
     schema = pa.schema([("accession", pa.string()), ("key_id", pa.int32()), ("rows", pa.int64())])
-    buf_acc: list[str] = []
-    buf_key: list[int] = []
-    buf_rows: list[int] = []
-    current: str | None = None
-    current_set = ""
-    current_keys: Counter[int] = Counter()
-    current_mask = 0
-
-    with pq.ParquetWriter(out / "protein_keys.parquet", schema, compression="zstd") as writer:
-
-        def flush_buffers() -> None:
-            if buf_acc:
-                writer.write_table(pa.table([buf_acc, buf_key, buf_rows], schema=schema))
-                buf_acc.clear()
-                buf_key.clear()
-                buf_rows.clear()
-
-        def close_run() -> None:
-            if current is None:
-                return
-            for kid, n in current_keys.items():
-                buf_acc.append(current)
-                buf_key.append(kid)
-                buf_rows.append(n)
-            runs_by_set[current_set] += 1
-            masks = superset_masks if current_set == "superset" else neighbour_masks
-            masks[current] = masks.get(current, 0) | current_mask
-            if len(buf_acc) >= batch_rows:
-                flush_buffers()
-
+    with pq.ParquetWriter(
+        source.out / "protein_keys.parquet", schema, compression="zstd"
+    ) as writer:
+        inventory = _GafInventory(superset, neighbours, _ParquetBuffer(writer, schema, batch_rows))
         for line in lines:
-            counters["lines"] += 1
-            if not line.startswith(_GAF_PREFIX):
-                continue
-            counters["uniprot_rows"] += 1
-            accession = line[len(_GAF_PREFIX) : line.index("\t", len(_GAF_PREFIX))]
-            if accession in superset:
-                member = "superset"
-            elif accession in neighbours:
-                member = "neighbour"
-            else:
-                head = line.split("\t", GAF_EVIDENCE + 1)
-                if len(head) > GAF_EVIDENCE:
-                    outside_codes[head[GAF_EVIDENCE]] += 1
-                continue
-            cols = line.rstrip("\n").split("\t")
-            if len(cols) <= GAF_ASSIGNED_BY:
-                counters["malformed"] += 1
-                continue
-            code = cols[GAF_EVIDENCE]
-            family = code_family(code)
-            if family == "unknown":
-                unknown_codes[code] += 1
-            ref = reference_class(cols[GAF_REFERENCE])
-            by = cols[GAF_ASSIGNED_BY]
-            negated = is_negated(cols[GAF_QUALIFIER])
-            groups[(member, code, ref, by, negated)] += 1
-            key = (code, ref, by, negated)
-            kid = key_ids.get(key)
-            if kid is None:
-                kid = key_ids[key] = len(key_ids)
-            if accession != current:
-                close_run()
-                if current is not None and accession < current:
-                    counters["order_breaks"] += 1
-                current = accession
-                current_set = member
-                current_keys = Counter()
-                current_mask = 0
-            current_keys[kid] += 1
-            current_mask |= FAMILY_BITS[family]
-        close_run()
-        flush_buffers()
-
-    superset_patterns = Counter(pattern_of(mask) for mask in superset_masks.values())
-    superset_patterns["no_rows"] = len(superset) - len(superset_masks)
-    neighbour_patterns = Counter(pattern_of(mask) for mask in neighbour_masks.values())
-    _write_tsv(
-        out / "groups.tsv",
-        ("set", "code", "reference", "assigned_by", "negated", "rows"),
-        sorted(
-            ((*key, n) for key, n in groups.items()),
-            key=lambda row: (-row[-1], row[:-1]),
-        ),
-    )
-    _write_tsv(
-        out / "keys.tsv",
-        ("key_id", "code", "reference", "assigned_by", "negated"),
-        sorted(((kid, *key) for key, kid in key_ids.items()), key=lambda row: row[0]),
-    )
-    rows_by_set: Counter[str] = Counter()
-    for (member, *_rest), n in groups.items():
-        rows_by_set[member] += n
-    rows_by_set["outside"] = sum(outside_codes.values())
-    record = {
-        "pass": "gaf",
-        "release": release,
-        "published": published.isoformat(),
-        "cut_release": cut_release,
-        "cut_date": cut_date.isoformat(),
-        **dict(counters),
-        "rows_by_set": dict(rows_by_set),
-        "runs_by_set": dict(runs_by_set),
-        "proteins_by_set": {"superset": len(superset_masks), "neighbour": len(neighbour_masks)},
-        "superset_members": len(superset),
-        "superset_by_pattern": dict(superset_patterns),
-        "neighbours_listed": len(neighbours),
-        "neighbours_by_pattern": dict(neighbour_patterns),
-        "neighbours_with_no_rows": len(neighbours) - len(neighbour_masks),
-        "outside_rows_by_code": dict(outside_codes),
-        "unknown_codes": dict(unknown_codes),
-        "keys": len(key_ids),
-    }
-    _write_record(out / "gaf.json", record)
+            inventory.feed(line)
+        inventory.finish()
+    inventory.write_tables(source.out)
+    record = {**source.head("gaf"), **inventory.summary()}
+    _write_record(source.out / "gaf.json", record)
     return record
 
 
@@ -458,27 +488,31 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _source(args: argparse.Namespace) -> PassSource:
+    return PassSource(
+        release=args.release,
+        published=args.published,
+        cut_release=args.cut_release,
+        cut_date=args.cut_date,
+        out=args.out,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    shared = {
-        "published": args.published,
-        "cut_release": args.cut_release,
-        "cut_date": args.cut_date,
-        "out": args.out,
-    }
+    source = _source(args)
     if args.pass_name == "superset":
-        record = superset_pass(args.archive, release=args.release, **shared)
+        record = superset_pass(args.archive, source)
     elif args.pass_name == "neighbours":
         record = neighbours_pass(
-            _stdin_lines(), superset=read_superset(args.superset), release=args.release, **shared
+            _stdin_lines(), superset=read_superset(args.superset), source=source
         )
     else:
         record = gaf_pass(
             _stdin_lines(),
             superset=read_superset(args.superset),
             neighbours=read_neighbours(args.neighbours),
-            release=args.release,
-            **shared,
+            source=source,
         )
     stamp = {"revision": args.revision, "argv": list(sys.argv if argv is None else argv)}
     run_path = args.out / f"{record['pass']}.run.json"
