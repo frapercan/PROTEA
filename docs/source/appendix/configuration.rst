@@ -157,6 +157,26 @@ Environment variable overrides
        ``protea/artifacts/align_cache`` inside the project root. Set to
        an empty string to disable caching entirely. Read by
        :mod:`protea.core._pair_feature_compute`.
+   * - ``PROTEA_SKIP_TAXONOMY_WARMUP``
+     - ``1``, ``true`` or ``yes`` keeps the NCBI taxonomy warm-up out of
+       worker startup. Without it the workers on ``protea.jobs``,
+       ``protea.predictions.batch`` and ``protea.training`` load the
+       taxonomy before they consume anything, which, with
+       ``PROTEA_TAXONOMY_DB_PATH`` unset, downloads today's NCBI dump
+       (about 100 MB) when ete3's file under ``$HOME`` is absent. Skipping
+       only moves that load to the first taxonomy feature. Read by
+       ``scripts/worker.py``.
+   * - ``PROTEA_TAXONOMY_DB_PATH``
+     - A declared ete3 taxonomy database (``taxa.sqlite``). Unset, ete3
+       opens its default under ``$HOME`` and downloads the current NCBI
+       dump when that file is absent or in a format it does not read. Set,
+       that file is loaded as it is and never downloaded or rebuilt. A
+       missing or unreadable file, or an interpreter that cannot import
+       ete3, raises ``DeclaredTaxonomyUnavailable``, so the computation that
+       asked for taxonomy fails instead of recording the pair as unrelated.
+       Pointing it at a file that does not exist yet is how a deployment
+       forbids the download before a taxonomy is declared. Read by
+       :mod:`protea.core.feature_engineering`.
 
 Frontend
 --------

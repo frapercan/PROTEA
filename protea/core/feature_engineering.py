@@ -11,11 +11,14 @@ Performance notes:
 - Alignment is O(m*n) per pair; parasail uses SIMD acceleration.
 - Taxonomy lookups use an LRU cache over lineage queries (ete3 local
   SQLite). First call may trigger a DB download if the ete3 database
-  is absent.
+  is absent, unless ``PROTEA_TAXONOMY_DB_PATH`` declares the database,
+  which is then loaded from that file and never downloaded.
 """
 
 from __future__ import annotations
 
+import os
+import sqlite3
 from functools import lru_cache
 from typing import Any
 
@@ -26,12 +29,16 @@ try:
 except ImportError:
     _PARASAIL_AVAILABLE = False
 
+_ETE3_IMPORT_ERROR: ImportError | None = None
 try:
     from ete3 import NCBITaxa  # type: ignore[import-untyped]
 
     _ETE3_AVAILABLE = True
-except ImportError:
+except ImportError as exc:
+    # Kept for the declared taxonomy's refusal. On Python 3.13 and later ete3
+    # 3.1.3 fails here, because its package import reaches ``import cgi``.
     _ETE3_AVAILABLE = False
+    _ETE3_IMPORT_ERROR = exc
 
 
 # ---------------------------------------------------------------------------
@@ -117,17 +124,88 @@ def compute_alignment(seq1: str, seq2: str) -> dict[str, Any]:
 # Taxonomy
 # ---------------------------------------------------------------------------
 
+#: The declared taxonomy database. Unset, ``NCBITaxa()`` opens ete3's default
+#: under ``$HOME`` and downloads today's NCBI dump when that file is absent or
+#: in a format it does not read, as it always has. Set, the named file is the
+#: taxonomy: it is read as it is on disk and never downloaded or rebuilt, so a
+#: missing or unreadable file raises :class:`DeclaredTaxonomyUnavailable`.
+TAXONOMY_DB_PATH_ENV = "PROTEA_TAXONOMY_DB_PATH"
+
+
+class DeclaredTaxonomyUnavailable(RuntimeError):
+    """The declared taxonomy cannot be used as it is.
+
+    The file is missing, ete3 would have to rebuild it, or ete3 itself cannot
+    be imported. A configuration error and not a fact about two taxa, so
+    :func:`compute_taxonomy` lets it through rather than calling the pair
+    unrelated: swallowed, it would null every taxonomy feature in silence.
+    """
+
+
+if _ETE3_AVAILABLE:
+
+    class _NeverDownloadingNCBITaxa(NCBITaxa):
+        """``NCBITaxa`` with its only door to the network shut.
+
+        ete3 3.1.3 reaches the network only through ``update_taxonomy_database``,
+        and its constructor calls it when the file is missing and when the
+        file's format is not the one it reads. Refusing there makes "never
+        downloads" a property of this object, not of a check made just before
+        building it.
+        """
+
+        def update_taxonomy_database(self, taxdump_file: str | None = None) -> None:
+            db = getattr(self, "db", None)
+            if db is not None:
+                db.close()
+            raise DeclaredTaxonomyUnavailable(
+                f"{TAXONOMY_DB_PATH_ENV}={self.dbfile} cannot be read without rebuilding "
+                "it from a downloaded NCBI dump, and a declared taxonomy is never downloaded"
+            )
+
+
 _ncbi: NCBITaxa | None = None
+
+
+def _declared_taxonomy_path() -> str | None:
+    """The file ``PROTEA_TAXONOMY_DB_PATH`` declares, or ``None`` when unset."""
+    return os.environ.get(TAXONOMY_DB_PATH_ENV, "").strip() or None
+
+
+def _load_declared_taxonomy(path: str) -> NCBITaxa:
+    """Open the declared database as it is on disk, or refuse.
+
+    ``update=True`` keeps ete3's own format check, which the subclass turns
+    from a rebuild into a refusal.
+    """
+    if not os.path.isfile(path):
+        raise DeclaredTaxonomyUnavailable(
+            f"{TAXONOMY_DB_PATH_ENV}={path} does not exist; a declared taxonomy is "
+            "loaded from that file and never downloaded"
+        )
+    try:
+        return _NeverDownloadingNCBITaxa(dbfile=path, update=True)
+    except sqlite3.DatabaseError as exc:
+        raise DeclaredTaxonomyUnavailable(
+            f"{TAXONOMY_DB_PATH_ENV}={path} is not an ete3 taxonomy database ({exc})"
+        ) from exc
 
 
 def _get_ncbi() -> NCBITaxa:
     global _ncbi
     if not _ETE3_AVAILABLE:
+        declared = _declared_taxonomy_path()
+        if declared is not None:
+            raise DeclaredTaxonomyUnavailable(
+                f"{TAXONOMY_DB_PATH_ENV}={declared} is declared, but ete3 cannot be "
+                f"imported on this interpreter ({_ETE3_IMPORT_ERROR})"
+            )
         raise RuntimeError(
             "ete3 is required for taxonomy features. Install it with: pip install ete3"
         )
     if _ncbi is None:
-        _ncbi = NCBITaxa()
+        declared = _declared_taxonomy_path()
+        _ncbi = NCBITaxa() if declared is None else _load_declared_taxonomy(declared)
     return _ncbi
 
 
@@ -135,9 +213,12 @@ def warmup_taxonomy_db() -> None:
     """Pre-initialize the NCBITaxa database.
 
     Call at worker startup so the download (~100 MB on first run)
-    happens before any batch is processed, not mid-flight.
+    happens before any batch is processed, not mid-flight. With
+    ``PROTEA_TAXONOMY_DB_PATH`` set it loads that file instead and never
+    downloads; a declared file that cannot be loaded raises
+    :class:`DeclaredTaxonomyUnavailable`.
     """
-    if not _ETE3_AVAILABLE:
+    if not _ETE3_AVAILABLE and _declared_taxonomy_path() is None:
         return
     import logging
 
@@ -192,6 +273,8 @@ def compute_taxonomy(t1_raw: Any, t2_raw: Any) -> dict[str, Any]:
     try:
         lin1 = _cached_lineage(t1)
         lin2 = _cached_lineage(t2)
+    except DeclaredTaxonomyUnavailable:
+        raise
     except Exception:
         return _null
 
