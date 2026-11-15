@@ -1,7 +1,7 @@
 """Every registered operation declares an ``OperationSpec``, and the specs say what the code does.
 
 ADR-D60, decision 6: routing, the consumer a worker runs, the checks of
-``POST /jobs`` and what a pilot may run all derive from the spec, so a spec that
+``POST /jobs`` and the stages the cluster may run as file stages all derive from the spec, so a spec that
 disagrees with the code would route work where nothing consumes it. These tests
 pin the specs to today's routing, read independently of the catalog: from the
 code paths that send each operation to a queue, from CLAUDE.md's queue routing

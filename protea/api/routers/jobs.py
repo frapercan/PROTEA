@@ -195,7 +195,8 @@ class CreateJobRequest(BaseModel):
         min_length=1,
         description=(
             "RabbitMQ queue to publish the job to: the one the operation's spec names, "
-            "e.g. `protea.jobs`. Any other queue is refused with 422."
+            "e.g. `protea.jobs`. Any other queue is refused with 422, except that the "
+            "`ping` probe is admitted on any queue that carries jobs."
         ),
     )
     payload: dict[str, Any] = Field(

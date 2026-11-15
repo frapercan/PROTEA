@@ -448,7 +448,7 @@
             "type": "object"
           },
           "queue_name": {
-            "description": "RabbitMQ queue to publish the job to: the one the operation's spec names, e.g. `protea.jobs`. Any other queue is refused with 422.",
+            "description": "RabbitMQ queue to publish the job to: the one the operation's spec names, e.g. `protea.jobs`. Any other queue is refused with 422, except that the `ping` probe is admitted on any queue that carries jobs.",
             "minLength": 1,
             "title": "Queue Name",
             "type": "string"

@@ -124,7 +124,7 @@ Operation descriptor
 ``protea.core.operation_spec`` defines ``OperationSpec(domain, kind, queue,
 purity, resource, family, publishes_to, status)`` and what derives from it:
 the queues an ``OperationConsumer`` serves, the checks of ``POST /jobs`` and
-the operations a cluster pilot may run. ``protea.core.queues`` holds every
+the stages the cluster may run as file stages. ``protea.core.queues`` holds every
 broker name, so a queue is written once.
 
 .. automodule:: protea.core.operation_spec

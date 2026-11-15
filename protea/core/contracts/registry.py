@@ -8,8 +8,9 @@ from protea.core.operation_spec import OperationSpec
 class OperationRegistry:
     """Operations by name, each with the spec it declared (ADR-D60, decision 6).
 
-    Routing, the consumer a worker runs, the checks of ``POST /jobs`` and what a
-    pilot may run all read the specs, so an operation without one cannot enter.
+    Routing, the consumer a worker runs, the checks of ``POST /jobs`` and the stages
+    the cluster may run as file stages all read the specs, so an operation without one
+    cannot enter.
     """
 
     def __init__(self) -> None:

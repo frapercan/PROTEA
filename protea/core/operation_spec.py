@@ -7,7 +7,7 @@ says where an operation runs and what it needs. Four things derive from it:
 - the consumer a worker runs on a queue (:func:`message_queues`, read by
   ``scripts/worker.py``);
 - the operations ``POST /jobs`` refuses outright, because they never get a Job row;
-- the operations a cluster pilot may run (:func:`pilot_operations`).
+- the stages the cluster may run as file stages (:func:`cluster_file_stages`).
 
 The specs sit beside the registration in :mod:`protea.core.operation_catalog`, and
 :class:`~protea.core.contracts.registry.OperationRegistry` refuses an operation that
@@ -73,10 +73,12 @@ MESSAGE_KINDS: frozenset[str] = frozenset({"message_stage", "write", "file_stage
 #: and one evaluator are what make the three families comparable (ADR-D60).
 SHARED_DOMAINS: frozenset[str] = frozenset({"universe", "evaluation", "infrastructure"})
 
-#: The one queue a cluster pilot consumes (ADR-D60, decision 4). Nothing else may stay
-#: on it once phase 4 lands; ``tests/test_the_pilot_queue_carries_one_operation.py``
+#: The queue of the first stage that leaves the database, ``compute_embeddings_batch``
+#: (ADR-D60, decision 4). Phase 4 makes it pure and gives it a file-stage form that the
+#: cluster runs; the cluster itself never joins a queue. Nothing else may stay on this
+#: queue once phase 4 lands; ``tests/test_the_embeddings_stage_queue_carries_one_operation.py``
 #: lists what still does, each with the phase that removes it.
-PILOT_QUEUE = queues.EMBEDDINGS_BATCH
+EMBEDDINGS_STAGE_QUEUE = queues.EMBEDDINGS_BATCH
 
 
 @dataclass(frozen=True)
@@ -167,14 +169,20 @@ def job_queues(specs: Iterable[OperationSpec]) -> frozenset[str]:
     return frozenset(spec.queue for spec in specs if spec.carries_jobs)
 
 
-def pilot_operations(specs: Mapping[str, OperationSpec]) -> frozenset[str]:
-    """The operations a pilot may run: the pure ones on :data:`PILOT_QUEUE`.
+def cluster_file_stages(specs: Mapping[str, OperationSpec]) -> frozenset[str]:
+    """The stages the cluster may run as file stages (ADR-D60, decisions 4 and 6).
 
-    Derived, never listed: an operation enters by becoming pure, which is what lets a
-    node without the database run it.
+    Every ``file_stage``, and every pure stage of :data:`EMBEDDINGS_STAGE_QUEUE`, whose
+    file-stage form phase 4 builds. Derived, never listed: a stage enters by becoming
+    pure, which is what lets a machine without the platform's services run it. The
+    cluster reads files placed beforehand and writes sealed files that an ingest
+    operation loads; it never holds a platform credential.
     """
     return frozenset(
-        name for name, spec in specs.items() if spec.queue == PILOT_QUEUE and spec.purity == "pure"
+        name
+        for name, spec in specs.items()
+        if spec.kind == "file_stage"
+        or (spec.queue == EMBEDDINGS_STAGE_QUEUE and spec.purity == "pure")
     )
 
 
