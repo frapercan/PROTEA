@@ -418,17 +418,13 @@ def _write_tsv(path: Path, header: Sequence[str], rows: Iterable[Sequence[Any]])
 
 
 def _stdin_lines() -> io.TextIOWrapper:
-    """Stdin as UTF-8 text with a large buffer; a bad byte is replaced, never fatal.
+    """Stdin as UTF-8 text with a 16 MiB buffer; a bad byte is replaced, never fatal.
 
     The fields the passes read (accession, code, reference, assigned_by) are
     ASCII, so a replacement character can only land in a free-text column.
     """
-    return io.TextIOWrapper(
-        io.BufferedReader(sys.stdin.buffer, buffer_size=1 << 24),
-        encoding="utf-8",
-        errors="replace",
-        newline="\n",
-    )
+    raw = open(sys.stdin.fileno(), "rb", buffering=1 << 24, closefd=False)
+    return io.TextIOWrapper(raw, encoding="utf-8", errors="replace", newline="\n")
 
 
 def _parser() -> argparse.ArgumentParser:
