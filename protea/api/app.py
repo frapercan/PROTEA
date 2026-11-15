@@ -82,6 +82,7 @@ from protea.api.routers.proteins_stats import prewarm_all as prewarm_protein_sta
 from protea.core.code_revision import code_revision, is_identifying
 from protea.core.operation_catalog import build_operation_registry
 from protea.infrastructure.benchmark_config import load_benchmark_config
+from protea.infrastructure.environment_check import exit_on_environment_mismatch
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.telemetry import build_metric_registry, configure_telemetry
@@ -598,6 +599,8 @@ def create_app(project_root: Path | None = None) -> FastAPI:
         project_root = Path(__file__).resolve().parents[2]
 
     settings = load_settings(project_root)
+    # A dev API on a database or vhost that is not dev's exits 78 here.
+    exit_on_environment_mismatch(settings)
     factory = build_session_factory(settings.db_url)
 
     # T5.6b: fail loudly when the bearer secret is missing in a

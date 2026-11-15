@@ -17,6 +17,7 @@ from pathlib import Path
 
 from protea.config.tuning import WorkerTuning
 from protea.core.operation_catalog import build_operation_registry
+from protea.infrastructure.environment_check import exit_on_environment_mismatch
 from protea.infrastructure.queue.consumer import (
     ConsumerOptions,
     OperationConsumer,
@@ -73,6 +74,9 @@ def main() -> None:
 
     project_root = Path(__file__).resolve().parents[1]
     settings = load_settings(project_root)
+    # A dev worker on a database or vhost that is not dev's exits 78 here,
+    # before it opens anything (protea.infrastructure.environment_check).
+    exit_on_environment_mismatch(settings)
 
     factory = build_session_factory(settings.db_url)
 
