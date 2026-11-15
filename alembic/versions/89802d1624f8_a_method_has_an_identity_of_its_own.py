@@ -57,6 +57,8 @@ CHECKS: dict[str, dict[str, str]] = {
         "ck_method_runtime": "runtime IN ('native', 'container')",
         "ck_method_instance_release": "instance_release > 0",
         "ck_method_spec_sha256": "length(spec_sha256) = 64",
+        "ck_method_short_name": "length(short_name) > 0",
+        "ck_method_description": "length(description) > 0",
     },
     "method_training_window": {
         "ck_method_training_window_role": "role IN ('fit', 'holdout')",
@@ -67,6 +69,9 @@ CHECKS: dict[str, dict[str, str]] = {
     "prediction_set": {
         "ck_prediction_set_has_a_producer": (
             "embedding_config_id IS NOT NULL OR method_id IS NOT NULL"
+        ),
+        "ck_prediction_set_a_configuration_has_a_limit": (
+            "embedding_config_id IS NULL OR limit_per_entry IS NOT NULL"
         ),
     },
 }
@@ -94,6 +99,8 @@ def _create_method_tables() -> None:
         _uuid("id"),
         sa.Column("family", sa.String(length=32), nullable=False),
         sa.Column("code", sa.String(length=64), nullable=False),
+        sa.Column("short_name", sa.String(length=64), nullable=False),
+        sa.Column("description", sa.Text(), nullable=False),
         sa.Column("instance_release", sa.Integer(), nullable=False),
         _uuid("ontology_snapshot_id"),
         _jsonb("recipe"),
@@ -111,6 +118,7 @@ def _create_method_tables() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("spec_sha256", name="uq_method_spec_sha256"),
+        sa.UniqueConstraint("short_name", name="uq_method_short_name"),
         *_checks("method"),
     )
     op.create_index("ix_method_code", "method", ["code"])
@@ -186,6 +194,9 @@ def upgrade() -> None:
         existing_type=postgresql.UUID(as_uuid=True),
         nullable=True,
     )
+    # A method's prediction set has no retrieval depth; a configuration's keeps one
+    # (ck_prediction_set_a_configuration_has_a_limit).
+    op.alter_column("prediction_set", "limit_per_entry", existing_type=sa.Integer(), nullable=True)
     for name, text in CHECKS["prediction_set"].items():
         op.create_check_constraint(name, "prediction_set", text)
 
@@ -205,6 +216,7 @@ def downgrade() -> None:
         )
     for name in CHECKS["prediction_set"]:
         op.drop_constraint(name, "prediction_set", type_="check")
+    op.alter_column("prediction_set", "limit_per_entry", existing_type=sa.Integer(), nullable=False)
     op.alter_column(
         "prediction_set",
         "embedding_config_id",

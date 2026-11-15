@@ -36,6 +36,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     event,
     func,
@@ -54,6 +55,7 @@ from protea.core.contracts.method import (
     Runtime,
     TrainingWindow,
 )
+from protea.core.families import family_entry
 from protea.infrastructure.orm.base import Base
 
 _JSONB = JSONB().with_variant(JSON(), "sqlite")
@@ -68,16 +70,53 @@ def closed_over(column: str, values: tuple[str, ...]) -> str:
     return f"{column} IN ({listed})"
 
 
+#: ADR-D58's short descriptor is a lowercase slug of at most 64 characters. The slug
+#: rule holds by construction (a slug code and a release number), so the database
+#: checks only that the name is there: a regular expression would not be portable to
+#: the SQLite the unit tests build the schema in.
+SHORT_NAME_CHECK = "length(short_name) > 0"
+SHORT_NAME_MAX = 64
+
+
+def method_short_name(spec: MethodSpec) -> str:
+    """The method's short descriptor (ADR-D58): its code and its instance release.
+
+    Derived, never typed: one code at one instance cut is one method, so a variant
+    of a method at the same cut needs a code of its own.
+    """
+    name = f"{spec.code}-{spec.instance.release}"
+    if len(name) > SHORT_NAME_MAX:
+        raise ValueError(
+            f"method code {spec.code!r} is too long for its short name {name!r} "
+            f"(at most {SHORT_NAME_MAX} characters)"
+        )
+    return name
+
+
+def method_description(spec: MethodSpec) -> str:
+    """The method's long descriptor (ADR-D58), derived from its spec."""
+    pins = len(spec.pins)
+    return (
+        f"Method {spec.code} of the {family_entry(spec.family).short_name} family for the "
+        f"{spec.instance.release} instance: {spec.runtime} runtime, {pins} pinned "
+        f"artefact{'' if pins == 1 else 's'}, "
+        f"{'with' if spec.explains else 'without'} explanations."
+    )
+
+
 class Method(Base):
     """A method with an identity of its own, as its spec derives it."""
 
     __tablename__ = "method"
     __table_args__ = (
         UniqueConstraint("spec_sha256", name="uq_method_spec_sha256"),
+        UniqueConstraint("short_name", name="uq_method_short_name"),
         CheckConstraint(closed_over("family", FAMILY_VALUES), name="ck_method_family"),
         CheckConstraint(closed_over("runtime", RUNTIMES), name="ck_method_runtime"),
         CheckConstraint("instance_release > 0", name="ck_method_instance_release"),
         CheckConstraint("length(spec_sha256) = 64", name="ck_method_spec_sha256"),
+        CheckConstraint(SHORT_NAME_CHECK, name="ck_method_short_name"),
+        CheckConstraint("length(description) > 0", name="ck_method_description"),
     )
 
     #: Derived from the spec, never defaulted: see the module docstring.
@@ -86,6 +125,9 @@ class Method(Base):
     #: The method's semantic code, a lowercase slug. Not unique on its own: one
     #: code at two instance cuts is two methods.
     code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    #: ADR-D58's two descriptors, derived from the spec by :meth:`from_spec`.
+    short_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
     #: The release ordinal of the instance cut (211, 227).
     instance_release: Mapped[int] = mapped_column(Integer, nullable=False)
     ontology_snapshot_id: Mapped[uuid.UUID] = mapped_column(
@@ -139,6 +181,8 @@ class Method(Base):
             runtime=spec.runtime,
             explains=spec.explains,
             spec_sha256=spec.spec_sha256,
+            short_name=method_short_name(spec),
+            description=method_description(spec),
         )
         method.pins = [
             MethodPin(role=p.role, sha256=p.sha256, refs=list(p.refs)) for p in spec.pins

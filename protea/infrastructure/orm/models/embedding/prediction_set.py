@@ -42,6 +42,11 @@ class PredictionSet(Base):
             "embedding_config_id IS NOT NULL OR method_id IS NOT NULL",
             name="ck_prediction_set_has_a_producer",
         ),
+        # A method's set has no retrieval depth; a configuration's keeps one.
+        CheckConstraint(
+            "embedding_config_id IS NULL OR limit_per_entry IS NOT NULL",
+            name="ck_prediction_set_a_configuration_has_a_limit",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -76,7 +81,7 @@ class PredictionSet(Base):
         nullable=True,
         index=True,
     )
-    limit_per_entry: Mapped[int] = mapped_column(Integer, nullable=False)
+    limit_per_entry: Mapped[int | None] = mapped_column(Integer, nullable=True)
     distance_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

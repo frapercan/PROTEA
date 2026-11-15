@@ -39,7 +39,13 @@ from protea.core.contracts.method import (
 )
 from protea.infrastructure.orm.base import Base
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
-from protea.infrastructure.orm.models.method.method import FAMILY_VALUES, Method, MethodPin
+from protea.infrastructure.orm.models.method.method import (
+    FAMILY_VALUES,
+    Method,
+    MethodPin,
+    method_description,
+    method_short_name,
+)
 
 _REPO = Path(__file__).resolve().parents[1]
 _MIGRATION = _REPO / "alembic/versions/89802d1624f8_a_method_has_an_identity_of_its_own.py"
@@ -357,6 +363,8 @@ class TestTheDatabaseRefusesOnItsOwn:
             ("runtime", "docker"),
             ("instance_release", 0),
             ("spec_sha256", "abc"),
+            ("short_name", ""),
+            ("description", ""),
         ],
     )
     def test_a_value_outside_its_vocabulary_is_refused(
@@ -367,6 +375,8 @@ class TestTheDatabaseRefusesOnItsOwn:
             "id": uuid.uuid4().hex,
             "family": "world-model",
             "code": "jepa-211",
+            "short_name": "jepa-211-211",
+            "description": "A world-model method for the 211 instance.",
             "instance_release": 211,
             "ontology_snapshot_id": _SNAPSHOT.hex,
             "recipe": "{}",
@@ -393,6 +403,44 @@ class TestAPredictionSetNamesWhatProducedIt:
         checks = _shape(PredictionSet.__table__)["checks"]
         assert checks["ck_prediction_set_has_a_producer"] == (
             "embedding_config_id IS NOT NULL OR method_id IS NOT NULL"
+        )
+
+    def test_only_a_configuration_set_needs_a_retrieval_depth(self) -> None:
+        # A method's set has no retrieval depth, so the column is nullable; a set
+        # produced by an embedding configuration keeps its K.
+        table = PredictionSet.__table__
+        assert table.c.limit_per_entry.nullable
+        checks = _shape(table)["checks"]
+        assert checks["ck_prediction_set_a_configuration_has_a_limit"] == (
+            "embedding_config_id IS NULL OR limit_per_entry IS NOT NULL"
+        )
+
+
+class TestAMethodCarriesItsTwoDescriptors:
+    def test_the_short_name_is_the_code_at_its_instance_and_unique(self) -> None:
+        spec = _spec()
+        assert method_short_name(spec) == f"{spec.code}-{spec.instance.release}"
+        uniques = {c.name for c in Method.__table__.constraints if c.name}
+        assert "uq_method_short_name" in uniques
+
+    def test_the_description_names_family_code_and_instance(self) -> None:
+        spec = _spec()
+        text_ = method_description(spec)
+        assert spec.code in text_ and str(spec.instance.release) in text_
+        assert spec.family.value in text_
+
+    def test_a_code_too_long_for_its_short_name_is_refused(self) -> None:
+        from dataclasses import replace
+
+        with pytest.raises(ValueError, match="too long"):
+            method_short_name(replace(_spec(), code="a" * 64))
+
+    def test_from_spec_writes_both_descriptors(self) -> None:
+        spec = _spec()
+        row = Method.from_spec(spec)
+        assert (row.short_name, row.description) == (
+            method_short_name(spec),
+            method_description(spec),
         )
 
 
@@ -470,14 +518,17 @@ def _seed_a_method_set(engine: sa.Engine) -> uuid.UUID:
         )
         conn.execute(
             text(
-                "INSERT INTO method (id, family, code, instance_release, ontology_snapshot_id,"
-                " recipe, runtime, explains, spec_sha256) VALUES (:id, :family, :code, 211,"
+                "INSERT INTO method (id, family, code, short_name, description,"
+                " instance_release, ontology_snapshot_id, recipe, runtime, explains,"
+                " spec_sha256) VALUES (:id, :family, :code, :short_name, :description, 211,"
                 " :snapshot, CAST(:recipe AS jsonb), 'native', false, :sha)"
             ),
             {
                 "id": spec.method_id,
                 "family": spec.family.value,
                 "code": spec.code,
+                "short_name": method_short_name(spec),
+                "description": method_description(spec),
                 "snapshot": _SNAPSHOT,
                 "recipe": json.dumps(spec.document()["recipe"]),
                 "sha": spec.spec_sha256,
