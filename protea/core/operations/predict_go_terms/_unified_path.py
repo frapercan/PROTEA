@@ -184,7 +184,8 @@ def unified_load_annotations(
         ctx.ref_data["embeddings_f32_cos"] if use_cos else ctx.ref_data["embeddings_f32"]
     )
     # The SAME horizon and the SAME drop the method uses, or it reaches past
-    # what this delivered. See _self_neighbour for why, and what it cost.
+    # what this delivered. protea_method._self_by_sequence says why, and
+    # tests/test_the_batch_does_not_choose_the_donors.py what it cost.
     accs = list(ctx.ref_data["accessions"])
     keys = sequence_keys
     margin = extra_neighbours_for(ctx.valid_accessions, accs, keys) if keys else 0
