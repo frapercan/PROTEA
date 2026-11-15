@@ -208,8 +208,8 @@ else
     prefix="$(grep -oP 'APIRouter\(\s*prefix\s*=\s*"\K[^"]+' "$file" 2>/dev/null | head -1)"
     [[ -z "$prefix" ]] && continue
     # The prefix may be followed by a sub-path or end the route outright:
-    # rungs.py registers at exactly /v1/rungs, so requiring a trailing slash
-    # reports four routers missing that are all present.
+    # showcase.py registers at exactly /v1/showcase, so requiring a trailing
+    # slash reports four routers missing that are all present.
     if ! grep -qE "\"[^\"]*${prefix}(/|\")" <<<"$spec"; then
       bad "router $(basename "$file") declares prefix $prefix, absent from the served spec"
       missing=$((missing + 1))
@@ -234,7 +234,6 @@ fi
     /v1/embeddings/configs \
     /v1/annotations/evaluation-sets \
     /v1/scoring/configs \
-    /v1/rungs \
     /v1/jobs
   do
     code="$(curl -s -o /dev/null -w '%{http_code}' -m 60 "$API$ep?limit=3" 2>/dev/null)"
