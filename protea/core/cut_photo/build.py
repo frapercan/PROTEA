@@ -53,6 +53,7 @@ __all__ = [
     "EMPTY_GO_REF_BY_WITH_FROM",
     "KNOWLEDGEBASE_STREAM_MD5",
     "OUTPUTS",
+    "OUTPUTS_BY_KIND",
     "channel_table_digest",
     "declared_go_release",
     "main",
@@ -70,6 +71,12 @@ OUTPUTS: tuple[str, ...] = (
     "sequences.parquet",
     "unreviewed_sequences.parquet",
 )
+#: The outputs each kind of photo must have. A truth-only photo ends a window and
+#: is read for its truth and its Swiss-Prot list, so it has no TrEMBL sequences.
+OUTPUTS_BY_KIND: dict[str, tuple[str, ...]] = {
+    "full": OUTPUTS,
+    "truth_only": ("members.parquet", "rows.parquet", "sequences.parquet"),
+}
 _MD5 = re.compile(r"[0-9a-f]{32}")
 
 
@@ -94,7 +101,7 @@ def photo_sources(records: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any
             "superset_sha256": members["superset_source"]["sha256"],
             "knowledgebase": dict(records.get("unreviewed", {}).get("source_file", {})),
         },
-        "uniref": dict(members["uniref_source"]),
+        "uniref": dict(members.get("uniref_source", {})),
     }
 
 
@@ -189,18 +196,21 @@ def manifest_pass(out: Path, revision: str) -> dict[str, Any]:
     stream = out / KNOWLEDGEBASE_STREAM_MD5
     if "unreviewed" in records and stream.exists():
         records["unreviewed"]["stream_md5"] = stream.read_text(encoding="utf-8").strip()
-    missing = [name for name in OUTPUTS if not (out / name).exists()]
+    kind = str(records["members"].get("kind", "full"))
+    outputs = OUTPUTS_BY_KIND[kind]
+    missing = [name for name in outputs if not (out / name).exists()]
     unknown = int(records["rows"].get("unknown_evidence_rows", 0))
     sources = photo_sources(records)
     disagreements = source_disagreements(records)
     manifest = {
         "photo": "cut-photo",
+        "kind": kind,
         "cut_release": records["members"]["cut_release"],
         "cut_date": records["members"]["cut_date"],
         "sources": sources,
         "channels": list(CHANNELS),
         "channel_table": records["rows"]["channel_table"],
-        "outputs": {name: _file_sha256(out / name) for name in OUTPUTS if name not in missing},
+        "outputs": {name: _file_sha256(out / name) for name in outputs if name not in missing},
         "counts": {name: records[name] for name in records},
         "status": "refused" if unknown or missing or disagreements else "complete",
         "refusals": {
@@ -236,7 +246,11 @@ def _parser() -> argparse.ArgumentParser:
 
     p_mem = sub.add_parser("members", help="decompressed GAF lines on stdin")
     p_mem.add_argument("--superset-table", required=True, type=Path)
-    p_mem.add_argument("--neighbours", required=True, type=Path)
+    kind = p_mem.add_mutually_exclusive_group(required=True)
+    kind.add_argument("--neighbours", type=Path, help="the measured cluster table")
+    kind.add_argument(
+        "--truth-only", action="store_true", help="a cut that only ends a window: no neighbours"
+    )
     source(p_mem)
     source_file(p_mem, sha256_required=True)
     p_rows = sub.add_parser("rows", help="decompressed GAF lines on stdin")

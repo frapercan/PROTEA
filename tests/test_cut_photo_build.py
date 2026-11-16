@@ -18,6 +18,7 @@ import pytest
 from protea.core.cut_photo.build import (
     KNOWLEDGEBASE_STREAM_MD5,
     OUTPUTS,
+    OUTPUTS_BY_KIND,
     main,
     manifest_pass,
     members_pass,
@@ -549,3 +550,48 @@ class TestTheTremblPass:
         argv += ["--out", str(out), "--source-url", KB_FILE["url"], "--source-md5", KB_FILE["md5"]]
         assert main(argv) == 0
         assert json.loads((out / "unreviewed.json").read_text())["sequences"] == 3
+
+
+class TestATruthOnlyPhoto:
+    """A cut that only ends a window: its members and rows, its Swiss-Prot, nothing else."""
+
+    def _build(self, tmp_path: Path) -> Path:
+        superset, _ = _setup(tmp_path)
+        out = tmp_path / "photo"
+        members_pass(
+            GAF,
+            superset_table=superset,
+            neighbours_path=None,
+            source=_source(out),
+            source_file=GOA_FILE,
+        )
+        rows_pass(
+            GAF, members_path=out / "members.parquet", source=_source(out), source_file=GOA_FILE
+        )
+        uniprot = _source(out, release="2022_03", published=date(2022, 8, 3))
+        sequences_pass(TestTheManifest()._archive(tmp_path), uniprot, source_url=SPROT_URL)
+        return out
+
+    def test_it_has_no_neighbours_and_no_clusters(self, tmp_path: Path) -> None:
+        out = self._build(tmp_path)
+        members = pq.read_table(out / "members.parquet").to_pylist()
+        assert sorted(m["accession"] for m in members) == ["P1", "P2", "Q9"]
+        assert not any(m["neighbour"] or m["cluster"] for m in members)
+        record = json.loads((out / "members.json").read_text())
+        assert record["kind"] == "truth_only" and "uniref_source" not in record
+
+    def test_it_is_complete_without_trembl(self, tmp_path: Path) -> None:
+        manifest = manifest_pass(self._build(tmp_path), revision="abc")
+        assert (manifest["status"], manifest["kind"]) == ("complete", "truth_only")
+        assert sorted(manifest["outputs"]) == sorted(OUTPUTS_BY_KIND["truth_only"])
+        assert manifest["sources"]["uniref"] == {}
+
+    @pytest.mark.parametrize("kind", [[], ["--neighbours", "n.parquet", "--truth-only"]])
+    def test_the_cli_takes_exactly_one_of_neighbours_or_truth_only(
+        self, tmp_path: Path, kind: list[str]
+    ) -> None:
+        argv = ["members", "--superset-table", "s.tsv", *kind, "--release", "205"]
+        argv += ["--published", "2021-05-01", "--cut-release", "205", "--cut-date", "2021-05-01"]
+        argv += ["--out", str(tmp_path), "--source-url", "u", "--source-sha256", "0" * 64]
+        with pytest.raises(SystemExit):
+            main(argv)

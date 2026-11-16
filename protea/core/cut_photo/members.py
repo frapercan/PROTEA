@@ -18,6 +18,11 @@ Four sets, each from a source dated on or before the cut:
 Each member is written with the sets it entered by, its UniRef50 cluster when it is
 in one, and the md5 of its Swiss-Prot sequence when it is in the superset. GOA on
 stdin.
+
+A truth-only photo (``neighbours_path`` None) has the first three sets and no
+neighbours: the photo of a cut that only ends a window, from which a method takes
+what each target gained and whether it is still reviewed, never what it predicts
+from (the author, 2026-11-16, for cut 205).
 """
 
 from __future__ import annotations
@@ -96,7 +101,7 @@ def members_pass(
     lines: Iterable[str],
     *,
     superset_table: Path,
-    neighbours_path: Path,
+    neighbours_path: Path | None,
     source: PassSource,
     source_file: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -104,14 +109,18 @@ def members_pass(
 
     ``neighbours_path`` is the cluster table the ``neighbours`` measure pass wrote
     (every member of a UniRef50 cluster that holds a superset protein), named by the
-    record beside it. ``source_file`` is the GOA file the lines were decompressed
-    from, as the caller declares it (``url`` and ``sha256``); the manifest refuses a
-    photo without it.
+    record beside it; None builds a truth-only photo. ``source_file`` is the GOA file
+    the lines were decompressed from, as the caller declares it (``url`` and
+    ``sha256``); the manifest refuses a photo without it.
     """
     source.check("GOA")
     superset, superset_source = _superset(superset_table, source)
-    uniref = upstream_source(neighbours_path.with_name("neighbours.json"), "UniRef", source)
-    cluster_of = _read_clusters(neighbours_path, superset)
+    cluster_of: dict[str, str] = {}
+    uniref: dict[str, Any] = {}
+    if neighbours_path is not None:
+        named = upstream_source(neighbours_path.with_name("neighbours.json"), "UniRef", source)
+        cluster_of = _read_clusters(neighbours_path, superset)
+        uniref = {"uniref_source": {**named, "sha256": _file_sha256(neighbours_path)}}
     truth: set[str] = set()
     curated: set[str] = set()
     annotated: set[str] = set()
@@ -130,6 +139,7 @@ def members_pass(
     _write_members(source.out, sorted(base | neighbours), superset, sets, cluster_of)
     record = {
         **source.head("members"),
+        "kind": "full" if neighbours_path is not None else "truth_only",
         "members": len(base) + len(neighbours),
         "superset": len(superset),
         "by_truth": len(truth),
@@ -139,7 +149,7 @@ def members_pass(
         "clusters_with_superset": len({cluster_of[a] for a in superset if a in cluster_of}),
         "cluster_members_outside_base": len(cluster_of.keys() - base),
         "superset_source": superset_source,
-        "uniref_source": {**uniref, "sha256": _file_sha256(neighbours_path)},
+        **uniref,
         "source_file": dict(source_file or {}),
         "gaf_header": header,
     }

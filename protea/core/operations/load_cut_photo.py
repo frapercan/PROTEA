@@ -54,7 +54,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.cut_photo.build import OUTPUTS, channel_table_digest
+from protea.core.cut_photo.build import OUTPUTS_BY_KIND, channel_table_digest
 from protea.core.operations._cut_photo_channel_table import (
     check_stored_channel_table,
     declare_channel_table,
@@ -172,9 +172,10 @@ class PhotoSources:
     cut_date: date
     snapshot: OntologySnapshot
     release: SwissProtRelease
-    uniref_release: str
-    uniref_published_at: date
-    uniref_clusters_sha256: str
+    #: None for a truth-only photo, which has no neighbours and so no clusters.
+    uniref_release: str | None
+    uniref_published_at: date | None
+    uniref_clusters_sha256: str | None
 
 
 def file_sha256(path: Path) -> str:
@@ -199,7 +200,10 @@ def read_manifest(photo_dir: Path, expected_sha256: str) -> dict[str, Any]:
         raise PhotoRefused(
             f"the photo's status is {manifest.get('status')!r}: {manifest.get('refusals')}"
         )
-    absent = [name for name in OUTPUTS if name not in manifest["outputs"]]
+    required = OUTPUTS_BY_KIND.get(str(manifest.get("kind", "full")))
+    if required is None:
+        raise PhotoRefused(f"the manifest names an unknown kind of photo: {manifest.get('kind')!r}")
+    absent = [name for name in required if name not in manifest["outputs"]]
     if absent:
         raise PhotoRefused(
             f"the manifest lists no {', '.join(absent)}: the photo was built by an older "
@@ -287,21 +291,19 @@ def check_sources(
     cut, cut_date = int(manifest["cut_release"]), date.fromisoformat(manifest["cut_date"])
     sources = manifest["sources"]
     refuse_a_cut_after_the_mark(cut)
-    goa, uniprot, uniref = sources["goa"], sources["uniprot"], sources["uniref"]
+    goa, uniprot = sources["goa"], sources["uniprot"]
     if int(goa["release"]) != cut or date.fromisoformat(goa["published"]) != cut_date:
         raise PhotoRefused(
             f"the cut is GOA {cut} of {cut_date}, the manifest's GOA is {goa['release']} "
             f"of {goa['published']}"
         )
-    uniref_published = date.fromisoformat(uniref["published"])
+    uniref_release, uniref_published, uniref_sha256 = _checked_uniref(manifest, cut, cut_date)
     for name, published in (
         (f"UniProt {release.release}", release.published_at),
-        (f"UniRef {uniref['release']}", uniref_published),
         (f"GO {snapshot.obo_version}", graph_date(snapshot.obo_version)),
     ):
         refuse_a_dated_source(source=name, published=published, cut_release=cut, cut_date=cut_date)
     refuse_a_uniprot_release_at_or_after_the_ceiling(release.release)
-    refuse_a_uniprot_release_at_or_after_the_ceiling(str(uniref["release"]), source="UniRef")
     check_graph(snapshot, str(goa.get("declared_go_release") or ""), loaded_graphs)
     check_channel_table(manifest)
     declared = (uniprot["release"], uniprot["published"], uniprot["superset_sha256"])
@@ -319,10 +321,35 @@ def check_sources(
         cut_date=cut_date,
         snapshot=snapshot,
         release=release,
-        uniref_release=str(uniref["release"]),
+        uniref_release=uniref_release,
         uniref_published_at=uniref_published,
-        uniref_clusters_sha256=str(uniref["sha256"]),
+        uniref_clusters_sha256=uniref_sha256,
     )
+
+
+def _checked_uniref(
+    manifest: dict[str, Any], cut: int, cut_date: date
+) -> tuple[str | None, date | None, str | None]:
+    """The UniRef release a full photo's clusters come from, checked against the guard.
+
+    A truth-only photo has no neighbours and must name no UniRef release.
+    """
+    uniref = manifest["sources"].get("uniref") or {}
+    if manifest.get("kind", "full") == "truth_only":
+        if uniref:
+            raise PhotoRefused("a truth-only photo names a UniRef release: it has no neighbours")
+        return None, None, None
+    if not uniref:
+        raise PhotoRefused("a full photo names no UniRef release for its neighbours")
+    published = date.fromisoformat(uniref["published"])
+    refuse_a_dated_source(
+        source=f"UniRef {uniref['release']}",
+        published=published,
+        cut_release=cut,
+        cut_date=cut_date,
+    )
+    refuse_a_uniprot_release_at_or_after_the_ceiling(str(uniref["release"]), source="UniRef")
+    return str(uniref["release"]), published, str(uniref["sha256"])
 
 
 def _batches(path: Path, columns: list[str]) -> Iterator[list[dict[str, Any]]]:
@@ -379,17 +406,21 @@ def photo_descriptors(
     members, rows = counts["members"], counts["rows"]
     cut, uniref = sources.cut, sources.uniref_release
     graph = sources.snapshot.obo_version.rsplit("/", 1)[-1]
+    neighbours = (
+        f"{members.get('by_neighbour', 0)} as annotated neighbours in the UniRef50 {uniref} "
+        "clusters of a Swiss-Prot protein"
+        if uniref
+        else "no neighbours (a truth-only photo: the cut only ends a window)"
+    )
     return {
         "short_name": f"photo-{cut}",
         "description": (
             f"Photo of cut {cut} (GOA {cut}, {sources.cut_date.isoformat()}): "
             f"{members['members']} members, {members['superset']} of them in Swiss-Prot "
             f"{sources.release.release}, {members['by_truth']} admitted by a truth code, "
-            f"{members['by_curated_only']} by curated inference alone and "
-            f"{members.get('by_neighbour', 0)} as annotated neighbours in the UniRef50 "
-            f"{uniref} clusters of a Swiss-Prot protein, with {rows.get('member_rows', 0)} "
-            f"GOA rows on the GO graph of {graph}, channels checked against the GO_REF list "
-            f"read on {goref_list_read_on}."
+            f"{members['by_curated_only']} by curated inference alone and {neighbours}, "
+            f"with {rows.get('member_rows', 0)} GOA rows on the GO graph of {graph}, "
+            f"channels checked against the GO_REF list read on {goref_list_read_on}."
         ),
     }
 
@@ -493,13 +524,17 @@ def _store_sequences(
 
 
 def _store_both_sequence_files(session: Session, photo_dir: Path, emit: EmitFn) -> dict[str, int]:
-    """The Swiss-Prot and the TrEMBL sequences of the paired release, stored by md5."""
+    """The Swiss-Prot and the TrEMBL sequences of the paired release, stored by md5.
+
+    A truth-only photo has no TrEMBL file; its counts say so with zeros.
+    """
     counts: dict[str, int] = {}
-    for name, stage in (
-        ("sequences", "sequences"),
-        ("unreviewed_sequences", "unreviewed_sequences"),
-    ):
-        added, reused = _store_sequences(session, photo_dir / f"{name}.parquet", emit, stage)
+    for name in ("sequences", "unreviewed_sequences"):
+        path = photo_dir / f"{name}.parquet"
+        if not path.exists():
+            counts[f"{name}_added"] = counts[f"{name}_already_present"] = 0
+            continue
+        added, reused = _store_sequences(session, path, emit, name)
         counts[f"{name}_added"], counts[f"{name}_already_present"] = added, reused
     return counts
 
@@ -570,7 +605,8 @@ def _store_members(
     release does not hold the accession.
     """
     trembl: dict[str, str] = {}
-    for batch in _batches(photo_dir / "unreviewed_sequences.parquet", ["accession", "md5"]):
+    unreviewed = photo_dir / "unreviewed_sequences.parquet"
+    for batch in _batches(unreviewed, ["accession", "md5"]) if unreviewed.exists() else ():
         trembl.update((row["accession"], row["md5"]) for row in batch)
     counts: Counter[str] = Counter()
     progress = _Progress(emit, "members")
@@ -650,7 +686,11 @@ class LoadCutPhotoOperation:
         sources = check_sources(manifest, snapshot, release, loaded_graphs)
         check_stored_channel_table(session)
         sequences = verify_sequences(photo_dir / "sequences.parquet", release.content_sha256)
-        unreviewed = verify_unreviewed_sequences(photo_dir / "unreviewed_sequences.parquet")
+        unreviewed = (
+            verify_unreviewed_sequences(photo_dir / "unreviewed_sequences.parquet")
+            if "unreviewed_sequences.parquet" in manifest["outputs"]
+            else 0
+        )
         emit(
             "load_cut_photo.verified",
             f"photo of cut {cut} verified against Swiss-Prot {release.release}",
@@ -681,6 +721,7 @@ class LoadCutPhotoOperation:
         channel_table = manifest["channel_table"]
         table_written = declare_channel_table(session, verified.job_id)
         photo = CutPhoto(
+            kind=str(manifest.get("kind", "full")),
             cut_release=sources.cut,
             cut_date=sources.cut_date,
             annotation_set_id=annotation_set.id,

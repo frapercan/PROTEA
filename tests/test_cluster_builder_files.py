@@ -72,7 +72,11 @@ def test_the_shipped_list_is_the_import_closure_and_the_job_scripts() -> None:
     listed = _listed()
     assert {name for name in listed if name.startswith("protea/")} == files
     scripts = {name for name in listed if not name.startswith("protea/")}
-    assert scripts == {"deploy/cluster/cut_photo_measure.sh", "deploy/cluster/cut_photo_build.sh"}
+    assert scripts == {
+        "deploy/cluster/cut_photo_measure.sh",
+        "deploy/cluster/cut_photo_build.sh",
+        "deploy/cluster/cut_photo_truth.sh",
+    }
     assert all((ROOT / name).is_file() for name in scripts)
 
 
@@ -116,6 +120,14 @@ def test_the_build_job_refuses_a_cut_past_the_mark(tmp_path: Path) -> None:
     assert "after the mark 227" in done.stdout
 
 
+def test_the_truth_only_job_refuses_a_cut_past_the_mark(tmp_path: Path) -> None:
+    args = ["python", str(tmp_path), "228", "2025-11-01", "2025_03", "2025-06-18"]
+    args += [str(tmp_path)] * 3 + ["rev", "url", "0" * 64, "url"]
+    done = _run("cut_photo_truth.sh", *args)
+    assert done.returncode == 2
+    assert "after the mark 227" in done.stdout
+
+
 def test_the_measure_job_refuses_a_cut_past_the_mark(tmp_path: Path) -> None:
     args = ["python", str(tmp_path), "228", "2025-11-01", "2025_03", "2025-06-18"]
     args += [str(tmp_path / "sprot"), str(tmp_path / "uniref"), "0" * 32, str(tmp_path), "rev"]
@@ -124,19 +136,41 @@ def test_the_measure_job_refuses_a_cut_past_the_mark(tmp_path: Path) -> None:
     assert "after the mark 227" in done.stdout
 
 
-def test_the_send_refuses_a_name_that_is_not_protea_code(tmp_path: Path) -> None:
-    # The script reads the list beside itself, so a copy beside a list that names a
-    # data file shows the refusal, which comes before git or ssh is touched.
-    (tmp_path / "send_builder_code.sh").write_text(
-        (CLUSTER / "send_builder_code.sh").read_text(encoding="utf-8"), encoding="utf-8"
-    )
-    (tmp_path / "builder_files.txt").write_text("protea/core/marks.py\ndata/photo.parquet\n")
-    done = subprocess.run(
-        ["bash", str(tmp_path / "send_builder_code.sh"), "HEAD", "nowhere", "/tmp/x"],
+def _repo_with_a_list(tmp_path: Path, listed: str) -> Path:
+    """A git repository holding a copy of the send script beside a committed list."""
+    cluster = tmp_path / "deploy" / "cluster"
+    cluster.mkdir(parents=True)
+    send = (CLUSTER / "send_builder_code.sh").read_text(encoding="utf-8")
+    (cluster / "send_builder_code.sh").write_text(send, encoding="utf-8")
+    (cluster / "builder_files.txt").write_text(listed, encoding="utf-8")
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@example.org"]
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "list"]):
+        subprocess.run([*git, *args], check=True, capture_output=True, timeout=30)
+    return cluster / "send_builder_code.sh"
+
+
+def _send(script: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(script), "HEAD", "nowhere", "/tmp/x"],
         capture_output=True,
         text=True,
         timeout=30,
         check=False,
     )
+
+
+def test_the_send_refuses_a_name_that_is_not_protea_code(tmp_path: Path) -> None:
+    script = _repo_with_a_list(tmp_path, "protea/core/marks.py\ndata/photo.parquet\n")
+    done = _send(script)
     assert done.returncode == 2
-    assert "REFUSED: data/photo.parquet is neither a Python file under protea/" in done.stdout
+    assert "REFUSED: data/photo.parquet is neither a Python file" in done.stdout
+
+
+def test_the_send_reads_the_list_of_the_revision_not_of_the_working_tree(
+    tmp_path: Path,
+) -> None:
+    # A working-tree list naming a data file is never read: the committed one is.
+    script = _repo_with_a_list(tmp_path, "protea/core/marks.py\n")
+    (script.parent / "builder_files.txt").write_text("data/photo.parquet\n", encoding="utf-8")
+    done = _send(script)
+    assert "REFUSED" not in done.stdout
