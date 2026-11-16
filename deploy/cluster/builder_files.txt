@@ -1,0 +1,16 @@
+# The files a cluster needs to run protea.core.cut_photo.measure and .build: the import
+# closure of the builder inside protea/, which needs only the standard library and
+# pyarrow. send_builder_code.sh ships exactly these, and
+# tests/test_cluster_builder_files.py fails when the closure and this list disagree.
+protea/__init__.py
+protea/core/__init__.py
+protea/core/cut_photo/__init__.py
+protea/core/cut_photo/build.py
+protea/core/cut_photo/channels.py
+protea/core/cut_photo/formats.py
+protea/core/cut_photo/measure.py
+protea/core/evidence_codes.py
+protea/core/marks.py
+protea/core/row_alignment.py
+protea/core/source_guards.py
+protea/core/swissprot_table.py
