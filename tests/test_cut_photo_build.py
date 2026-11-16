@@ -49,9 +49,22 @@ KB_FILE = {
 }
 #: The paired release's TrEMBL, as the job streams it: Q9 is the one member outside
 #: the superset; X7 is a record nobody asked for.
-TREMBL = [b">tr|Q9|Q9_HUMAN Some protein OS=Homo sapiens\n", b"MQQ\n", b"LK\n"]
-TREMBL += [b">tr|X7|X7_HUMAN Other\n", b"MAA\n"]
-TREMBL += [b">tr|N1|N1_MOUSE\n", b"MNN\n", b">tr|N2|N2_RAT\n", b"MPP\n"]
+TREMBL = [("Q9", "MQQLK"), ("X7", "MAA"), ("N1", "MNN"), ("N2", "MPP")]
+
+
+def _flat(entries: list[tuple[str, str]]) -> bytes:
+    """A UniProt flat file (``.dat``) holding these (accession, sequence) entries."""
+    out = []
+    for accession, sequence in entries:
+        out += [
+            f"ID   {accession}_HUMAN    Unreviewed;    {len(sequence)} AA.\n",
+            f"AC   {accession};\n",
+            "DE   SubName: Full=Uncharacterized protein; see https://example.org//x\n",
+            f"SQ   SEQUENCE   {len(sequence)} AA;  1 MW;  0 CRC64;\n",
+            f"     {sequence}\n",
+            "//\n",
+        ]
+    return "".join(out).encode()
 
 
 def _source(out: Path, release: str | int = CUT, published: date = CUT_DATE) -> PassSource:
@@ -355,7 +368,10 @@ class TestTheManifest:
         uniprot = _source(out, release="2022_03", published=date(2022, 8, 3))
         sequences_pass(self._archive(tmp_path, extra), uniprot, source_url=SPROT_URL)
         unreviewed_pass(
-            TREMBL, members_path=out / "members.parquet", source=uniprot, source_file=kb_file
+            io.BytesIO(_flat(TREMBL)),
+            members_path=out / "members.parquet",
+            source=uniprot,
+            source_file=kb_file,
         )
         if stream_md5 is not None:
             (out / KNOWLEDGEBASE_STREAM_MD5).write_text(stream_md5 + "\n")
@@ -525,7 +541,10 @@ class TestTheTremblPass:
     def test_a_member_the_release_does_not_hold_is_counted_and_named(self, tmp_path: Path) -> None:
         out, uniprot = self._photo(tmp_path)
         record = unreviewed_pass(
-            TREMBL[3:5], members_path=out / "members.parquet", source=uniprot, source_file=KB_FILE
+            io.BytesIO(_flat(TREMBL[1:2])),
+            members_path=out / "members.parquet",
+            source=uniprot,
+            source_file=KB_FILE,
         )
         assert (record["members_outside_superset"], record["sequences"]) == (3, 0)
         assert (record["missing"], record["missing_examples"]) == (3, ["N1", "N2", "Q9"])
@@ -534,7 +553,7 @@ class TestTheTremblPass:
         out, uniprot = self._photo(tmp_path)
         with pytest.raises(PhotoGuardError, match="twice"):
             unreviewed_pass(
-                TREMBL + TREMBL[:3],
+                io.BytesIO(_flat(TREMBL + TREMBL[:1])),
                 members_path=out / "members.parquet",
                 source=uniprot,
                 source_file=KB_FILE,
@@ -544,7 +563,7 @@ class TestTheTremblPass:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         out, _ = self._photo(tmp_path)
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"".join(TREMBL))))
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(_flat(TREMBL))))
         argv = ["unreviewed", "--members", str(out / "members.parquet"), "--release", "2022_03"]
         argv += ["--published", "2022-08-03", "--cut-release", "211", "--cut-date", "2022-09-16"]
         argv += ["--out", str(out), "--source-url", KB_FILE["url"], "--source-md5", KB_FILE["md5"]]

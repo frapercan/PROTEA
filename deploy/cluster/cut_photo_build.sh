@@ -10,7 +10,8 @@
 # its URL and digest, and the Swiss-Prot archive's URL, go into the manifest.
 #
 # The members outside Swiss-Prot take their sequence from the paired release's TrEMBL,
-# read out of the release's full knowledgebase archive (KB_ARCHIVE: the path
+# read out of the release's full knowledgebase archive, where a past release keeps it
+# as a flat file, uniprot_trembl.dat.gz (KB_ARCHIVE: the path
 # fetch_source.sh wrote the parts beside, FILE.part<N>, never joined). The parts are
 # streamed in order, the md5 of the stream is written beside the photo
 # (knowledgebase-stream.md5) and the manifest refuses the photo unless it is KB_MD5, the
@@ -61,21 +62,26 @@ pigz -dc -p 4 "$GOA" | build members --superset-table "$MEAS/superset.tsv" \
   --neighbours "$MEAS/neighbours.parquet" --release "$CUT" --published "$CUT_DATE" \
   "${at_cut[@]}" "${goa_file[@]}"
 log "members pass in $(( $(date +%s) - t )) s"; t=$(date +%s)
-pigz -dc -p 4 "$GOA" | build rows --members "$OUT/members.parquet" \
-  --release "$CUT" --published "$CUT_DATE" "${at_cut[@]}" "${goa_file[@]}"
-log "rows pass in $(( $(date +%s) - t )) s"; t=$(date +%s)
 build sequences --archive "$ARCHIVE" --release "$UREL" --published "$UPUB" "${at_cut[@]}" \
   --source-url "$UNIPROT_URL"
 log "sequences pass in $(( $(date +%s) - t )) s"; t=$(date +%s)
+# The rows pass and the TrEMBL pass both read only members.parquet, so they run side by
+# side: the rows pass is bound by Python over GOA, the TrEMBL pass by decompressing the
+# flat file (some 900 GB at 211).
+( pigz -dc -p 3 "$GOA" | build rows --members "$OUT/members.parquet" \
+    --release "$CUT" --published "$CUT_DATE" "${at_cut[@]}" "${goa_file[@]}" \
+  && log "rows pass in $(( $(date +%s) - t )) s" ) &
+rows_pid=$!
 rm -f "$OUT/knowledgebase-stream.md5" "$OUT/knowledgebase-stream.md5.tmp"
 cat "${KB_PARTS[@]}" \
   | tee >(md5sum | cut -d' ' -f1 > "$OUT/knowledgebase-stream.md5.tmp") \
-  | tar -xzOf - --wildcards '*uniprot_trembl.fasta.gz' | pigz -dc -p 4 \
+  | tar -xzOf - --wildcards '*uniprot_trembl.dat.gz' | pigz -dc -p 3 \
   | build unreviewed --members "$OUT/members.parquet" --release "$UREL" --published "$UPUB" \
       "${at_cut[@]}" --source-url "$KB_URL" --source-md5 "$KB_MD5"
 for _ in $(seq 1 120); do [ -s "$OUT/knowledgebase-stream.md5.tmp" ] && break; sleep 5; done
 mv "$OUT/knowledgebase-stream.md5.tmp" "$OUT/knowledgebase-stream.md5"
 log "TrEMBL pass in $(( $(date +%s) - t )) s, stream md5 $(cat "$OUT/knowledgebase-stream.md5")"
+wait "$rows_pid" || { log "ROWS PASS FAILED"; exit 1; }
 set +e
 build manifest --out "$OUT" --revision "$REV"; rc=$?
 set -e

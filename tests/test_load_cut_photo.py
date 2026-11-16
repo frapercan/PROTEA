@@ -99,8 +99,7 @@ KB_FILE = {
     "md5": "3d030df00f7ec4fd5b2d43ca74e3e4f7",
 }
 #: Q9 is the member outside the superset; its sequence comes from the paired TrEMBL.
-TREMBL = [b">tr|Q9|Q9_HUMAN Some protein\n", b"MQQLK\n", b">tr|X7|X7_HUMAN\n", b"MAA\n"]
-TREMBL += [b">tr|N1|N1_MOUSE\n", b"MNN\n", b">tr|N2|N2_RAT\n", b"MPP\n"]
+TREMBL = [("Q9", "MQQLK"), ("X7", "MAA"), ("N1", "MNN"), ("N2", "MPP")]
 #: The GO ids the test snapshot knows; GO:0000099 is the one it does not.
 KNOWN_TERMS = [f"GO:000000{i}" for i in range(1, 8)]
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -109,6 +108,21 @@ _VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 _MIGRATION = _VERSIONS / "d4a7c2e9f310_cut_photo_tables.py"
 _MEMBERS_MIGRATION = _VERSIONS / "384568a09847_cut_photo_members.py"
 _KIND_MIGRATION = _VERSIONS / "a6e1e05d3c8b_cut_photo_kind.py"
+
+
+def _flat(entries: list[tuple[str, str]]) -> bytes:
+    """A UniProt flat file (``.dat``) holding these (accession, sequence) entries."""
+    out = []
+    for accession, sequence in entries:
+        out += [
+            f"ID   {accession}_HUMAN    Unreviewed;    {len(sequence)} AA.\n",
+            f"AC   {accession};\n",
+            "DE   SubName: Full=Uncharacterized protein; see https://example.org//x\n",
+            f"SQ   SEQUENCE   {len(sequence)} AA;  1 MW;  0 CRC64;\n",
+            f"     {sequence}\n",
+            "//\n",
+        ]
+    return "".join(out).encode()
 
 
 def _gaf(accession: str, go: str, code: str, reference: str) -> str:
@@ -189,7 +203,10 @@ def build_photo(
     sequences_pass(archive, uniprot, source_url="https://ftp.uniprot.org/sprot-only2022_03.tar.gz")
     if not truth_only:
         unreviewed_pass(
-            TREMBL, members_path=out / "members.parquet", source=uniprot, source_file=KB_FILE
+            io.BytesIO(_flat(TREMBL)),
+            members_path=out / "members.parquet",
+            source=uniprot,
+            source_file=KB_FILE,
         )
         (out / KNOWLEDGEBASE_STREAM_MD5).write_text(KB_FILE["md5"] + "\n")
     manifest_pass(out, revision="builder-revision")

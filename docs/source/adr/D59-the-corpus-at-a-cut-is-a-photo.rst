@@ -287,10 +287,12 @@ today's sequence (ADR-D49 decision 4 still governs the series loaded before this
 record), and the drift against today's is measurable from the md5s.
 
 The build reads them out of the paired release's full knowledgebase archive,
-the only file in which UniProt publishes a release's TrEMBL: the job streams the
-archive's parts in order, takes the md5 of the stream, and keeps the TrEMBL
-records of the members outside the superset (``unreviewed_sequences.parquet``,
-94,190 members at 211). The manifest refuses the photo unless that md5 is the
+the only file in which UniProt publishes a past release's TrEMBL, and there only as
+a flat file (``uniprot_trembl.dat.gz``; the 2022_03 archive holds the two ``.dat``
+files and the docs, no FASTA): the job streams the archive's parts in order, takes
+the md5 of the stream, and keeps the entries of the members outside the superset
+(``unreviewed_sequences.parquet``), each sequence's md5 taken as the FASTA reader
+takes it. The manifest refuses the photo unless that md5 is the
 one the release's ``RELEASE.metalink`` publishes, and a member the release does
 not hold is counted and named, never guessed: a GOA release can cite an
 accession created after its paired UniProt release. The loader checks each
