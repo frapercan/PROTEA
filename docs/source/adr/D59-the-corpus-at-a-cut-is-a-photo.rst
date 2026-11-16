@@ -111,6 +111,16 @@ table ``evidence_channel`` keyed by those four fields, versioned with the GO_REF
 list it was checked against. Every ``GO_REF`` seen in GOA t must appear in the
 table; an unknown one is counted and rejects the photo rather than being guessed.
 
+A ``GO_REF`` with no number is read through its with/from (the author,
+2026-11-16: "Leer por with/from"). GOA 211 has 419,822 ``IEA`` rows by UniProt,
+dated 2022-09-07 and all cellular component, that cite ``GO_REF:`` alone; their
+with/from is a subcellular location (419,742) or a keyword (80), the two field
+mappings whose other rows cite ``GO_REF:0000044`` and ``GO_REF:0000043``. Such a
+reference takes that ``GO_REF`` when every with/from item is in one of the two
+vocabularies, and stays unread, so it refuses the photo, otherwise. At 211 every
+one of these rows lands in the mirror either way (the 50 member rows belong to
+proteins outside Swiss-Prot), so the reading changes no recipe row and no profile.
+
 .. list-table:: The channels
    :header-rows: 1
    :widths: 26 38 36
