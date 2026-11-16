@@ -125,6 +125,7 @@ from protea.core.operations.ingest_method_predictions import (
     IngestMethodPredictionsPayload,
 )
 from protea.core.operations.insert_proteins import InsertProteinsPayload
+from protea.core.operations.load_cut_photo import LoadCutPhotoPayload
 from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsPayload,
 )
@@ -352,6 +353,19 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "expected_sha256": "0" * 64,
         },
         ("release",),
+    ),
+    # A photo is named by the sha256 of its manifest, which is what the loader
+    # verifies before reading anything else, so a digest that is not one is
+    # refused before the directory is opened.
+    (
+        "load_cut_photo",
+        LoadCutPhotoPayload,
+        {
+            "photo_dir": "/srv/photos/211",
+            "manifest_sha256": "not-a-digest",
+            "ontology_snapshot_id": "7c5cf2d8-6f0a-4a43-9a43-25e7b8c0a2a1",
+        },
+        ("manifest_sha256",),
     ),
     # missing-required: source_version
     (

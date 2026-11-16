@@ -68,6 +68,7 @@ EXPECTED: dict[str, str] = {
     "prediction_set": "what one method predicted, over one query set, from one reference pool",
     "information_accretion_set": "the IA weights, identified by snapshot x corpus x evidence regime",
     "dataset": "the frozen re-ranker dump the laboratory pulls to train",
+    "cut_photo": "the corpus at a cut: Swiss-Prot, live tiers and UniRef50 profiles",
 }
 
 #: Tables whose name ends in ``_set`` but which are membership or join rows,

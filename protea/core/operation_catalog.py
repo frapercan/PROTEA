@@ -93,6 +93,7 @@ from protea.core.operations.ingest_method_predictions import (
     IngestMethodPredictionsOperation,
 )
 from protea.core.operations.insert_proteins import InsertProteinsOperation
+from protea.core.operations.load_cut_photo import LoadCutPhotoOperation
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingOperation,
@@ -186,6 +187,7 @@ _UNIVERSE: tuple[_Row, ...] = (
     # Its auto-frame child is a generate_evaluation_set job on protea.jobs.
     (LoadGOAAnnotationsOperation, replace(_FETCHED, publishes_to=(queues.JOBS,))),
     (LoadSwissProtReleaseOperation, _FETCHED),
+    (LoadCutPhotoOperation, _DERIVED),
     (RefreshGoaReleaseDatesOperation, _FETCHED),
     (LoadInterProGoMappingOperation, replace(_FETCHED, status="mirror")),
     (RunInterProScanBatchOperation, replace(_DERIVED, status="mirror")),
