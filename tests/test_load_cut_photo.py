@@ -31,17 +31,18 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 import protea.infrastructure.orm.models  # noqa: F401  (registers every table)
 from protea.core.cut_photo.build import (
+    channel_table_digest,
     manifest_pass,
     members_pass,
     rows_pass,
     sequences_pass,
 )
-from protea.core.cut_photo.channels import PROFILE_CHANNELS
+from protea.core.cut_photo.channels import PROFILE_CHANNELS, channel_rows
 from protea.core.cut_photo.measure import PassSource
 from protea.core.operations import load_cut_photo as loader
 from protea.core.operations.load_cut_photo import (
@@ -64,13 +65,20 @@ from protea.infrastructure.orm.models.annotation.cut_photo import (
     CutPhotoCluster,
     CutPhotoClusterProfile,
 )
+from protea.infrastructure.orm.models.annotation.evidence_channel import (
+    EvidenceChannel,
+    EvidenceChannelTable,
+)
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import (
     ProteinGOAnnotation,
 )
 from protea.infrastructure.orm.models.protein.protein import Protein
-from protea.infrastructure.orm.models.protein.swissprot_release import SwissProtRelease
+from protea.infrastructure.orm.models.protein.swissprot_release import (
+    SwissProtMembership,
+    SwissProtRelease,
+)
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 CUT = 211
@@ -414,8 +422,13 @@ def pg_session(postgres_url: str, monkeypatch: pytest.MonkeyPatch):
     with Session(engine, future=True) as session:
         snapshot = _snapshot()
         session.add(snapshot)
-        session.add(_release())
+        release = _release()
+        session.add(release)
         session.flush()
+        session.add_all(
+            SwissProtMembership(release_id=release.id, accession=accession, sequence_md5=md5)
+            for accession, md5 in MD5.items()
+        )
         session.add_all(
             GOTerm(go_id=go_id, ontology_snapshot_id=snapshot.id) for go_id in KNOWN_TERMS
         )
@@ -489,6 +502,65 @@ def test_a_photo_loads_and_says_what_it_wrote(pg_session: Session, tmp_path: Pat
     }
     annotation_set = pg_session.get(AnnotationSet, photo.annotation_set_id)
     assert annotation_set is not None and annotation_set.source_version == "211"
+
+    assert photo.channel_table_sha256 == channel_table_digest()
+    assert result["channel_table_written"] is True
+    assert pg_session.get(EvidenceChannelTable, photo.channel_table_sha256) is not None
+    stored_keys = pg_session.execute(select(func.count()).select_from(EvidenceChannel)).scalar_one()
+    assert stored_keys == len(channel_rows())
+
+
+#: Every stored row of a photo with the channel SQL computes for it, reviewed meaning
+#: in the photo's paired Swiss-Prot release.
+_ROW_CHANNELS = text(
+    """
+    SELECT a.protein_accession, t.go_id, a.evidence_code,
+           evidence_channel_of(p.channel_table_sha256, a.evidence_code, a.db_reference,
+                               a.with_from, m.accession IS NOT NULL)
+    FROM protein_go_annotation a
+    JOIN go_term t ON t.id = a.go_term_id
+    JOIN cut_photo p ON p.annotation_set_id = a.annotation_set_id
+    LEFT JOIN swissprot_membership m
+        ON m.release_id = p.swissprot_release_id AND m.accession = a.protein_accession
+    """
+)
+
+
+@pytest.mark.integration
+def test_sql_gives_every_stored_row_the_channel_the_builder_gave_it(
+    pg_session: Session, tmp_path: Path
+) -> None:
+    out, sha = build_photo(tmp_path)
+    _load(pg_session, out, sha)
+    stored = sorted(tuple(row) for row in pg_session.execute(_ROW_CHANNELS).all())
+    built = pq.read_table(out / "rows.parquet", columns=["accession", "go_id", "code", "channel"])
+    expected = sorted(
+        (r["accession"], r["go_id"], r["code"], r["channel"])
+        for r in built.to_pylist()
+        if r["go_id"] in KNOWN_TERMS
+    )
+    assert stored == expected
+    assert ("P1", "GO:0000002", "IEA", "reviewed_field_electronic") in stored
+
+
+@pytest.mark.integration
+def test_a_stored_channel_table_other_than_the_codes_refuses_before_writing(
+    pg_session: Session, tmp_path: Path
+) -> None:
+    out, sha = build_photo(tmp_path)
+    assert loader.declare_channel_table(pg_session, None) is True
+    pg_session.execute(
+        text(
+            "UPDATE evidence_channel SET channel = 'truth' "
+            "WHERE evidence_code = 'IEA' AND reference_class = 'GO_REF:0000107'"
+        )
+    )
+    pg_session.commit()
+    with pytest.raises(PhotoRefused, match="keys or channels"):
+        _load(pg_session, out, sha)
+    pg_session.rollback()
+    for table in (CutPhoto, ProteinGOAnnotation, Protein):
+        assert pg_session.execute(select(func.count()).select_from(table)).scalar_one() == 0
 
 
 @pytest.mark.integration

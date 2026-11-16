@@ -7,6 +7,11 @@ from .annotation.cut_photo import (  # noqa: F401
 )
 from .annotation.evaluation_result import EvaluationResult  # noqa: F401
 from .annotation.evaluation_set import EvaluationSet  # noqa: F401
+from .annotation.evidence_channel import (  # noqa: F401
+    EvidenceChannel,
+    EvidenceChannelEmptyGoRef,
+    EvidenceChannelTable,
+)
 from .annotation.go_term import GOTerm  # noqa: F401
 from .annotation.go_term_alias import GOTermAlias  # noqa: F401
 from .annotation.go_term_relationship import GOTermRelationship  # noqa: F401

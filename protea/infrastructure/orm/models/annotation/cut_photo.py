@@ -93,7 +93,15 @@ class CutPhoto(Base):
     uniref_clusters_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     #: The GO_REF list the channel table was checked against, and the table's digest.
     goref_list_read_on: Mapped[date] = mapped_column(Date, nullable=False)
-    channel_table_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    channel_table_sha256: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey(
+            "evidence_channel_table.sha256",
+            ondelete="RESTRICT",
+            name="fk_cut_photo_channel_table",
+        ),
+        nullable=False,
+    )
     manifest: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     manifest_uri: Mapped[str] = mapped_column(String(512), nullable=False)
     manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
