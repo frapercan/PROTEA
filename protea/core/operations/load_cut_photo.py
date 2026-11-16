@@ -235,31 +235,34 @@ def _dated(obo_version: str) -> date | None:
 
 
 def check_graph(
-    snapshot: OntologySnapshot, declared_go_release: str, loaded_graphs: Iterable[str]
+    snapshot: OntologySnapshot,
+    declared_go_release: str,
+    loaded_graphs: Iterable[str],
+    cut_date: date | None = None,
 ) -> None:
-    """Refuse a graph the GAF's declared GO release does not lead to.
+    """Refuse a graph the GAF's declared GO release (or the cut's date) does not lead to.
 
-    The rule pairs a cut with the newest graph whose release is not after the
-    one the GAF declares, so the graph may not be newer than that release, and no
-    loaded graph may sit between the two.
+    The rule pairs a cut with the newest graph whose release is not after the one
+    the GAF declares, so the graph may not be newer than that release, and no loaded
+    graph may sit between the two. A GAF that declares none (GAF 2.1, as GOA wrote up
+    to 2019) is bound by the cut's date instead, ADR-D60's pairing rule for cut 160.
     """
-    if not declared_go_release:
-        raise PhotoRefused("the GAF declares no GO release, so its graph cannot be checked")
-    declared = date.fromisoformat(declared_go_release)
+    if declared_go_release:
+        bound, named = date.fromisoformat(declared_go_release), "the GO release the GAF declares"
+    elif cut_date is not None:
+        bound, named = cut_date, "the cut's date (the GAF declares no GO release)"
+    else:
+        raise PhotoRefused("the GAF declares no GO release and no cut date bounds the graph")
     graph = graph_date(snapshot.obo_version)
-    if graph > declared:
-        raise PhotoRefused(
-            f"the GO graph {snapshot.obo_version} is newer than the release the GAF "
-            f"declares ({declared_go_release})"
-        )
+    if graph > bound:
+        raise PhotoRefused(f"the GO graph {snapshot.obo_version} is newer than {named} ({bound})")
     between = sorted(
-        v for v in loaded_graphs if (d := _dated(v)) is not None and graph < d <= declared
+        v for v in loaded_graphs if (d := _dated(v)) is not None and graph < d <= bound
     )
     if between:
         raise PhotoRefused(
-            f"{between[-1]} is loaded and not after the GO release the GAF declares "
-            f"({declared_go_release}): the cut takes the newest such graph, not "
-            f"{snapshot.obo_version}"
+            f"{between[-1]} is loaded and not after {named} ({bound}): the cut takes the "
+            f"newest such graph, not {snapshot.obo_version}"
         )
 
 
@@ -304,7 +307,7 @@ def check_sources(
     ):
         refuse_a_dated_source(source=name, published=published, cut_release=cut, cut_date=cut_date)
     refuse_a_uniprot_release_at_or_after_the_ceiling(release.release)
-    check_graph(snapshot, str(goa.get("declared_go_release") or ""), loaded_graphs)
+    check_graph(snapshot, str(goa.get("declared_go_release") or ""), loaded_graphs, cut_date)
     check_channel_table(manifest)
     declared = (uniprot["release"], uniprot["published"], uniprot["superset_sha256"])
     loaded = (release.release, release.published_at.isoformat(), release.content_sha256)

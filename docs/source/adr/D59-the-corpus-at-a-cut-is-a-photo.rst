@@ -143,6 +143,14 @@ the migration that introduced it or by the first load that classifies with it,
 and a later load refuses a stored table that differs from the code's
 (amended 2026-11-16, when the table was built).
 
+GOA 160 to 194 carry three obsolete references the first table did not list,
+placed by the author on 2026-11-16 from their titles in GO's list: Ensembl
+Compara's projections to fungal and to plant orthologs (``GO_REF:0000049``,
+62,810 rows at 160; ``GO_REF:0000035``, 11,000) are orthology, and InterPro2GO
+with UniProt's conservative changes (``GO_REF:0000042``, at most 23 rows a cut) is
+a signature. The table then has 92 rows and a new digest, so every photo is built
+with it.
+
 A ``GO_REF`` with no number is read through its with/from (the author,
 2026-11-16: "Leer por with/from"). GOA 211 has 419,822 ``IEA`` rows by UniProt,
 dated 2022-09-07 and all cellular component, that cite ``GO_REF:`` alone; their
@@ -260,7 +268,12 @@ photo adds rows and never rewrites an earlier one.
   whatever that date. The NCBI taxonomy archive of t's month becomes a fourth
   source only if the author decides on taxon groups.
 - ``load_cut_photo`` runs on the server. It verifies the manifest, writes the
-  rows of decision 3 and declares the photo.
+  rows of decision 3 and declares the photo. The photo's GO graph is the newest
+  loaded graph not after the GO release the GAF declares in its ``!go-version``
+  line; a GAF 2.1, as GOA wrote up to 2019 (cuts 160, 177 and 194), declares
+  none, and its graph is the newest loaded one not after the cut's date, the
+  pairing rule ADR-D60 gives cut 160 (amended 2026-11-16 with the author; the
+  manifest names the rule it applied).
 
 **Two kinds of photo** (amended 2026-11-16 with the author: "Si, ok"). A ``full``
 photo is everything above. A ``truth_only`` photo is the photo of a cut that only

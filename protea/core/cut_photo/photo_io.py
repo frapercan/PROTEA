@@ -96,6 +96,20 @@ def declared_go_release(header: dict[str, str]) -> str:
     return found.group(1) if found else ""
 
 
+def go_release_rule(header: dict[str, str]) -> str:
+    """Which rule picks the photo's GO graph (ADR-D59, amended 2026-11-16).
+
+    ``declared``: the newest loaded graph not after the GO release the GAF declares.
+    ``cut_date``: the GAF has no ``go-version`` line (a GAF 2.1, as GOA wrote up to
+    2019), so the newest loaded graph not after the cut's date, the pairing rule
+    ADR-D60 gives cut 160. ``unreadable``: a ``go-version`` line that names no
+    release, which refuses the photo.
+    """
+    if "go-version" not in header:
+        return "cut_date"
+    return "declared" if declared_go_release(header) else "unreadable"
+
+
 def _read_members(path: Path) -> dict[str, bool]:
     table = pq.read_table(path, columns=["accession", "superset"])
     pairs = zip(

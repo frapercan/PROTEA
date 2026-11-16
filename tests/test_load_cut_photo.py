@@ -341,7 +341,7 @@ class TestTheSources:
     ) -> None:
         manifest = self._manifest(tmp_path)
         manifest["sources"]["goa"]["declared_go_release"] = "2022-06-30"
-        with pytest.raises(PhotoRefused, match="newer than the release the GAF declares"):
+        with pytest.raises(PhotoRefused, match="newer than the GO release the GAF declares"):
             check_sources(manifest, _snapshot(), _release())
 
     def test_a_newer_loaded_graph_the_gaf_allows_is_refused(self, tmp_path: Path) -> None:
@@ -354,11 +354,15 @@ class TestTheSources:
         sources = check_sources(self._manifest(tmp_path), _snapshot(), _release(), loaded)
         assert sources.cut == CUT
 
-    def test_a_gaf_that_declares_no_go_release_is_refused(self, tmp_path: Path) -> None:
+    def test_a_gaf_that_declares_no_go_release_takes_the_newest_graph_by_the_cut(
+        self, tmp_path: Path
+    ) -> None:
         manifest = self._manifest(tmp_path)
         manifest["sources"]["goa"]["declared_go_release"] = ""
-        with pytest.raises(PhotoRefused, match="declares no GO release"):
-            check_sources(manifest, _snapshot(), _release())
+        assert check_sources(manifest, _snapshot(), _release(), [GRAPH]).cut == CUT
+        # A newer graph not after the cut's date is the one the cut takes.
+        with pytest.raises(PhotoRefused, match="the cut's date"):
+            check_sources(manifest, _snapshot(), _release(), [GRAPH, "releases/2022-09-12"])
 
     def test_a_photo_classified_with_another_channel_table_is_refused(self, tmp_path: Path) -> None:
         manifest = self._manifest(tmp_path)
