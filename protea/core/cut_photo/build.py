@@ -140,9 +140,17 @@ def _gaf_columns(lines: Iterable[str]) -> Iterable[list[str]]:
 
 
 def members_pass(
-    lines: Iterable[str], *, superset_table: Path, source: PassSource
+    lines: Iterable[str],
+    *,
+    superset_table: Path,
+    source: PassSource,
+    source_file: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Write ``members.parquet``: the superset and every accession GOA t admits."""
+    """Write ``members.parquet``: the superset and every accession GOA t admits.
+
+    ``source_file`` is the GOA file the lines were decompressed from, as the caller
+    declares it (``url`` and ``sha256``); the manifest refuses a photo without it.
+    """
     source.check("GOA")
     superset_source = upstream_source(superset_table.with_name("superset.json"), "UniProt", source)
     superset = read_local_table(str(superset_table))
@@ -180,6 +188,7 @@ def members_pass(
         "by_curated_only": len(curated - truth),
         "outside_superset": len(set(accessions) - set(superset)),
         "superset_source": {**superset_source, "sha256": superset_sha256},
+        "source_file": dict(source_file or {}),
     }
     _write_record(source.out / "members.json", record)
     return record
@@ -318,7 +327,12 @@ def _read_clusters(path: Path, members: dict[str, bool]) -> tuple[dict[str, str]
 
 
 def rows_pass(
-    lines: Iterable[str], *, members_path: Path, neighbours_path: Path, source: PassSource
+    lines: Iterable[str],
+    *,
+    members_path: Path,
+    neighbours_path: Path,
+    source: PassSource,
+    source_file: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Write the member rows with their channel, the clusters and the neighbour profiles."""
     source.check("GOA")
@@ -347,6 +361,7 @@ def rows_pass(
         "unknown_evidence_rows": sum(state.unknown.values()),
         "unknown_evidence_keys": len(state.unknown),
         "neighbours_source": {**neighbours_source, "sha256": _file_sha256(neighbours_path)},
+        "source_file": dict(source_file or {}),
         "channel_table": {
             "goref_list_read_on": GOREF_LIST_READ_ON,
             "sha256": channel_table_digest(),
@@ -392,9 +407,18 @@ def _write_unknown(
             handle.write(f"{code}\t{kind}\t{prefix}\t{by}\t{n}\t{shown}\n")
 
 
-def sequences_pass(archive: Path, source: PassSource) -> dict[str, Any]:
-    """Write ``sequences.parquet``: every Swiss-Prot sequence of the paired release."""
+def sequences_pass(
+    archive: Path, source: PassSource, *, source_url: str = "", expected_sha256: str = ""
+) -> dict[str, Any]:
+    """Write ``sequences.parquet``: every Swiss-Prot sequence of the paired release.
+
+    The archive's sha256 is computed here; ``expected_sha256``, when given, must
+    match it, so a caller that checked the download can say so.
+    """
     source.check("UniProt")
+    archive_sha256 = _file_sha256(archive)
+    if expected_sha256 and expected_sha256 != archive_sha256:
+        raise PhotoGuardError(f"{archive} hashes to {archive_sha256}, not {expected_sha256}")
     accessions: list[str] = []
     digests: list[str] = []
     sequences: list[str] = []
@@ -417,7 +441,8 @@ def sequences_pass(archive: Path, source: PassSource) -> dict[str, Any]:
     record = {
         **source.head("sequences"),
         "sequences": len(accessions),
-        "archive_sha256": _file_sha256(archive),
+        "archive_sha256": archive_sha256,
+        "source_file": {"url": source_url, "sha256": archive_sha256},
         "superset_sha256": hashlib.sha256(canonical_table(table_of)).hexdigest(),
     }
     _write_record(source.out / "sequences.json", record)
@@ -428,10 +453,16 @@ def photo_sources(records: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any
     """The photo's sources, named by what they are, from the pass records."""
     members, rows, sequences = records["members"], records["rows"], records["sequences"]
     return {
-        "goa": {"release": members["release"], "published": members["published"]},
+        "goa": {
+            "release": members["release"],
+            "published": members["published"],
+            "url": members.get("source_file", {}).get("url", ""),
+            "sha256": members.get("source_file", {}).get("sha256", ""),
+        },
         "uniprot": {
             "release": sequences["release"],
             "published": sequences["published"],
+            "url": sequences.get("source_file", {}).get("url", ""),
             "archive_sha256": sequences["archive_sha256"],
             "superset_sha256": members["superset_source"]["sha256"],
         },
@@ -442,12 +473,21 @@ def photo_sources(records: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any
 def source_disagreements(records: dict[str, dict[str, Any]]) -> list[str]:
     """What the passes say about the same source and do not agree on.
 
-    The two GOA passes must have read the same release, and the superset table
-    and the sequences must be the same UniProt release: as many entries, and the
-    same canonical table of accessions and md5s.
+    The two GOA passes must have read the same release from the same declared
+    file (ADR-D59 records each source's URL and sha256, so a GOA file with no
+    declared digest refuses too), and the superset table and the sequences must
+    be the same UniProt release: as many entries, and the same canonical table
+    of accessions and md5s.
     """
     members, rows, sequences = records["members"], records["rows"], records["sequences"]
     found: list[str] = []
+    goa_file = members.get("source_file", {})
+    if not goa_file.get("url") or len(goa_file.get("sha256", "")) != 64:
+        found.append(f"the GOA file is not declared with its URL and sha256: {goa_file}")
+    if rows.get("source_file", {}) != goa_file:
+        found.append(f"GOA file: members pass {goa_file}, rows pass {rows.get('source_file')}")
+    if not sequences.get("source_file", {}).get("url"):
+        found.append("the UniProt archive is not declared with its URL")
     for key in ("release", "published", "cut_release", "cut_date"):
         if members[key] != rows[key]:
             found.append(f"GOA {key}: members pass {members[key]}, rows pass {rows[key]}")
@@ -511,16 +551,28 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--cut-date", required=True)
         p.add_argument("--out", required=True, type=Path)
 
+    def source_file(p: argparse.ArgumentParser, *, sha256_required: bool) -> None:
+        p.add_argument("--source-url", required=True, help="where the source was downloaded from")
+        p.add_argument(
+            "--source-sha256",
+            required=sha256_required,
+            default="",
+            help="the sha256 of the source file, checked by the caller (GOA) or here (UniProt)",
+        )
+
     p_mem = sub.add_parser("members", help="decompressed GAF lines on stdin")
     p_mem.add_argument("--superset-table", required=True, type=Path)
     source(p_mem)
+    source_file(p_mem, sha256_required=True)
     p_rows = sub.add_parser("rows", help="decompressed GAF lines on stdin")
     p_rows.add_argument("--members", required=True, type=Path)
     p_rows.add_argument("--neighbours", required=True, type=Path)
     source(p_rows)
+    source_file(p_rows, sha256_required=True)
     p_seq = sub.add_parser("sequences")
     p_seq.add_argument("--archive", required=True, type=Path)
     source(p_seq)
+    source_file(p_seq, sha256_required=False)
     p_man = sub.add_parser("manifest")
     p_man.add_argument("--out", required=True, type=Path)
     p_man.add_argument("--revision", required=True)
@@ -547,14 +599,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"status": record["status"], "refusals": record["refusals"]}))
         return 0 if record["status"] == "complete" else 3
     src = _pass_source(args)
+    declared = {"url": args.source_url, "sha256": args.source_sha256.strip().lower()}
     if args.pass_name == "members":
-        record = members_pass(_stdin_lines(), superset_table=args.superset_table, source=src)
+        record = members_pass(
+            _stdin_lines(), superset_table=args.superset_table, source=src, source_file=declared
+        )
     elif args.pass_name == "rows":
         record = rows_pass(
-            _stdin_lines(), members_path=args.members, neighbours_path=args.neighbours, source=src
+            _stdin_lines(),
+            members_path=args.members,
+            neighbours_path=args.neighbours,
+            source=src,
+            source_file=declared,
         )
     else:
-        record = sequences_pass(args.archive, src)
+        record = sequences_pass(
+            args.archive, src, source_url=declared["url"], expected_sha256=declared["sha256"]
+        )
     print(json.dumps(record, sort_keys=True))
     return 0
 
