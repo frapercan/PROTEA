@@ -12,6 +12,9 @@ unless all of the following hold:
   release of the clusters and the ontology snapshot the payload names) was
   published on or before the cut, with no UniProt or UniRef release at or after
   the ceiling (``protea.core.source_guards``, the rules the builder asked);
+- the GO graph is the one the GAF's header leads to: not newer than the GO
+  release the GAF declares (``!go-version``), and no loaded graph sits between
+  the two, since a cut takes the newest graph not after that release;
 - the Swiss-Prot release the manifest names is the one already loaded: same
   publication date, same entry count, same canonical table digest;
 - ``sequences.parquet`` IS that release: every md5 is the md5 of its sequence,
@@ -35,7 +38,7 @@ import hashlib
 import json
 import uuid
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -176,10 +179,50 @@ def graph_date(obo_version: str) -> date:
         raise PhotoRefused(f"the GO graph {obo_version!r} carries no date to check") from exc
 
 
+def _dated(obo_version: str) -> date | None:
+    try:
+        return date.fromisoformat(obo_version.rsplit("/", 1)[-1])
+    except ValueError:
+        return None
+
+
+def check_graph(
+    snapshot: OntologySnapshot, declared_go_release: str, loaded_graphs: Iterable[str]
+) -> None:
+    """Refuse a graph the GAF's declared GO release does not lead to.
+
+    The rule pairs a cut with the newest graph whose release is not after the
+    one the GAF declares, so the graph may not be newer than that release, and no
+    loaded graph may sit between the two.
+    """
+    if not declared_go_release:
+        raise PhotoRefused("the GAF declares no GO release, so its graph cannot be checked")
+    declared = date.fromisoformat(declared_go_release)
+    graph = graph_date(snapshot.obo_version)
+    if graph > declared:
+        raise PhotoRefused(
+            f"the GO graph {snapshot.obo_version} is newer than the release the GAF "
+            f"declares ({declared_go_release})"
+        )
+    between = sorted(
+        v for v in loaded_graphs if (d := _dated(v)) is not None and graph < d <= declared
+    )
+    if between:
+        raise PhotoRefused(
+            f"{between[-1]} is loaded and not after the GO release the GAF declares "
+            f"({declared_go_release}): the cut takes the newest such graph, not "
+            f"{snapshot.obo_version}"
+        )
+
+
 def check_sources(
-    manifest: dict[str, Any], snapshot: OntologySnapshot, release: SwissProtRelease
+    manifest: dict[str, Any],
+    snapshot: OntologySnapshot,
+    release: SwissProtRelease,
+    loaded_graphs: Iterable[str] = (),
 ) -> PhotoSources:
-    """Refuse what the guard refuses, and a Swiss-Prot release that is not the loaded one."""
+    """Refuse what the guard refuses, a graph the GAF does not lead to, and a
+    Swiss-Prot release that is not the loaded one."""
     cut, cut_date = int(manifest["cut_release"]), date.fromisoformat(manifest["cut_date"])
     sources = manifest["sources"]
     refuse_a_cut_after_the_mark(cut)
@@ -198,6 +241,7 @@ def check_sources(
         refuse_a_dated_source(source=name, published=published, cut_release=cut, cut_date=cut_date)
     refuse_a_uniprot_release_at_or_after_the_ceiling(release.release)
     refuse_a_uniprot_release_at_or_after_the_ceiling(str(uniref["release"]), source="UniRef")
+    check_graph(snapshot, str(goa.get("declared_go_release") or ""), loaded_graphs)
     declared = (uniprot["release"], uniprot["published"], uniprot["superset_sha256"])
     loaded = (release.release, release.published_at.isoformat(), release.content_sha256)
     if declared != loaded:
@@ -278,7 +322,7 @@ def photo_descriptors(
 
 
 def _annotation_set(
-    session: Session, sources: PhotoSources, manifest_sha256: str
+    session: Session, sources: PhotoSources, manifest_sha256: str, goa: dict[str, Any]
 ) -> tuple[AnnotationSet, bool]:
     """The annotation set of release t: the existing one on the same graph, or a new one."""
     existing = (
@@ -305,7 +349,12 @@ def _annotation_set(
         source_version=str(sources.cut),
         ontology_snapshot_id=sources.snapshot.id,
         source_published_at=datetime.combine(sources.cut_date, time(0), tzinfo=UTC),
-        meta={"created_by": "load_cut_photo", "cut_photo_manifest_sha256": manifest_sha256},
+        meta={
+            "created_by": "load_cut_photo",
+            "cut_photo_manifest_sha256": manifest_sha256,
+            "gaf_go_version": goa.get("go_version", ""),
+            "gaf_date_generated": goa.get("date_generated", ""),
+        },
     )
     session.add(created)
     session.flush()
@@ -485,7 +534,8 @@ class LoadCutPhotoOperation:
         ).scalar_one_or_none()
         if release is None:
             raise PhotoRefused(f"Swiss-Prot {release_name} is not loaded")
-        sources = check_sources(manifest, snapshot, release)
+        loaded_graphs = session.execute(select(OntologySnapshot.obo_version)).scalars().all()
+        sources = check_sources(manifest, snapshot, release, loaded_graphs)
         sequences = verify_sequences(photo_dir / "sequences.parquet", release.content_sha256)
         emit(
             "load_cut_photo.verified",
@@ -505,7 +555,9 @@ class LoadCutPhotoOperation:
         self, session: Session, verified: VerifiedPhoto, sources: PhotoSources, emit: EmitFn
     ) -> OperationResult:
         photo_dir, manifest = verified.photo_dir, verified.manifest
-        annotation_set, created = _annotation_set(session, sources, verified.manifest_sha256)
+        annotation_set, created = _annotation_set(
+            session, sources, verified.manifest_sha256, manifest["sources"]["goa"]
+        )
         proteins = _store_proteins(session, photo_dir / "members.parquet", sources.cut)
         sequences_added, sequences_reused = _store_sequences(
             session, photo_dir / "sequences.parquet"

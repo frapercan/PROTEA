@@ -108,6 +108,8 @@ def _gaf(accession: str, go: str, code: str, reference: str) -> str:
 
 GAF = [
     "!gaf-version: 2.2\n",
+    "!date-generated: 2022-09-16 10:43\n",
+    "!go-version: http://purl.obolibrary.org/obo/go/releases/2022-09-12/extensions/go-plus.owl\n",
     _gaf("P1", "GO:0000001", "IDA", "PMID:1"),
     _gaf("P1", "GO:0000002", "IEA", "GO_REF:0000043"),
     _gaf("Q9", "GO:0000003", "ISS", "GO_REF:0000024"),
@@ -247,6 +249,30 @@ class TestTheSources:
         manifest = self._manifest(tmp_path)
         manifest["sources"]["goa"] = {"release": 210, "published": "2022-07-01"}
         with pytest.raises(PhotoRefused, match="the manifest's GOA is 210"):
+            check_sources(manifest, _snapshot(), _release())
+
+    def test_a_graph_newer_than_the_release_the_gaf_declares_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        manifest = self._manifest(tmp_path)
+        manifest["sources"]["goa"]["declared_go_release"] = "2022-06-30"
+        with pytest.raises(PhotoRefused, match="newer than the release the GAF declares"):
+            check_sources(manifest, _snapshot(), _release())
+
+    def test_a_newer_loaded_graph_the_gaf_allows_is_refused(self, tmp_path: Path) -> None:
+        loaded = ["releases/2022-07-01", "releases/2022-08-01", "releases/2022-10-01"]
+        with pytest.raises(PhotoRefused, match="2022-08-01 is loaded"):
+            check_sources(self._manifest(tmp_path), _snapshot(), _release(), loaded)
+
+    def test_older_and_later_graphs_do_not_change_the_choice(self, tmp_path: Path) -> None:
+        loaded = ["releases/2021-10-26", GRAPH, "releases/2025-07-22", "go-basic"]
+        sources = check_sources(self._manifest(tmp_path), _snapshot(), _release(), loaded)
+        assert sources.cut == CUT
+
+    def test_a_gaf_that_declares_no_go_release_is_refused(self, tmp_path: Path) -> None:
+        manifest = self._manifest(tmp_path)
+        manifest["sources"]["goa"]["declared_go_release"] = ""
+        with pytest.raises(PhotoRefused, match="declares no GO release"):
             check_sources(manifest, _snapshot(), _release())
 
     def test_another_swissprot_than_the_loaded_one_is_refused(self, tmp_path: Path) -> None:

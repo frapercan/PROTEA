@@ -36,6 +36,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import re
 import sys
 import tarfile
 from collections import Counter
@@ -131,12 +132,33 @@ def upstream_source(record_path: Path, family: str, source: PassSource) -> dict[
     return {"release": str(record["release"]), "published": str(record["published"])}
 
 
-def _gaf_columns(lines: Iterable[str]) -> Iterable[list[str]]:
+#: A GAF header field: ``!go-version: <url>``, ``!date-generated: ...``.
+_HEADER_FIELD = re.compile(r"^!([a-z][a-z-]*):\s*(.*?)\s*$")
+#: The GO release a GAF says it was built against, inside its ``go-version`` URL.
+_DECLARED_GO_RELEASE = re.compile(r"releases/(\d{4}-\d{2}-\d{2})")
+
+
+def _gaf_columns(lines: Iterable[str], header: dict[str, str] | None = None) -> Iterable[list[str]]:
+    """The columns of every UniProtKB row; ``header`` collects the ``!key: value`` lines.
+
+    Only lines that are not UniProtKB rows are looked at for the header, so the
+    rows pay one ``startswith`` each, as before.
+    """
     for line in lines:
         if line.startswith(_GAF_PREFIX):
             cols = line.rstrip("\n").split("\t")
             if len(cols) > GAF_ASSIGNED_BY:
                 yield cols
+        elif header is not None and line.startswith("!"):
+            field = _HEADER_FIELD.match(line)
+            if field:
+                header.setdefault(field.group(1), field.group(2))
+
+
+def declared_go_release(header: dict[str, str]) -> str:
+    """The GO release date the GAF declares (``YYYY-MM-DD``), or ``""`` when it says none."""
+    found = _DECLARED_GO_RELEASE.search(header.get("go-version", ""))
+    return found.group(1) if found else ""
 
 
 def members_pass(
@@ -162,7 +184,8 @@ def members_pass(
         )
     truth: set[str] = set()
     curated: set[str] = set()
-    for cols in _gaf_columns(lines):
+    header: dict[str, str] = {}
+    for cols in _gaf_columns(lines, header):
         code = cols[GAF_EVIDENCE]
         if code in TRUTH_CODES:
             truth.add(cols[GAF_ID])
@@ -189,6 +212,7 @@ def members_pass(
         "outside_superset": len(set(accessions) - set(superset)),
         "superset_source": {**superset_source, "sha256": superset_sha256},
         "source_file": dict(source_file or {}),
+        "gaf_header": header,
     }
     _write_record(source.out / "members.json", record)
     return record
@@ -346,7 +370,8 @@ def rows_pass(
         state = _RowsAndProfiles(
             members, neighbours, _ParquetBuffer(writer, _ROW_SCHEMA, 1_000_000)
         )
-        for cols in _gaf_columns(lines):
+        header: dict[str, str] = {}
+        for cols in _gaf_columns(lines, header):
             state.feed(cols)
         state.rows_out.flush()
     _write_clusters(out, superset_clusters)
@@ -362,6 +387,7 @@ def rows_pass(
         "unknown_evidence_keys": len(state.unknown),
         "neighbours_source": {**neighbours_source, "sha256": _file_sha256(neighbours_path)},
         "source_file": dict(source_file or {}),
+        "gaf_header": header,
         "channel_table": {
             "goref_list_read_on": GOREF_LIST_READ_ON,
             "sha256": channel_table_digest(),
@@ -458,6 +484,9 @@ def photo_sources(records: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any
             "published": members["published"],
             "url": members.get("source_file", {}).get("url", ""),
             "sha256": members.get("source_file", {}).get("sha256", ""),
+            "date_generated": members.get("gaf_header", {}).get("date-generated", ""),
+            "go_version": members.get("gaf_header", {}).get("go-version", ""),
+            "declared_go_release": declared_go_release(members.get("gaf_header", {})),
         },
         "uniprot": {
             "release": sequences["release"],
@@ -488,6 +517,11 @@ def source_disagreements(records: dict[str, dict[str, Any]]) -> list[str]:
         found.append(f"GOA file: members pass {goa_file}, rows pass {rows.get('source_file')}")
     if not sequences.get("source_file", {}).get("url"):
         found.append("the UniProt archive is not declared with its URL")
+    header = members.get("gaf_header", {})
+    if not declared_go_release(header):
+        found.append(f"the GAF declares no GO release in its go-version: {header}")
+    if rows.get("gaf_header", {}) != header:
+        found.append(f"GAF header: members pass {header}, rows pass {rows.get('gaf_header')}")
     for key in ("release", "published", "cut_release", "cut_date"):
         if members[key] != rows[key]:
             found.append(f"GOA {key}: members pass {members[key]}, rows pass {rows[key]}")

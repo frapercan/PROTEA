@@ -60,8 +60,16 @@ def _gaf(accession: str, go: str, code: str, reference: str, qualifier: str = "e
     return "\t".join(cols) + "\n"
 
 
-GAF = [
+GO_VERSION = "http://purl.obolibrary.org/obo/go/releases/2022-09-12/extensions/go-plus.owl"
+HEADER = [
     "!gaf-version: 2.2\n",
+    "!\n",
+    "!This file contains all GO annotations for proteins in the UniProt KnowledgeBase,\n",
+    "!date-generated: 2022-09-16 10:43 \n",
+    f"!go-version: {GO_VERSION}\n",
+]
+GAF = [
+    *HEADER,
     _gaf("P1", "GO:0000001", "IDA", "PMID:1"),
     _gaf("P1", "GO:0000002", "IEA", "GO_REF:0000043"),
     _gaf("Q9", "GO:0000003", "ISS", "GO_REF:0000024"),
@@ -311,6 +319,9 @@ class TestTheManifest:
             "release": CUT,
             "published": CUT_DATE.isoformat(),
             **GOA_FILE,
+            "date_generated": "2022-09-16 10:43",
+            "go_version": GO_VERSION,
+            "declared_go_release": "2022-09-12",
         }
         assert sources["uniprot"]["release"] == "2022_03"
         assert sources["uniprot"]["url"] == SPROT_URL
@@ -319,6 +330,32 @@ class TestTheManifest:
             == hashlib.sha256(canonical_table(MD5)).hexdigest()
         )
         assert sources["uniref"]["release"] == "2022_03"
+
+    def test_a_gaf_that_declares_no_go_release_refuses_the_photo(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, [line for line in GAF if not line.startswith("!go-version")])
+        self._sequences(tmp_path, out)
+        manifest = manifest_pass(out, revision="abc")
+        assert manifest["status"] == "refused"
+        disagreements = manifest["refusals"]["source_disagreements"]
+        assert any("declares no GO release" in d for d in disagreements)
+
+    def test_two_passes_over_different_gaf_headers_refuse_the_photo(self, tmp_path: Path) -> None:
+        superset, neighbours = _setup(tmp_path)
+        out = tmp_path / "photo"
+        members_pass(GAF, superset_table=superset, source=_source(out), source_file=GOA_FILE)
+        other = [line.replace("2022-09-12", "2022-07-01") for line in GAF]
+        rows_pass(
+            other,
+            members_path=out / "members.parquet",
+            neighbours_path=neighbours,
+            source=_source(out),
+            source_file=GOA_FILE,
+        )
+        self._sequences(tmp_path, out)
+        manifest = manifest_pass(out, revision="abc")
+        assert any(
+            d.startswith("GAF header:") for d in manifest["refusals"]["source_disagreements"]
+        )
 
     def test_an_undeclared_goa_file_refuses_the_photo(self, tmp_path: Path) -> None:
         out = _build(tmp_path, GAF, goa_file={})
