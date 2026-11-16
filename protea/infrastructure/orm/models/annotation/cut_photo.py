@@ -47,6 +47,13 @@ from protea.infrastructure.orm.base import Base
 #: ADR-D58, decision 2: a short descriptor is a lowercase slug of at most 64 characters.
 SHORT_NAME_CHECK = "short_name ~ '^[a-z0-9][a-z0-9-]*$' AND length(short_name) <= 64"
 DESCRIPTIONS_CHECK = "length(description) > 0"
+#: A full photo names the UniRef release its neighbours came from; a truth-only photo
+#: ends a window, has no neighbours and names none.
+KIND_CHECK = (
+    "(kind = 'full' AND uniref_release IS NOT NULL AND uniref_published_at IS NOT NULL "
+    "AND uniref_clusters_sha256 IS NOT NULL) OR (kind = 'truth_only' AND uniref_release IS NULL "
+    "AND uniref_published_at IS NULL AND uniref_clusters_sha256 IS NULL)"
+)
 DIGESTS_CHECK = (
     "length(manifest_sha256) = 64 AND length(channel_table_sha256) = 64 "
     "AND length(uniref_clusters_sha256) = 64"
@@ -62,9 +69,12 @@ class CutPhoto(Base):
         CheckConstraint(SHORT_NAME_CHECK, name="ck_cut_photo_short_name"),
         CheckConstraint(DESCRIPTIONS_CHECK, name="ck_cut_photo_descriptions"),
         CheckConstraint(DIGESTS_CHECK, name="ck_cut_photo_digests"),
+        CheckConstraint(KIND_CHECK, name="ck_cut_photo_kind"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    #: ``full``, or ``truth_only`` for a cut that only ends a window (ADR-D59).
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default="full")
     #: The GOA release of the cut, and its publication date, which is the cut's date.
     cut_release: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     cut_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -80,10 +90,11 @@ class CutPhoto(Base):
     swissprot_release_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("swissprot_release.id", ondelete="RESTRICT"), nullable=False
     )
-    uniref_release: Mapped[str] = mapped_column(String(16), nullable=False)
-    uniref_published_at: Mapped[date] = mapped_column(Date, nullable=False)
-    #: The sha256 of the cluster table the members' clusters were read from.
-    uniref_clusters_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: The UniRef release of the neighbours and the sha256 of its measured cluster table;
+    #: NULL on a truth-only photo (``KIND_CHECK``).
+    uniref_release: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    uniref_published_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    uniref_clusters_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     #: The GO_REF list the channel table was checked against, and the table's digest.
     goref_list_read_on: Mapped[date] = mapped_column(Date, nullable=False)
     channel_table_sha256: Mapped[str] = mapped_column(

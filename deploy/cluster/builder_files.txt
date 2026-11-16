@@ -21,3 +21,4 @@ protea/core/source_guards.py
 protea/core/swissprot_table.py
 deploy/cluster/cut_photo_measure.sh
 deploy/cluster/cut_photo_build.sh
+deploy/cluster/cut_photo_truth.sh

@@ -108,6 +108,7 @@ SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 _MIGRATION = _VERSIONS / "d4a7c2e9f310_cut_photo_tables.py"
 _MEMBERS_MIGRATION = _VERSIONS / "384568a09847_cut_photo_members.py"
+_KIND_MIGRATION = _VERSIONS / "a6e1e05d3c8b_cut_photo_kind.py"
 
 
 def _gaf(accession: str, go: str, code: str, reference: str) -> str:
@@ -142,7 +143,9 @@ def _record(path: Path, pass_name: str, **extra: object) -> None:
     path.write_text(json.dumps({**head, **extra}))
 
 
-def build_photo(tmp_path: Path, gaf: list[str] = GAF) -> tuple[Path, str]:
+def build_photo(
+    tmp_path: Path, gaf: list[str] = GAF, *, truth_only: bool = False
+) -> tuple[Path, str]:
     """A photo of cut 211 built by the builder's passes: its directory and manifest sha256."""
     measured = tmp_path / "measured"
     measured.mkdir(parents=True)
@@ -164,7 +167,7 @@ def build_photo(tmp_path: Path, gaf: list[str] = GAF) -> tuple[Path, str]:
     members_pass(
         gaf,
         superset_table=measured / "superset.tsv",
-        neighbours_path=measured / "neighbours.parquet",
+        neighbours_path=None if truth_only else measured / "neighbours.parquet",
         source=goa,
         source_file=GOA_FILE,
     )
@@ -184,10 +187,11 @@ def build_photo(tmp_path: Path, gaf: list[str] = GAF) -> tuple[Path, str]:
         out=out,
     )
     sequences_pass(archive, uniprot, source_url="https://ftp.uniprot.org/sprot-only2022_03.tar.gz")
-    unreviewed_pass(
-        TREMBL, members_path=out / "members.parquet", source=uniprot, source_file=KB_FILE
-    )
-    (out / KNOWLEDGEBASE_STREAM_MD5).write_text(KB_FILE["md5"] + "\n")
+    if not truth_only:
+        unreviewed_pass(
+            TREMBL, members_path=out / "members.parquet", source=uniprot, source_file=KB_FILE
+        )
+        (out / KNOWLEDGEBASE_STREAM_MD5).write_text(KB_FILE["md5"] + "\n")
     manifest_pass(out, revision="builder-revision")
     return out, file_sha256(out / "photo.json")
 
@@ -243,6 +247,34 @@ class TestTheManifest:
         (out / "photo.json").write_text(json.dumps(manifest))
         with pytest.raises(PhotoRefused, match="lists no unreviewed_sequences.parquet"):
             read_manifest(out, file_sha256(out / "photo.json"))
+
+    def test_an_unknown_kind_of_photo_is_refused(self, tmp_path: Path) -> None:
+        out, _ = build_photo(tmp_path)
+        manifest = json.loads((out / "photo.json").read_text())
+        (out / "photo.json").write_text(json.dumps({**manifest, "kind": "partial"}))
+        with pytest.raises(PhotoRefused, match="unknown kind of photo"):
+            read_manifest(out, file_sha256(out / "photo.json"))
+
+    def test_a_truth_only_photo_needs_no_trembl_and_names_no_uniref(self, tmp_path: Path) -> None:
+        out, sha = build_photo(tmp_path, truth_only=True)
+        manifest = read_manifest(out, sha)
+        sources = check_sources(manifest, _snapshot(), _release())
+        assert manifest["kind"] == "truth_only"
+        assert (sources.uniref_release, sources.uniref_clusters_sha256) == (None, None)
+
+    def test_a_truth_only_photo_that_names_uniref_is_refused(self, tmp_path: Path) -> None:
+        out, sha = build_photo(tmp_path, truth_only=True)
+        manifest = read_manifest(out, sha)
+        manifest["sources"]["uniref"] = {"release": "2022_03", "published": "2022-08-03"}
+        with pytest.raises(PhotoRefused, match="names a UniRef release"):
+            check_sources(manifest, _snapshot(), _release())
+
+    def test_a_full_photo_that_names_no_uniref_is_refused(self, tmp_path: Path) -> None:
+        out, sha = build_photo(tmp_path)
+        manifest = read_manifest(out, sha)
+        manifest["sources"]["uniref"] = {}
+        with pytest.raises(PhotoRefused, match="names no UniRef release"):
+            check_sources(manifest, _snapshot(), _release())
 
     def test_a_trembl_sequence_its_md5_does_not_describe_is_refused(self, tmp_path: Path) -> None:
         path = tmp_path / "unreviewed_sequences.parquet"
@@ -409,15 +441,22 @@ class TestTheSchema:
             assert getattr(photo, name) == getattr(model, name), name
         for name in ("MEMBER_SETS_CHECK", "NEIGHBOUR_ALONE_CHECK", "DESCRIPTIONS_CHECK"):
             assert getattr(members, name) == getattr(model, name), name
+        assert _migration(_KIND_MIGRATION).KIND_CHECK == model.KIND_CHECK
 
     def test_the_migrations_follow_each_other(self) -> None:
         photo, members = _migration(), _migration(_MEMBERS_MIGRATION)
         assert (photo.revision, photo.down_revision) == ("d4a7c2e9f310", "b71e2396e5c3")
         assert (members.revision, members.down_revision) == ("384568a09847", "f0e6749f94cb")
+        kind = _migration(_KIND_MIGRATION)
+        assert (kind.revision, kind.down_revision) == ("a6e1e05d3c8b", "384568a09847")
 
     def test_the_migrations_create_the_columns_the_models_declare(self) -> None:
-        for table, path in ((CutPhoto, _MIGRATION), (CutPhotoMember, _MEMBERS_MIGRATION)):
-            source = path.read_text(encoding="utf-8")
+        sources = {
+            CutPhoto: _MIGRATION.read_text(encoding="utf-8")
+            + _KIND_MIGRATION.read_text(encoding="utf-8"),
+            CutPhotoMember: _MEMBERS_MIGRATION.read_text(encoding="utf-8"),
+        }
+        for table, source in sources.items():
             for column in table.__table__.columns:
                 assert f'"{column.name}"' in source, (table.__tablename__, column.name)
 
@@ -660,3 +699,23 @@ def test_an_annotation_set_of_the_cut_on_another_graph_is_refused(
     }
     with pytest.raises(PhotoRefused, match="is on snapshot"):
         LoadCutPhotoOperation().execute(pg_session, payload, emit=_noop_emit)
+
+
+@pytest.mark.integration
+def test_a_truth_only_photo_loads_with_its_kind(pg_session: Session, tmp_path: Path) -> None:
+    out, sha = build_photo(tmp_path, truth_only=True)
+    events: list[str] = []
+    result = _load(pg_session, out, sha, events)
+    stages = [e.split(":", 1)[1] for e in events if e.startswith("load_cut_photo.stage_done")]
+    assert stages == ["proteins", "sequences", "rows", "members"]
+    photo = pg_session.execute(select(CutPhoto)).scalar_one()
+    assert (photo.kind, photo.uniref_release, photo.uniref_clusters_sha256) == (
+        "truth_only",
+        None,
+        None,
+    )
+    assert "truth-only photo" in photo.description
+    members = pg_session.execute(select(CutPhotoMember)).scalars().all()
+    assert sorted(m.accession for m in members) == ["P1", "P2", "Q9"]
+    assert not any(m.neighbour or m.cluster for m in members)
+    assert result["unreviewed_sequences_added"] == 0

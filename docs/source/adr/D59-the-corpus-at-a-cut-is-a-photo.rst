@@ -262,6 +262,19 @@ photo adds rows and never rewrites an earlier one.
 - ``load_cut_photo`` runs on the server. It verifies the manifest, writes the
   rows of decision 3 and declares the photo.
 
+**Two kinds of photo** (amended 2026-11-16 with the author: "Si, ok"). A ``full``
+photo is everything above. A ``truth_only`` photo is the photo of a cut that only
+ends a window, from which a method takes what each target gained and whether it
+is still in Swiss-Prot, and never what it predicts from: its members (the
+superset, truth and curated inference) with all their GOA t rows and its
+Swiss-Prot sequences, with no UniRef neighbours and no TrEMBL. It names no UniRef
+release; ``cut_photo.kind`` records which kind a photo is, and a check holds a
+full photo to naming its UniRef release and a truth-only one to naming none. The
+builder takes it only when asked (``--truth-only``, exclusive with
+``--neighbours``), so no photo turns truth-only by omission. Cut 205 is the one
+truth-only photo of the campaign: building it full would have read 166 GB of
+UniRef and 146 GB of TrEMBL nothing uses.
+
 **The guard is in both halves.** The builder refuses a source published after
 the cut and any cut after the instance mark (227); the loader refuses a manifest
 that names one.
@@ -338,7 +351,9 @@ the one-day-later release is a source published after the cut and is refused.
      - 1,708,978,241; 9d0f5a80...
      - 272,876,614,176; 0af081c0...
 
-Cut 205 is truth only (the end of 177->205) and needs no pair. The full md5
+Cut 205 is truth only (the end of 177->205): its photo is ``truth_only`` and pairs
+with Swiss-Prot 2021_03 alone, for the targets still reviewed at its end (ADR-D60).
+The full md5
 values are the ones each metalink publishes; the builder checks the whole
 digest, these are abbreviated here.
 

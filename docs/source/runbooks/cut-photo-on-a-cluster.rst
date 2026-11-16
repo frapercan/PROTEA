@@ -116,6 +116,14 @@ Steps
    ends with ``manifest exit 0`` (complete) or ``3`` (refused) and the sha256 of
    ``photo.json``.
 
+   A cut that only ends a window (205, the end of 177->205) is built **truth-only**
+   instead, in one job that also measures its superset and reads neither UniRef nor
+   TrEMBL::
+
+      sbatch [partition] cut_photo_truth.sh <python> <code-dir> <cut> <cut-date> \
+        <uniprot-release> <uniprot-date> <src> <measured> <photo> <revision> \
+        <goa-url> <goa-sha256> <swiss-prot-url>
+
 5. **Read a refusal.** A photo is refused when an evidence key is not in the
    channel table, an output is missing, or two passes disagree about a source
    (``photo.json``, ``refusals``). ``unknown_evidence.tsv`` lists each unplaced key
