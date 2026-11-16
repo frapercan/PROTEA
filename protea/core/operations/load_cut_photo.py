@@ -1,0 +1,554 @@
+"""Load the photo of a cut into the database (ADR-D59, decision 4, server half).
+
+The builder (``protea.core.cut_photo.build``) writes a photo's files where its
+sources are, with no database. This operation runs on the server, on those
+files copied to a directory it can read, and refuses before writing anything
+unless all of the following hold:
+
+- ``photo.json`` hashes to the sha256 the payload names, its status is
+  ``complete``, and every output it lists still hashes to what it recorded;
+- the cut is not after the mark, the GOA release it names was published on the
+  cut's date, and every other source (the paired Swiss-Prot release, the UniRef
+  release of the clusters and the ontology snapshot the payload names) was
+  published on or before the cut, with no UniProt or UniRef release at or after
+  the ceiling (``protea.core.source_guards``, the rules the builder asked);
+- the Swiss-Prot release the manifest names is the one already loaded: same
+  publication date, same entry count, same canonical table digest;
+- ``sequences.parquet`` IS that release: every md5 is the md5 of its sequence,
+  and its accessions and md5s hash to the release's canonical table.
+
+Then, in the job's transaction: the annotation set of release t (created, or the
+existing one when it was loaded against the same snapshot), an accession-only
+``protein`` row for each member not yet known, with ``first_admitted_release``
+written as a minimum as ADR-D49 does, the superset's sequences in ``sequence``
+(by md5; ``protein.sequence_id`` keeps today's sequence, decision 5 reads the
+paired one through ``swissprot_membership``), every member row whose GO term the
+snapshot knows, the ``cut_photo`` row with its ADR-D58 descriptors and its
+manifest stored by URI and sha256, the superset proteins' clusters and the
+neighbour profiles. A cut has one photo: the same manifest again is a no-op, and
+another manifest for a cut that has one is refused.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
+from collections import Counter
+from collections.abc import Iterator
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time
+from pathlib import Path
+from typing import Any
+
+import pyarrow.parquet as pq
+from pydantic import field_validator
+from sqlalchemy import or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session
+
+from protea.core.code_revision import code_revision
+from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.operations.load_goa_annotations import _IDENTITY_ELEMENTS
+from protea.core.source_guards import (
+    SourceGuardError,
+    refuse_a_cut_after_the_mark,
+    refuse_a_dated_source,
+    refuse_a_uniprot_release_at_or_after_the_ceiling,
+)
+from protea.core.swissprot_table import canonical_table
+from protea.core.utils import contract_payload, job_id_from_payload
+from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+from protea.infrastructure.orm.models.annotation.cut_photo import (
+    CutPhoto,
+    CutPhotoCluster,
+    CutPhotoClusterProfile,
+)
+from protea.infrastructure.orm.models.annotation.go_term import GOTerm
+from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
+from protea.infrastructure.orm.models.annotation.protein_go_annotation import (
+    ProteinGOAnnotation,
+)
+from protea.infrastructure.orm.models.protein.protein import Protein
+from protea.infrastructure.orm.models.protein.swissprot_release import SwissProtRelease
+from protea.infrastructure.orm.models.sequence.sequence import Sequence
+from protea.infrastructure.settings import load_settings
+from protea.infrastructure.storage import get_artifact_store
+
+#: Rows per INSERT. The widest table here has nine columns, so a batch stays well
+#: under the 65,535 bind parameters one statement may carry.
+_BATCH = 5000
+
+#: How many of the GO ids the snapshot does not know are named in the event.
+_LOST_IDS_SHOWN = 20
+
+
+class PhotoRefused(SourceGuardError):
+    """A photo the loader will not write, with the reason."""
+
+
+class LoadCutPhotoPayload(ProteaPayload, frozen=True):
+    """Where the photo's files are, what its manifest hashes to, and its GO graph.
+
+    Everything else (the cut, GOA, UniProt and UniRef) is read from the verified
+    manifest. The graph is named here because pairing a cut with a GO release is
+    a decision the builder does not take.
+    """
+
+    photo_dir: str
+    manifest_sha256: str
+    ontology_snapshot_id: str
+
+    @field_validator("ontology_snapshot_id", mode="before")
+    @classmethod
+    def snapshot_must_be_a_uuid(cls, v: Any) -> str:
+        return str(uuid.UUID(str(v)))
+
+    @field_validator("manifest_sha256", mode="before")
+    @classmethod
+    def digest_must_be_hex64(cls, v: Any) -> str:
+        text = str(v).strip().lower()
+        if len(text) != 64 or any(c not in "0123456789abcdef" for c in text):
+            raise ValueError("manifest_sha256 must be 64 hexadecimal characters")
+        return text
+
+
+@dataclass(frozen=True)
+class VerifiedPhoto:
+    """A photo every check passed: where it is, its manifest and the job loading it."""
+
+    photo_dir: Path
+    manifest_sha256: str
+    manifest: dict[str, Any]
+    job_id: uuid.UUID | None
+
+
+@dataclass(frozen=True)
+class PhotoSources:
+    """The facts the checks established, carried to the writer."""
+
+    cut: int
+    cut_date: date
+    snapshot: OntologySnapshot
+    release: SwissProtRelease
+    uniref_release: str
+    uniref_published_at: date
+    uniref_clusters_sha256: str
+
+
+def file_sha256(path: Path) -> str:
+    """The sha256 of a file, read in blocks."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 22), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def read_manifest(photo_dir: Path, expected_sha256: str) -> dict[str, Any]:
+    """The verified manifest, or :class:`PhotoRefused` naming what failed."""
+    path = photo_dir / "photo.json"
+    if not path.is_file():
+        raise PhotoRefused(f"{path} does not exist")
+    got = file_sha256(path)
+    if got != expected_sha256:
+        raise PhotoRefused(f"photo.json hashes to {got}, not to {expected_sha256}")
+    manifest: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    if manifest.get("status") != "complete":
+        raise PhotoRefused(
+            f"the photo's status is {manifest.get('status')!r}: {manifest.get('refusals')}"
+        )
+    for name, recorded in manifest["outputs"].items():
+        output = photo_dir / name
+        if not output.is_file():
+            raise PhotoRefused(f"{name} is listed by the manifest and missing")
+        actual = file_sha256(output)
+        if actual != recorded:
+            raise PhotoRefused(f"{name} hashes to {actual}, the manifest recorded {recorded}")
+    return manifest
+
+
+def graph_date(obo_version: str) -> date:
+    """The date of a snapshot's graph, from ``releases/YYYY-MM-DD`` or a bare date."""
+    try:
+        return date.fromisoformat(obo_version.rsplit("/", 1)[-1])
+    except ValueError as exc:
+        raise PhotoRefused(f"the GO graph {obo_version!r} carries no date to check") from exc
+
+
+def check_sources(
+    manifest: dict[str, Any], snapshot: OntologySnapshot, release: SwissProtRelease
+) -> PhotoSources:
+    """Refuse what the guard refuses, and a Swiss-Prot release that is not the loaded one."""
+    cut, cut_date = int(manifest["cut_release"]), date.fromisoformat(manifest["cut_date"])
+    sources = manifest["sources"]
+    refuse_a_cut_after_the_mark(cut)
+    goa, uniprot, uniref = sources["goa"], sources["uniprot"], sources["uniref"]
+    if int(goa["release"]) != cut or date.fromisoformat(goa["published"]) != cut_date:
+        raise PhotoRefused(
+            f"the cut is GOA {cut} of {cut_date}, the manifest's GOA is {goa['release']} "
+            f"of {goa['published']}"
+        )
+    uniref_published = date.fromisoformat(uniref["published"])
+    for name, published in (
+        (f"UniProt {release.release}", release.published_at),
+        (f"UniRef {uniref['release']}", uniref_published),
+        (f"GO {snapshot.obo_version}", graph_date(snapshot.obo_version)),
+    ):
+        refuse_a_dated_source(source=name, published=published, cut_release=cut, cut_date=cut_date)
+    refuse_a_uniprot_release_at_or_after_the_ceiling(release.release)
+    refuse_a_uniprot_release_at_or_after_the_ceiling(str(uniref["release"]), source="UniRef")
+    declared = (uniprot["release"], uniprot["published"], uniprot["superset_sha256"])
+    loaded = (release.release, release.published_at.isoformat(), release.content_sha256)
+    if declared != loaded:
+        raise PhotoRefused(f"the manifest's Swiss-Prot is {declared}, the loaded one is {loaded}")
+    built_from = int(manifest["counts"]["members"]["superset"])
+    if built_from != release.accession_count:
+        raise PhotoRefused(
+            f"the photo was built from {built_from} Swiss-Prot entries, release "
+            f"{release.release} holds {release.accession_count}"
+        )
+    return PhotoSources(
+        cut=cut,
+        cut_date=cut_date,
+        snapshot=snapshot,
+        release=release,
+        uniref_release=str(uniref["release"]),
+        uniref_published_at=uniref_published,
+        uniref_clusters_sha256=str(uniref["sha256"]),
+    )
+
+
+def _batches(path: Path, columns: list[str]) -> Iterator[list[dict[str, Any]]]:
+    for batch in pq.ParquetFile(path).iter_batches(batch_size=_BATCH, columns=columns):
+        yield batch.to_pylist()
+
+
+def verify_sequences(path: Path, expected_sha256: str) -> int:
+    """Refuse sequences that are not the paired release, byte for byte; return how many.
+
+    Every md5 must be the md5 of its sequence, and the accessions with their md5s
+    must hash to the canonical table the loaded release was verified against.
+    """
+    table_of: dict[str, str] = {}
+    for batch in _batches(path, ["accession", "md5", "sequence"]):
+        for row in batch:
+            # md5 is UniProt's sequence fingerprint, fixed by the data, not a security choice.
+            got = hashlib.md5(row["sequence"].encode(), usedforsecurity=False).hexdigest()
+            if got != row["md5"]:
+                raise PhotoRefused(f"{row['accession']}: its sequence hashes to {got}")
+            if row["accession"] in table_of:
+                raise PhotoRefused(f"{row['accession']} appears twice in {path.name}")
+            table_of[row["accession"]] = row["md5"]
+    digest = hashlib.sha256(canonical_table(table_of)).hexdigest()
+    if digest != expected_sha256:
+        raise PhotoRefused(
+            f"{path.name} hashes to {digest} as a table, the release to {expected_sha256}"
+        )
+    return len(table_of)
+
+
+def photo_descriptors(
+    sources: PhotoSources, counts: dict[str, Any], goref_list_read_on: str
+) -> dict[str, str]:
+    """ADR-D58's descriptors of the photo and of its profile set, derived, never typed."""
+    members, rows = counts["members"], counts["rows"]
+    cut, uniref = sources.cut, sources.uniref_release
+    graph = sources.snapshot.obo_version.rsplit("/", 1)[-1]
+    return {
+        "short_name": f"photo-{cut}",
+        "description": (
+            f"Photo of cut {cut} (GOA {cut}, {sources.cut_date.isoformat()}): "
+            f"{members['members']} members, {members['superset']} of them in Swiss-Prot "
+            f"{sources.release.release}, {members['by_truth']} admitted by a truth code and "
+            f"{members['by_curated_only']} by curated inference alone, with "
+            f"{rows.get('member_rows', 0)} GOA rows on the GO graph of {graph}, channels "
+            f"checked against the GO_REF list read on {goref_list_read_on}."
+        ),
+        "profile_short_name": f"profiles-{cut}-uniref-{uniref.replace('_', '-').lower()}",
+        "profile_description": (
+            f"UniRef50 {uniref} profiles of cut {cut}: for each of the "
+            f"{rows.get('clusters_with_superset', 0)} clusters holding a Swiss-Prot "
+            f"{sources.release.release} protein, how many of its "
+            f"{rows.get('neighbours_outside_base', 0)} members outside the base carry each GO "
+            f"term in each recipe channel ({rows.get('profile_keys', 0)} cluster, term, "
+            f"channel and negation keys)."
+        ),
+    }
+
+
+def _annotation_set(
+    session: Session, sources: PhotoSources, manifest_sha256: str
+) -> tuple[AnnotationSet, bool]:
+    """The annotation set of release t: the existing one on the same graph, or a new one."""
+    existing = (
+        session.execute(
+            select(AnnotationSet).where(
+                AnnotationSet.source == "goa", AnnotationSet.source_version == str(sources.cut)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(existing) > 1:
+        raise PhotoRefused(f"GOA {sources.cut} has {len(existing)} annotation sets; which is t?")
+    if existing:
+        found = existing[0]
+        if found.ontology_snapshot_id != sources.snapshot.id:
+            raise PhotoRefused(
+                f"the annotation set of GOA {sources.cut} is on snapshot "
+                f"{found.ontology_snapshot_id}, the photo on {sources.snapshot.id}"
+            )
+        return found, False
+    created = AnnotationSet(
+        source="goa",
+        source_version=str(sources.cut),
+        ontology_snapshot_id=sources.snapshot.id,
+        source_published_at=datetime.combine(sources.cut_date, time(0), tzinfo=UTC),
+        meta={"created_by": "load_cut_photo", "cut_photo_manifest_sha256": manifest_sha256},
+    )
+    session.add(created)
+    session.flush()
+    return created, True
+
+
+def _store_proteins(session: Session, path: Path, cut: int) -> int:
+    added = 0
+    for batch in _batches(path, ["accession"]):
+        values = []
+        for row in batch:
+            canonical, is_canonical, isoform = Protein.parse_isoform(row["accession"])
+            values.append(
+                {
+                    "accession": row["accession"],
+                    "canonical_accession": canonical,
+                    "is_canonical": is_canonical,
+                    "isoform_index": isoform,
+                    "first_admitted_release": cut,
+                }
+            )
+        inserted = session.execute(
+            pg_insert(Protein.__table__).values(values).on_conflict_do_nothing()
+        )
+        added += inserted.rowcount or 0
+        session.execute(
+            update(Protein)
+            .where(Protein.accession.in_([v["accession"] for v in values]))
+            .where(
+                or_(Protein.first_admitted_release.is_(None), Protein.first_admitted_release > cut)
+            )
+            .values(first_admitted_release=cut)
+            .execution_options(synchronize_session=False)
+        )
+    return added
+
+
+def _store_sequences(session: Session, path: Path) -> tuple[int, int]:
+    added = offered = 0
+    for batch in _batches(path, ["md5", "sequence"]):
+        unique = {row["md5"]: row["sequence"] for row in batch}
+        offered += len(unique)
+        values = [{"sequence_hash": md5, "sequence": seq} for md5, seq in unique.items()]
+        inserted = session.execute(
+            pg_insert(Sequence.__table__)
+            .values(values)
+            .on_conflict_do_nothing(index_elements=["sequence_hash"])
+        )
+        added += inserted.rowcount or 0
+    return added, offered - added
+
+
+def _store_annotations(
+    session: Session, path: Path, annotation_set_id: uuid.UUID, snapshot_id: uuid.UUID
+) -> dict[str, Any]:
+    terms = dict(
+        session.execute(
+            select(GOTerm.go_id, GOTerm.id).where(GOTerm.ontology_snapshot_id == snapshot_id)
+        ).all()
+    )
+    offered = inserted = 0
+    lost: Counter[str] = Counter()
+    columns = ["accession", "go_id", "qualifier", "code", "reference", "with_from", "date"]
+    for batch in _batches(path, [*columns, "assigned_by"]):
+        values = []
+        for row in batch:
+            term = terms.get(row["go_id"])
+            if term is None:
+                lost[row["go_id"]] += 1
+                continue
+            values.append(
+                {
+                    "annotation_set_id": annotation_set_id,
+                    "protein_accession": row["accession"],
+                    "go_term_id": term,
+                    "qualifier": row["qualifier"] or None,
+                    "evidence_code": row["code"] or None,
+                    "assigned_by": row["assigned_by"] or None,
+                    "db_reference": row["reference"] or None,
+                    "with_from": row["with_from"] or None,
+                    "annotation_date": row["date"] or None,
+                }
+            )
+        if values:
+            offered += len(values)
+            result = session.execute(
+                pg_insert(ProteinGOAnnotation.__table__)
+                .values(values)
+                .on_conflict_do_nothing(index_elements=_IDENTITY_ELEMENTS)
+            )
+            inserted += result.rowcount or 0
+    return {
+        "rows_inserted": inserted,
+        "rows_already_present": offered - inserted,
+        "rows_with_unknown_term": sum(lost.values()),
+        "unknown_terms": len(lost),
+        "unknown_terms_most_frequent": dict(lost.most_common(_LOST_IDS_SHOWN)),
+    }
+
+
+def _store_clusters_and_profiles(
+    session: Session, photo_dir: Path, photo_id: uuid.UUID
+) -> tuple[int, int]:
+    clusters = profiles = 0
+    for batch in _batches(photo_dir / "clusters.parquet", ["accession", "cluster"]):
+        session.execute(
+            pg_insert(CutPhotoCluster.__table__).values(
+                [{**r, "photo_id": photo_id} for r in batch]
+            )
+        )
+        clusters += len(batch)
+    columns = ["cluster", "go_id", "channel", "negated", "members"]
+    for batch in _batches(photo_dir / "profiles.parquet", columns):
+        session.execute(
+            pg_insert(CutPhotoClusterProfile.__table__).values(
+                [{**r, "photo_id": photo_id} for r in batch]
+            )
+        )
+        profiles += len(batch)
+    return clusters, profiles
+
+
+def manifest_key_for(cut: int, manifest_sha256: str) -> str:
+    """Where a photo's manifest lives in the artifact store: the one spelling."""
+    return f"cut-photos/{cut}/{manifest_sha256}/photo.json"
+
+
+def store_manifest(photo_dir: Path, cut: int, manifest_sha256: str) -> str:
+    """Put the verified manifest in the artifact store and return its URI."""
+    project_root = Path(__file__).resolve().parents[3]
+    store = get_artifact_store(load_settings(project_root))
+    return str(store.put(manifest_key_for(cut, manifest_sha256), photo_dir / "photo.json"))
+
+
+class LoadCutPhotoOperation:
+    """Write one verified photo of a cut (ADR-D59)."""
+
+    name = "load_cut_photo"
+    description = (
+        "Verify the photo of a cut built away from the server (its manifest, its "
+        "sources against the guard and the loaded Swiss-Prot release, its sequences "
+        "byte for byte) and write its rows, clusters and neighbour profiles (ADR-D59)."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        digest = str(payload.get("manifest_sha256", ""))[:12]
+        return f"photo {digest} <- {payload.get('photo_dir', '')}" if digest else ""
+
+    def execute(
+        self, session: Session, payload: dict[str, Any], *, emit: EmitFn
+    ) -> OperationResult:
+        p = LoadCutPhotoPayload.model_validate(contract_payload(payload))
+        photo_dir = Path(p.photo_dir)
+        manifest = read_manifest(photo_dir, p.manifest_sha256)
+        cut = int(manifest["cut_release"])
+        existing = session.execute(
+            select(CutPhoto).where(CutPhoto.cut_release == cut)
+        ).scalar_one_or_none()
+        if existing is not None:
+            if existing.manifest_sha256 == p.manifest_sha256:
+                emit(
+                    "load_cut_photo.already_loaded",
+                    f"cut {cut} already has this photo",
+                    {"cut": cut, "photo_id": str(existing.id)},
+                    "info",
+                )
+                return OperationResult(result={"photo_id": str(existing.id), "skipped": True})
+            raise PhotoRefused(
+                f"cut {cut} already has a photo, with manifest {existing.manifest_sha256}"
+            )
+        snapshot = session.get(OntologySnapshot, uuid.UUID(p.ontology_snapshot_id))
+        if snapshot is None:
+            raise PhotoRefused(f"ontology snapshot {p.ontology_snapshot_id} is not loaded")
+        release_name = str(manifest["sources"]["uniprot"]["release"])
+        release = session.execute(
+            select(SwissProtRelease).where(SwissProtRelease.release == release_name)
+        ).scalar_one_or_none()
+        if release is None:
+            raise PhotoRefused(f"Swiss-Prot {release_name} is not loaded")
+        sources = check_sources(manifest, snapshot, release)
+        sequences = verify_sequences(photo_dir / "sequences.parquet", release.content_sha256)
+        emit(
+            "load_cut_photo.verified",
+            f"photo of cut {cut} verified against Swiss-Prot {release.release}",
+            {"cut": cut, "sequences": sequences},
+            "info",
+        )
+        verified = VerifiedPhoto(
+            photo_dir=photo_dir,
+            manifest_sha256=p.manifest_sha256,
+            manifest=manifest,
+            job_id=job_id_from_payload(payload),
+        )
+        return self._write(session, verified, sources, emit)
+
+    def _write(
+        self, session: Session, verified: VerifiedPhoto, sources: PhotoSources, emit: EmitFn
+    ) -> OperationResult:
+        photo_dir, manifest = verified.photo_dir, verified.manifest
+        annotation_set, created = _annotation_set(session, sources, verified.manifest_sha256)
+        proteins = _store_proteins(session, photo_dir / "members.parquet", sources.cut)
+        sequences_added, sequences_reused = _store_sequences(
+            session, photo_dir / "sequences.parquet"
+        )
+        rows = _store_annotations(
+            session, photo_dir / "rows.parquet", annotation_set.id, sources.snapshot.id
+        )
+        emit("load_cut_photo.rows", None, rows, "info")
+        channel_table = manifest["channel_table"]
+        photo = CutPhoto(
+            cut_release=sources.cut,
+            cut_date=sources.cut_date,
+            annotation_set_id=annotation_set.id,
+            ontology_snapshot_id=sources.snapshot.id,
+            swissprot_release_id=sources.release.id,
+            uniref_release=sources.uniref_release,
+            uniref_published_at=sources.uniref_published_at,
+            uniref_clusters_sha256=sources.uniref_clusters_sha256,
+            goref_list_read_on=date.fromisoformat(channel_table["goref_list_read_on"]),
+            channel_table_sha256=channel_table["sha256"],
+            manifest=manifest,
+            manifest_uri=store_manifest(photo_dir, sources.cut, verified.manifest_sha256),
+            manifest_sha256=verified.manifest_sha256,
+            code_revision=code_revision() or None,
+            builder_revision=str(manifest.get("revision") or "") or None,
+            job_id=verified.job_id,
+            **photo_descriptors(sources, manifest["counts"], channel_table["goref_list_read_on"]),
+        )
+        session.add(photo)
+        session.flush()
+        clusters, profiles = _store_clusters_and_profiles(session, photo_dir, photo.id)
+        result = {
+            "photo_id": str(photo.id),
+            "short_name": photo.short_name,
+            "annotation_set_id": str(annotation_set.id),
+            "annotation_set_created": created,
+            "proteins_added": proteins,
+            "sequences_added": sequences_added,
+            "sequences_already_present": sequences_reused,
+            **{k: v for k, v in rows.items() if k != "unknown_terms_most_frequent"},
+            "clusters": clusters,
+            "profile_rows": profiles,
+            "manifest_uri": photo.manifest_uri,
+        }
+        emit("load_cut_photo.done", f"{photo.short_name} loaded", result, "info")
+        return OperationResult(result=result)
