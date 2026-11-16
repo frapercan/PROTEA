@@ -80,6 +80,10 @@ SEQUENCES = {"P1": "MKV", "P2": "MAAGG"}
 MD5 = {a: hashlib.md5(s.encode(), usedforsecurity=False).hexdigest() for a, s in SEQUENCES.items()}
 SUPERSET_SHA256 = hashlib.sha256(canonical_table(MD5)).hexdigest()
 GRAPH = "releases/2022-07-01"
+GOA_FILE = {
+    "url": "https://ftp.ebi.ac.uk/pub/databases/GO/goa/old/UNIPROT/goa_uniprot_all.gaf.211.gz",
+    "sha256": "b" * 64,
+}
 #: The GO ids the test snapshot knows; GO:0000099 is the one it does not.
 KNOWN_TERMS = [f"GO:000000{i}" for i in range(1, 8)]
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -137,12 +141,13 @@ def build_photo(tmp_path: Path, gaf: list[str] = GAF) -> tuple[Path, str]:
     )
     out = tmp_path / "photo"
     goa = PassSource(release=CUT, published=CUT_DATE, cut_release=CUT, cut_date=CUT_DATE, out=out)
-    members_pass(gaf, superset_table=measured / "superset.tsv", source=goa)
+    members_pass(gaf, superset_table=measured / "superset.tsv", source=goa, source_file=GOA_FILE)
     rows_pass(
         gaf,
         members_path=out / "members.parquet",
         neighbours_path=measured / "neighbours.parquet",
         source=goa,
+        source_file=GOA_FILE,
     )
     fasta = "".join(f">sp|{a}|{a}_HUMAN\n{s}\n" for a, s in SEQUENCES.items()).encode()
     blob = gzip.compress(fasta)
@@ -158,7 +163,7 @@ def build_photo(tmp_path: Path, gaf: list[str] = GAF) -> tuple[Path, str]:
         cut_date=CUT_DATE,
         out=out,
     )
-    sequences_pass(archive, uniprot)
+    sequences_pass(archive, uniprot, source_url="https://ftp.uniprot.org/sprot-only2022_03.tar.gz")
     manifest_pass(out, revision="builder-revision")
     return out, file_sha256(out / "photo.json")
 

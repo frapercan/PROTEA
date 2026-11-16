@@ -30,6 +30,14 @@ CUT_DATE = date(2022, 9, 16)
 UNIPROT = {"release": "2022_03", "published": "2022-08-03"}
 SEQUENCES = {"P1": "MKV", "P2": "MAAGG"}
 MD5 = {a: hashlib.md5(s.encode(), usedforsecurity=False).hexdigest() for a, s in SEQUENCES.items()}
+GOA_FILE = {
+    "url": "https://ftp.ebi.ac.uk/pub/databases/GO/goa/old/UNIPROT/goa_uniprot_all.gaf.211.gz",
+    "sha256": "b" * 64,
+}
+SPROT_URL = (
+    "https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/release-2022_03/"
+    "knowledgebase/uniprot_sprot-only2022_03.tar.gz"
+)
 
 
 def _source(out: Path, release: str | int = CUT, published: date = CUT_DATE) -> PassSource:
@@ -92,12 +100,21 @@ def _setup(tmp_path: Path) -> tuple[Path, Path]:
     return superset, neighbours
 
 
-def _build(tmp_path: Path, gaf: list[str]) -> Path:
+def _build(
+    tmp_path: Path,
+    gaf: list[str],
+    goa_file: dict[str, str] = GOA_FILE,
+    rows_file: dict[str, str] | None = None,
+) -> Path:
     superset, neighbours = _setup(tmp_path)
     out = tmp_path / "photo"
-    members_pass(gaf, superset_table=superset, source=_source(out))
+    members_pass(gaf, superset_table=superset, source=_source(out), source_file=goa_file)
     rows_pass(
-        gaf, members_path=out / "members.parquet", neighbours_path=neighbours, source=_source(out)
+        gaf,
+        members_path=out / "members.parquet",
+        neighbours_path=neighbours,
+        source=_source(out),
+        source_file=goa_file if rows_file is None else rows_file,
     )
     return out
 
@@ -241,14 +258,21 @@ class TestRowsAndProfiles:
 
 
 class TestTheManifest:
-    def _sequences(self, tmp_path: Path, out: Path, extra: bytes = b"") -> None:
+    def _archive(self, tmp_path: Path, extra: bytes = b"") -> Path:
         fasta = gzip.compress(b">sp|P1|ONE_HUMAN\nMKV\n>sp|P2|TWO_HUMAN\nMAA\nGG\n" + extra)
         archive = tmp_path / "sprot.tar.gz"
         with tarfile.open(archive, "w:gz") as tar:
             info = tarfile.TarInfo("uniprot_sprot.fasta.gz")
             info.size = len(fasta)
             tar.addfile(info, io.BytesIO(fasta))
-        sequences_pass(archive, _source(out, release="2022_03", published=date(2022, 8, 3)))
+        return archive
+
+    def _sequences(self, tmp_path: Path, out: Path, extra: bytes = b"") -> None:
+        sequences_pass(
+            self._archive(tmp_path, extra),
+            _source(out, release="2022_03", published=date(2022, 8, 3)),
+            source_url=SPROT_URL,
+        )
 
     def test_an_unknown_reference_refuses_the_photo(self, tmp_path: Path) -> None:
         out = _build(tmp_path, [*GAF, UNKNOWN_ROW])
@@ -283,13 +307,46 @@ class TestTheManifest:
         out = _build(tmp_path, GAF)
         self._sequences(tmp_path, out)
         sources = manifest_pass(out, revision="abc")["sources"]
-        assert sources["goa"] == {"release": CUT, "published": CUT_DATE.isoformat()}
+        assert sources["goa"] == {
+            "release": CUT,
+            "published": CUT_DATE.isoformat(),
+            **GOA_FILE,
+        }
         assert sources["uniprot"]["release"] == "2022_03"
+        assert sources["uniprot"]["url"] == SPROT_URL
         assert (
             sources["uniprot"]["superset_sha256"]
             == hashlib.sha256(canonical_table(MD5)).hexdigest()
         )
         assert sources["uniref"]["release"] == "2022_03"
+
+    def test_an_undeclared_goa_file_refuses_the_photo(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, GAF, goa_file={})
+        self._sequences(tmp_path, out)
+        manifest = manifest_pass(out, revision="abc")
+        assert manifest["status"] == "refused"
+        disagreements = manifest["refusals"]["source_disagreements"]
+        assert any("not declared with its URL and sha256" in d for d in disagreements)
+
+    def test_two_goa_passes_over_different_files_refuse_the_photo(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, GAF, rows_file={**GOA_FILE, "sha256": "c" * 64})
+        self._sequences(tmp_path, out)
+        manifest = manifest_pass(out, revision="abc")
+        assert manifest["status"] == "refused"
+        assert any(d.startswith("GOA file:") for d in manifest["refusals"]["source_disagreements"])
+
+    def test_an_archive_that_is_not_the_checked_one_is_refused(self, tmp_path: Path) -> None:
+        source = _source(tmp_path / "photo", release="2022_03", published=date(2022, 8, 3))
+        with pytest.raises(PhotoGuardError, match="hashes to"):
+            sequences_pass(
+                self._archive(tmp_path), source, source_url=SPROT_URL, expected_sha256="0" * 64
+            )
+
+    def test_the_cli_will_not_read_goa_without_its_file_declared(self, tmp_path: Path) -> None:
+        argv = ["members", "--superset-table", str(tmp_path / "superset.tsv"), "--release", "211"]
+        argv += ["--published", "2022-09-16", "--cut-release", "211", "--cut-date", "2022-09-16"]
+        with pytest.raises(SystemExit):
+            main([*argv, "--out", str(tmp_path / "photo")])
 
     def test_sequences_of_another_release_refuse_the_photo(self, tmp_path: Path) -> None:
         out = _build(tmp_path, GAF)
