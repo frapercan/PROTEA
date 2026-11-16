@@ -12,7 +12,7 @@ ADRs come in two layers:
   PROTEA. They explain trade-offs of concrete code paths (KNN
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
-- **Strategic decisions** (``D1``-``D60``): plan-level decisions. The
+- **Strategic decisions** (``D1``-``D61``): plan-level decisions. The
   ``D1``-``D31`` block was taken in the master plan revision 3 (2026-05-05)
   and drives the structure of the project, the deployment story, and the
   thesis writing cadence. Later records (``D34`` onward) were added as the
@@ -339,6 +339,10 @@ later revision) or *Superseded* (a named later decision replaces it).
      - :doc:`One universe, three method families, four contracts <D60-one-universe-three-method-families>`
      - Proposed
      - T-PLATFORM
+   * - D61
+     - :doc:`The homology table of a cut: its superset searched against its photo with a pinned MMseqs2 <D61-the-homology-table-of-a-cut>`
+     - Proposed
+     - T-PLATFORM
 
 .. toctree::
    :maxdepth: 1
@@ -411,3 +415,4 @@ later revision) or *Superseded* (a named later decision replaces it).
    D58-every-entity-carries-a-short-and-a-long-descriptor
    D59-the-corpus-at-a-cut-is-a-photo
    D60-one-universe-three-method-families
+   D61-the-homology-table-of-a-cut
