@@ -523,9 +523,12 @@ def _store_proteins(session: Session, path: Path, cut: int, emit: EmitFn) -> int
                 }
             )
         inserted = session.execute(
-            pg_insert(Protein.__table__).values(values).on_conflict_do_nothing()
+            pg_insert(Protein.__table__)
+            .values(values)
+            .on_conflict_do_nothing()
+            .returning(Protein.__table__.c.accession)
         )
-        added += inserted.rowcount or 0
+        added += len(inserted.all())
         session.execute(
             update(Protein)
             .where(Protein.accession.in_([v["accession"] for v in values]))
@@ -551,8 +554,9 @@ def _store_sequences(session: Session, path: Path, emit: EmitFn) -> tuple[int, i
             pg_insert(Sequence.__table__)
             .values(values)
             .on_conflict_do_nothing(index_elements=["sequence_hash"])
+            .returning(Sequence.__table__.c.sequence_hash)
         )
-        added += inserted.rowcount or 0
+        added += len(inserted.all())
         progress.batch(len(batch))
     progress.done(sequences_added=added, sequences_already_present=offered - added)
     return added, offered - added
@@ -600,8 +604,9 @@ def _store_annotations(
                 pg_insert(ProteinGOAnnotation.__table__)
                 .values(values)
                 .on_conflict_do_nothing(index_elements=_IDENTITY_ELEMENTS)
+                .returning(ProteinGOAnnotation.__table__.c.id)
             )
-            inserted += result.rowcount or 0
+            inserted += len(result.all())
         progress.batch(len(batch))
     progress.done(rows_inserted=inserted)
     return {

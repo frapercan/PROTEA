@@ -487,6 +487,12 @@ def test_a_photo_loads_and_says_what_it_wrote(pg_session: Session, tmp_path: Pat
     ).all()
     assert sorted(rows) == [("P1", "GO:0000001"), ("P1", "GO:0000002"), ("Q9", "GO:0000003")]
     assert result["rows_with_unknown_term"] == 1 and result["unknown_terms"] == 1
+    # What was written, counted from the rows each INSERT returned: a multi-row
+    # INSERT ... ON CONFLICT reports a rowcount of -1 through psycopg, which the
+    # first dev load at 211 summed into -133 proteins and -114 sequences.
+    assert (result["proteins_added"], result["sequences_added"]) == (3, 2)
+    assert (result["rows_inserted"], result["rows_already_present"]) == (3, 0)
+    assert result["sequences_already_present"] == 0
 
     clusters = dict(
         pg_session.execute(select(CutPhotoCluster.accession, CutPhotoCluster.cluster)).all()
@@ -594,11 +600,12 @@ def test_the_earliest_admission_is_kept(pg_session: Session, tmp_path: Path) -> 
     )
     pg_session.commit()
     out, sha = build_photo(tmp_path)
-    _load(pg_session, out, sha)
+    result = _load(pg_session, out, sha)
     admitted = dict(
         pg_session.execute(select(Protein.accession, Protein.first_admitted_release)).all()
     )
     assert admitted == {"P1": 205, "P2": CUT, "Q9": CUT}
+    assert result["proteins_added"] == 1
 
 
 @pytest.mark.integration
