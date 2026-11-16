@@ -5,17 +5,21 @@ import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from pydantic import field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core._artifact_identity import sha256_of_file
+from protea.core._window_population import (
+    TARGET_POPULATIONS,
+    restricted_to,
+    superset_at_start,
+)
 from protea.core.code_revision import (
     code_revision,
     is_identifying,
     revisions_conflict,
 )
-from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.evaluation import (
     GAIN_RULES,
     NOT_CODE_RULES,
@@ -26,17 +30,18 @@ from protea.core.evaluation import (
     groundtruth_key_for,
     serialize_evaluation_data_to_parquet,
 )
+from protea.core.operations._generate_evaluation_set_payload import (
+    GenerateEvaluationSetPayload,
+)
 from protea.core.operations._holdout_guard import Claim, refuse_if_the_set_reads_the_holdout
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.core.window_declarations import (
     SAME_SNAPSHOT_RULES,
-    WINDOW_ROLES,
     TruthRules,
     WindowGraphs,
     closing_graphs_by_default,
     closure_applied,
     named_truth_rules,
-    payload_with_named_rules,
     refuse_unless_named_rules_apply,
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -47,7 +52,7 @@ from protea.infrastructure.storage import get_artifact_store
 
 
 class _Identity(NamedTuple):
-    """The seven fields that decide which delta a row holds.
+    """The fields that decide which delta a row holds.
 
     Kept as one object because they travel together: every lookup, every
     refusal and every insert needs all of them, and a signature that took
@@ -58,7 +63,8 @@ class _Identity(NamedTuple):
     delta: under ``projected`` a t1 term with no node at t0 becomes its first
     live ancestors instead of being dropped. Two profiles over the same five
     ids are two different truths and coexist, which is why the database key
-    holds it too.
+    holds it too. ``target_population`` is the last: the three rules before it
+    decide which terms are truth, it decides which proteins are targets.
     """
 
     old_set_id: uuid.UUID
@@ -69,130 +75,7 @@ class _Identity(NamedTuple):
     truth_profile: str = TRUTH_PROFILES[0]
     toi_rule: str = GAIN_RULES[0]
     not_codes: str = NOT_CODE_RULES[0]
-
-
-class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
-    old_annotation_set_id: str
-    new_annotation_set_id: str
-    pivot_ontology_snapshot_id: str | None = None
-    # Cross-OBO override: propagate each side's annotations under an EXPLICIT
-    # ontology snapshot (its native DAG), decoupled from the annotation set's
-    # stored ``ontology_snapshot_id``. The reconcile already resolves go_id text
-    # and loads the native DAG by snapshot id, so these select the propagation
-    # graph WITHOUT touching annotation rows. ``None`` falls back to each set's
-    # stored snapshot (existing behaviour). Use when an annotation set is bound
-    # to a wrong/too-new OBO (the phantom-gap: t0 propagated under a churned
-    # graph that marks pre-window experimental annotations as new knowledge).
-    old_native_snapshot_id: str | None = None
-    new_native_snapshot_id: str | None = None
-    # ADR D40: bind the produced set to a rolling-origin protocol window.
-    # ``"valid"`` (selection + threshold tuning) | ``"test"`` (report once)
-    # | ``None`` (unbound). Defaults to None so existing callers are
-    # unaffected. ADR-D60 adds the roles of a frame: ``"training"``,
-    # ``"validation"`` and ``"test_spent"``.
-    window_role: str | None = None
-    # A named set of truth rules (``protea.core.window_declarations``), e.g.
-    # ``"october-headline-frame"``. It fills ``truth_profile``, ``toi_rule``
-    # and ``not_codes`` and refuses a payload that asks for others, and it
-    # fixes the closure: under the October rules both sides close under the
-    # graph the t0 corpus was loaded under, so both natives (and with them the
-    # pivot) default to that graph. A build that would apply anything else is
-    # refused before the delta is computed. None leaves every default as it was.
-    truth_rule_set: str | None = None
-    # How the t1 side's truth is built. ``as_closed`` (the default) is what
-    # every stored window did: a term the pivot cannot name is dropped by the
-    # closure. ``projected`` replaces it by its first live ancestors at t0,
-    # same aspect, before the binding rule. It is part of the window's
-    # identity, so asking for the other profile over the same two corpora
-    # builds a second window rather than colliding with the first.
-    truth_profile: str = TRUTH_PROFILES[0]
-    # Which terms the GAIN may contain. ``pivot_terms`` (the default) is what
-    # every stored window did; ``live_in_both_ends`` restricts it before the
-    # delta is classified, which is what the lab's frame does. Independent of
-    # the profile: the projection decides what a gain CAN be, this decides
-    # which gains COUNT.
-    toi_rule: str = GAIN_RULES[0]
-    # Which NOT annotations may take truth away. ``any`` (the default) is what
-    # every stored window did: every NOT row whatever its evidence.
-    # ``experimental`` restricts the negation to the thirteen experimental
-    # codes, which is the lab's frame. Independent of the other two: they
-    # decide what a gain can be and which gains count, this decides which
-    # denials bind.
-    not_codes: str = NOT_CODE_RULES[0]
-
-    @field_validator("truth_profile")
-    @classmethod
-    def _known_profile(cls, value: str) -> str:
-        if value not in TRUTH_PROFILES:
-            raise ValueError(f"unknown truth_profile {value!r}; expected one of {TRUTH_PROFILES}")
-        return value
-
-    @field_validator("toi_rule")
-    @classmethod
-    def _known_gain_rule(cls, value: str) -> str:
-        if value not in GAIN_RULES:
-            raise ValueError(f"unknown toi_rule {value!r}; expected one of {GAIN_RULES}")
-        return value
-
-    @field_validator("not_codes")
-    @classmethod
-    def _known_not_rule(cls, value: str) -> str:
-        if value not in NOT_CODE_RULES:
-            raise ValueError(f"unknown not_codes {value!r}; expected one of {NOT_CODE_RULES}")
-        return value
-    #: The sentence a caller must repeat verbatim to build a window that reads
-    #: past the board's mark. Deliberately not a boolean: the holdout is meant
-    #: to be scored once, at the end, and a flag that can be set by reflex is a
-    #: flag that gets set by reflex. See split_registry.HOLDOUT_WAIVER.
-    holdout_waiver: str | None = None
-    #: The other sentence: a band BEYOND the spent holdout, which begins at or
-    #: after it and therefore cannot be a second look at it. Separate from the
-    #: waiver because the waiver says of itself that it is the single pass, and
-    #: that pass is written on a row already. Honoured only when the window's
-    #: start is at or after the band's end; a straddle is refused by name. See
-    #: split_registry.PROSPECTIVE_DECLARATION.
-    prospective_declaration: str | None = None
-
-    @field_validator("old_annotation_set_id", "new_annotation_set_id", mode="before")
-    @classmethod
-    def must_be_non_empty(cls, v: str) -> str:
-        if not isinstance(v, str) or not v.strip():
-            raise ValueError("must be a non-empty string")
-        return v.strip()
-
-    @field_validator(
-        "pivot_ontology_snapshot_id",
-        "old_native_snapshot_id",
-        "new_native_snapshot_id",
-        mode="before",
-    )
-    @classmethod
-    def snapshot_opt_non_empty(cls, v):
-        if v is None:
-            return None
-        if not isinstance(v, str) or not v.strip():
-            raise ValueError("must be a non-empty string or null")
-        return v.strip()
-
-    @field_validator("window_role", mode="before")
-    @classmethod
-    def window_role_in_vocab(cls, v):
-        if v is None:
-            return None
-        if not isinstance(v, str) or v not in WINDOW_ROLES:
-            raise ValueError(f"must be one of {WINDOW_ROLES}, or null")
-        return v
-
-    @model_validator(mode="before")
-    @classmethod
-    def _fill_from_named_rule_set(cls, data: Any) -> Any:
-        """Fill the three rule fields from ``truth_rule_set`` before they validate.
-
-        Before and not after, because after validation a field left out and a
-        field sent with its default look the same, and only the first may be
-        filled from the set.
-        """
-        return payload_with_named_rules(data) if isinstance(data, dict) else data
+    target_population: str = TARGET_POPULATIONS[0]
 
 
 def _reuse_verdict(served: str | None) -> tuple[str, str]:
@@ -335,6 +218,7 @@ def _identity_fields(row_id: uuid.UUID, ident: _Identity) -> dict[str, str]:
         "pivot_snapshot_id": str(ident.pivot_id),
         "old_native_snapshot_id": str(ident.old_native),
         "new_native_snapshot_id": str(ident.new_native),
+        "target_population": ident.target_population,
     }
 
 
@@ -422,6 +306,7 @@ class GenerateEvaluationSetOperation:
             p.truth_profile,
             p.toi_rule,
             p.not_codes,
+            p.target_population,
         )
         # Before the reuse lookup, so a served row is compared with these.
         applied = _declared_rules(p.truth_rule_set, mode, ident, (old_set, new_set), emit)
@@ -431,6 +316,7 @@ class GenerateEvaluationSetOperation:
             return short
 
         data, stats = self._compute_delta(session, ident, mode, emit)
+        data, stats = self._restrict_targets(session, ident, (data, stats), emit)
         self._refuse_empty_delta(session, ident, stats)
 
         eval_set = self._new_row(ident, ask, stats, job_id_from_payload(payload))
@@ -460,6 +346,7 @@ class GenerateEvaluationSetOperation:
             truth_profile=ident.truth_profile,
             toi_rule=ident.toi_rule,
             not_codes=ident.not_codes,
+            target_population=ident.target_population,
             stats=stats,
             window_role=ask.window_role,
             truth_rules=ask.rules.as_json(),
@@ -567,6 +454,34 @@ class GenerateEvaluationSetOperation:
         return data, stats
 
     @staticmethod
+    def _restrict_targets(
+        session: Session, ident: _Identity, built: tuple[Any, dict[str, Any]], emit: EmitFn
+    ) -> tuple[Any, dict[str, Any]]:
+        """The delta kept to the window's target population, with stats that say so.
+
+        ``every_protein`` changes nothing but the stats, which name the rule
+        either way. ``superset_at_t0`` keeps the superset of the photo of the
+        window's start in every bucket and counts, by bucket, the proteins it
+        left out; the counts of the six buckets are taken again after it.
+        """
+        data, stats = built
+        stats = {**stats, "target_population": ident.target_population}
+        if ident.target_population == "every_protein":
+            return data, stats
+        population = superset_at_start(session, ident.old_set_id)
+        kept, outside = restricted_to(data, population.accessions)
+        stats = {
+            **stats,
+            **kept.stats(),
+            **outside,
+            "population_cut": population.cut_release,
+            "population_photo_id": str(population.photo_id),
+            "population_proteins": len(population.accessions),
+        }
+        emit("generate_evaluation_set.targets_restricted", None, stats, "info")
+        return kept, stats
+
+    @staticmethod
     def _refuse_empty_delta(session: Session, ident: _Identity, stats: dict[str, Any]) -> None:
         """Refuse a delta of nothing taken over corpora of something.
 
@@ -621,6 +536,7 @@ class GenerateEvaluationSetOperation:
                 truth_profile=ident.truth_profile,
                 toi_rule=ident.toi_rule,
                 not_codes=ident.not_codes,
+                target_population=ident.target_population,
             )
             .one_or_none()
         )
@@ -793,3 +709,9 @@ class GenerateEvaluationSetOperation:
             "info",
         )
         return uri
+
+
+__all__ = [
+    "GenerateEvaluationSetOperation",
+    "GenerateEvaluationSetPayload",
+]

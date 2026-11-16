@@ -20,8 +20,8 @@ from protea.services._annotations_evaluation_helpers import (
     evaluation_set_to_dict,
 )
 
-#: The eight columns ``uq_evaluation_set_identity`` names. Written here rather
-#: than imported so that adding a ninth to the constraint fails this test
+#: The nine columns ``uq_evaluation_set_identity`` names. Written here rather
+#: than imported so that adding a tenth to the constraint fails this test
 #: instead of silently leaving the new one out of the API.
 IDENTITY = (
     "old_annotation_set_id",
@@ -32,6 +32,7 @@ IDENTITY = (
     "truth_profile",
     "toi_rule",
     "not_codes",
+    "target_population",
 )
 
 
@@ -67,6 +68,7 @@ def _window(**over: object) -> EvaluationSet:
         "truth_profile": "projected",
         "toi_rule": "live_in_both_ends",
         "not_codes": "experimental",
+        "target_population": "superset_at_t0",
         "job_id": None,
         "created_at": datetime(2026, 10, 28, 0, 58, tzinfo=UTC),
         "stats": {"delta_proteins": 40531},
@@ -97,7 +99,7 @@ def test_an_unsealed_result_says_so_rather_than_omitting_the_field():
     assert body["frame_digest"] is None
 
 
-def test_a_window_carries_all_eight_columns_of_its_identity():
+def test_a_window_carries_all_nine_columns_of_its_identity():
     """Serving two of eight meant two windows could not be told apart from the
     API. ``7aa37929`` and ``ea0f4334`` are that case in the live record."""
     body = evaluation_set_to_dict(_window())
@@ -107,6 +109,7 @@ def test_a_window_carries_all_eight_columns_of_its_identity():
     assert body["truth_profile"] == "projected"
     assert body["toi_rule"] == "live_in_both_ends"
     assert body["not_codes"] == "experimental"
+    assert body["target_population"] == "superset_at_t0"
 
 
 def test_two_windows_that_differ_only_in_the_truth_profile_serialise_apart():
@@ -123,9 +126,7 @@ def test_two_windows_that_differ_only_in_the_truth_profile_serialise_apart():
     closed = evaluation_set_to_dict(_window(truth_profile="as_closed", **shared))
     projected = evaluation_set_to_dict(_window(truth_profile="projected", **shared))
 
-    assert {name: closed[name] for name in IDENTITY} != {
-        name: projected[name] for name in IDENTITY
-    }
+    assert {name: closed[name] for name in IDENTITY} != {name: projected[name] for name in IDENTITY}
 
 
 def test_an_absent_snapshot_serialises_as_null_and_not_as_the_string_none():

@@ -45,6 +45,12 @@ TRUTH_RULES_CHECK = (
 )
 
 
+#: The vocabulary of :data:`protea.core._window_population.TARGET_POPULATIONS`,
+#: spelled out so the model imports nothing from core; the migration that
+#: installs it carries the same text and a test compares the three.
+TARGET_POPULATION_CHECK = "target_population IN ('every_protein', 'superset_at_t0')"
+
+
 class EvaluationSet(Base):
     """Result of comparing two AnnotationSets to produce CAFA-style evaluation data.
 
@@ -113,6 +119,7 @@ class EvaluationSet(Base):
             "truth_profile",
             "toi_rule",
             "not_codes",
+            "target_population",
             name="uq_evaluation_set_identity",
         ),
         # ADR D40: keep the protocol-window vocabulary closed at the DB
@@ -146,6 +153,10 @@ class EvaluationSet(Base):
         CheckConstraint(
             "not_codes IN ('any', 'experimental')",
             name="ck_evaluation_set_not_codes",
+        ),
+        CheckConstraint(
+            TARGET_POPULATION_CHECK,
+            name="ck_evaluation_set_target_population",
         ),
     )
 
@@ -281,6 +292,20 @@ class EvaluationSet(Base):
     #: of them LK, and nine projected entries: small, and exactly the
     #: difference between reproducing the lab's truth and missing it.
     not_codes: Mapped[str] = mapped_column(String(16), nullable=False, server_default="any")
+    #: Which proteins the window may score. ``every_protein`` is what every row
+    #: written before this column did: any protein that gained between the two
+    #: ends. ``superset_at_t0`` keeps the superset of the photo of the window's
+    #: start (ADR-D59), the Swiss-Prot list of the release paired with that
+    #: cut, fixed before the window opens as CAFA fixes its targets; the author
+    #: chose it for the four windows of the frame on 2026-11-16 (ADR-D60).
+    #:
+    #: In the identity because it changes the delta, like the three rules
+    #: above, and separate from them because it answers another question:
+    #: they decide which TERMS are truth, this decides which PROTEINS are
+    #: targets. The proteins it left out are counted by bucket in ``stats``.
+    target_population: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="every_protein"
+    )
     #: WHICH CODE BUILT THIS ROW, from :func:`protea.core.code_revision`.
     #:
     #: The three rule columns above say what the delta IS by declaration. This

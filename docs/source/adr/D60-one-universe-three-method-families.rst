@@ -220,10 +220,12 @@ Consequences
 - Laboratory numbers do not carry over. Each family reproduces its first path
   in the new universe before any of its numbers is reported.
 - The schema changes:
+
   - it grows the method tables, the frame roles and the photo tables;
   - predictions lose their embedding-configuration identity;
   - the reads that inner-join a prediction set to its embedding configuration
     become outer joins.
+
 - Compute leaves the database stage by stage, starting with the embeddings
   batch. A stage that cannot be made pure stays on a queue that only
   database-holding nodes consume.
@@ -253,6 +255,7 @@ Implementation order
 ~~~~~~~~~~~~~~~~~~~~
 
 0. **Rails, with no behaviour change:**
+
    - the integration branch, the attribution guard and the photo builder of
      ADR-D59;
    - this record and the high-confidence deletions;
@@ -260,6 +263,7 @@ Implementation order
      stack;
    - an environment check, the declaration path of the revision guard, a
      taxonomy that never downloads and the bootstrap tools.
+
 1. The operation descriptor.
 2. The universe from zero.
 3. The executor rules, in database mode.
@@ -282,6 +286,13 @@ Decisions taken by the author (2026-11-15)
 - **Truth rules of the four windows.** Those of the October headline window:
   experimental gains between t0 and t1, terms live at both ends, NOT rows only
   when experimental, closure under the graph of t0 on both sides.
+- **Targets of the four windows** (2026-11-16). The superset of the photo of
+  the window's start: the Swiss-Prot list of the release paired with that cut,
+  fixed before the window opens, as CAFA fixes its targets. A protein outside it
+  is not a target however much it gained, and the window counts those it left
+  out. The rule is the window's ``target_population`` (``superset_at_t0``; the
+  default ``every_protein`` is what every earlier window did), part of its
+  identity because it changes the delta.
 - **Sequences.** A photo carries the sequences of its paired release (ADR-D59,
   decision 5).
 - **Cuts.** Cut 160 takes the ontology its pairing rule gives (2016-10-29). Cut
