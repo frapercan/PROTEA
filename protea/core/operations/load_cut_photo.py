@@ -85,6 +85,42 @@ _BATCH = 5000
 #: How many of the GO ids the snapshot does not know are named in the event.
 _LOST_IDS_SHOWN = 20
 
+#: Batches between two progress events. A photo is millions of rows written in one
+#: transaction, and the stale-job reaper fails a running job that has emitted nothing
+#: for ``stall_seconds`` (30 minutes by default), so a long stage has to keep talking.
+_PROGRESS_EVERY = 100
+
+
+class _Progress:
+    """Count one stage's batches and rows, emitting every ``_PROGRESS_EVERY`` batches.
+
+    ``total`` (the stage's row count, read from the parquet footer) also moves the
+    job's own progress, through the ``_progress_*`` fields the worker reads.
+    """
+
+    def __init__(self, emit: EmitFn, stage: str, total: int | None = None) -> None:
+        self.emit, self.stage, self.total = emit, stage, total
+        self.batches = self.rows = 0
+
+    def batch(self, rows: int) -> None:
+        self.batches += 1
+        self.rows += rows
+        if self.batches % _PROGRESS_EVERY == 0:
+            self._send("load_cut_photo.progress")
+
+    def done(self, **counts: Any) -> None:
+        self._send("load_cut_photo.stage_done", **counts)
+
+    def _send(self, event: str, **counts: Any) -> None:
+        fields: dict[str, Any] = {"stage": self.stage, "rows": self.rows, **counts}
+        if self.total is not None:
+            fields |= {"_progress_current": self.rows, "_progress_total": self.total}
+        self.emit(event, f"{self.stage}: {self.rows} rows", fields, "info")
+
+
+def _row_count(path: Path) -> int:
+    return int(pq.ParquetFile(path).metadata.num_rows)
+
 
 class PhotoRefused(SourceGuardError):
     """A photo the loader will not write, with the reason."""
@@ -361,8 +397,9 @@ def _annotation_set(
     return created, True
 
 
-def _store_proteins(session: Session, path: Path, cut: int) -> int:
+def _store_proteins(session: Session, path: Path, cut: int, emit: EmitFn) -> int:
     added = 0
+    progress = _Progress(emit, "proteins")
     for batch in _batches(path, ["accession"]):
         values = []
         for row in batch:
@@ -389,11 +426,14 @@ def _store_proteins(session: Session, path: Path, cut: int) -> int:
             .values(first_admitted_release=cut)
             .execution_options(synchronize_session=False)
         )
+        progress.batch(len(values))
+    progress.done(proteins_added=added)
     return added
 
 
-def _store_sequences(session: Session, path: Path) -> tuple[int, int]:
+def _store_sequences(session: Session, path: Path, emit: EmitFn) -> tuple[int, int]:
     added = offered = 0
+    progress = _Progress(emit, "sequences")
     for batch in _batches(path, ["md5", "sequence"]):
         unique = {row["md5"]: row["sequence"] for row in batch}
         offered += len(unique)
@@ -404,11 +444,17 @@ def _store_sequences(session: Session, path: Path) -> tuple[int, int]:
             .on_conflict_do_nothing(index_elements=["sequence_hash"])
         )
         added += inserted.rowcount or 0
+        progress.batch(len(batch))
+    progress.done(sequences_added=added, sequences_already_present=offered - added)
     return added, offered - added
 
 
 def _store_annotations(
-    session: Session, path: Path, annotation_set_id: uuid.UUID, snapshot_id: uuid.UUID
+    session: Session,
+    path: Path,
+    annotation_set_id: uuid.UUID,
+    snapshot_id: uuid.UUID,
+    emit: EmitFn,
 ) -> dict[str, Any]:
     terms = dict(
         session.execute(
@@ -417,6 +463,7 @@ def _store_annotations(
     )
     offered = inserted = 0
     lost: Counter[str] = Counter()
+    progress = _Progress(emit, "rows", total=_row_count(path))
     columns = ["accession", "go_id", "qualifier", "code", "reference", "with_from", "date"]
     for batch in _batches(path, [*columns, "assigned_by"]):
         values = []
@@ -446,6 +493,8 @@ def _store_annotations(
                 .on_conflict_do_nothing(index_elements=_IDENTITY_ELEMENTS)
             )
             inserted += result.rowcount or 0
+        progress.batch(len(batch))
+    progress.done(rows_inserted=inserted)
     return {
         "rows_inserted": inserted,
         "rows_already_present": offered - inserted,
@@ -456,9 +505,10 @@ def _store_annotations(
 
 
 def _store_clusters_and_profiles(
-    session: Session, photo_dir: Path, photo_id: uuid.UUID
+    session: Session, photo_dir: Path, photo_id: uuid.UUID, emit: EmitFn
 ) -> tuple[int, int]:
     clusters = profiles = 0
+    progress = _Progress(emit, "clusters")
     for batch in _batches(photo_dir / "clusters.parquet", ["accession", "cluster"]):
         session.execute(
             pg_insert(CutPhotoCluster.__table__).values(
@@ -466,6 +516,9 @@ def _store_clusters_and_profiles(
             )
         )
         clusters += len(batch)
+        progress.batch(len(batch))
+    progress.done()
+    progress = _Progress(emit, "profiles")
     columns = ["cluster", "go_id", "channel", "negated", "members"]
     for batch in _batches(photo_dir / "profiles.parquet", columns):
         session.execute(
@@ -474,6 +527,8 @@ def _store_clusters_and_profiles(
             )
         )
         profiles += len(batch)
+        progress.batch(len(batch))
+    progress.done()
     return clusters, profiles
 
 
@@ -558,12 +613,12 @@ class LoadCutPhotoOperation:
         annotation_set, created = _annotation_set(
             session, sources, verified.manifest_sha256, manifest["sources"]["goa"]
         )
-        proteins = _store_proteins(session, photo_dir / "members.parquet", sources.cut)
+        proteins = _store_proteins(session, photo_dir / "members.parquet", sources.cut, emit)
         sequences_added, sequences_reused = _store_sequences(
-            session, photo_dir / "sequences.parquet"
+            session, photo_dir / "sequences.parquet", emit
         )
         rows = _store_annotations(
-            session, photo_dir / "rows.parquet", annotation_set.id, sources.snapshot.id
+            session, photo_dir / "rows.parquet", annotation_set.id, sources.snapshot.id, emit
         )
         emit("load_cut_photo.rows", None, rows, "info")
         channel_table = manifest["channel_table"]
@@ -588,7 +643,7 @@ class LoadCutPhotoOperation:
         )
         session.add(photo)
         session.flush()
-        clusters, profiles = _store_clusters_and_profiles(session, photo_dir, photo.id)
+        clusters, profiles = _store_clusters_and_profiles(session, photo_dir, photo.id, emit)
         result = {
             "photo_id": str(photo.id),
             "short_name": photo.short_name,

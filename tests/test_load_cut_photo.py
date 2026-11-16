@@ -335,6 +335,32 @@ class TestTheDescriptors:
             )
 
 
+class TestProgress:
+    """A long stage keeps emitting, so the stale-job reaper never takes the load for dead."""
+
+    def test_a_stage_reports_every_few_batches_and_when_it_ends(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(loader, "_PROGRESS_EVERY", 2)
+        events: list[tuple[str, dict[str, Any]]] = []
+        progress = loader._Progress(lambda e, _m, f, _l: events.append((e, f)), "rows", total=25)
+        for _ in range(5):
+            progress.batch(5)
+        progress.done(rows_inserted=25)
+        assert [e for e, _ in events] == [
+            "load_cut_photo.progress",
+            "load_cut_photo.progress",
+            "load_cut_photo.stage_done",
+        ]
+        assert events[0][1] == {
+            "stage": "rows",
+            "rows": 10,
+            "_progress_current": 10,
+            "_progress_total": 25,
+        }
+        assert events[-1][1]["rows_inserted"] == 25
+
+
 class TestTheSchema:
     def test_the_model_and_the_migration_declare_the_same_checks(self) -> None:
         migration = _migration()
@@ -393,14 +419,19 @@ def pg_session(postgres_url: str, monkeypatch: pytest.MonkeyPatch):
     engine.dispose()
 
 
-def _load(session: Session, out: Path, sha: str) -> dict[str, Any]:
+def _load(session: Session, out: Path, sha: str, events: list[str] | None = None) -> dict[str, Any]:
     snapshot_id = session.execute(select(OntologySnapshot.id)).scalar_one()
     payload = {
         "photo_dir": str(out),
         "manifest_sha256": sha,
         "ontology_snapshot_id": str(snapshot_id),
     }
-    result = LoadCutPhotoOperation().execute(session, payload, emit=_noop_emit).result
+
+    def emit(event: str, _message: object, fields: dict[str, Any], _level: object) -> None:
+        if events is not None:
+            events.append(f"{event}:{fields.get('stage', '')}")
+
+    result = LoadCutPhotoOperation().execute(session, payload, emit=emit).result
     session.commit()
     return result
 
@@ -408,7 +439,10 @@ def _load(session: Session, out: Path, sha: str) -> dict[str, Any]:
 @pytest.mark.integration
 def test_a_photo_loads_and_says_what_it_wrote(pg_session: Session, tmp_path: Path) -> None:
     out, sha = build_photo(tmp_path)
-    result = _load(pg_session, out, sha)
+    events: list[str] = []
+    result = _load(pg_session, out, sha, events)
+    stages = [e.split(":", 1)[1] for e in events if e.startswith("load_cut_photo.stage_done")]
+    assert stages == ["proteins", "sequences", "rows", "clusters", "profiles"]
 
     photo = pg_session.execute(select(CutPhoto)).scalar_one()
     assert (photo.short_name, photo.profile_short_name) == (
