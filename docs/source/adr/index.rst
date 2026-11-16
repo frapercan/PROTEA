@@ -333,7 +333,7 @@ later revision) or *Superseded* (a named later decision replaces it).
      - T-PLATFORM
    * - D59
      - :doc:`The corpus at a cut is a photo: its Swiss-Prot, its live tiers and their UniRef50 profiles <D59-the-corpus-at-a-cut-is-a-photo>`
-     - Proposed
+     - Accepted
      - T-PLATFORM
    * - D60
      - :doc:`One universe, three method families, four contracts <D60-one-universe-three-method-families>`

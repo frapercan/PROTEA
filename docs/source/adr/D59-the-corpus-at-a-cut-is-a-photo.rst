@@ -1,7 +1,11 @@
 ADR-D59: The corpus at a cut is a photo: its Swiss-Prot, its live tiers and their UniRef50 profiles
 ======================================================================================================
 
-:Status: Proposed. The requirement is the author's, stated on 2026-11-15:
+:Status: Accepted (2026-11-16, the author: "Acepto!"), with that day's
+         amendments to decisions 3, 4 and 5, which say what the build reads
+         today and leave the taxon groups and the sequences of the members
+         outside Swiss-Prot open. The requirement is the author's, stated on
+         2026-11-15:
          "Dado un testsuperset, el corpus debe tener union revisadas,
          experimentales, y deberiamos enriquecer con vecinos sacados de uniref
          que aunque tengan evidencia no experimental puedan aportar algo a los
@@ -78,6 +82,7 @@ t.**
    * - ``truth``, ``curated_inference``
      - GOA t, unchanged from ADR-D49.
      - A measurement on this protein, or a curator's judgement about it.
+
 A protein can enter by several sets, and every set it entered by is recorded.
 ``ND``-only proteins stay out for the reason ADR-D49 gave.
 
@@ -167,9 +172,11 @@ produces them.
 already holds is copied.**
 
 - ``cut_photo``: one row per cut, with a short and a long descriptor (ADR-D58),
-  the GOA annotation set of t, the paired ``SwissProtRelease``, the UniRef,
-  taxonomy and GO_REF versions, the manifest URI and its sha256, the job and the
-  code revision.
+  the GOA annotation set of t, the ontology snapshot, the paired
+  ``SwissProtRelease``, the UniRef release and the digest of its cluster table,
+  the date the GO_REF list was read and the digest of the channel table, the
+  manifest URI and its sha256, the job and the revisions of the loader and the
+  builder. A taxonomy version joins them if taxon groups do (decision 4).
 - The superset is the paired release's ``SwissProtMembership``, accession and
   sequence md5 included; it is referenced, not copied.
 - The live tiers are read from the annotations, as ADR-D49 already does; no tier
@@ -177,8 +184,11 @@ already holds is copied.**
 - ``cut_photo_cluster``: one row per (photo, superset accession) with its
   UniRef50 cluster, so a target finds its profile.
 - ``cut_photo_cluster_profile``: one row per (photo, cluster, GO term, channel,
-  taxon group) with the number of members carrying it. It is the only part of
-  the photo no existing table can derive, and it holds counts, not proteins.
+  negation) with the number of the cluster's members that carry it and are not
+  members of the photo; a ``NOT`` row is counted apart, as evidence against. A
+  taxon group joins the key only if the author decides to split profiles by one
+  (decision 4). It is the only part of the photo no existing table can derive,
+  and it holds counts, not proteins.
   Under ADR-D58 its rows are COUNTED entities, named by their set and carrying no
   descriptors; the profile SET (one per photo, naming the GOA cut and the UniRef
   release) is a CITED entity: its short and long descriptors are derived by the
@@ -206,13 +216,21 @@ photo adds rows and never rewrites an earlier one.
   The Swiss-Prot pass writes the canonical table ``load_swissprot_release``
   verifies, with the same parser, now in ``protea.core.swissprot_table`` so a
   node without the database stack can import it.
-- ``build_cut_photo`` is a pure function of five downloaded, dated sources: GOA
-  t, the paired UniProt release, the paired UniRef release, the NCBI taxonomy
-  archive of t's month and the GO_REF list as of t. It opens no database
-  connection and writes parquet files plus a manifest that records each
-  source's URL, publication date and sha256. It runs on a compute node (Picasso,
-  in this campaign) from code shipped by the platform; only code is shipped, and
-  the public sources are downloaded on the node.
+- The build, ``protea.core.cut_photo.build``, is a pure function of three
+  downloaded, dated sources: GOA t, the paired UniProt release (its Swiss-Prot
+  archive) and the paired UniRef release, which reaches it through the
+  measurement's records. It opens no database connection and writes parquet
+  files plus a manifest that records each source's URL, publication date and
+  sha256. It runs on a compute node (Picasso, in this campaign) from code
+  shipped by the platform; only code is shipped, and the public sources are
+  downloaded on the cluster's login node, since its compute nodes have no
+  internet (runbook *Cut photo on a cluster*).
+- Two inputs the first draft named as sources are not downloaded. The GO_REF
+  list the channel table was checked against is the one read on the date the
+  photo records (``goref_list_read_on``), next to the digest of the table it was
+  classified with; a reference the table does not place refuses the photo,
+  whatever that date. The NCBI taxonomy archive of t's month becomes a fourth
+  source only if the author decides on taxon groups.
 - ``load_cut_photo`` runs on the server. It verifies the manifest, writes the
   rows of decision 3 and declares the photo.
 
@@ -226,6 +244,11 @@ superset member takes the sequence its paired Swiss-Prot release carries, which
 superset takes its sequence from the paired release's files. A photo never uses
 today's sequence (ADR-D49 decision 4 still governs the series loaded before this
 record), and the drift against today's is measurable from the md5s.
+
+Today the build reads the Swiss-Prot archive alone, so a member outside the
+superset is loaded as an accession-only row with no sequence from its pairing:
+94,190 of the 662,192 members at 211, in the diagnostic build. Reading them from
+the rest of the paired release is open (below).
 
 The five pairings
 ~~~~~~~~~~~~~~~~~
@@ -313,6 +336,12 @@ What this record does not settle
   analysis decision, a filter on the channel table.
 - **The evaluation option itself.** Restricting ``generate_evaluation_set`` to a
   photo's superset is a separate change.
+- **Sequences of the members outside Swiss-Prot.** Whether they come from the
+  unreviewed part of the paired release (its TrEMBL archive), and how, is the
+  author's decision (decision 5).
+- **Taxon groups in the profiles.** Whether a profile is split by a coarse taxon
+  group, and from which taxonomy, is the author's decision. Until then the
+  profile's key has no taxon group and the photo no taxonomy source.
 
 References
 ~~~~~~~~~~
@@ -324,5 +353,8 @@ References
   ``protea/core/swissprot_table.py`` (the parser and canonical table shared with
   ``load_swissprot_release``), ``tests/test_cut_photo_formats.py``,
   ``tests/test_cut_photo_measure.py``
+- ``protea/core/cut_photo/build.py`` and ``protea/core/cut_photo/channels.py``
+  (the build and the channel table), ``protea/core/operations/load_cut_photo.py``
+  (the loader), ``deploy/cluster/`` and the runbook *Cut photo on a cluster*
 - The laboratory card ``compresion/fichas/fotos-cinco-cortes.md`` (sf-jepa), which
   fixes the parity checks before any photo is built
