@@ -15,6 +15,8 @@ unless all of the following hold:
 - the GO graph is the one the GAF's header leads to: not newer than the GO
   release the GAF declares (``!go-version``), and no loaded graph sits between
   the two, since a cut takes the newest graph not after that release;
+- the photo was classified with the channel table this platform declares, since
+  the rows are stored without their channel and every reader computes it again;
 - the Swiss-Prot release the manifest names is the one already loaded: same
   publication date, same entry count, same canonical table digest;
 - ``sequences.parquet`` IS that release: every md5 is the md5 of its sequence,
@@ -52,6 +54,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.cut_photo.build import channel_table_digest
 from protea.core.operations.load_goa_annotations import _IDENTITY_ELEMENTS
 from protea.core.source_guards import (
     SourceGuardError,
@@ -251,6 +254,23 @@ def check_graph(
         )
 
 
+def check_channel_table(manifest: dict[str, Any]) -> None:
+    """Refuse a photo classified with another channel table than this platform's.
+
+    The member rows are stored without their channel (ADR-D59, decision 2: the
+    channel is a declared table, not a column), so every reader computes it again
+    from the platform's table. A photo whose counts and profiles came from another
+    table would disagree with every such reading; it is rebuilt, not loaded.
+    """
+    declared = channel_table_digest()
+    built_with = str(manifest.get("channel_table", {}).get("sha256", ""))
+    if built_with != declared:
+        raise PhotoRefused(
+            f"the photo was classified with channel table {built_with}, this platform "
+            f"declares {declared}: rebuild it with this revision's builder"
+        )
+
+
 def check_sources(
     manifest: dict[str, Any],
     snapshot: OntologySnapshot,
@@ -278,6 +298,7 @@ def check_sources(
     refuse_a_uniprot_release_at_or_after_the_ceiling(release.release)
     refuse_a_uniprot_release_at_or_after_the_ceiling(str(uniref["release"]), source="UniRef")
     check_graph(snapshot, str(goa.get("declared_go_release") or ""), loaded_graphs)
+    check_channel_table(manifest)
     declared = (uniprot["release"], uniprot["published"], uniprot["superset_sha256"])
     loaded = (release.release, release.published_at.isoformat(), release.content_sha256)
     if declared != loaded:

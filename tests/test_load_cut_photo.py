@@ -275,6 +275,12 @@ class TestTheSources:
         with pytest.raises(PhotoRefused, match="declares no GO release"):
             check_sources(manifest, _snapshot(), _release())
 
+    def test_a_photo_classified_with_another_channel_table_is_refused(self, tmp_path: Path) -> None:
+        manifest = self._manifest(tmp_path)
+        manifest["channel_table"]["sha256"] = "c" * 64
+        with pytest.raises(PhotoRefused, match="classified with channel table"):
+            check_sources(manifest, _snapshot(), _release())
+
     def test_another_swissprot_than_the_loaded_one_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(PhotoRefused, match="the loaded one is"):
             check_sources(self._manifest(tmp_path), _snapshot(), _release(content_sha256="f" * 64))
