@@ -42,9 +42,10 @@ Rules the scripts assume
 - **Compute nodes have no internet.** Every source is downloaded on the login node
   first and read from the shared scratch.
 - **Only code is shipped.** ``send_builder_code.sh`` sends the files listed in
-  ``deploy/cluster/builder_files.txt`` from a commit, never the working tree, and
+  ``deploy/cluster/builder_files.txt`` from a commit, never the working tree: the
+  two job scripts and the import closure of the two tools, and
   ``tests/test_cluster_builder_files.py`` fails when that list stops being the
-  import closure of the two tools. The closure needs the standard library and
+  closure. The closure needs the standard library and
   pyarrow only; the cluster provides a Python with pyarrow, passed as the first
   argument of each job.
 - **Arguments are positional.** Some clusters cancel jobs submitted with
@@ -74,7 +75,9 @@ Steps
       deploy/cluster/send_builder_code.sh <revision> <ssh-host> <code-root>
 
    The files land in ``<code-root>/<short revision>``: that directory is the
-   ``CODE_DIR`` of both jobs.
+   ``CODE_DIR`` of both jobs, and its ``deploy/cluster/`` holds the job scripts of
+   the same revision, which is where steps 3 and 4 submit them from.
+   ``fetch_source.sh`` runs on the login node and is copied there by hand.
 
 2. **Fetch the sources** (on the login node, each with ``nohup``)::
 
@@ -88,7 +91,7 @@ Steps
 
 3. **Measure** (one job)::
 
-      sbatch [partition] cut_photo_measure.sh <python> <code-dir> <cut> <cut-date> \
+      sbatch [partition] <code-dir>/deploy/cluster/cut_photo_measure.sh <python> <code-dir> <cut> <cut-date> \
         <uniprot-release> <uniprot-date> <src>/uniprot_sprot-only<release>.tar.gz \
         <src>/uniref<release>.tar.gz <uniref-md5> <measured> <revision>
 
@@ -97,7 +100,7 @@ Steps
 
 4. **Build** (one job)::
 
-      sbatch [partition] cut_photo_build.sh <python> <code-dir> <cut> <cut-date> \
+      sbatch [partition] <code-dir>/deploy/cluster/cut_photo_build.sh <python> <code-dir> <cut> <cut-date> \
         <uniprot-release> <uniprot-date> <src> <measured> <photo> <revision> \
         <goa-url> <goa-sha256> <swiss-prot-url>
 
