@@ -54,16 +54,14 @@ from sqlalchemy.orm import Session
 
 from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.cut_photo.build import channel_table_digest
-from protea.core.cut_photo.channels import (
-    GOREF_LIST_READ_ON,
-    channel_rows,
-    channel_table_descriptors,
+from protea.core.cut_photo.build import OUTPUTS, channel_table_digest
+from protea.core.operations._cut_photo_channel_table import (
+    check_stored_channel_table,
+    declare_channel_table,
 )
-from protea.core.cut_photo.formats import EMPTY_GO_REF_BY_WITH_FROM
+from protea.core.operations._cut_photo_errors import PhotoRefused
 from protea.core.operations.load_goa_annotations import _IDENTITY_ELEMENTS
 from protea.core.source_guards import (
-    SourceGuardError,
     refuse_a_cut_after_the_mark,
     refuse_a_dated_source,
     refuse_a_uniprot_release_at_or_after_the_ceiling,
@@ -75,11 +73,6 @@ from protea.infrastructure.orm.models.annotation.cut_photo import (
     CutPhoto,
     CutPhotoCluster,
     CutPhotoClusterProfile,
-)
-from protea.infrastructure.orm.models.annotation.evidence_channel import (
-    EvidenceChannel,
-    EvidenceChannelEmptyGoRef,
-    EvidenceChannelTable,
 )
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -134,10 +127,6 @@ class _Progress:
 
 def _row_count(path: Path) -> int:
     return int(pq.ParquetFile(path).metadata.num_rows)
-
-
-class PhotoRefused(SourceGuardError):
-    """A photo the loader will not write, with the reason."""
 
 
 class LoadCutPhotoPayload(ProteaPayload, frozen=True):
@@ -211,6 +200,12 @@ def read_manifest(photo_dir: Path, expected_sha256: str) -> dict[str, Any]:
         raise PhotoRefused(
             f"the photo's status is {manifest.get('status')!r}: {manifest.get('refusals')}"
         )
+    absent = [name for name in OUTPUTS if name not in manifest["outputs"]]
+    if absent:
+        raise PhotoRefused(
+            f"the manifest lists no {', '.join(absent)}: the photo was built by an older "
+            "builder; rebuild it with this revision's"
+        )
     for name, recorded in manifest["outputs"].items():
         output = photo_dir / name
         if not output.is_file():
@@ -280,83 +275,6 @@ def check_channel_table(manifest: dict[str, Any]) -> None:
             f"the photo was classified with channel table {built_with}, this platform "
             f"declares {declared}: rebuild it with this revision's builder"
         )
-
-
-def _declared_channel_keys() -> dict[tuple[str, str, bool], tuple[str, str | None]]:
-    return {
-        (row.evidence_code, row.reference_class, row.reviewed): (row.channel, row.reference_title)
-        for row in channel_rows()
-    }
-
-
-def check_stored_channel_table(session: Session) -> None:
-    """Refuse a stored channel table under this code's digest that is not this code's.
-
-    The table is written once, under the digest the photos record, and every reader
-    classifies with what is stored. A stored version that differs from the code's
-    (another day's GO_REF list, another key or channel, another reading of an empty
-    ``GO_REF``) would make the readers disagree with the photo, so the load stops
-    before writing anything. Nothing stored yet is not a refusal: the load writes it.
-    """
-    sha = channel_table_digest()
-    version = session.get(EvidenceChannelTable, sha)
-    if version is None:
-        return
-    stored = {
-        (r.evidence_code, r.reference_class, r.reviewed): (r.channel, r.reference_title)
-        for r in session.execute(
-            select(EvidenceChannel).where(EvidenceChannel.table_sha256 == sha)
-        ).scalars()
-    }
-    empty = dict(
-        session.execute(
-            select(
-                EvidenceChannelEmptyGoRef.with_from_prefix, EvidenceChannelEmptyGoRef.reads_as
-            ).where(EvidenceChannelEmptyGoRef.table_sha256 == sha)
-        )
-        .tuples()
-        .all()
-    )
-    named = []
-    if stored != _declared_channel_keys():
-        named.append("its keys or channels")
-    if empty != EMPTY_GO_REF_BY_WITH_FROM:
-        named.append("its reading of an empty GO_REF")
-    if version.goref_list_read_on.isoformat() != GOREF_LIST_READ_ON:
-        named.append("the day GO's list was read")
-    if named:
-        raise PhotoRefused(
-            f"channel table {sha} is stored with other contents than this code declares "
-            f"({', '.join(named)}): a table is written once and never changed"
-        )
-
-
-def declare_channel_table(session: Session, job_id: uuid.UUID | None) -> bool:
-    """Write the channel table this code declares unless it is stored; True if written.
-
-    ``check_stored_channel_table`` has already refused a stored version that differs,
-    so a stored one is this code's and is left as it is.
-    """
-    sha = channel_table_digest()
-    if session.get(EvidenceChannelTable, sha) is not None:
-        return False
-    session.add(
-        EvidenceChannelTable(
-            sha256=sha,
-            goref_list_read_on=date.fromisoformat(GOREF_LIST_READ_ON),
-            code_revision=code_revision() or None,
-            job_id=job_id,
-            **channel_table_descriptors(sha),
-        )
-    )
-    session.flush()
-    session.add_all(EvidenceChannel(table_sha256=sha, **row._asdict()) for row in channel_rows())
-    session.add_all(
-        EvidenceChannelEmptyGoRef(table_sha256=sha, with_from_prefix=prefix, reads_as=reads_as)
-        for prefix, reads_as in sorted(EMPTY_GO_REF_BY_WITH_FROM.items())
-    )
-    session.flush()
-    return True
 
 
 def check_sources(
@@ -435,6 +353,24 @@ def verify_sequences(path: Path, expected_sha256: str) -> int:
             f"{path.name} hashes to {digest} as a table, the release to {expected_sha256}"
         )
     return len(table_of)
+
+
+def verify_unreviewed_sequences(path: Path) -> int:
+    """Refuse a TrEMBL sequence its md5 does not describe; return how many there are.
+
+    The manifest pinned the file's sha256 and the archive's published md5, checked
+    on the stream the builder read; this checks each record, as ``verify_sequences``
+    does for Swiss-Prot.
+    """
+    count = 0
+    for batch in _batches(path, ["accession", "md5", "sequence"]):
+        for row in batch:
+            # md5 is UniProt's sequence fingerprint, fixed by the data, not a security choice.
+            got = hashlib.md5(row["sequence"].encode(), usedforsecurity=False).hexdigest()
+            if got != row["md5"]:
+                raise PhotoRefused(f"{row['accession']}: its sequence hashes to {got}")
+            count += 1
+    return count
 
 
 def photo_descriptors(
@@ -543,9 +479,11 @@ def _store_proteins(session: Session, path: Path, cut: int, emit: EmitFn) -> int
     return added
 
 
-def _store_sequences(session: Session, path: Path, emit: EmitFn) -> tuple[int, int]:
+def _store_sequences(
+    session: Session, path: Path, emit: EmitFn, stage: str = "sequences"
+) -> tuple[int, int]:
     added = offered = 0
-    progress = _Progress(emit, "sequences")
+    progress = _Progress(emit, stage)
     for batch in _batches(path, ["md5", "sequence"]):
         unique = {row["md5"]: row["sequence"] for row in batch}
         offered += len(unique)
@@ -560,6 +498,18 @@ def _store_sequences(session: Session, path: Path, emit: EmitFn) -> tuple[int, i
         progress.batch(len(batch))
     progress.done(sequences_added=added, sequences_already_present=offered - added)
     return added, offered - added
+
+
+def _store_both_sequence_files(session: Session, photo_dir: Path, emit: EmitFn) -> dict[str, int]:
+    """The Swiss-Prot and the TrEMBL sequences of the paired release, stored by md5."""
+    counts: dict[str, int] = {}
+    for name, stage in (
+        ("sequences", "sequences"),
+        ("unreviewed_sequences", "unreviewed_sequences"),
+    ):
+        added, reused = _store_sequences(session, photo_dir / f"{name}.parquet", emit, stage)
+        counts[f"{name}_added"], counts[f"{name}_already_present"] = added, reused
+    return counts
 
 
 def _store_annotations(
@@ -707,10 +657,11 @@ class LoadCutPhotoOperation:
         sources = check_sources(manifest, snapshot, release, loaded_graphs)
         check_stored_channel_table(session)
         sequences = verify_sequences(photo_dir / "sequences.parquet", release.content_sha256)
+        unreviewed = verify_unreviewed_sequences(photo_dir / "unreviewed_sequences.parquet")
         emit(
             "load_cut_photo.verified",
             f"photo of cut {cut} verified against Swiss-Prot {release.release}",
-            {"cut": cut, "sequences": sequences},
+            {"cut": cut, "sequences": sequences, "unreviewed_sequences": unreviewed},
             "info",
         )
         verified = VerifiedPhoto(
@@ -729,9 +680,7 @@ class LoadCutPhotoOperation:
             session, sources, verified.manifest_sha256, manifest["sources"]["goa"]
         )
         proteins = _store_proteins(session, photo_dir / "members.parquet", sources.cut, emit)
-        sequences_added, sequences_reused = _store_sequences(
-            session, photo_dir / "sequences.parquet", emit
-        )
+        sequences = _store_both_sequence_files(session, photo_dir, emit)
         rows = _store_annotations(
             session, photo_dir / "rows.parquet", annotation_set.id, sources.snapshot.id, emit
         )
@@ -766,8 +715,7 @@ class LoadCutPhotoOperation:
             "annotation_set_id": str(annotation_set.id),
             "annotation_set_created": created,
             "proteins_added": proteins,
-            "sequences_added": sequences_added,
-            "sequences_already_present": sequences_reused,
+            **sequences,
             **{k: v for k, v in rows.items() if k != "unknown_terms_most_frequent"},
             "clusters": clusters,
             "profile_rows": profiles,

@@ -6,6 +6,7 @@ import gzip
 import hashlib
 import io
 import json
+import sys
 import tarfile
 from datetime import date
 from pathlib import Path
@@ -15,12 +16,14 @@ import pyarrow.parquet as pq
 import pytest
 
 from protea.core.cut_photo.build import (
+    KNOWLEDGEBASE_STREAM_MD5,
     OUTPUTS,
     main,
     manifest_pass,
     members_pass,
     rows_pass,
     sequences_pass,
+    unreviewed_pass,
 )
 from protea.core.cut_photo.measure import PassSource, PhotoGuardError
 from protea.core.swissprot_table import canonical_table
@@ -38,6 +41,15 @@ SPROT_URL = (
     "https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/release-2022_03/"
     "knowledgebase/uniprot_sprot-only2022_03.tar.gz"
 )
+KB_FILE = {
+    "url": "https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/release-2022_03/"
+    "knowledgebase/knowledgebase2022_03.tar.gz",
+    "md5": "3d030df00f7ec4fd5b2d43ca74e3e4f7",
+}
+#: The paired release's TrEMBL, as the job streams it: Q9 is the one member outside
+#: the superset; X7 is a record nobody asked for.
+TREMBL = [b">tr|Q9|Q9_HUMAN Some protein OS=Homo sapiens\n", b"MQQ\n", b"LK\n"]
+TREMBL += [b">tr|X7|X7_HUMAN Other\n", b"MAA\n"]
 
 
 def _source(out: Path, release: str | int = CUT, published: date = CUT_DATE) -> PassSource:
@@ -320,12 +332,21 @@ class TestTheManifest:
             tar.addfile(info, io.BytesIO(fasta))
         return archive
 
-    def _sequences(self, tmp_path: Path, out: Path, extra: bytes = b"") -> None:
-        sequences_pass(
-            self._archive(tmp_path, extra),
-            _source(out, release="2022_03", published=date(2022, 8, 3)),
-            source_url=SPROT_URL,
+    def _sequences(
+        self,
+        tmp_path: Path,
+        out: Path,
+        extra: bytes = b"",
+        stream_md5: str | None = KB_FILE["md5"],
+        kb_file: dict[str, str] = KB_FILE,
+    ) -> None:
+        uniprot = _source(out, release="2022_03", published=date(2022, 8, 3))
+        sequences_pass(self._archive(tmp_path, extra), uniprot, source_url=SPROT_URL)
+        unreviewed_pass(
+            TREMBL, members_path=out / "members.parquet", source=uniprot, source_file=kb_file
         )
+        if stream_md5 is not None:
+            (out / KNOWLEDGEBASE_STREAM_MD5).write_text(stream_md5 + "\n")
 
     def test_an_unknown_reference_refuses_the_photo(self, tmp_path: Path) -> None:
         out = _build(tmp_path, [*GAF, UNKNOWN_ROW])
@@ -355,6 +376,10 @@ class TestTheManifest:
         assert json.loads((out / "photo.json").read_text())["status"] == "complete"
         sequences = pq.read_table(out / "sequences.parquet").to_pylist()
         assert [s["sequence"] for s in sequences] == ["MKV", "MAAGG"]
+        unreviewed = pq.read_table(out / "unreviewed_sequences.parquet").to_pylist()
+        md5 = hashlib.md5(b"MQQLK", usedforsecurity=False).hexdigest()
+        assert unreviewed == [{"accession": "Q9", "md5": md5, "sequence": "MQQLK"}]
+        assert manifest["counts"]["unreviewed"]["missing"] == 0
 
     def test_the_manifest_names_its_sources(self, tmp_path: Path) -> None:
         out = _build(tmp_path, GAF)
@@ -375,6 +400,7 @@ class TestTheManifest:
             == hashlib.sha256(canonical_table(MD5)).hexdigest()
         )
         assert sources["uniref"]["release"] == "2022_03"
+        assert sources["uniprot"]["knowledgebase"] == KB_FILE
 
     def test_a_gaf_that_declares_no_go_release_refuses_the_photo(self, tmp_path: Path) -> None:
         out = _build(tmp_path, [line for line in GAF if not line.startswith("!go-version")])
@@ -443,3 +469,69 @@ class TestTheManifest:
         out = _build(tmp_path, [*GAF, UNKNOWN_ROW])
         self._sequences(tmp_path, out)
         assert main(["manifest", "--out", str(out), "--revision", "abc"]) == 3
+
+    def _refusals(self, out: Path) -> list[str]:
+        manifest = manifest_pass(out, revision="abc")
+        assert manifest["status"] == "refused"
+        return list(manifest["refusals"]["source_disagreements"]) + list(
+            manifest["refusals"]["missing_outputs"]
+        )
+
+    def test_a_stream_that_is_not_the_published_archive_refuses(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, GAF)
+        self._sequences(tmp_path, out, stream_md5="0" * 32)
+        assert any("knowledgebase stream hashed to 000" in r for r in self._refusals(out))
+
+    def test_a_stream_with_no_md5_recorded_refuses(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, GAF)
+        self._sequences(tmp_path, out, stream_md5=None)
+        assert any("nothing recorded" in r for r in self._refusals(out))
+
+    def test_an_archive_of_another_release_refuses(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, GAF)
+        other = {**KB_FILE, "url": KB_FILE["url"].replace("2022_03", "2021_03")}
+        self._sequences(tmp_path, out, kb_file=other)
+        assert any("is not UniProt 2022_03" in r for r in self._refusals(out))
+
+    def test_a_photo_without_the_trembl_pass_is_refused(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, GAF)
+        uniprot = _source(out, release="2022_03", published=date(2022, 8, 3))
+        sequences_pass(self._archive(tmp_path), uniprot, source_url=SPROT_URL)
+        assert "unreviewed_sequences.parquet" in self._refusals(out)
+
+
+class TestTheTremblPass:
+    """The members outside the superset take their sequence from the paired TrEMBL."""
+
+    def _photo(self, tmp_path: Path) -> tuple[Path, PassSource]:
+        out = _build(tmp_path, GAF)
+        return out, _source(out, release="2022_03", published=date(2022, 8, 3))
+
+    def test_a_member_the_release_does_not_hold_is_counted_and_named(self, tmp_path: Path) -> None:
+        out, uniprot = self._photo(tmp_path)
+        record = unreviewed_pass(
+            TREMBL[3:], members_path=out / "members.parquet", source=uniprot, source_file=KB_FILE
+        )
+        assert (record["members_outside_superset"], record["sequences"]) == (1, 0)
+        assert (record["missing"], record["missing_examples"]) == (1, ["Q9"])
+
+    def test_a_record_read_twice_refuses(self, tmp_path: Path) -> None:
+        out, uniprot = self._photo(tmp_path)
+        with pytest.raises(PhotoGuardError, match="twice"):
+            unreviewed_pass(
+                TREMBL + TREMBL[:3],
+                members_path=out / "members.parquet",
+                source=uniprot,
+                source_file=KB_FILE,
+            )
+
+    def test_the_cli_reads_the_stream_as_bytes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        out, _ = self._photo(tmp_path)
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"".join(TREMBL))))
+        argv = ["unreviewed", "--members", str(out / "members.parquet"), "--release", "2022_03"]
+        argv += ["--published", "2022-08-03", "--cut-release", "211", "--cut-date", "2022-09-16"]
+        argv += ["--out", str(out), "--source-url", KB_FILE["url"], "--source-md5", KB_FILE["md5"]]
+        assert main(argv) == 0
+        assert json.loads((out / "unreviewed.json").read_text())["sequences"] == 1

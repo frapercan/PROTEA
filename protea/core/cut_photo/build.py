@@ -40,7 +40,7 @@ import re
 import sys
 import tarfile
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -98,7 +98,16 @@ OUTPUTS: tuple[str, ...] = (
     "clusters.parquet",
     "profiles.parquet",
     "sequences.parquet",
+    "unreviewed_sequences.parquet",
 )
+
+#: Written beside the photo by the job that streams the paired release's knowledgebase
+#: archive into the ``unreviewed`` pass: the md5 of that stream, which the manifest
+#: checks against the md5 UniProt publishes for the archive.
+KNOWLEDGEBASE_STREAM_MD5 = "knowledgebase-stream.md5"
+#: How many accessions the paired release does not hold a record names.
+MISSING_SHOWN = 20
+_MD5 = re.compile(r"[0-9a-f]{32}")
 
 
 def channel_table_digest() -> str:
@@ -487,6 +496,71 @@ def sequences_pass(
     return record
 
 
+def _wanted_lines(lines: Iterable[bytes], wanted: frozenset[bytes]) -> Iterator[bytes]:
+    """The lines of the FASTA records whose accession is wanted, the rest skipped unread.
+
+    TrEMBL holds hundreds of millions of records and a photo wants a few hundred
+    thousand, so a record is kept or dropped on its header's accession, still as
+    bytes; only the kept ones reach the one parser, ``iter_swissprot_records``.
+    """
+    keep = False
+    for raw in lines:
+        if raw.startswith(b">"):
+            parts = raw.split(b"|", 2)
+            keep = len(parts) == 3 and parts[1] in wanted
+        if keep:
+            yield raw
+
+
+def unreviewed_pass(
+    lines: Iterable[bytes],
+    *,
+    members_path: Path,
+    source: PassSource,
+    source_file: dict[str, str],
+) -> dict[str, Any]:
+    """Write ``unreviewed_sequences.parquet``: the paired release's sequence of every
+    member outside the superset (ADR-D59, decision 5).
+
+    ``lines`` is the paired release's TrEMBL FASTA, decompressed. The job streams it
+    out of the release's knowledgebase archive and takes the archive's md5 while it
+    reads (``KNOWLEDGEBASE_STREAM_MD5``); the record declares the archive by URL and by
+    the md5 UniProt publishes, and the manifest refuses the photo unless the two agree.
+    A member the release does not hold is counted and named, never guessed: a GOA
+    release can cite an accession created after its paired UniProt release.
+    """
+    source.check("UniProt")
+    members = _read_members(members_path)
+    wanted = {accession for accession, in_superset in members.items() if not in_superset}
+    found: dict[str, tuple[str, str]] = {}
+    keys = frozenset(accession.encode() for accession in wanted)
+    for accession, digest, sequence in iter_swissprot_records(_wanted_lines(lines, keys)):
+        if accession in found:
+            raise PhotoGuardError(f"{accession} appears twice in the TrEMBL stream")
+        found[accession] = (digest, sequence)
+    ordered = sorted(found)
+    table = pa.table(
+        {
+            "accession": ordered,
+            "md5": [found[a][0] for a in ordered],
+            "sequence": [found[a][1] for a in ordered],
+        }
+    )
+    source.out.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, source.out / "unreviewed_sequences.parquet", compression="zstd")
+    missing = sorted(wanted - found.keys())
+    record = {
+        **source.head("unreviewed"),
+        "members_outside_superset": len(wanted),
+        "sequences": len(found),
+        "missing": len(missing),
+        "missing_examples": missing[:MISSING_SHOWN],
+        "source_file": {"url": source_file.get("url", ""), "md5": source_file.get("md5", "")},
+    }
+    _write_record(source.out / "unreviewed.json", record)
+    return record
+
+
 def photo_sources(records: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """The photo's sources, named by what they are, from the pass records."""
     members, rows, sequences = records["members"], records["rows"], records["sequences"]
@@ -506,6 +580,7 @@ def photo_sources(records: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any
             "url": sequences.get("source_file", {}).get("url", ""),
             "archive_sha256": sequences["archive_sha256"],
             "superset_sha256": members["superset_source"]["sha256"],
+            "knowledgebase": dict(records.get("unreviewed", {}).get("source_file", {})),
         },
         "uniref": dict(rows["neighbours_source"]),
     }
@@ -552,6 +627,43 @@ def source_disagreements(records: dict[str, dict[str, Any]]) -> list[str]:
             f"the superset table hashes to {superset['sha256']}, the sequences' accessions "
             f"and md5s to {sequences['superset_sha256']}"
         )
+    found += _unreviewed_disagreements(records)
+    return found
+
+
+def _unreviewed_disagreements(records: dict[str, dict[str, Any]]) -> list[str]:
+    """The TrEMBL pass read the paired release's archive, checked, for the photo's members.
+
+    Its archive is declared by URL and published md5, the stream the job read hashed
+    to that md5, the release and the cut are the sequences pass's, and it looked for
+    exactly the members the members pass put outside the superset.
+    """
+    unreviewed = records.get("unreviewed")
+    if not unreviewed:
+        return []
+    members, sequences = records["members"], records["sequences"]
+    found: list[str] = []
+    declared = unreviewed.get("source_file", {})
+    if not declared.get("url") or not _MD5.fullmatch(str(declared.get("md5", ""))):
+        found.append(f"the knowledgebase archive is not declared with its URL and md5: {declared}")
+    elif str(unreviewed["release"]) not in declared["url"]:
+        found.append(
+            f"the knowledgebase archive {declared['url']} is not UniProt {unreviewed['release']}"
+        )
+    streamed = unreviewed.get("stream_md5", "")
+    if streamed != declared.get("md5"):
+        found.append(
+            f"the knowledgebase stream hashed to {streamed or 'nothing recorded'}, "
+            f"UniProt publishes {declared.get('md5')}"
+        )
+    for key in ("release", "published", "cut_release", "cut_date"):
+        if str(unreviewed[key]) != str(sequences[key]):
+            found.append(f"{key}: sequences pass {sequences[key]}, TrEMBL pass {unreviewed[key]}")
+    if int(unreviewed["members_outside_superset"]) != int(members["outside_superset"]):
+        found.append(
+            f"the TrEMBL pass looked for {unreviewed['members_outside_superset']} members, "
+            f"the members pass put {members['outside_superset']} outside the superset"
+        )
     return found
 
 
@@ -559,8 +671,12 @@ def manifest_pass(out: Path, revision: str) -> dict[str, Any]:
     """Write ``photo.json`` from the pass records and the sha256 of every output."""
     records = {
         name: json.loads((out / f"{name}.json").read_text())
-        for name in ("members", "rows", "sequences")
+        for name in ("members", "rows", "sequences", "unreviewed")
+        if (out / f"{name}.json").exists() or name != "unreviewed"
     }
+    stream = out / KNOWLEDGEBASE_STREAM_MD5
+    if "unreviewed" in records and stream.exists():
+        records["unreviewed"]["stream_md5"] = stream.read_text(encoding="utf-8").strip()
     missing = [name for name in OUTPUTS if not (out / name).exists()]
     unknown = int(records["rows"].get("unknown_evidence_rows", 0))
     sources = photo_sources(records)
@@ -619,6 +735,11 @@ def _parser() -> argparse.ArgumentParser:
     p_seq.add_argument("--archive", required=True, type=Path)
     source(p_seq)
     source_file(p_seq, sha256_required=False)
+    p_unr = sub.add_parser("unreviewed", help="decompressed TrEMBL FASTA on stdin")
+    p_unr.add_argument("--members", required=True, type=Path)
+    source(p_unr)
+    p_unr.add_argument("--source-url", required=True, help="the knowledgebase archive's URL")
+    p_unr.add_argument("--source-md5", required=True, help="the md5 UniProt publishes for it")
     p_man = sub.add_parser("manifest")
     p_man.add_argument("--out", required=True, type=Path)
     p_man.add_argument("--revision", required=True)
@@ -645,6 +766,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"status": record["status"], "refusals": record["refusals"]}))
         return 0 if record["status"] == "complete" else 3
     src = _pass_source(args)
+    if args.pass_name == "unreviewed":
+        record = unreviewed_pass(
+            sys.stdin.buffer,
+            members_path=args.members,
+            source=src,
+            source_file={"url": args.source_url, "md5": args.source_md5.strip().lower()},
+        )
+        print(json.dumps(record, sort_keys=True))
+        return 0
     declared = {"url": args.source_url, "sha256": args.source_sha256.strip().lower()}
     if args.pass_name == "members":
         record = members_pass(

@@ -36,11 +36,13 @@ from sqlalchemy.orm import Session
 
 import protea.infrastructure.orm.models  # noqa: F401  (registers every table)
 from protea.core.cut_photo.build import (
+    KNOWLEDGEBASE_STREAM_MD5,
     channel_table_digest,
     manifest_pass,
     members_pass,
     rows_pass,
     sequences_pass,
+    unreviewed_pass,
 )
 from protea.core.cut_photo.channels import PROFILE_CHANNELS, channel_rows
 from protea.core.cut_photo.measure import PassSource
@@ -92,6 +94,13 @@ GOA_FILE = {
     "url": "https://ftp.ebi.ac.uk/pub/databases/GO/goa/old/UNIPROT/goa_uniprot_all.gaf.211.gz",
     "sha256": "b" * 64,
 }
+KB_FILE = {
+    "url": "https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/release-2022_03/"
+    "knowledgebase/knowledgebase2022_03.tar.gz",
+    "md5": "3d030df00f7ec4fd5b2d43ca74e3e4f7",
+}
+#: Q9 is the member outside the superset; its sequence comes from the paired TrEMBL.
+TREMBL = [b">tr|Q9|Q9_HUMAN Some protein\n", b"MQQLK\n", b">tr|X7|X7_HUMAN\n", b"MAA\n"]
 #: The GO ids the test snapshot knows; GO:0000099 is the one it does not.
 KNOWN_TERMS = [f"GO:000000{i}" for i in range(1, 8)]
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -174,6 +183,10 @@ def build_photo(tmp_path: Path, gaf: list[str] = GAF) -> tuple[Path, str]:
         out=out,
     )
     sequences_pass(archive, uniprot, source_url="https://ftp.uniprot.org/sprot-only2022_03.tar.gz")
+    unreviewed_pass(
+        TREMBL, members_path=out / "members.parquet", source=uniprot, source_file=KB_FILE
+    )
+    (out / KNOWLEDGEBASE_STREAM_MD5).write_text(KB_FILE["md5"] + "\n")
     manifest_pass(out, revision="builder-revision")
     return out, file_sha256(out / "photo.json")
 
@@ -221,6 +234,20 @@ class TestTheManifest:
         out, sha = build_photo(tmp_path, [*GAF, unknown])
         with pytest.raises(PhotoRefused, match="status is 'refused'"):
             read_manifest(out, sha)
+
+    def test_a_manifest_without_the_trembl_output_is_refused(self, tmp_path: Path) -> None:
+        out, _ = build_photo(tmp_path)
+        manifest = json.loads((out / "photo.json").read_text())
+        del manifest["outputs"]["unreviewed_sequences.parquet"]
+        (out / "photo.json").write_text(json.dumps(manifest))
+        with pytest.raises(PhotoRefused, match="lists no unreviewed_sequences.parquet"):
+            read_manifest(out, file_sha256(out / "photo.json"))
+
+    def test_a_trembl_sequence_its_md5_does_not_describe_is_refused(self, tmp_path: Path) -> None:
+        path = tmp_path / "unreviewed_sequences.parquet"
+        pq.write_table(pa.table({"accession": ["Q9"], "md5": ["0" * 32], "sequence": ["MQ"]}), path)
+        with pytest.raises(PhotoRefused, match="Q9: its sequence hashes to"):
+            loader.verify_unreviewed_sequences(path)
 
     def test_an_output_changed_after_the_build_is_refused(self, tmp_path: Path) -> None:
         out, sha = build_photo(tmp_path)
@@ -461,7 +488,14 @@ def test_a_photo_loads_and_says_what_it_wrote(pg_session: Session, tmp_path: Pat
     events: list[str] = []
     result = _load(pg_session, out, sha, events)
     stages = [e.split(":", 1)[1] for e in events if e.startswith("load_cut_photo.stage_done")]
-    assert stages == ["proteins", "sequences", "rows", "clusters", "profiles"]
+    assert stages == [
+        "proteins",
+        "sequences",
+        "unreviewed_sequences",
+        "rows",
+        "clusters",
+        "profiles",
+    ]
 
     photo = pg_session.execute(select(CutPhoto)).scalar_one()
     assert (photo.short_name, photo.profile_short_name) == (
@@ -478,7 +512,9 @@ def test_a_photo_loads_and_says_what_it_wrote(pg_session: Session, tmp_path: Pat
     assert all(p.sequence_id is None for p in proteins.values())
 
     hashes = set(pg_session.execute(select(Sequence.sequence_hash)).scalars())
-    assert hashes == set(MD5.values())
+    trembl_md5 = hashlib.md5(b"MQQLK", usedforsecurity=False).hexdigest()
+    assert hashes == {*MD5.values(), trembl_md5}
+    assert result["unreviewed_sequences_added"] == 1
 
     rows = pg_session.execute(
         select(ProteinGOAnnotation.protein_accession, GOTerm.go_id).join(
