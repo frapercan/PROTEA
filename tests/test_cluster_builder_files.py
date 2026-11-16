@@ -67,9 +67,13 @@ def _listed() -> set[str]:
     return {line.strip() for line in lines if line.strip() and not line.startswith("#")}
 
 
-def test_the_shipped_list_is_the_import_closure() -> None:
+def test_the_shipped_list_is_the_import_closure_and_the_job_scripts() -> None:
     files, _ = _closure()
-    assert _listed() == files
+    listed = _listed()
+    assert {name for name in listed if name.startswith("protea/")} == files
+    scripts = {name for name in listed if not name.startswith("protea/")}
+    assert scripts == {"deploy/cluster/cut_photo_measure.sh", "deploy/cluster/cut_photo_build.sh"}
+    assert all((ROOT / name).is_file() for name in scripts)
 
 
 def test_the_closure_needs_only_the_standard_library_and_pyarrow() -> None:
@@ -134,4 +138,4 @@ def test_the_send_refuses_a_name_that_is_not_protea_code(tmp_path: Path) -> None
         check=False,
     )
     assert done.returncode == 2
-    assert "REFUSED: data/photo.parquet is not a Python file under protea/" in done.stdout
+    assert "REFUSED: data/photo.parquet is neither a Python file under protea/" in done.stdout
