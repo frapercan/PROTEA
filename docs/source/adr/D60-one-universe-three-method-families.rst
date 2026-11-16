@@ -70,7 +70,7 @@ Decision
 
 **1. One universe, read by id.** For each cut the universe holds:
 
-- the photo of ADR-D59 (the superset, the live tiers and the UniRef50 profiles),
+- the photo of ADR-D59 (the superset, the live tiers and the annotated UniRef50 neighbours),
   loaded as an annotation set that carries its publication date;
 - the label state at the cut (truth codes only) and the populations declared at
   the cut;

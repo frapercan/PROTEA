@@ -1,10 +1,11 @@
-ADR-D59: The corpus at a cut is a photo: its Swiss-Prot, its live tiers and their UniRef50 profiles
-======================================================================================================
+ADR-D59: The corpus at a cut is a photo: its Swiss-Prot, its live tiers and their annotated UniRef50 neighbours
+===============================================================================================================
 
 :Status: Accepted (2026-11-16, the author: "Acepto!"), with that day's
          amendments to decisions 3, 4 and 5, which say what the build reads
-         today and leave the taxon groups and the sequences of the members
-         outside Swiss-Prot open. The requirement is the author's, stated on
+         today, and the later one to decisions 1 and 3 (annotated UniRef50
+         neighbours enter as members with all their rows, the author's "A
+         oK!"). The taxon groups stay open. The requirement is the author's, stated on
          2026-11-15:
          "Dado un testsuperset, el corpus debe tener union revisadas,
          experimentales, y deberiamos enriquecer con vecinos sacados de uniref
@@ -86,27 +87,42 @@ t.**
 A protein can enter by several sets, and every set it entered by is recorded.
 ``ND``-only proteins stay out for the reason ADR-D49 gave.
 
-**UniRef50 neighbours never enter the corpus as proteins; they enter as a
-profile per cluster** (the author, 2026-11-15: "ok, perfil por grupo"). For every
-UniRef50 cluster of the paired UniRef release that holds a ``superset`` protein,
-the photo stores how many members carry each GO term in each RECIPE channel
-(``truth``, ``curated``, ``phylogenetic``, ``orthology_electronic``), optionally
-split by a coarse taxon group. Membership is UniRef's, with no hand-set parameter.
+**A fourth set: the annotated UniRef50 neighbours** (amended 2026-11-16). A
+member of a UniRef50 cluster of the paired UniRef release that holds a
+``superset`` protein, in no other set, enters the photo as a protein when it
+carries at least one GOA t row in a channel of ``NEIGHBOUR_CHANNELS``: PAINT's
+(``phylogenetic``) or electronic orthology (``orthology_electronic``). Truth or
+curated rows would have admitted it already, and a field translation on an
+unreviewed entry is a rule's output (``signature_electronic``), so these two are
+the recipe channels a protein outside the base can carry. Membership is UniRef's
+and the channel table's, with no hand-set parameter. A neighbour is never an
+evaluation target and gives no label (it has no ``truth`` row by construction);
+it is a donor, with its sequence and every GOA t row it has (decision 2), so a
+method can weigh it by its own similarity to the query. The author, 2026-11-16:
+"mi idea original era alimentar el corpus con homologos interesantes (con sus
+anotaciones, probablemente IEA)", and, asked whether to keep all of their rows or
+only the recipe channels', "A oK!" (all of them).
 
-A profile depends on TWO releases, and neither derives from the other: the GOA
-cut whose rows are counted and the UniRef release whose clustering defines the
-groups. Both are named on the profile set; naming only the cut would make two
-profiles built on different clusterings look like the same quantity, the defect
-ADR-D56 closed for windows. The clustering must be published on or before the
-cut, or the groups would know sequences that did not exist at the cut. At 211 it
-is: UniRef 2022_03 was released on 03-Aug-2022 (its release note) and GOA 211 on
-2022-09-16 (EBI index).
-Measured at 211 outside the platform, so as an order of magnitude only: the
-196,353 clusters holding a reviewed protein have 38,185,820 other members carrying
-370,4 million GOA 211 rows, 98% of them in mirror channels; 903,248 of those
-members carry a recipe-channel row (8,3 million rows: 663,165 by Ensembl
-orthology, 300,973 by PAINT). As proteins they would be 1,3 times the whole
-corpus; as a profile they are counts per (cluster, term, channel).
+This replaces the first draft's per-cluster profile (the author, 2026-11-15: "ok,
+perfil por grupo"), which counted exactly these neighbours by (cluster, term,
+channel) and lost which neighbour carried what.
+
+A neighbour depends on TWO releases, and neither derives from the other: the GOA
+cut whose rows admit it and the UniRef release whose clustering makes it a
+neighbour. Both are named on the photo; naming only the cut would make two photos
+built on different clusterings look like the same corpus, the defect ADR-D56
+closed for windows. The clustering must be published on or before the cut, or the
+groups would know sequences that did not exist at the cut. At 211 it is: UniRef
+2022_03 was released on 03-Aug-2022 (its release note) and GOA 211 on 2022-09-16
+(EBI index).
+
+Measured at 211 by the photo's own code (Picasso job 3681144, 2026-11-16): the
+196,353 clusters holding a reviewed protein have 38,151,372 members outside the
+base, 35,304,037 of them with a GOA 211 row; 868,800 are annotated neighbours,
+spread over 63,913 clusters that hold 144,177 reviewed proteins (median 7
+neighbours per cluster, 99th percentile 69, at most 204). They carry 13,604,622
+GOA 211 rows: 1,054,472 PAINT, 6,782,553 electronic orthology, 5,765,078
+signatures and 2,519 ``ND``. The photo of 211 has 1,530,992 members.
 
 **2. Every GOA t row of a member is kept, and its evidence channel is a declared
 table, not a column.** The channel is a pure function of the row's evidence code,
@@ -135,7 +151,7 @@ mappings whose other rows cite ``GO_REF:0000044`` and ``GO_REF:0000043``. Such a
 reference takes that ``GO_REF`` when every with/from item is in one of the two
 vocabularies, and stays unread, so it refuses the photo, otherwise. At 211 every
 one of these rows lands in the mirror either way (the 50 member rows belong to
-proteins outside Swiss-Prot), so the reading changes no recipe row and no profile.
+proteins outside Swiss-Prot), so the reading changes no recipe row.
 
 .. list-table:: The channels
    :header-rows: 1
@@ -192,26 +208,26 @@ already holds is copied.**
   sequence md5 included; it is referenced, not copied.
 - The live tiers are read from the annotations, as ADR-D49 already does; no tier
   column is stored.
-- ``cut_photo_cluster``: one row per (photo, superset accession) with its
-  UniRef50 cluster, so a target finds its profile.
-- ``cut_photo_cluster_profile``: one row per (photo, cluster, GO term, channel,
-  negation) with the number of the cluster's members that carry it and are not
-  members of the photo; a ``NOT`` row is counted apart, as evidence against. A
-  taxon group joins the key only if the author decides to split profiles by one
-  (decision 4). It is the only part of the photo no existing table can derive,
-  and it holds counts, not proteins.
-  Under ADR-D58 its rows are COUNTED entities, named by their set and carrying no
-  descriptors; the profile SET (one per photo, naming the GOA cut and the UniRef
-  release) is a CITED entity: its short and long descriptors are derived by the
-  operation that creates it, and the entity is declared in the descriptor guard's
-  list in the same change that adds it.
+- ``cut_photo_member``: one row per (photo, member) with the sets it entered by
+  (``superset``, ``truth``, ``curated``, ``neighbour``), its UniRef50 cluster when
+  it is in one that holds a superset protein, and the md5 of its sequence in the
+  paired release (decision 5), NULL when the release does not hold it. A
+  neighbour enters by UniRef, which no annotation records, so who is in a photo
+  is stored rather than derived; the superset flags agree with the paired
+  release's ``SwissProtMembership`` because the loader refuses a photo whose
+  superset is not that release. Its rows are COUNTED entities under ADR-D58,
+  named by their photo. It replaces the first draft's ``cut_photo_cluster`` (the
+  cluster of each superset protein) and ``cut_photo_cluster_profile`` (amended
+  2026-11-16), and the profile set's descriptors on ``cut_photo`` go with them.
 - ``protein``: a member that is not yet in the table enters as an accession-only
   row; ``first_admitted_release`` is written as a minimum, as ADR-D49 does.
 - ``protein_go_annotation``: the GOA t rows of the new members are appended to
   the annotation set of release t. New members carry no ``truth`` and no
   ``curated`` row by construction (those would have admitted them already), so
   every evaluation set, every Information Accretion table under the ``lafa``
-  regime and every donor bank restricted to those codes is unchanged.
+  regime and every donor bank restricted to those codes is unchanged. The
+  neighbours' rows enter the same set, so a donor bank that reads PAINT or
+  orthology rows sees them (they are what admits a neighbour).
 
 **Reading a cut sees that cut's photo and nothing admitted after it.** A later
 photo adds rows and never rewrites an earlier one.
@@ -266,9 +282,10 @@ one the release's ``RELEASE.metalink`` publishes, and a member the release does
 not hold is counted and named, never guessed: a GOA release can cite an
 accession created after its paired UniProt release. The loader checks each
 sequence against its md5 and stores it by md5, as it does the Swiss-Prot ones;
-the database link from each such member to its paired sequence comes with the
-photo's membership table (amended 2026-11-16, when the author approved reading
-TrEMBL; until that day the build read the Swiss-Prot archive alone).
+``cut_photo_member`` links each member to it by md5 (amended 2026-11-16, when the
+author approved reading TrEMBL; until that day the build read the Swiss-Prot
+archive alone). At 211 the members outside Swiss-Prot are 962,990: 94,190 that
+GOA admits and 868,800 neighbours.
 
 The five pairings
 ~~~~~~~~~~~~~~~~~
@@ -340,15 +357,16 @@ Consequences
   rest are built.
 - **Cost moves to the compute node.** Each cut needs its GOA file (the largest
   release is 24,28 GB, per ADR-D49), its Swiss-Prot list and its UniRef50
-  membership, read once to build the cluster profiles and then discarded.
+  membership, read once to admit the neighbours and then discarded, and the
+  paired release's knowledgebase archive, read once for the TrEMBL sequences.
 
 What this record does not settle
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- **Protein-level neighbours.** If a low-homology method later needs
-  protein-to-protein transfer from neighbours, the candidates are the members
-  with a recipe-channel row (903,248 at 211, measured outside the platform: an
-  order of magnitude, not a declared count); adding them is a separate decision.
+- **Distant homologs.** The neighbours are UniRef50 co-members, at least 50%
+  identical to their cluster's seed. Homologs below that, in other clusters, come
+  with the homology table (MMseqs2), searched against the corpus and against the
+  paired release's UniRef50 representatives, a separate record.
 - **Bridges.** UniRef members with no annotation at all could link a query to
   distant annotated proteins through intermediate sequences. They are not members
   under this record.
@@ -356,14 +374,9 @@ What this record does not settle
   analysis decision, a filter on the channel table.
 - **The evaluation option itself.** Restricting ``generate_evaluation_set`` to a
   photo's superset is a separate change.
-- **The membership table.** Which members a photo holds, by which set, and the
-  md5 of each one's paired sequence, as rows the database can join. Today the
-  superset and the live tiers are derived and the TrEMBL link is in the photo's
-  files; neighbours admitted as proteins would need the table (open, with the
-  author's decision on protein-level neighbours above).
-- **Taxon groups in the profiles.** Whether a profile is split by a coarse taxon
-  group, and from which taxonomy, is the author's decision. Until then the
-  profile's key has no taxon group and the photo no taxonomy source.
+- **Taxon groups.** Whether the photo records a coarse taxon group per member,
+  and from which taxonomy, is the author's decision. Until then the photo has no
+  taxonomy source (the GAF's own taxon column stays on each row).
 
 References
 ~~~~~~~~~~

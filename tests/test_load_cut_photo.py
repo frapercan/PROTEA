@@ -44,7 +44,7 @@ from protea.core.cut_photo.build import (
     sequences_pass,
     unreviewed_pass,
 )
-from protea.core.cut_photo.channels import PROFILE_CHANNELS, channel_rows
+from protea.core.cut_photo.channels import channel_rows
 from protea.core.cut_photo.measure import PassSource
 from protea.core.operations import load_cut_photo as loader
 from protea.core.operations.load_cut_photo import (
@@ -64,8 +64,7 @@ from protea.infrastructure.orm.models.annotation import cut_photo as model
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.cut_photo import (
     CutPhoto,
-    CutPhotoCluster,
-    CutPhotoClusterProfile,
+    CutPhotoMember,
 )
 from protea.infrastructure.orm.models.annotation.evidence_channel import (
     EvidenceChannel,
@@ -101,12 +100,14 @@ KB_FILE = {
 }
 #: Q9 is the member outside the superset; its sequence comes from the paired TrEMBL.
 TREMBL = [b">tr|Q9|Q9_HUMAN Some protein\n", b"MQQLK\n", b">tr|X7|X7_HUMAN\n", b"MAA\n"]
+TREMBL += [b">tr|N1|N1_MOUSE\n", b"MNN\n", b">tr|N2|N2_RAT\n", b"MPP\n"]
 #: The GO ids the test snapshot knows; GO:0000099 is the one it does not.
 KNOWN_TERMS = [f"GO:000000{i}" for i in range(1, 8)]
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 _VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 _MIGRATION = _VERSIONS / "d4a7c2e9f310_cut_photo_tables.py"
+_MEMBERS_MIGRATION = _VERSIONS / "384568a09847_cut_photo_members.py"
 
 
 def _gaf(accession: str, go: str, code: str, reference: str) -> str:
@@ -160,14 +161,14 @@ def build_photo(tmp_path: Path, gaf: list[str] = GAF) -> tuple[Path, str]:
     )
     out = tmp_path / "photo"
     goa = PassSource(release=CUT, published=CUT_DATE, cut_release=CUT, cut_date=CUT_DATE, out=out)
-    members_pass(gaf, superset_table=measured / "superset.tsv", source=goa, source_file=GOA_FILE)
-    rows_pass(
+    members_pass(
         gaf,
-        members_path=out / "members.parquet",
+        superset_table=measured / "superset.tsv",
         neighbours_path=measured / "neighbours.parquet",
         source=goa,
         source_file=GOA_FILE,
     )
+    rows_pass(gaf, members_path=out / "members.parquet", source=goa, source_file=GOA_FILE)
     fasta = "".join(f">sp|{a}|{a}_HUMAN\n{s}\n" for a, s in SEQUENCES.items()).encode()
     blob = gzip.compress(fasta)
     archive = tmp_path / "sprot.tar.gz"
@@ -208,9 +209,9 @@ def _release(**changes: Any) -> SwissProtRelease:
     return SwissProtRelease(**fields)
 
 
-def _migration() -> ModuleType:
+def _migration(path: Path = _MIGRATION) -> ModuleType:
     """Loaded by path: ``alembic/`` is not a package and the library shadows the name."""
-    spec = importlib.util.spec_from_file_location("_d4a7c2e9f310", _MIGRATION)
+    spec = importlib.util.spec_from_file_location(f"_{path.stem}", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -251,8 +252,8 @@ class TestTheManifest:
 
     def test_an_output_changed_after_the_build_is_refused(self, tmp_path: Path) -> None:
         out, sha = build_photo(tmp_path)
-        pq.write_table(pa.table({"accession": ["P1"], "cluster": ["C9"]}), out / "clusters.parquet")
-        with pytest.raises(PhotoRefused, match="clusters.parquet hashes to"):
+        pq.write_table(pa.table({"accession": ["P1"], "cluster": ["C9"]}), out / "members.parquet")
+        with pytest.raises(PhotoRefused, match="members.parquet hashes to"):
             read_manifest(out, sha)
 
 
@@ -344,19 +345,18 @@ class TestTheSequences:
 
 
 class TestTheDescriptors:
-    def test_both_short_names_are_slugs_naming_the_cut_and_the_clustering(
+    def test_the_short_name_is_a_slug_and_the_description_names_each_set(
         self, tmp_path: Path
     ) -> None:
         out, sha = build_photo(tmp_path)
         manifest = read_manifest(out, sha)
         sources = check_sources(manifest, _snapshot(), _release())
         names = photo_descriptors(sources, manifest["counts"], "2026-11-16")
-        assert names["short_name"] == "photo-211"
-        assert names["profile_short_name"] == "profiles-211-uniref-2022-03"
-        assert all(SLUG.match(names[k]) for k in ("short_name", "profile_short_name"))
+        assert sorted(names) == ["description", "short_name"]
+        assert names["short_name"] == "photo-211" and SLUG.match(names["short_name"])
         assert "Swiss-Prot 2022_03" in names["description"]
         assert "2022-07-01" in names["description"]
-        assert "UniRef50 2022_03" in names["profile_description"]
+        assert "2 as annotated neighbours in the UniRef50 2022_03 clusters" in names["description"]
 
     def test_the_payload_refuses_a_digest_that_is_not_one(self) -> None:
         with pytest.raises(ValueError, match="64 hexadecimal"):
@@ -403,29 +403,21 @@ class TestProgress:
 
 
 class TestTheSchema:
-    def test_the_model_and_the_migration_declare_the_same_checks(self) -> None:
-        migration = _migration()
-        for name in (
-            "PROFILE_CHANNEL_CHECK",
-            "SHORT_NAME_CHECK",
-            "PROFILE_SHORT_NAME_CHECK",
-            "DESCRIPTIONS_CHECK",
-            "DIGESTS_CHECK",
-        ):
-            assert getattr(migration, name) == getattr(model, name), name
+    def test_the_model_and_the_migrations_declare_the_same_checks(self) -> None:
+        photo, members = _migration(), _migration(_MEMBERS_MIGRATION)
+        for name in ("SHORT_NAME_CHECK", "DIGESTS_CHECK"):
+            assert getattr(photo, name) == getattr(model, name), name
+        for name in ("MEMBER_SETS_CHECK", "NEIGHBOUR_ALONE_CHECK", "DESCRIPTIONS_CHECK"):
+            assert getattr(members, name) == getattr(model, name), name
 
-    def test_the_profile_check_admits_exactly_the_builders_profile_channels(self) -> None:
-        listed = set(re.findall(r"'([a-z_]+)'", model.PROFILE_CHANNEL_CHECK))
-        assert listed == set(PROFILE_CHANNELS)
+    def test_the_migrations_follow_each_other(self) -> None:
+        photo, members = _migration(), _migration(_MEMBERS_MIGRATION)
+        assert (photo.revision, photo.down_revision) == ("d4a7c2e9f310", "b71e2396e5c3")
+        assert (members.revision, members.down_revision) == ("384568a09847", "f0e6749f94cb")
 
-    def test_the_migration_follows_the_window_roles(self) -> None:
-        migration = _migration()
-        assert migration.down_revision == "b71e2396e5c3"
-        assert migration.revision == "d4a7c2e9f310"
-
-    def test_the_migration_creates_the_columns_the_model_declares(self) -> None:
-        source = _MIGRATION.read_text(encoding="utf-8")
-        for table in (CutPhoto, CutPhotoCluster, CutPhotoClusterProfile):
+    def test_the_migrations_create_the_columns_the_models_declare(self) -> None:
+        for table, path in ((CutPhoto, _MIGRATION), (CutPhotoMember, _MEMBERS_MIGRATION)):
+            source = path.read_text(encoding="utf-8")
             for column in table.__table__.columns:
                 assert f'"{column.name}"' in source, (table.__tablename__, column.name)
 
@@ -488,60 +480,63 @@ def test_a_photo_loads_and_says_what_it_wrote(pg_session: Session, tmp_path: Pat
     events: list[str] = []
     result = _load(pg_session, out, sha, events)
     stages = [e.split(":", 1)[1] for e in events if e.startswith("load_cut_photo.stage_done")]
-    assert stages == [
-        "proteins",
-        "sequences",
-        "unreviewed_sequences",
-        "rows",
-        "clusters",
-        "profiles",
-    ]
+    assert stages == ["proteins", "sequences", "unreviewed_sequences", "rows", "members"]
 
     photo = pg_session.execute(select(CutPhoto)).scalar_one()
-    assert (photo.short_name, photo.profile_short_name) == (
-        "photo-211",
-        "profiles-211-uniref-2022-03",
-    )
+    assert photo.short_name == "photo-211"
     assert photo.manifest_uri == f"memory://cut-photos/211/{sha}"
     assert photo.manifest_sha256 == sha and photo.builder_revision == "builder-revision"
     assert photo.uniref_release == "2022_03" and photo.cut_date == CUT_DATE
 
     proteins = {p.accession: p for p in pg_session.execute(select(Protein)).scalars()}
-    assert sorted(proteins) == ["P1", "P2", "Q9"]
+    assert sorted(proteins) == ["N1", "N2", "P1", "P2", "Q9"]
     assert {p.first_admitted_release for p in proteins.values()} == {CUT}
     assert all(p.sequence_id is None for p in proteins.values())
 
     hashes = set(pg_session.execute(select(Sequence.sequence_hash)).scalars())
-    trembl_md5 = hashlib.md5(b"MQQLK", usedforsecurity=False).hexdigest()
-    assert hashes == {*MD5.values(), trembl_md5}
-    assert result["unreviewed_sequences_added"] == 1
+    trembl = {
+        s: hashlib.md5(s.encode(), usedforsecurity=False).hexdigest()
+        for s in ("MQQLK", "MNN", "MPP")
+    }
+    assert hashes == {*MD5.values(), *trembl.values()}
+    assert result["unreviewed_sequences_added"] == 3
 
     rows = pg_session.execute(
         select(ProteinGOAnnotation.protein_accession, GOTerm.go_id).join(
             GOTerm, GOTerm.id == ProteinGOAnnotation.go_term_id
         )
     ).all()
-    assert sorted(rows) == [("P1", "GO:0000001"), ("P1", "GO:0000002"), ("Q9", "GO:0000003")]
+    assert sorted(rows) == [
+        ("N1", "GO:0000005"),
+        ("N2", "GO:0000006"),
+        ("P1", "GO:0000001"),
+        ("P1", "GO:0000002"),
+        ("Q9", "GO:0000003"),
+    ]
     assert result["rows_with_unknown_term"] == 1 and result["unknown_terms"] == 1
     # What was written, counted from the rows each INSERT returned: a multi-row
     # INSERT ... ON CONFLICT reports a rowcount of -1 through psycopg, which the
     # first dev load at 211 summed into -133 proteins and -114 sequences.
-    assert (result["proteins_added"], result["sequences_added"]) == (3, 2)
-    assert (result["rows_inserted"], result["rows_already_present"]) == (3, 0)
+    assert (result["proteins_added"], result["sequences_added"]) == (5, 2)
+    assert (result["rows_inserted"], result["rows_already_present"]) == (5, 0)
     assert result["sequences_already_present"] == 0
 
-    clusters = dict(
-        pg_session.execute(select(CutPhotoCluster.accession, CutPhotoCluster.cluster)).all()
+    members = {
+        m.accession: (m.superset, m.truth, m.curated, m.neighbour, m.cluster, m.sequence_md5)
+        for m in pg_session.execute(select(CutPhotoMember)).scalars()
+    }
+    assert members == {
+        "P1": (True, True, False, False, "C1", MD5["P1"]),
+        "P2": (True, False, False, False, "C2", MD5["P2"]),
+        "Q9": (False, False, True, False, None, trembl["MQQLK"]),
+        "N1": (False, False, False, True, "C1", trembl["MNN"]),
+        "N2": (False, False, False, True, "C1", trembl["MPP"]),
+    }
+    assert (result["members"], result["neighbours"], result["members_with_paired_sequence"]) == (
+        5,
+        2,
+        5,
     )
-    assert clusters == {"P1": "C1", "P2": "C2"}
-    profile = {
-        (r.cluster, r.go_id, r.channel, r.negated): r.members
-        for r in pg_session.execute(select(CutPhotoClusterProfile)).scalars()
-    }
-    assert profile == {
-        ("C1", "GO:0000005", "phylogenetic", False): 1,
-        ("C1", "GO:0000006", "orthology_electronic", False): 1,
-    }
     annotation_set = pg_session.get(AnnotationSet, photo.annotation_set_id)
     assert annotation_set is not None and annotation_set.source_version == "211"
 
@@ -640,8 +635,8 @@ def test_the_earliest_admission_is_kept(pg_session: Session, tmp_path: Path) -> 
     admitted = dict(
         pg_session.execute(select(Protein.accession, Protein.first_admitted_release)).all()
     )
-    assert admitted == {"P1": 205, "P2": CUT, "Q9": CUT}
-    assert result["proteins_added"] == 1
+    assert admitted == {"P1": 205, "P2": CUT, "Q9": CUT, "N1": CUT, "N2": CUT}
+    assert result["proteins_added"] == 3
 
 
 @pytest.mark.integration

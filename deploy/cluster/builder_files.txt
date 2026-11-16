@@ -10,6 +10,10 @@ protea/core/cut_photo/build.py
 protea/core/cut_photo/channels.py
 protea/core/cut_photo/formats.py
 protea/core/cut_photo/measure.py
+protea/core/cut_photo/members.py
+protea/core/cut_photo/photo_io.py
+protea/core/cut_photo/rows.py
+protea/core/cut_photo/sequences.py
 protea/core/evidence_codes.py
 protea/core/marks.py
 protea/core/row_alignment.py

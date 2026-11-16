@@ -9,7 +9,7 @@ and rejects the photo rather than being guessed").
 
 Which channels the recipe reads is decided at query time
 (:data:`RECIPE_CHANNELS`), so changing that decision changes a filter, not the
-data. The UniRef50 profiles count only :data:`PROFILE_CHANNELS`.
+data. The UniRef50 neighbours are admitted by :data:`NEIGHBOUR_CHANNELS`.
 
 THE ELECTRONIC REFERENCES WERE CHECKED AGAINST GO's OWN LIST. Each ``GO_REF`` of
 an ``IEA`` row is classified from its title in the Gene Ontology's
@@ -60,15 +60,11 @@ RECIPE_CHANNELS: Final[frozenset[Channel]] = frozenset(
     {"truth", "curated", "phylogenetic", "orthology_electronic", "reviewed_field_electronic"}
 )
 
-#: The channels a UniRef50 profile counts (ADR-D59, decision 1). Neighbours are
-#: mostly unreviewed, so a field translation on them is a rule's output, which is
-#: ``signature_electronic``; the profile therefore leaves the field channel out.
-PROFILE_CHANNELS: Final[tuple[Channel, ...]] = (
-    "truth",
-    "curated",
-    "phylogenetic",
-    "orthology_electronic",
-)
+#: The channels that admit a UniRef50 neighbour as a member (ADR-D59, decision 1,
+#: amended 2026-11-16): the recipe channels a protein outside the base can carry.
+#: Truth and curated rows would have admitted it already, and a field translation on
+#: an unreviewed entry is a rule's output, ``signature_electronic``.
+NEIGHBOUR_CHANNELS: Final[frozenset[Channel]] = frozenset({"phylogenetic", "orthology_electronic"})
 
 #: Curated inference that is not phylogenetic. ``IKR`` and ``IRD`` admit a protein
 #: through ADR-D49's curated tier but are PAINT's, so their channel is phylogenetic.

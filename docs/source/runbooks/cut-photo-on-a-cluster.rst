@@ -158,8 +158,17 @@ The run at 211, measured
      - fetched in 19 s, md5 checked
    * - UniRef 2022_03 (189,698,335,699 bytes)
      - fetched in 829 s in 16 parts, never joined
-   * - Build job (members, rows, sequences, manifest)
-     - 55 minutes on 8 cores; peak memory 8.7 GB
-   * - The photo
+   * - Knowledgebase 2022_03, with TrEMBL (157,495,106,389 bytes)
+     - fetched in 1,407 s in 16 parts, never joined
+   * - Build job, before neighbours were members (members, rows, sequences, manifest)
+     - 57 minutes on 8 cores (members 15, rows 40); peak memory 8.7 GB
+   * - That photo
      - 172 MB: 662,192 members (568,002 in Swiss-Prot), 9,995,432 member rows,
-       566,809 clustered superset proteins, 666,731 profile keys over 63,913 clusters
+       566,809 clustered superset proteins
+   * - Its load in the dev database
+     - 34 minutes: 9,498,933 annotation rows (the GAF lines that differ only in
+       with/from, assigned_by or date are one row), every one given by SQL the
+       channel the builder gave it
+   * - The annotated neighbours (one job, 30 minutes, 11.5 GB)
+     - 868,800 of the 38,151,372 cluster members outside the base, with 13,604,622
+       GOA 211 rows; with them the photo has 1,530,992 members

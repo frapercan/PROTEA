@@ -71,8 +71,7 @@ from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.cut_photo import (
     CutPhoto,
-    CutPhotoCluster,
-    CutPhotoClusterProfile,
+    CutPhotoMember,
 )
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -376,7 +375,7 @@ def verify_unreviewed_sequences(path: Path) -> int:
 def photo_descriptors(
     sources: PhotoSources, counts: dict[str, Any], goref_list_read_on: str
 ) -> dict[str, str]:
-    """ADR-D58's descriptors of the photo and of its profile set, derived, never typed."""
+    """ADR-D58's descriptors of the photo, derived, never typed."""
     members, rows = counts["members"], counts["rows"]
     cut, uniref = sources.cut, sources.uniref_release
     graph = sources.snapshot.obo_version.rsplit("/", 1)[-1]
@@ -385,19 +384,12 @@ def photo_descriptors(
         "description": (
             f"Photo of cut {cut} (GOA {cut}, {sources.cut_date.isoformat()}): "
             f"{members['members']} members, {members['superset']} of them in Swiss-Prot "
-            f"{sources.release.release}, {members['by_truth']} admitted by a truth code and "
-            f"{members['by_curated_only']} by curated inference alone, with "
-            f"{rows.get('member_rows', 0)} GOA rows on the GO graph of {graph}, channels "
-            f"checked against the GO_REF list read on {goref_list_read_on}."
-        ),
-        "profile_short_name": f"profiles-{cut}-uniref-{uniref.replace('_', '-').lower()}",
-        "profile_description": (
-            f"UniRef50 {uniref} profiles of cut {cut}: for each of the "
-            f"{rows.get('clusters_with_superset', 0)} clusters holding a Swiss-Prot "
-            f"{sources.release.release} protein, how many of its "
-            f"{rows.get('neighbours_outside_base', 0)} members outside the base carry each GO "
-            f"term in each recipe channel ({rows.get('profile_keys', 0)} cluster, term, "
-            f"channel and negation keys)."
+            f"{sources.release.release}, {members['by_truth']} admitted by a truth code, "
+            f"{members['by_curated_only']} by curated inference alone and "
+            f"{members.get('by_neighbour', 0)} as annotated neighbours in the UniRef50 "
+            f"{uniref} clusters of a Swiss-Prot protein, with {rows.get('member_rows', 0)} "
+            f"GOA rows on the GO graph of {graph}, channels checked against the GO_REF list "
+            f"read on {goref_list_read_on}."
         ),
     }
 
@@ -568,32 +560,33 @@ def _store_annotations(
     }
 
 
-def _store_clusters_and_profiles(
+def _store_members(
     session: Session, photo_dir: Path, photo_id: uuid.UUID, emit: EmitFn
-) -> tuple[int, int]:
-    clusters = profiles = 0
-    progress = _Progress(emit, "clusters")
-    for batch in _batches(photo_dir / "clusters.parquet", ["accession", "cluster"]):
-        session.execute(
-            pg_insert(CutPhotoCluster.__table__).values(
-                [{**r, "photo_id": photo_id} for r in batch]
-            )
-        )
-        clusters += len(batch)
-        progress.batch(len(batch))
-    progress.done()
-    progress = _Progress(emit, "profiles")
-    columns = ["cluster", "go_id", "channel", "negated", "members"]
-    for batch in _batches(photo_dir / "profiles.parquet", columns):
-        session.execute(
-            pg_insert(CutPhotoClusterProfile.__table__).values(
-                [{**r, "photo_id": photo_id} for r in batch]
-            )
-        )
-        profiles += len(batch)
-        progress.batch(len(batch))
-    progress.done()
-    return clusters, profiles
+) -> dict[str, int]:
+    """One ``cut_photo_member`` row per member, with the md5 of its paired sequence.
+
+    A superset member's md5 is in ``members.parquet`` (the canonical Swiss-Prot table);
+    any other member's is the one the TrEMBL pass found, or NULL when the paired
+    release does not hold the accession.
+    """
+    trembl: dict[str, str] = {}
+    for batch in _batches(photo_dir / "unreviewed_sequences.parquet", ["accession", "md5"]):
+        trembl.update((row["accession"], row["md5"]) for row in batch)
+    counts: Counter[str] = Counter()
+    progress = _Progress(emit, "members")
+    columns = ["accession", "superset", "truth", "curated", "neighbour", "cluster", "md5"]
+    for batch in _batches(photo_dir / "members.parquet", columns):
+        values = []
+        for row in batch:
+            md5 = row.pop("md5") or trembl.get(row["accession"])
+            values.append({**row, "photo_id": photo_id, "sequence_md5": md5})
+            counts["members"] += 1
+            counts["members_with_paired_sequence"] += md5 is not None
+            counts["neighbours"] += bool(row["neighbour"])
+        session.execute(pg_insert(CutPhotoMember.__table__).values(values))
+        progress.batch(len(values))
+    progress.done(**counts)
+    return dict(counts)
 
 
 def manifest_key_for(cut: int, manifest_sha256: str) -> str:
@@ -708,7 +701,7 @@ class LoadCutPhotoOperation:
         )
         session.add(photo)
         session.flush()
-        clusters, profiles = _store_clusters_and_profiles(session, photo_dir, photo.id, emit)
+        members = _store_members(session, photo_dir, photo.id, emit)
         result = {
             "photo_id": str(photo.id),
             "short_name": photo.short_name,
@@ -717,8 +710,7 @@ class LoadCutPhotoOperation:
             "proteins_added": proteins,
             **sequences,
             **{k: v for k, v in rows.items() if k != "unknown_terms_most_frequent"},
-            "clusters": clusters,
-            "profile_rows": profiles,
+            **members,
             "manifest_uri": photo.manifest_uri,
             "channel_table_sha256": photo.channel_table_sha256,
             "channel_table_written": table_written,
