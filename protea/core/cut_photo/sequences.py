@@ -5,8 +5,9 @@ from the paired UniProt release.
     Every superset member's, from the release's Swiss-Prot FASTA.
 ``unreviewed``
     Every other member's (the accessions GOA admits outside Swiss-Prot and the
-    annotated neighbours), from the release's TrEMBL, which UniProt publishes only
-    inside its full knowledgebase archive; the job streams it in.
+    annotated neighbours), from the release's TrEMBL, which UniProt publishes for a
+    past release only as a flat file inside its full knowledgebase archive
+    (``uniprot_trembl.dat.gz``); the job streams it in.
 """
 
 from __future__ import annotations
@@ -14,9 +15,8 @@ from __future__ import annotations
 import gzip
 import hashlib
 import tarfile
-from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -29,7 +29,11 @@ from protea.core.cut_photo.measure import (
     _write_record,
 )
 from protea.core.cut_photo.photo_io import _read_members
-from protea.core.swissprot_table import canonical_table, iter_swissprot_records
+from protea.core.swissprot_table import (
+    canonical_table,
+    iter_flat_file_sequences,
+    iter_swissprot_records,
+)
 
 #: Written beside the photo by the job that streams the paired release's knowledgebase
 #: archive into the ``unreviewed`` pass: the md5 of that stream, which the manifest
@@ -82,24 +86,8 @@ def sequences_pass(
     return record
 
 
-def _wanted_lines(lines: Iterable[bytes], wanted: frozenset[bytes]) -> Iterator[bytes]:
-    """The lines of the FASTA records whose accession is wanted, the rest skipped unread.
-
-    TrEMBL holds hundreds of millions of records and a photo wants a few hundred
-    thousand, so a record is kept or dropped on its header's accession, still as
-    bytes; only the kept ones reach the one parser, ``iter_swissprot_records``.
-    """
-    keep = False
-    for raw in lines:
-        if raw.startswith(b">"):
-            parts = raw.split(b"|", 2)
-            keep = len(parts) == 3 and parts[1] in wanted
-        if keep:
-            yield raw
-
-
 def unreviewed_pass(
-    lines: Iterable[bytes],
+    stream: BinaryIO,
     *,
     members_path: Path,
     source: PassSource,
@@ -108,7 +96,8 @@ def unreviewed_pass(
     """Write ``unreviewed_sequences.parquet``: the paired release's sequence of every
     member outside the superset (ADR-D59, decision 5).
 
-    ``lines`` is the paired release's TrEMBL FASTA, decompressed. The job streams it
+    ``stream`` is the paired release's TrEMBL flat file (``uniprot_trembl.dat``),
+    decompressed: a past release publishes TrEMBL in no other form. The job streams it
     out of the release's knowledgebase archive and takes the archive's md5 while it
     reads (``KNOWLEDGEBASE_STREAM_MD5``); the record declares the archive by URL and by
     the md5 UniProt publishes, and the manifest refuses the photo unless the two agree.
@@ -120,7 +109,7 @@ def unreviewed_pass(
     wanted = {accession for accession, in_superset in members.items() if not in_superset}
     found: dict[str, tuple[str, str]] = {}
     keys = frozenset(accession.encode() for accession in wanted)
-    for accession, digest, sequence in iter_swissprot_records(_wanted_lines(lines, keys)):
+    for accession, digest, sequence in iter_flat_file_sequences(stream, keys):
         if accession in found:
             raise PhotoGuardError(f"{accession} appears twice in the TrEMBL stream")
         found[accession] = (digest, sequence)

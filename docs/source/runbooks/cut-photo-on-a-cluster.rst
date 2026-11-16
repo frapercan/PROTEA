@@ -64,7 +64,8 @@ Before you start
 Take the cut's pairing from ADR-D59 ("The five pairings"): the GOA release and its
 publication date (the cut's date), the paired UniProt release and its date, and the
 sizes and md5 of its Swiss-Prot and UniRef archives. The release's TrEMBL is published
-only inside its full knowledgebase archive (``knowledgebase<release>.tar.gz``); take
+only inside its full knowledgebase archive (``knowledgebase<release>.tar.gz``), as the
+flat file ``uniprot_trembl.dat.gz``; take
 that archive's size and md5 from the same ``RELEASE.metalink``. Take the GO graph from the rule
 the loader enforces: the newest loaded graph not after the GO release the GAF's
 ``!go-version`` line declares. Use a revision merged on the integration branch.
@@ -109,10 +110,13 @@ Steps
         <goa-url> <goa-sha256> <swiss-prot-url> \
         <src>/knowledgebase<release>.tar.gz <knowledgebase-md5> <knowledgebase-url>
 
-   After the Swiss-Prot sequences, the job streams the knowledgebase parts in order
-   and keeps the TrEMBL records of the members outside Swiss-Prot
-   (``unreviewed_sequences.parquet``); it writes the md5 of that stream beside the
-   photo, and the manifest refuses the photo unless it is the published one. The log
+   After the Swiss-Prot sequences, the job runs the rows pass and the TrEMBL pass side
+   by side (both read only the members). The TrEMBL pass streams the knowledgebase
+   parts in order, takes ``uniprot_trembl.dat.gz`` out of the archive (a past
+   release publishes TrEMBL only as this flat file) and keeps the entries of the
+   members outside Swiss-Prot (``unreviewed_sequences.parquet``); it writes the md5
+   of that stream beside the photo, and the manifest refuses the photo unless it is
+   the published one. The log
    ends with ``manifest exit 0`` (complete) or ``3`` (refused) and the sha256 of
    ``photo.json``.
 

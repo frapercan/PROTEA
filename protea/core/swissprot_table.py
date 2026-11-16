@@ -68,6 +68,60 @@ def iter_swissprot_records(lines: Any) -> Iterator[tuple[str, str, str]]:
         yield record()
 
 
+#: The line that ends every entry of a UniProt flat file, with the newlines around it.
+_FLAT_FILE_END = b"\n//\n"
+#: Bytes read at a time from a flat-file stream.
+_FLAT_FILE_CHUNK = 1 << 26
+
+
+def iter_flat_file_sequences(
+    stream: Any, wanted: frozenset[bytes]
+) -> Iterator[tuple[str, str, str]]:
+    """``(accession, md5, sequence)`` of the wanted entries of a UniProt flat file stream.
+
+    ``stream`` is a binary stream of a decompressed ``uniprot_*.dat`` (anything with
+    ``read``), the only form in which UniProt publishes a past release's TrEMBL. An
+    entry's accession is the first one on its first ``AC`` line; its sequence is the
+    lines after ``SQ`` up to ``//``, whitespace removed, and the md5 is taken as
+    :func:`iter_swissprot_records` takes it, so the two formats give the same digest
+    for the same sequence. Entries are cut on the ``//`` line and kept or dropped on
+    their accession while still bytes, because a release holds hundreds of millions
+    of them and a photo wants a few hundred thousand.
+
+    :raises ValueError: on a wanted entry with no ``SQ`` line or no sequence.
+    """
+    tail = b""
+    while chunk := stream.read(_FLAT_FILE_CHUNK):
+        data = tail + chunk
+        cut = data.rfind(_FLAT_FILE_END)
+        if cut < 0:
+            tail = data
+            continue
+        yield from _wanted_entries(data[:cut], wanted)
+        tail = data[cut + len(_FLAT_FILE_END) :]
+    if tail.strip():
+        yield from _wanted_entries(tail.rstrip().removesuffix(b"\n//"), wanted)
+
+
+def _wanted_entries(block: bytes, wanted: frozenset[bytes]) -> Iterator[tuple[str, str, str]]:
+    for entry in block.split(_FLAT_FILE_END):
+        start = entry.find(b"\nAC   ")
+        if start < 0:
+            continue
+        end = entry.find(b";", start)
+        accession = entry[start + 6 : end].strip()
+        if accession not in wanted:
+            continue
+        sq = entry.find(b"\nSQ   ", end)
+        lines = entry.find(b"\n", sq + 1) if sq >= 0 else -1
+        sequence = entry[lines:].translate(None, b" \t\r\n").decode() if lines >= 0 else ""
+        if not sequence:
+            raise ValueError(f"{accession.decode()} has no sequence in the flat file")
+        # md5 is UniProt's own sequence fingerprint, as in iter_swissprot_records.
+        digest = hashlib.md5(sequence.encode(), usedforsecurity=False).hexdigest()
+        yield accession.decode(), digest, sequence
+
+
 def parse_swissprot_fasta(lines: Any) -> dict[str, str]:
     """Accession to md5 of its sequence, from a Swiss-Prot FASTA stream.
 
