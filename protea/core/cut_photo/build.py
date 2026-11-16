@@ -40,7 +40,11 @@ from protea.core.cut_photo.channels import CHANNELS
 from protea.core.cut_photo.formats import EMPTY_GO_REF_BY_WITH_FROM
 from protea.core.cut_photo.measure import PassSource, _file_sha256, _stdin_lines, _write_record
 from protea.core.cut_photo.members import members_pass
-from protea.core.cut_photo.photo_io import channel_table_digest, declared_go_release
+from protea.core.cut_photo.photo_io import (
+    channel_table_digest,
+    declared_go_release,
+    go_release_rule,
+)
 from protea.core.cut_photo.rows import rows_pass
 from protea.core.cut_photo.sequences import (
     KNOWLEDGEBASE_STREAM_MD5,
@@ -92,6 +96,7 @@ def photo_sources(records: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any
             "date_generated": members.get("gaf_header", {}).get("date-generated", ""),
             "go_version": members.get("gaf_header", {}).get("go-version", ""),
             "declared_go_release": declared_go_release(members.get("gaf_header", {})),
+            "go_release_rule": go_release_rule(members.get("gaf_header", {})),
         },
         "uniprot": {
             "release": sequences["release"],
@@ -124,8 +129,8 @@ def source_disagreements(records: dict[str, dict[str, Any]]) -> list[str]:
     if not sequences.get("source_file", {}).get("url"):
         found.append("the UniProt archive is not declared with its URL")
     header = members.get("gaf_header", {})
-    if not declared_go_release(header):
-        found.append(f"the GAF declares no GO release in its go-version: {header}")
+    if go_release_rule(header) == "unreadable":
+        found.append(f"the GAF's go-version names no GO release: {header}")
     if rows.get("gaf_header", {}) != header:
         found.append(f"GAF header: members pass {header}, rows pass {rows.get('gaf_header')}")
     for key in ("release", "published", "cut_release", "cut_date"):

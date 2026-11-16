@@ -68,7 +68,8 @@ only inside its full knowledgebase archive (``knowledgebase<release>.tar.gz``), 
 flat file ``uniprot_trembl.dat.gz``; take
 that archive's size and md5 from the same ``RELEASE.metalink``. Take the GO graph from the rule
 the loader enforces: the newest loaded graph not after the GO release the GAF's
-``!go-version`` line declares. Use a revision merged on the integration branch.
+``!go-version`` line declares, or, for a GAF 2.1 that declares none (GOA up to
+2019), the newest loaded graph not after the cut's date. Use a revision merged on the integration branch.
 
 Steps
 -----

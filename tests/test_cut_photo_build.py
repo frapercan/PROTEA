@@ -421,6 +421,7 @@ class TestTheManifest:
             "date_generated": "2022-09-16 10:43",
             "go_version": GO_VERSION,
             "declared_go_release": "2022-09-12",
+            "go_release_rule": "declared",
         }
         assert sources["uniprot"]["release"] == "2022_03"
         assert sources["uniprot"]["url"] == SPROT_URL
@@ -431,13 +432,23 @@ class TestTheManifest:
         assert sources["uniref"]["release"] == "2022_03"
         assert sources["uniprot"]["knowledgebase"] == KB_FILE
 
-    def test_a_gaf_that_declares_no_go_release_refuses_the_photo(self, tmp_path: Path) -> None:
+    def test_a_gaf_with_no_go_version_is_bound_by_the_cut_date(self, tmp_path: Path) -> None:
+        # GOA wrote GAF 2.1 with no go-version line up to 2019 (160, 177, 194).
         out = _build(tmp_path, [line for line in GAF if not line.startswith("!go-version")])
+        self._sequences(tmp_path, out)
+        manifest = manifest_pass(out, revision="abc")
+        assert manifest["status"] == "complete"
+        goa = manifest["sources"]["goa"]
+        assert (goa["declared_go_release"], goa["go_release_rule"]) == ("", "cut_date")
+
+    def test_a_go_version_that_names_no_release_refuses_the_photo(self, tmp_path: Path) -> None:
+        gaf = ["!go-version: unknown\n" if line.startswith("!go-version") else line for line in GAF]
+        out = _build(tmp_path, gaf)
         self._sequences(tmp_path, out)
         manifest = manifest_pass(out, revision="abc")
         assert manifest["status"] == "refused"
         disagreements = manifest["refusals"]["source_disagreements"]
-        assert any("declares no GO release" in d for d in disagreements)
+        assert any("go-version names no GO release" in d for d in disagreements)
 
     def test_two_passes_over_different_gaf_headers_refuse_the_photo(self, tmp_path: Path) -> None:
         superset, neighbours = _setup(tmp_path)

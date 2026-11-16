@@ -89,6 +89,18 @@ ELECTRONIC_REFERENCES: Final[dict[str, tuple[ElectronicKind, str]]] = {
         "OBSOLETE Automatic transfer of experimentally verified manual GO "
         "annotation data to orthologs using Ensembl Compara",
     ),
+    # Ensembl Compara's projections to fungal and plant orthologs, which GOA 160 still
+    # carries (EnsemblFungi 62,810 rows, EnsemblPlants 11,000): the author, 2026-11-16.
+    "GO_REF:0000049": (
+        "orthology",
+        "OBSOLETE Automatic transfer of experimentally verified manual GO annotation "
+        "data to fungal orthologs using Ensembl Compara",
+    ),
+    "GO_REF:0000035": (
+        "orthology",
+        "OBSOLETE Automatic transfer of experimentally verified manual GO annotation "
+        "data to plant orthologs using Ensembl Compara",
+    ),
     "GO_REF:0000043": (
         "field",
         "Gene Ontology annotation based on UniProtKB/Swiss-Prot keyword mapping",
@@ -115,6 +127,13 @@ ELECTRONIC_REFERENCES: Final[dict[str, tuple[ElectronicKind, str]]] = {
     "GO_REF:0000002": (
         "signature",
         "Gene Ontology annotation through association of InterPro records with GO terms",
+    ),
+    # InterPro2GO with UniProt's conservative term changes, in GOA 160 to 194 (at most
+    # 23 rows a cut): a signature, as GO_REF:0000002 is (the author, 2026-11-16).
+    "GO_REF:0000042": (
+        "signature",
+        "OBSOLETE Gene Ontology annotation through association of InterPro records "
+        "with GO terms, accompanied by conservative changes to GO terms applied by UniProt",
     ),
     "GO_REF:0000104": (
         "signature",
