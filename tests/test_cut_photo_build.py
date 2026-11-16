@@ -256,7 +256,17 @@ class TestTheManifest:
         manifest = manifest_pass(out, revision="abc")
         assert manifest["status"] == "refused"
         assert manifest["refusals"]["unknown_evidence_rows"] == 1
-        assert "IEA\tReactome\tUniProt\t1" in (out / "unknown_evidence.tsv").read_text()
+        lines = (out / "unknown_evidence.tsv").read_text().splitlines()
+        assert lines[1] == "IEA\tother\tReactome\tUniProt\t1\tReactome:R-1"
+
+    def test_an_unknown_goref_keeps_its_id_and_its_examples(self, tmp_path: Path) -> None:
+        rows = [_gaf("N3", f"GO:00000{n}", "IEA", "GO_REF:0009999") for n in (10, 11, 12)]
+        out = _build(tmp_path, [*GAF, *rows])
+        self._sequences(tmp_path, out)
+        manifest = manifest_pass(out, revision="abc")
+        assert manifest["counts"]["rows"]["unknown_evidence_keys"] == 1
+        lines = (out / "unknown_evidence.tsv").read_text().splitlines()
+        assert lines[1] == "IEA\tGO_REF:0009999\tGO_REF\tUniProt\t3\tGO_REF:0009999"
 
     def test_a_clean_cut_is_complete_with_every_output_digested(self, tmp_path: Path) -> None:
         out = _build(tmp_path, GAF)

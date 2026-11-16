@@ -84,6 +84,8 @@ from protea.core.row_alignment import lookup_by
 from protea.core.swissprot_table import canonical_table, iter_swissprot_records, read_local_table
 
 _GAF_PREFIX = "UniProtKB\t"
+#: How many distinct raw references ``unknown_evidence.tsv`` shows for each key.
+UNKNOWN_EXAMPLES = 3
 ADMITTING_CODES = TRUTH_CODES | CURATED_INFERENCE_CODES
 
 #: The outputs a complete photo has, in the order the manifest lists them.
@@ -211,7 +213,8 @@ class _RowsAndProfiles:
         self.rows_out = rows_out
         self.seen: set[tuple[str, str, str, bool]] = set()
         self.profile: Counter[tuple[str, str, str, bool]] = Counter()
-        self.unknown: Counter[tuple[str, str, str]] = Counter()
+        self.unknown: Counter[tuple[str, str, str, str]] = Counter()
+        self.examples: dict[tuple[str, str, str, str], list[str]] = {}
         self.counts: Counter[str] = Counter()
 
     def feed(self, cols: list[str]) -> None:
@@ -221,17 +224,32 @@ class _RowsAndProfiles:
         if reviewed is None and cluster is None:
             return
         code, reference = cols[GAF_EVIDENCE], cols[GAF_REFERENCE]
+        kind = reference_class(reference)
         channel: str
         try:
-            channel = channel_of(code, reference_class(reference), bool(reviewed))
+            channel = channel_of(code, kind, bool(reviewed))
         except UnknownEvidence:
-            prefix = reference.split(":", 1)[0] if reference else ""
-            self.unknown[(code, prefix, cols[GAF_ASSIGNED_BY])] += 1
+            self._count_unknown(code, kind, reference, cols[GAF_ASSIGNED_BY])
             channel = "unknown"
         if reviewed is not None:
             self._member_row(cols, channel)
         elif channel in PROFILE_CHANNELS and cluster is not None:
             self._profile_row(cluster, accession, cols, channel)
+
+    def _count_unknown(self, code: str, kind: str, reference: str, assigned_by: str) -> None:
+        """Count a row the channel table cannot place, keeping a few raw references.
+
+        The key holds the reference CLASS (the whole ``GO_REF`` id, ``publication``
+        or ``other``) beside the raw prefix: a prefix alone would turn every unknown
+        ``GO_REF`` into the same ``GO_REF`` key, and the examples are what the
+        decision to classify them is read from.
+        """
+        prefix = reference.split(":", 1)[0] if reference else ""
+        key = (code, kind, prefix, assigned_by)
+        self.unknown[key] += 1
+        shown = self.examples.setdefault(key, [])
+        if len(shown) < UNKNOWN_EXAMPLES and reference not in shown:
+            shown.append(reference)
 
     def _member_row(self, cols: list[str], channel: str) -> None:
         self.counts["member_rows"] += 1
@@ -319,7 +337,7 @@ def rows_pass(
         state.rows_out.flush()
     _write_clusters(out, superset_clusters)
     _write_profiles(out, state.profile)
-    _write_unknown(out, state.unknown)
+    _write_unknown(out, state.unknown, state.examples)
     record = {
         **source.head("rows"),
         **dict(state.counts),
@@ -327,6 +345,7 @@ def rows_pass(
         "neighbours_outside_base": len(neighbours),
         "profile_keys": len(state.profile),
         "unknown_evidence_rows": sum(state.unknown.values()),
+        "unknown_evidence_keys": len(state.unknown),
         "neighbours_source": {**neighbours_source, "sha256": _file_sha256(neighbours_path)},
         "channel_table": {
             "goref_list_read_on": GOREF_LIST_READ_ON,
@@ -359,11 +378,18 @@ def _write_profiles(out: Path, profile: Counter[tuple[str, str, str, bool]]) -> 
     pq.write_table(table, out / "profiles.parquet", compression="zstd")
 
 
-def _write_unknown(out: Path, unknown: Counter[tuple[str, str, str]]) -> None:
+def _write_unknown(
+    out: Path,
+    unknown: Counter[tuple[str, str, str, str]],
+    examples: dict[tuple[str, str, str, str], list[str]],
+) -> None:
+    """One line per key, most rows first, with up to ``UNKNOWN_EXAMPLES`` raw references."""
     with open(out / "unknown_evidence.tsv", "w", encoding="utf-8") as handle:
-        handle.write("code\treference_prefix\tassigned_by\trows\n")
-        for (code, prefix, by), n in sorted(unknown.items(), key=lambda kv: -kv[1]):
-            handle.write(f"{code}\t{prefix}\t{by}\t{n}\n")
+        handle.write("code\treference_class\treference_prefix\tassigned_by\trows\texamples\n")
+        for key, n in sorted(unknown.items(), key=lambda kv: (-kv[1], kv[0])):
+            code, kind, prefix, by = key
+            shown = " ; ".join(examples.get(key, []))
+            handle.write(f"{code}\t{kind}\t{prefix}\t{by}\t{n}\t{shown}\n")
 
 
 def sequences_pass(archive: Path, source: PassSource) -> dict[str, Any]:
