@@ -35,6 +35,7 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 import protea.infrastructure.orm.models  # noqa: F401  (registers every table)
+from protea.core._window_population import superset_at_start
 from protea.core.cut_photo.build import (
     KNOWLEDGEBASE_STREAM_MD5,
     channel_table_digest,
@@ -661,6 +662,29 @@ def test_a_stored_channel_table_other_than_the_codes_refuses_before_writing(
 
 
 @pytest.mark.integration
+@pytest.mark.integration
+def test_a_window_starting_at_the_photo_scores_its_superset(
+    pg_session: Session, tmp_path: Path
+) -> None:
+    # The window's start is a corpus; the photo that loaded it names it, and its
+    # superset members are the targets a window over ``superset_at_t0`` keeps.
+    out, sha = build_photo(tmp_path)
+    _load(pg_session, out, sha)
+    photo = pg_session.execute(select(CutPhoto)).scalar_one()
+    found = superset_at_start(pg_session, photo.annotation_set_id)
+    superset = set(
+        pg_session.execute(
+            select(CutPhotoMember.accession).where(
+                CutPhotoMember.photo_id == photo.id, CutPhotoMember.superset
+            )
+        ).scalars()
+    )
+    assert found.accessions == superset and len(superset) == 2
+    assert (found.cut_release, found.photo_id) == (CUT, photo.id)
+    with pytest.raises(ValueError, match="no cut photo has annotation set"):
+        superset_at_start(pg_session, uuid.uuid4())
+
+
 def test_the_same_manifest_again_is_a_no_op(pg_session: Session, tmp_path: Path) -> None:
     out, sha = build_photo(tmp_path)
     first = _load(pg_session, out, sha)
