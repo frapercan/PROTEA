@@ -14,6 +14,7 @@ import re
 
 from protea.core.cut_photo import formats
 from protea.core.cut_photo.formats import (
+    EMPTY_GO_REF_UNREAD,
     UNIREF_LINE_FILTER,
     is_negated,
     iter_gaf_columns,
@@ -68,6 +69,23 @@ class TestReferenceClass:
     def test_anything_else_is_other(self) -> None:
         assert reference_class("Reactome:R-HSA-123") == "other"
         assert reference_class("") == "other"
+
+    def test_an_empty_goref_is_read_through_its_with_from_vocabulary(self) -> None:
+        # GOA 211: 419,822 IEA rows by UniProt, dated 2022-09-07, cite "GO_REF:" with
+        # no number; their with/from names the field mapping they came from.
+        assert reference_class("GO_REF:", "UniProtKB-SubCell:SL-0097") == "GO_REF:0000044"
+        assert reference_class("GO_REF:", "UniProtKB-KW:KW-0539") == "GO_REF:0000043"
+        both = "UniProtKB-SubCell:SL-0097|UniProtKB-SubCell:SL-0039"
+        assert reference_class("GO_REF:", both) == "GO_REF:0000044"
+
+    def test_an_empty_goref_the_with_from_does_not_name_stays_unread(self) -> None:
+        assert reference_class("GO_REF:", "") == EMPTY_GO_REF_UNREAD
+        assert reference_class("GO_REF:", "InterPro:IPR000001") == EMPTY_GO_REF_UNREAD
+        mixed = "UniProtKB-SubCell:SL-0097|UniProtKB-KW:KW-0539"
+        assert reference_class("GO_REF:", mixed) == EMPTY_GO_REF_UNREAD
+
+    def test_a_numbered_goref_ignores_the_with_from(self) -> None:
+        assert reference_class("GO_REF:0000002", "UniProtKB-SubCell:SL-0097") == "GO_REF:0000002"
 
 
 class TestNegation:

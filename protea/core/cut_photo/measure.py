@@ -50,6 +50,7 @@ from protea.core.cut_photo.formats import (
     GAF_EVIDENCE,
     GAF_QUALIFIER,
     GAF_REFERENCE,
+    GAF_WITH_FROM,
     NO_DATA_CODE,
     PROPAGATED_CODES,
     TRUTH_CODES,
@@ -339,7 +340,7 @@ class _GafInventory:
             self.unknown_codes[code] += 1
         key = (
             code,
-            reference_class(cols[GAF_REFERENCE]),
+            reference_class(cols[GAF_REFERENCE], cols[GAF_WITH_FROM]),
             cols[GAF_ASSIGNED_BY],
             is_negated(cols[GAF_QUALIFIER]),
         )

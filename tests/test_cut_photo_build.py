@@ -46,8 +46,16 @@ def _source(out: Path, release: str | int = CUT, published: date = CUT_DATE) -> 
     )
 
 
-def _gaf(accession: str, go: str, code: str, reference: str, qualifier: str = "enables") -> str:
+def _gaf(
+    accession: str,
+    go: str,
+    code: str,
+    reference: str,
+    qualifier: str = "enables",
+    with_from: str = "",
+) -> str:
     cols = [""] * 17
+    cols[7] = with_from
     cols[0], cols[1], cols[3], cols[4], cols[5], cols[6] = (
         "UniProtKB",
         accession,
@@ -263,6 +271,43 @@ class TestRowsAndProfiles:
             {"accession": "P1", "cluster": "C1"},
             {"accession": "P2", "cluster": "C2"},
         ]
+
+
+class TestAnEmptyGoRef:
+    """GOA 211's rows that cite ``GO_REF:`` with no number, read through their with/from."""
+
+    def test_a_subcellular_location_row_takes_the_field_channel(self, tmp_path: Path) -> None:
+        empty = [
+            _gaf("P1", "GO:0000020", "IEA", "GO_REF:", with_from="UniProtKB-SubCell:SL-0097"),
+            _gaf("Q9", "GO:0000021", "IEA", "GO_REF:", with_from="UniProtKB-SubCell:SL-0097"),
+            _gaf("N2", "GO:0000022", "IEA", "GO_REF:", with_from="UniProtKB-KW:KW-0539"),
+        ]
+        out = _build(tmp_path, [*GAF, *empty])
+        rows = pq.read_table(out / "rows.parquet").to_pylist()
+        got = {(r["accession"], r["go_id"]): r["channel"] for r in rows}
+        assert got[("P1", "GO:0000020")] == "reviewed_field_electronic"
+        assert got[("Q9", "GO:0000021")] == "signature_electronic"
+        record = json.loads((out / "rows.json").read_text())
+        assert record["unknown_evidence_rows"] == 0
+        assert record["empty_go_ref_read_as_GO_REF:0000044"] == 2
+        assert record["empty_go_ref_read_as_GO_REF:0000043"] == 1
+        profiles = pq.read_table(out / "profiles.parquet").to_pylist()
+        assert all(p["go_id"] != "GO:0000022" for p in profiles)
+
+    def test_an_empty_goref_from_another_vocabulary_refuses(self, tmp_path: Path) -> None:
+        unread = _gaf("N3", "GO:0000023", "IEA", "GO_REF:", with_from="InterPro:IPR000001")
+        out = _build(tmp_path, [*GAF, unread])
+        lines = (out / "unknown_evidence.tsv").read_text().splitlines()
+        assert lines[1] == "IEA\tempty_go_ref\tGO_REF\tUniProt\t1\tGO_REF:"
+
+    def test_the_channel_digest_covers_the_reading_of_an_empty_goref(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from protea.core.cut_photo import build
+
+        before = build.channel_table_digest()
+        monkeypatch.setitem(build.EMPTY_GO_REF_BY_WITH_FROM, "UniProtKB-KW", "GO_REF:0000037")
+        assert build.channel_table_digest() != before
 
 
 class TestTheManifest:

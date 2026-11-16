@@ -58,6 +58,8 @@ from protea.core.cut_photo.channels import (
 )
 from protea.core.cut_photo.formats import (
     CURATED_INFERENCE_CODES,
+    EMPTY_GO_REF,
+    EMPTY_GO_REF_BY_WITH_FROM,
     GAF_ASPECT,
     GAF_ASSIGNED_BY,
     GAF_DATE,
@@ -100,8 +102,16 @@ OUTPUTS: tuple[str, ...] = (
 
 
 def channel_table_digest() -> str:
-    """The sha256 of the declared electronic reference table, recorded per photo."""
-    blob = json.dumps(sorted(ELECTRONIC_REFERENCES.items()), sort_keys=True).encode()
+    """The sha256 of the declared electronic reference table, recorded per photo.
+
+    It covers the reading of an empty ``GO_REF`` through its with/from too, since
+    that rule decides a channel as much as the table does.
+    """
+    declared = {
+        "references": sorted(ELECTRONIC_REFERENCES.items()),
+        "empty_go_ref_by_with_from": sorted(EMPTY_GO_REF_BY_WITH_FROM.items()),
+    }
+    blob = json.dumps(declared, sort_keys=True).encode()
     return hashlib.sha256(blob).hexdigest()
 
 
@@ -257,7 +267,9 @@ class _RowsAndProfiles:
         if reviewed is None and cluster is None:
             return
         code, reference = cols[GAF_EVIDENCE], cols[GAF_REFERENCE]
-        kind = reference_class(reference)
+        kind = reference_class(reference, cols[GAF_WITH_FROM])
+        if reference == EMPTY_GO_REF:
+            self.counts[f"empty_go_ref_read_as_{kind}"] += 1
         channel: str
         try:
             channel = channel_of(code, kind, bool(reviewed))

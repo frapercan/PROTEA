@@ -60,8 +60,23 @@ KNOWN_CODES: frozenset[str] = (
 
 _GO_REF = re.compile(r"GO_REF:\d{7}")
 
+#: A reference that names ``GO_REF`` with no number. GOA 211 has 419,822 such rows,
+#: all ``IEA`` by UniProt dated 2022-09-07 and all cellular component, whose with/from
+#: is a subcellular location (419,742) or a keyword (80): the two field mappings
+#: whose rows otherwise cite ``GO_REF:0000044`` and ``GO_REF:0000043``.
+EMPTY_GO_REF = "GO_REF:"
 
-def reference_class(field: str) -> str:
+#: The with/from vocabularies that name the mapping an empty ``GO_REF`` came from.
+#: Any other with/from leaves the reference as :data:`EMPTY_GO_REF_UNREAD`, which no
+#: channel lists, so the photo refuses it instead of guessing.
+EMPTY_GO_REF_BY_WITH_FROM: dict[str, str] = {
+    "UniProtKB-SubCell": "GO_REF:0000044",
+    "UniProtKB-KW": "GO_REF:0000043",
+}
+EMPTY_GO_REF_UNREAD = "empty_go_ref"
+
+
+def reference_class(field: str, with_from: str = "") -> str:
     """Name the source behind a GAF reference field.
 
     A ``GO_REF`` names a pipeline or a curation method, so it is returned as is
@@ -69,13 +84,27 @@ def reference_class(field: str) -> str:
     (``PMID``, ``DOI``) is ``"publication"``; anything else is ``"other"``. That
     keeps the inventory small without hiding any pipeline, because every
     electronic annotation cites a ``GO_REF``.
+
+    The one exception is a ``GO_REF`` with no number (:data:`EMPTY_GO_REF`): it is
+    read through its ``with_from`` when every item there is in one vocabulary of
+    :data:`EMPTY_GO_REF_BY_WITH_FROM`, and is :data:`EMPTY_GO_REF_UNREAD` otherwise.
     """
     match = _GO_REF.search(field)
     if match:
         return match.group(0)
-    for part in field.split("|"):
+    parts = field.split("|")
+    for part in parts:
         if part.startswith(("PMID:", "DOI:")):
             return "publication"
+    if EMPTY_GO_REF in parts:
+        read = {
+            EMPTY_GO_REF_BY_WITH_FROM.get(item.split(":", 1)[0])
+            for item in with_from.split("|")
+            if item
+        }
+        if len(read) == 1 and None not in read:
+            return str(read.pop())
+        return EMPTY_GO_REF_UNREAD
     return "other"
 
 
