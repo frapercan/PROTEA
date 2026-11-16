@@ -110,11 +110,22 @@ corpus; as a profile they are counts per (cluster, term, channel).
 
 **2. Every GOA t row of a member is kept, and its evidence channel is a declared
 table, not a column.** The channel is a pure function of the row's evidence code,
-its reference (``GO_REF`` or a publication), ``assigned_by`` and whether the
-protein is reviewed at t. Following ADR-D56 it is stored by what it depends on: a
-table ``evidence_channel`` keyed by those four fields, versioned with the GO_REF
-list it was checked against. Every ``GO_REF`` seen in GOA t must appear in the
-table; an unknown one is counted and rejects the photo rather than being guessed.
+its reference (``GO_REF`` or a publication) and whether the protein is reviewed at
+t. Following ADR-D56 it is stored by what it depends on: a table
+``evidence_channel`` keyed by those three facts, versioned by the digest every
+photo records and dated by the day the GO_REF list it was checked against was
+read (``evidence_channel_table``). ``assigned_by`` decides no channel, so it is
+not a key; it stays in the inventory of refused keys, where it helps to place a
+new one. Every ``GO_REF`` seen in GOA t must appear in the table; an unknown one
+is counted and rejects the photo rather than being guessed.
+
+Two SQL functions classify a stored row from the table, so any reader computes
+the channel without Python: ``evidence_reference_class`` reads the reference
+(including the empty ``GO_REF`` below) and ``evidence_channel_of`` returns the
+channel, or NULL for a key the table does not list. A table is written once, by
+the migration that introduced it or by the first load that classifies with it,
+and a later load refuses a stored table that differs from the code's
+(amended 2026-11-16, when the table was built).
 
 A ``GO_REF`` with no number is read through its with/from (the author,
 2026-11-16: "Leer por with/from"). GOA 211 has 419,822 ``IEA`` rows by UniProt,

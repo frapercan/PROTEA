@@ -23,9 +23,15 @@ and the entry is added after reading its title, never by default.
 
 from __future__ import annotations
 
-from typing import Final, Literal
+from collections import Counter
+from typing import Final, Literal, NamedTuple
 
-from protea.core.cut_photo.formats import AUTOMATIC_CODE, NO_DATA_CODE, TRUTH_CODES
+from protea.core.cut_photo.formats import (
+    AUTOMATIC_CODE,
+    EMPTY_GO_REF_BY_WITH_FROM,
+    NO_DATA_CODE,
+    TRUTH_CODES,
+)
 
 Channel = Literal[
     "truth",
@@ -187,3 +193,66 @@ def channel_of(code: str, reference: str, reviewed: bool) -> Channel:
     if kind == "field":
         return "reviewed_field_electronic" if reviewed else "signature_electronic"
     return "signature_electronic"
+
+
+#: The reference class a row of the table names when its channel does not depend on
+#: the reference, which is every code but ``IEA``. A reader matches it first and
+#: computes a row's reference class only when it does not match.
+ANY_REFERENCE: Final[str] = "*"
+
+
+class ChannelRow(NamedTuple):
+    """One key of the declared partition and its channel: a row of ``evidence_channel``."""
+
+    evidence_code: str
+    reference_class: str
+    reviewed: bool
+    channel: Channel
+    reference_title: str | None
+
+
+def channel_rows() -> list[ChannelRow]:
+    """Every key the partition declares, with the channel :func:`channel_of` gives it.
+
+    A code other than ``IEA`` decides its channel alone, so it takes one row per
+    reviewed state under :data:`ANY_REFERENCE`. ``IEA`` takes one row per declared
+    reference and reviewed state, with the reference's title in GO's list. A key
+    missing here is one :func:`channel_of` refuses, so a reader that finds no row
+    has found a key the photo would have refused.
+    """
+    codes = TRUTH_CODES | CURATED_CODES | PHYLOGENETIC_CODES | {NO_DATA_CODE}
+    rows = [
+        ChannelRow(code, ANY_REFERENCE, reviewed, channel_of(code, ANY_REFERENCE, reviewed), None)
+        for code in sorted(codes)
+        for reviewed in (False, True)
+    ]
+    rows += [
+        ChannelRow(
+            AUTOMATIC_CODE,
+            reference,
+            reviewed,
+            channel_of(AUTOMATIC_CODE, reference, reviewed),
+            title,
+        )
+        for reference, (_kind, title) in sorted(ELECTRONIC_REFERENCES.items())
+        for reviewed in (False, True)
+    ]
+    return rows
+
+
+def channel_table_descriptors(sha256: str) -> dict[str, str]:
+    """ADR-D58's short and long descriptors of the channel table this code declares."""
+    kinds = Counter(kind for kind, _title in ELECTRONIC_REFERENCES.values())
+    read = ", ".join(f"{p} as {r}" for p, r in sorted(EMPTY_GO_REF_BY_WITH_FROM.items()))
+    return {
+        "short_name": f"evidence-channels-{GOREF_LIST_READ_ON}-{sha256[:8]}",
+        "description": (
+            f"The evidence channel of a GOA row, checked against GO's GO_REF list "
+            f"read on {GOREF_LIST_READ_ON}: {len(TRUTH_CODES)} truth codes, "
+            f"{len(CURATED_CODES)} curated, {len(PHYLOGENETIC_CODES)} phylogenetic and ND "
+            f"as no data; {len(ELECTRONIC_REFERENCES)} electronic references "
+            f"({kinds['orthology']} orthology, {kinds['field']} field translations, "
+            f"{kinds['signature']} signatures); an empty GO_REF read through its "
+            f"with/from ({read}). {len(channel_rows())} rows."
+        ),
+    }
