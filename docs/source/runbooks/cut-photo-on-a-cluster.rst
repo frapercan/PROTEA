@@ -63,7 +63,9 @@ Before you start
 
 Take the cut's pairing from ADR-D59 ("The five pairings"): the GOA release and its
 publication date (the cut's date), the paired UniProt release and its date, and the
-sizes and md5 of its Swiss-Prot and UniRef archives. Take the GO graph from the rule
+sizes and md5 of its Swiss-Prot and UniRef archives. The release's TrEMBL is published
+only inside its full knowledgebase archive (``knowledgebase<release>.tar.gz``); take
+that archive's size and md5 from the same ``RELEASE.metalink``. Take the GO graph from the rule
 the loader enforces: the newest loaded graph not after the GO release the GAF's
 ``!go-version`` line declares. Use a revision merged on the integration branch.
 
@@ -84,10 +86,12 @@ Steps
       fetch_source.sh <swiss-prot url> <src>/uniprot_sprot-only<release>.tar.gz <bytes> 4 <md5>
       fetch_source.sh <uniref url> <src>/uniref<release>.tar.gz <bytes> 16 <md5> nojoin
       fetch_source.sh <goa url> <src>/goa_uniprot_all.gaf.<cut>.gz <bytes> 8
+      fetch_source.sh <knowledgebase url> <src>/knowledgebase<release>.tar.gz <bytes> 16 <md5> nojoin
 
    The last line of each log gives the file's sha256. Record the GOA one: the build
-   job refuses a GOA file that does not hash to it. The UniRef archive stays in parts
-   and is checked by its stream md5 in the next step.
+   job refuses a GOA file that does not hash to it. The UniRef and knowledgebase
+   archives stay in parts and are checked by the md5 of their stream by the job that
+   reads them.
 
 3. **Measure** (one job)::
 
@@ -102,10 +106,15 @@ Steps
 
       sbatch [partition] <code-dir>/deploy/cluster/cut_photo_build.sh <python> <code-dir> <cut> <cut-date> \
         <uniprot-release> <uniprot-date> <src> <measured> <photo> <revision> \
-        <goa-url> <goa-sha256> <swiss-prot-url>
+        <goa-url> <goa-sha256> <swiss-prot-url> \
+        <src>/knowledgebase<release>.tar.gz <knowledgebase-md5> <knowledgebase-url>
 
-   The log ends with ``manifest exit 0`` (complete) or ``3`` (refused) and the
-   sha256 of ``photo.json``.
+   After the Swiss-Prot sequences, the job streams the knowledgebase parts in order
+   and keeps the TrEMBL records of the members outside Swiss-Prot
+   (``unreviewed_sequences.parquet``); it writes the md5 of that stream beside the
+   photo, and the manifest refuses the photo unless it is the published one. The log
+   ends with ``manifest exit 0`` (complete) or ``3`` (refused) and the sha256 of
+   ``photo.json``.
 
 5. **Read a refusal.** A photo is refused when an evidence key is not in the
    channel table, an output is missing, or two passes disagree about a source
@@ -130,9 +139,9 @@ Steps
    operations list) and emits a ``load_cut_photo.stage_done`` event per stage, so a
    long load is never taken for a stalled one.
 
-8. **Clean up.** Delete the UniRef parts after the measure job and the GOA file once
-   the photo is loaded. Keep ``photo.json`` with the photo's files until the load
-   succeeds.
+8. **Clean up.** Delete the UniRef parts after the measure job, the knowledgebase
+   parts after the build, and the GOA file once the photo is loaded. Keep
+   ``photo.json`` with the photo's files until the load succeeds.
 
 The run at 211, measured
 ------------------------

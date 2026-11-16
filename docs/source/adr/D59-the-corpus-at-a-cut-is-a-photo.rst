@@ -229,7 +229,8 @@ photo adds rows and never rewrites an earlier one.
   node without the database stack can import it.
 - The build, ``protea.core.cut_photo.build``, is a pure function of three
   downloaded, dated sources: GOA t, the paired UniProt release (its Swiss-Prot
-  archive) and the paired UniRef release, which reaches it through the
+  archive, and its full knowledgebase archive for the TrEMBL sequences of
+  decision 5) and the paired UniRef release, which reaches it through the
   measurement's records. It opens no database connection and writes parquet
   files plus a manifest that records each source's URL, publication date and
   sha256. It runs on a compute node (Picasso, in this campaign) from code
@@ -256,10 +257,18 @@ superset takes its sequence from the paired release's files. A photo never uses
 today's sequence (ADR-D49 decision 4 still governs the series loaded before this
 record), and the drift against today's is measurable from the md5s.
 
-Today the build reads the Swiss-Prot archive alone, so a member outside the
-superset is loaded as an accession-only row with no sequence from its pairing:
-94,190 of the 662,192 members at 211, in the diagnostic build. Reading them from
-the rest of the paired release is open (below).
+The build reads them out of the paired release's full knowledgebase archive,
+the only file in which UniProt publishes a release's TrEMBL: the job streams the
+archive's parts in order, takes the md5 of the stream, and keeps the TrEMBL
+records of the members outside the superset (``unreviewed_sequences.parquet``,
+94,190 members at 211). The manifest refuses the photo unless that md5 is the
+one the release's ``RELEASE.metalink`` publishes, and a member the release does
+not hold is counted and named, never guessed: a GOA release can cite an
+accession created after its paired UniProt release. The loader checks each
+sequence against its md5 and stores it by md5, as it does the Swiss-Prot ones;
+the database link from each such member to its paired sequence comes with the
+photo's membership table (amended 2026-11-16, when the author approved reading
+TrEMBL; until that day the build read the Swiss-Prot archive alone).
 
 The five pairings
 ~~~~~~~~~~~~~~~~~
@@ -347,9 +356,11 @@ What this record does not settle
   analysis decision, a filter on the channel table.
 - **The evaluation option itself.** Restricting ``generate_evaluation_set`` to a
   photo's superset is a separate change.
-- **Sequences of the members outside Swiss-Prot.** Whether they come from the
-  unreviewed part of the paired release (its TrEMBL archive), and how, is the
-  author's decision (decision 5).
+- **The membership table.** Which members a photo holds, by which set, and the
+  md5 of each one's paired sequence, as rows the database can join. Today the
+  superset and the live tiers are derived and the TrEMBL link is in the photo's
+  files; neighbours admitted as proteins would need the table (open, with the
+  author's decision on protein-level neighbours above).
 - **Taxon groups in the profiles.** Whether a profile is split by a coarse taxon
   group, and from which taxonomy, is the author's decision. Until then the
   profile's key has no taxon group and the photo no taxonomy source.

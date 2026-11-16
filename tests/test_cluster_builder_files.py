@@ -110,6 +110,7 @@ def test_the_download_refuses_a_source_past_the_mark(url: str, tmp_path: Path) -
 def test_the_build_job_refuses_a_cut_past_the_mark(tmp_path: Path) -> None:
     args = ["python", str(tmp_path), "228", "2025-11-01", "2025_03", "2025-06-18"]
     args += [str(tmp_path)] * 3 + ["rev", "url", "0" * 64, "url"]
+    args += [str(tmp_path / "kb"), "0" * 32, "url"]
     done = _run("cut_photo_build.sh", *args)
     assert done.returncode == 2
     assert "after the mark 227" in done.stdout
