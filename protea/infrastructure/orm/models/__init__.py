@@ -2,8 +2,7 @@ from .alignment.sequence_alignment import SequenceAlignment  # noqa: F401
 from .annotation.annotation_set import AnnotationSet  # noqa: F401
 from .annotation.cut_photo import (  # noqa: F401
     CutPhoto,
-    CutPhotoCluster,
-    CutPhotoClusterProfile,
+    CutPhotoMember,
 )
 from .annotation.evaluation_result import EvaluationResult  # noqa: F401
 from .annotation.evaluation_set import EvaluationSet  # noqa: F401

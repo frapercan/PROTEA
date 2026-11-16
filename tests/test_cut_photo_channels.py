@@ -8,7 +8,7 @@ from protea.core.cut_photo import channels
 from protea.core.cut_photo.channels import (
     CHANNELS,
     ELECTRONIC_REFERENCES,
-    PROFILE_CHANNELS,
+    NEIGHBOUR_CHANNELS,
     RECIPE_CHANNELS,
     UnknownEvidence,
     channel_of,
@@ -32,10 +32,13 @@ GOA_211_ELECTRONIC_REFERENCES = (
 
 
 class TestThePartition:
-    def test_seven_channels_and_the_recipe_and_profile_are_subsets(self) -> None:
+    def test_seven_channels_and_the_recipe_and_neighbour_channels_are_subsets(self) -> None:
         assert len(CHANNELS) == len(set(CHANNELS)) == 7
         assert RECIPE_CHANNELS <= set(CHANNELS)
-        assert set(PROFILE_CHANNELS) <= RECIPE_CHANNELS
+        # A neighbour is admitted only by recipe channels an unreviewed protein outside
+        # the base can carry: truth or curated would have admitted it already.
+        assert NEIGHBOUR_CHANNELS == {"phylogenetic", "orthology_electronic"}
+        assert NEIGHBOUR_CHANNELS <= RECIPE_CHANNELS
         assert "signature_electronic" not in RECIPE_CHANNELS
         assert "no_data" not in RECIPE_CHANNELS
 

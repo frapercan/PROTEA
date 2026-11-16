@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the photo of a cut on a compute node (ADR-D59, step 2) in ONE job, with
 # python -m protea.core.cut_photo.build shipped as code only by send_builder_code.sh:
-# members, rows, sequences and manifest.
+# members (with the annotated UniRef50 neighbours), rows, sequences and manifest.
 #
 # Reads the GOA file and the paired Swiss-Prot archive fetch_source.sh downloaded on
 # the login node (SRC_DIR), and the superset and neighbour tables cut_photo_measure.sh
@@ -57,10 +57,11 @@ at_cut=(--cut-release "$CUT" --cut-date "$CUT_DATE" --out "$OUT")
 goa_file=(--source-url "$GOA_URL" --source-sha256 "$GOA_SHA")
 log "start build, cut $CUT, code $REV on $(hostname)"
 t=$(date +%s)
-pigz -dc -p 4 "$GOA" | build members --superset-table "$MEAS/superset.tsv" --release "$CUT" \
-  --published "$CUT_DATE" "${at_cut[@]}" "${goa_file[@]}"
+pigz -dc -p 4 "$GOA" | build members --superset-table "$MEAS/superset.tsv" \
+  --neighbours "$MEAS/neighbours.parquet" --release "$CUT" --published "$CUT_DATE" \
+  "${at_cut[@]}" "${goa_file[@]}"
 log "members pass in $(( $(date +%s) - t )) s"; t=$(date +%s)
-pigz -dc -p 4 "$GOA" | build rows --members "$OUT/members.parquet" --neighbours "$MEAS/neighbours.parquet" \
+pigz -dc -p 4 "$GOA" | build rows --members "$OUT/members.parquet" \
   --release "$CUT" --published "$CUT_DATE" "${at_cut[@]}" "${goa_file[@]}"
 log "rows pass in $(( $(date +%s) - t )) s"; t=$(date +%s)
 build sequences --archive "$ARCHIVE" --release "$UREL" --published "$UPUB" "${at_cut[@]}" \

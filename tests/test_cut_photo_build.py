@@ -50,6 +50,7 @@ KB_FILE = {
 #: the superset; X7 is a record nobody asked for.
 TREMBL = [b">tr|Q9|Q9_HUMAN Some protein OS=Homo sapiens\n", b"MQQ\n", b"LK\n"]
 TREMBL += [b">tr|X7|X7_HUMAN Other\n", b"MAA\n"]
+TREMBL += [b">tr|N1|N1_MOUSE\n", b"MNN\n", b">tr|N2|N2_RAT\n", b"MPP\n"]
 
 
 def _source(out: Path, release: str | int = CUT, published: date = CUT_DATE) -> PassSource:
@@ -100,7 +101,7 @@ GAF = [
     _gaf("N2", "GO:0000007", "IEA", "GO_REF:0000002"),
     _gaf("X1", "GO:0000009", "IEA", "GO_REF:0000002"),
 ]
-UNKNOWN_ROW = _gaf("N3", "GO:0000008", "IEA", "Reactome:R-1")
+UNKNOWN_ROW = _gaf("Q9", "GO:0000008", "IEA", "Reactome:R-1")
 
 
 def _record(path: Path, pass_name: str, **extra: object) -> None:
@@ -136,87 +137,122 @@ def _build(
 ) -> Path:
     superset, neighbours = _setup(tmp_path)
     out = tmp_path / "photo"
-    members_pass(gaf, superset_table=superset, source=_source(out), source_file=goa_file)
+    members_pass(
+        gaf,
+        superset_table=superset,
+        neighbours_path=neighbours,
+        source=_source(out),
+        source_file=goa_file,
+    )
     rows_pass(
         gaf,
         members_path=out / "members.parquet",
-        neighbours_path=neighbours,
         source=_source(out),
         source_file=goa_file if rows_file is None else rows_file,
     )
     return out
 
 
+def _members(tmp_path: Path, gaf: list[str]) -> dict[str, dict[str, object]]:
+    out = _build(tmp_path, gaf)
+    return {row["accession"]: row for row in pq.read_table(out / "members.parquet").to_pylist()}
+
+
 class TestMembers:
-    def test_the_base_is_the_superset_and_what_goa_admits(self, tmp_path: Path) -> None:
-        out = _build(tmp_path, GAF)
-        table = pq.read_table(out / "members.parquet").to_pylist()
-        by = {row["accession"]: row for row in table}
-        assert sorted(by) == ["P1", "P2", "Q9"]
+    def test_the_superset_what_goa_admits_and_the_annotated_neighbours(
+        self, tmp_path: Path
+    ) -> None:
+        by = _members(tmp_path, GAF)
+        assert sorted(by) == ["N1", "N2", "P1", "P2", "Q9"]
         assert by["P1"]["superset"] and by["P1"]["truth"] and by["P1"]["md5"] == MD5["P1"]
         assert by["Q9"]["curated"] and not by["Q9"]["superset"] and by["Q9"]["md5"] is None
         assert by["P2"]["superset"] and not by["P2"]["truth"]
+        # N1 by PAINT (IBA), N2 by electronic orthology: neighbours alone, never targets.
+        for neighbour in ("N1", "N2"):
+            row = by[neighbour]
+            assert row["neighbour"] and not (row["superset"] or row["truth"] or row["curated"])
+        assert {a: by[a]["cluster"] for a in by} == {
+            "N1": "C1",
+            "N2": "C1",
+            "P1": "C1",
+            "P2": "C2",
+            "Q9": None,
+        }
+
+    def test_the_record_counts_each_set(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, GAF)
+        record = json.loads((out / "members.json").read_text())
+        assert (record["members"], record["by_neighbour"], record["outside_superset"]) == (5, 2, 3)
+        assert record["clusters_with_superset"] == 2
+        assert record["cluster_members_outside_base"] == 3
+
+    def test_a_neighbour_with_signatures_alone_stays_out(self, tmp_path: Path) -> None:
+        by = _members(tmp_path, [*GAF, _gaf("N3", "GO:0000030", "IEA", "GO_REF:0000002")])
+        assert "N3" not in by and "X1" not in by
+
+    def test_a_signature_cited_before_an_orthology_reference_does_not_admit(
+        self, tmp_path: Path
+    ) -> None:
+        # The reference class is the FIRST GO_REF the field cites, as in the rows pass.
+        row = _gaf("N3", "GO:0000031", "IEA", "GO_REF:0000002|GO_REF:0000107")
+        assert "N3" not in _members(tmp_path, [*GAF, row])
+
+    def test_a_cluster_member_with_a_truth_row_enters_by_truth(self, tmp_path: Path) -> None:
+        by = _members(tmp_path, [*GAF, _gaf("N3", "GO:0000032", "IDA", "PMID:9")])
+        assert by["N3"]["truth"] and not by["N3"]["neighbour"]
+        assert by["N3"]["cluster"] == "C2"
 
 
 class TestTheInputsAreNamed:
     """Each measured table is named by the record beside it, or the pass refuses."""
 
+    def _members_pass(self, tmp_path: Path, superset: Path, neighbours: Path) -> None:
+        members_pass(
+            GAF,
+            superset_table=superset,
+            neighbours_path=neighbours,
+            source=_source(tmp_path / "photo"),
+        )
+
     def test_the_photo_names_its_superset_and_its_clusters(self, tmp_path: Path) -> None:
         out = _build(tmp_path, GAF)
         members = json.loads((out / "members.json").read_text())
-        rows = json.loads((out / "rows.json").read_text())
         assert members["superset_source"]["release"] == "2022_03"
         assert (
             members["superset_source"]["sha256"] == hashlib.sha256(canonical_table(MD5)).hexdigest()
         )
-        assert rows["neighbours_source"]["release"] == "2022_03"
-        assert len(rows["neighbours_source"]["sha256"]) == 64
+        assert members["uniref_source"]["release"] == "2022_03"
+        assert len(members["uniref_source"]["sha256"]) == 64
 
     def test_a_table_with_no_record_refuses(self, tmp_path: Path) -> None:
-        superset, _ = _setup(tmp_path)
+        superset, neighbours = _setup(tmp_path)
         (tmp_path / "superset.json").unlink()
         with pytest.raises(PhotoGuardError, match="missing"):
-            members_pass(GAF, superset_table=superset, source=_source(tmp_path / "photo"))
+            self._members_pass(tmp_path, superset, neighbours)
 
     def test_a_table_measured_for_another_cut_refuses(self, tmp_path: Path) -> None:
         superset, neighbours = _setup(tmp_path)
-        out = tmp_path / "photo"
-        members_pass(GAF, superset_table=superset, source=_source(out))
         record = json.loads((tmp_path / "neighbours.json").read_text())
         (tmp_path / "neighbours.json").write_text(json.dumps({**record, "cut_release": 205}))
         with pytest.raises(PhotoGuardError, match="written for cut 205"):
-            rows_pass(
-                GAF,
-                members_path=out / "members.parquet",
-                neighbours_path=neighbours,
-                source=_source(out),
-            )
+            self._members_pass(tmp_path, superset, neighbours)
 
     def test_clusters_published_after_the_cut_refuse(self, tmp_path: Path) -> None:
         superset, neighbours = _setup(tmp_path)
-        out = tmp_path / "photo"
-        members_pass(GAF, superset_table=superset, source=_source(out))
         _record(
             tmp_path / "neighbours.json", "neighbours", release="2022_04", published="2022-10-12"
         )
         with pytest.raises(PhotoGuardError):
-            rows_pass(
-                GAF,
-                members_path=out / "members.parquet",
-                neighbours_path=neighbours,
-                source=_source(out),
-            )
+            self._members_pass(tmp_path, superset, neighbours)
 
     def test_a_superset_table_its_record_does_not_describe_refuses(self, tmp_path: Path) -> None:
-        superset, _ = _setup(tmp_path)
+        superset, neighbours = _setup(tmp_path)
         superset.write_bytes(canonical_table({**MD5, "P3": "c" * 32}))
         with pytest.raises(PhotoGuardError, match="its record says"):
-            members_pass(GAF, superset_table=superset, source=_source(tmp_path / "photo"))
+            self._members_pass(tmp_path, superset, neighbours)
 
     def test_an_accession_in_two_clusters_refuses(self, tmp_path: Path) -> None:
         superset, neighbours = _setup(tmp_path)
-        out = tmp_path / "photo"
-        members_pass(GAF, superset_table=superset, source=_source(out))
         pq.write_table(
             pa.table(
                 {
@@ -228,31 +264,19 @@ class TestTheInputsAreNamed:
             neighbours,
         )
         with pytest.raises(PhotoGuardError, match="more than one cluster"):
-            rows_pass(
-                GAF,
-                members_path=out / "members.parquet",
-                neighbours_path=neighbours,
-                source=_source(out),
-            )
+            self._members_pass(tmp_path, superset, neighbours)
 
     def test_clusters_measured_against_another_superset_refuse(self, tmp_path: Path) -> None:
         superset, neighbours = _setup(tmp_path)
-        out = tmp_path / "photo"
-        members_pass(GAF, superset_table=superset, source=_source(out))
         pq.write_table(
             pa.table({"cluster": ["C1"], "accession": ["N1"], "in_superset": [True]}), neighbours
         )
         with pytest.raises(PhotoGuardError, match="superset does not"):
-            rows_pass(
-                GAF,
-                members_path=out / "members.parquet",
-                neighbours_path=neighbours,
-                source=_source(out),
-            )
+            self._members_pass(tmp_path, superset, neighbours)
 
 
-class TestRowsAndProfiles:
-    def test_member_rows_carry_their_channel(self, tmp_path: Path) -> None:
+class TestRows:
+    def test_every_member_row_carries_its_channel(self, tmp_path: Path) -> None:
         out = _build(tmp_path, GAF)
         rows = pq.read_table(out / "rows.parquet").to_pylist()
         got = {(r["accession"], r["go_id"]): r["channel"] for r in rows}
@@ -261,28 +285,16 @@ class TestRowsAndProfiles:
             ("P1", "GO:0000002"): "reviewed_field_electronic",
             ("Q9", "GO:0000003"): "curated",
             ("Q9", "GO:0000004"): "signature_electronic",
+            ("N1", "GO:0000005"): "phylogenetic",
+            ("N2", "GO:0000006"): "orthology_electronic",
+            ("N2", "GO:0000007"): "signature_electronic",
         }
 
-    def test_a_profile_counts_members_once_and_only_in_profile_channels(
-        self, tmp_path: Path
-    ) -> None:
+    def test_every_row_of_a_neighbour_is_kept_as_written(self, tmp_path: Path) -> None:
         out = _build(tmp_path, GAF)
-        profile = {
-            (r["cluster"], r["go_id"], r["channel"], r["negated"]): r["members"]
-            for r in pq.read_table(out / "profiles.parquet").to_pylist()
-        }
-        assert profile == {
-            ("C1", "GO:0000005", "phylogenetic", False): 1,
-            ("C1", "GO:0000006", "orthology_electronic", False): 1,
-        }
-
-    def test_the_superset_clusters_are_written(self, tmp_path: Path) -> None:
-        out = _build(tmp_path, GAF)
-        clusters = pq.read_table(out / "clusters.parquet").to_pylist()
-        assert clusters == [
-            {"accession": "P1", "cluster": "C1"},
-            {"accession": "P2", "cluster": "C2"},
-        ]
+        rows = pq.read_table(out / "rows.parquet").to_pylist()
+        assert sum(r["accession"] == "N1" for r in rows) == 2
+        assert sum(r["accession"] == "N2" for r in rows) == 2
 
 
 class TestAnEmptyGoRef:
@@ -299,15 +311,14 @@ class TestAnEmptyGoRef:
         got = {(r["accession"], r["go_id"]): r["channel"] for r in rows}
         assert got[("P1", "GO:0000020")] == "reviewed_field_electronic"
         assert got[("Q9", "GO:0000021")] == "signature_electronic"
+        assert got[("N2", "GO:0000022")] == "signature_electronic"
         record = json.loads((out / "rows.json").read_text())
         assert record["unknown_evidence_rows"] == 0
         assert record["empty_go_ref_read_as_GO_REF:0000044"] == 2
         assert record["empty_go_ref_read_as_GO_REF:0000043"] == 1
-        profiles = pq.read_table(out / "profiles.parquet").to_pylist()
-        assert all(p["go_id"] != "GO:0000022" for p in profiles)
 
     def test_an_empty_goref_from_another_vocabulary_refuses(self, tmp_path: Path) -> None:
-        unread = _gaf("N3", "GO:0000023", "IEA", "GO_REF:", with_from="InterPro:IPR000001")
+        unread = _gaf("Q9", "GO:0000023", "IEA", "GO_REF:", with_from="InterPro:IPR000001")
         out = _build(tmp_path, [*GAF, unread])
         lines = (out / "unknown_evidence.tsv").read_text().splitlines()
         assert lines[1] == "IEA\tempty_go_ref\tGO_REF\tUniProt\t1\tGO_REF:"
@@ -358,7 +369,7 @@ class TestTheManifest:
         assert lines[1] == "IEA\tother\tReactome\tUniProt\t1\tReactome:R-1"
 
     def test_an_unknown_goref_keeps_its_id_and_its_examples(self, tmp_path: Path) -> None:
-        rows = [_gaf("N3", f"GO:00000{n}", "IEA", "GO_REF:0009999") for n in (10, 11, 12)]
+        rows = [_gaf("Q9", f"GO:00000{n}", "IEA", "GO_REF:0009999") for n in (10, 11, 12)]
         out = _build(tmp_path, [*GAF, *rows])
         self._sequences(tmp_path, out)
         manifest = manifest_pass(out, revision="abc")
@@ -377,8 +388,9 @@ class TestTheManifest:
         sequences = pq.read_table(out / "sequences.parquet").to_pylist()
         assert [s["sequence"] for s in sequences] == ["MKV", "MAAGG"]
         unreviewed = pq.read_table(out / "unreviewed_sequences.parquet").to_pylist()
+        assert [u["accession"] for u in unreviewed] == ["N1", "N2", "Q9"]
         md5 = hashlib.md5(b"MQQLK", usedforsecurity=False).hexdigest()
-        assert unreviewed == [{"accession": "Q9", "md5": md5, "sequence": "MQQLK"}]
+        assert unreviewed[2] == {"accession": "Q9", "md5": md5, "sequence": "MQQLK"}
         assert manifest["counts"]["unreviewed"]["missing"] == 0
 
     def test_the_manifest_names_its_sources(self, tmp_path: Path) -> None:
@@ -413,14 +425,16 @@ class TestTheManifest:
     def test_two_passes_over_different_gaf_headers_refuse_the_photo(self, tmp_path: Path) -> None:
         superset, neighbours = _setup(tmp_path)
         out = tmp_path / "photo"
-        members_pass(GAF, superset_table=superset, source=_source(out), source_file=GOA_FILE)
-        other = [line.replace("2022-09-12", "2022-07-01") for line in GAF]
-        rows_pass(
-            other,
-            members_path=out / "members.parquet",
+        members_pass(
+            GAF,
+            superset_table=superset,
             neighbours_path=neighbours,
             source=_source(out),
             source_file=GOA_FILE,
+        )
+        other = [line.replace("2022-09-12", "2022-07-01") for line in GAF]
+        rows_pass(
+            other, members_path=out / "members.parquet", source=_source(out), source_file=GOA_FILE
         )
         self._sequences(tmp_path, out)
         manifest = manifest_pass(out, revision="abc")
@@ -510,10 +524,10 @@ class TestTheTremblPass:
     def test_a_member_the_release_does_not_hold_is_counted_and_named(self, tmp_path: Path) -> None:
         out, uniprot = self._photo(tmp_path)
         record = unreviewed_pass(
-            TREMBL[3:], members_path=out / "members.parquet", source=uniprot, source_file=KB_FILE
+            TREMBL[3:5], members_path=out / "members.parquet", source=uniprot, source_file=KB_FILE
         )
-        assert (record["members_outside_superset"], record["sequences"]) == (1, 0)
-        assert (record["missing"], record["missing_examples"]) == (1, ["Q9"])
+        assert (record["members_outside_superset"], record["sequences"]) == (3, 0)
+        assert (record["missing"], record["missing_examples"]) == (3, ["N1", "N2", "Q9"])
 
     def test_a_record_read_twice_refuses(self, tmp_path: Path) -> None:
         out, uniprot = self._photo(tmp_path)
@@ -534,4 +548,4 @@ class TestTheTremblPass:
         argv += ["--published", "2022-08-03", "--cut-release", "211", "--cut-date", "2022-09-16"]
         argv += ["--out", str(out), "--source-url", KB_FILE["url"], "--source-md5", KB_FILE["md5"]]
         assert main(argv) == 0
-        assert json.loads((out / "unreviewed.json").read_text())["sequences"] == 1
+        assert json.loads((out / "unreviewed.json").read_text())["sequences"] == 3

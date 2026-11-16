@@ -332,7 +332,7 @@ later revision) or *Superseded* (a named later decision replaces it).
      - Proposed
      - T-PLATFORM
    * - D59
-     - :doc:`The corpus at a cut is a photo: its Swiss-Prot, its live tiers and their UniRef50 profiles <D59-the-corpus-at-a-cut-is-a-photo>`
+     - :doc:`The corpus at a cut is a photo: its Swiss-Prot, its live tiers and their annotated UniRef50 neighbours <D59-the-corpus-at-a-cut-is-a-photo>`
      - Accepted
      - T-PLATFORM
    * - D60
