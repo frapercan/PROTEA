@@ -22,6 +22,12 @@ re-run alone. None opens a database connection.
 ``manifest``
     The photo's manifest: the cut, the sources, the sha256 of every output and
     whether the photo is refused. Assembled from the other passes' records.
+
+The two tables the passes read from the measurement (``superset.tsv`` and
+``neighbours.parquet``) are named by the record the measure pass wrote beside
+each one: the pass refuses a table whose record is missing, was written for
+another cut or names a source the guard refuses, and records its release and
+sha256, so the manifest says which Swiss-Prot and which UniRef the photo is of.
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ import sys
 import tarfile
 from collections import Counter
 from collections.abc import Iterable, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -67,12 +74,14 @@ from protea.core.cut_photo.formats import (
 from protea.core.cut_photo.measure import (
     SWISSPROT_FASTA_MEMBER,
     PassSource,
+    PhotoGuardError,
     _file_sha256,
     _ParquetBuffer,
     _stdin_lines,
     _write_record,
 )
-from protea.core.swissprot_table import iter_swissprot_records, read_local_table
+from protea.core.row_alignment import lookup_by
+from protea.core.swissprot_table import canonical_table, iter_swissprot_records, read_local_table
 
 _GAF_PREFIX = "UniProtKB\t"
 ADMITTING_CODES = TRUTH_CODES | CURATED_INFERENCE_CODES
@@ -93,6 +102,33 @@ def channel_table_digest() -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
+def upstream_source(record_path: Path, family: str, source: PassSource) -> dict[str, Any]:
+    """The release an input table was measured from, read from the record beside it.
+
+    The record must have been written for this cut, and its source must pass the
+    guard the measure pass asked (published on or before the cut, a UniProt or
+    UniRef release under the ceiling), so a table measured for another cut or
+    from a later release refuses here instead of entering the photo.
+    """
+    if not record_path.exists():
+        raise PhotoGuardError(f"{record_path} is missing: the {family} release cannot be named")
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    written_for = (int(record["cut_release"]), str(record["cut_date"]))
+    if written_for != (source.cut_release, source.cut_date.isoformat()):
+        raise PhotoGuardError(
+            f"{record_path} was written for cut {written_for[0]} ({written_for[1]}), "
+            f"not {source.cut_release} ({source.cut_date.isoformat()})"
+        )
+    PassSource(
+        release=str(record["release"]),
+        published=date.fromisoformat(str(record["published"])),
+        cut_release=source.cut_release,
+        cut_date=source.cut_date,
+        out=source.out,
+    ).check(family)
+    return {"release": str(record["release"]), "published": str(record["published"])}
+
+
 def _gaf_columns(lines: Iterable[str]) -> Iterable[list[str]]:
     for line in lines:
         if line.startswith(_GAF_PREFIX):
@@ -106,7 +142,14 @@ def members_pass(
 ) -> dict[str, Any]:
     """Write ``members.parquet``: the superset and every accession GOA t admits."""
     source.check("GOA")
+    superset_source = upstream_source(superset_table.with_name("superset.json"), "UniProt", source)
     superset = read_local_table(str(superset_table))
+    superset_sha256 = hashlib.sha256(canonical_table(superset)).hexdigest()
+    recorded = json.loads(superset_table.with_name("superset.json").read_text(encoding="utf-8"))
+    if recorded.get("sha256") != superset_sha256:
+        raise PhotoGuardError(
+            f"{superset_table} hashes to {superset_sha256}, its record says {recorded.get('sha256')}"
+        )
     truth: set[str] = set()
     curated: set[str] = set()
     for cols in _gaf_columns(lines):
@@ -134,6 +177,7 @@ def members_pass(
         "by_truth": len(truth),
         "by_curated_only": len(curated - truth),
         "outside_superset": len(set(accessions) - set(superset)),
+        "superset_source": {**superset_source, "sha256": superset_sha256},
     }
     _write_record(source.out / "members.json", record)
     return record
@@ -218,15 +262,21 @@ class _RowsAndProfiles:
 
 def _read_members(path: Path) -> dict[str, bool]:
     table = pq.read_table(path, columns=["accession", "superset"])
-    return dict(
-        zip(
-            table.column("accession").to_pylist(), table.column("superset").to_pylist(), strict=True
-        )
+    pairs = zip(
+        table.column("accession").to_pylist(), table.column("superset").to_pylist(), strict=True
     )
+    by_accession = lookup_by(pairs, lambda pair: pair[0], context=f"{path.name} accessions")
+    return {accession: bool(pair[1]) for accession, pair in by_accession.items()}
 
 
 def _read_clusters(path: Path, members: dict[str, bool]) -> tuple[dict[str, str], dict[str, str]]:
-    """``(cluster of each neighbour outside the base, cluster of each superset member)``."""
+    """``(cluster of each neighbour outside the base, cluster of each superset member)``.
+
+    UniRef puts an accession in one cluster, so an accession listed twice is
+    refused rather than kept with its last cluster; and a protein the table
+    marks as superset must be a superset member of this photo, or the table was
+    measured against another release.
+    """
     table = pq.read_table(path, columns=["cluster", "accession", "in_superset"])
     neighbours: dict[str, str] = {}
     superset: dict[str, str] = {}
@@ -236,7 +286,13 @@ def _read_clusters(path: Path, members: dict[str, bool]) -> tuple[dict[str, str]
         table.column("in_superset").to_pylist(),
         strict=True,
     ):
+        if accession in superset or accession in neighbours:
+            raise PhotoGuardError(f"{path.name} lists {accession} in more than one cluster")
         if in_superset:
+            if members.get(accession) is not True:
+                raise PhotoGuardError(
+                    f"{path.name} marks {accession} as Swiss-Prot, this photo's superset does not"
+                )
             superset[accession] = cluster
         elif accession not in members:
             neighbours[accession] = cluster
@@ -248,6 +304,9 @@ def rows_pass(
 ) -> dict[str, Any]:
     """Write the member rows with their channel, the clusters and the neighbour profiles."""
     source.check("GOA")
+    neighbours_source = upstream_source(
+        neighbours_path.with_name("neighbours.json"), "UniRef", source
+    )
     members = _read_members(members_path)
     neighbours, superset_clusters = _read_clusters(neighbours_path, members)
     out = source.out
@@ -268,6 +327,7 @@ def rows_pass(
         "neighbours_outside_base": len(neighbours),
         "profile_keys": len(state.profile),
         "unknown_evidence_rows": sum(state.unknown.values()),
+        "neighbours_source": {**neighbours_source, "sha256": _file_sha256(neighbours_path)},
         "channel_table": {
             "goref_list_read_on": GOREF_LIST_READ_ON,
             "sha256": channel_table_digest(),
@@ -312,12 +372,16 @@ def sequences_pass(archive: Path, source: PassSource) -> dict[str, Any]:
     accessions: list[str] = []
     digests: list[str] = []
     sequences: list[str] = []
+    table_of: dict[str, str] = {}
     with tarfile.open(archive, "r:gz") as tar:
         handle = tar.extractfile(SWISSPROT_FASTA_MEMBER)
         if handle is None:
             raise ValueError(f"{archive} has no {SWISSPROT_FASTA_MEMBER}")
         with gzip.GzipFile(fileobj=handle) as fasta:
             for accession, digest, sequence in iter_swissprot_records(fasta):
+                if accession in table_of:
+                    raise ValueError(f"{accession} appears twice in {archive}")
+                table_of[accession] = digest
                 accessions.append(accession)
                 digests.append(digest)
                 sequences.append(sequence)
@@ -328,9 +392,55 @@ def sequences_pass(archive: Path, source: PassSource) -> dict[str, Any]:
         **source.head("sequences"),
         "sequences": len(accessions),
         "archive_sha256": _file_sha256(archive),
+        "superset_sha256": hashlib.sha256(canonical_table(table_of)).hexdigest(),
     }
     _write_record(source.out / "sequences.json", record)
     return record
+
+
+def photo_sources(records: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The photo's sources, named by what they are, from the pass records."""
+    members, rows, sequences = records["members"], records["rows"], records["sequences"]
+    return {
+        "goa": {"release": members["release"], "published": members["published"]},
+        "uniprot": {
+            "release": sequences["release"],
+            "published": sequences["published"],
+            "archive_sha256": sequences["archive_sha256"],
+            "superset_sha256": members["superset_source"]["sha256"],
+        },
+        "uniref": dict(rows["neighbours_source"]),
+    }
+
+
+def source_disagreements(records: dict[str, dict[str, Any]]) -> list[str]:
+    """What the passes say about the same source and do not agree on.
+
+    The two GOA passes must have read the same release, and the superset table
+    and the sequences must be the same UniProt release: as many entries, and the
+    same canonical table of accessions and md5s.
+    """
+    members, rows, sequences = records["members"], records["rows"], records["sequences"]
+    found: list[str] = []
+    for key in ("release", "published", "cut_release", "cut_date"):
+        if members[key] != rows[key]:
+            found.append(f"GOA {key}: members pass {members[key]}, rows pass {rows[key]}")
+        if key.startswith("cut") and members[key] != sequences[key]:
+            found.append(f"{key}: members pass {members[key]}, sequences pass {sequences[key]}")
+    superset = members["superset_source"]
+    for key in ("release", "published"):
+        if str(superset[key]) != str(sequences[key]):
+            found.append(f"UniProt {key}: superset {superset[key]}, sequences {sequences[key]}")
+    if int(members["superset"]) != int(sequences["sequences"]):
+        found.append(
+            f"superset holds {members['superset']} entries, sequences {sequences['sequences']}"
+        )
+    if superset["sha256"] != sequences["superset_sha256"]:
+        found.append(
+            f"the superset table hashes to {superset['sha256']}, the sequences' accessions "
+            f"and md5s to {sequences['superset_sha256']}"
+        )
+    return found
 
 
 def manifest_pass(out: Path, revision: str) -> dict[str, Any]:
@@ -341,19 +451,23 @@ def manifest_pass(out: Path, revision: str) -> dict[str, Any]:
     }
     missing = [name for name in OUTPUTS if not (out / name).exists()]
     unknown = int(records["rows"].get("unknown_evidence_rows", 0))
+    sources = photo_sources(records)
+    disagreements = source_disagreements(records)
     manifest = {
         "photo": "cut-photo",
         "cut_release": records["members"]["cut_release"],
         "cut_date": records["members"]["cut_date"],
-        "sources": {
-            name: {k: records[name][k] for k in ("release", "published")} for name in records
-        },
+        "sources": sources,
         "channels": list(CHANNELS),
         "channel_table": records["rows"]["channel_table"],
         "outputs": {name: _file_sha256(out / name) for name in OUTPUTS if name not in missing},
         "counts": {name: records[name] for name in records},
-        "status": "refused" if unknown or missing else "complete",
-        "refusals": {"unknown_evidence_rows": unknown, "missing_outputs": missing},
+        "status": "refused" if unknown or missing or disagreements else "complete",
+        "refusals": {
+            "unknown_evidence_rows": unknown,
+            "missing_outputs": missing,
+            "source_disagreements": disagreements,
+        },
         "revision": revision,
     }
     _write_record(out / "photo.json", manifest)
@@ -388,8 +502,6 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _pass_source(args: argparse.Namespace) -> PassSource:
-    from datetime import date
-
     release: str | int = (
         int(args.release) if args.pass_name in ("members", "rows") else args.release
     )

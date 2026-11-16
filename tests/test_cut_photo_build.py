@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import io
 import json
 import tarfile
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from protea.core.cut_photo.build import (
     OUTPUTS,
@@ -20,10 +22,14 @@ from protea.core.cut_photo.build import (
     rows_pass,
     sequences_pass,
 )
-from protea.core.cut_photo.measure import PassSource
+from protea.core.cut_photo.measure import PassSource, PhotoGuardError
+from protea.core.swissprot_table import canonical_table
 
 CUT = 211
 CUT_DATE = date(2022, 9, 16)
+UNIPROT = {"release": "2022_03", "published": "2022-08-03"}
+SEQUENCES = {"P1": "MKV", "P2": "MAAGG"}
+MD5 = {a: hashlib.md5(s.encode(), usedforsecurity=False).hexdigest() for a, s in SEQUENCES.items()}
 
 
 def _source(out: Path, release: str | int = CUT, published: date = CUT_DATE) -> PassSource:
@@ -61,9 +67,17 @@ GAF = [
 UNKNOWN_ROW = _gaf("N3", "GO:0000008", "IEA", "Reactome:R-1")
 
 
+def _record(path: Path, pass_name: str, **extra: object) -> None:
+    head = {"pass": pass_name, **UNIPROT, "cut_release": CUT, "cut_date": CUT_DATE.isoformat()}
+    path.write_text(json.dumps({**head, **extra}))
+
+
 def _setup(tmp_path: Path) -> tuple[Path, Path]:
     superset = tmp_path / "superset.tsv"
-    superset.write_text(f"P1\t{'a' * 32}\nP2\t{'b' * 32}\n")
+    blob = canonical_table(MD5)
+    superset.write_bytes(blob)
+    _record(tmp_path / "superset.json", "superset", sha256=hashlib.sha256(blob).hexdigest())
+    _record(tmp_path / "neighbours.json", "neighbours")
     neighbours = tmp_path / "neighbours.parquet"
     pq.write_table(
         pa.table(
@@ -94,9 +108,102 @@ class TestMembers:
         table = pq.read_table(out / "members.parquet").to_pylist()
         by = {row["accession"]: row for row in table}
         assert sorted(by) == ["P1", "P2", "Q9"]
-        assert by["P1"]["superset"] and by["P1"]["truth"] and by["P1"]["md5"] == "a" * 32
+        assert by["P1"]["superset"] and by["P1"]["truth"] and by["P1"]["md5"] == MD5["P1"]
         assert by["Q9"]["curated"] and not by["Q9"]["superset"] and by["Q9"]["md5"] is None
         assert by["P2"]["superset"] and not by["P2"]["truth"]
+
+
+class TestTheInputsAreNamed:
+    """Each measured table is named by the record beside it, or the pass refuses."""
+
+    def test_the_photo_names_its_superset_and_its_clusters(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, GAF)
+        members = json.loads((out / "members.json").read_text())
+        rows = json.loads((out / "rows.json").read_text())
+        assert members["superset_source"]["release"] == "2022_03"
+        assert (
+            members["superset_source"]["sha256"] == hashlib.sha256(canonical_table(MD5)).hexdigest()
+        )
+        assert rows["neighbours_source"]["release"] == "2022_03"
+        assert len(rows["neighbours_source"]["sha256"]) == 64
+
+    def test_a_table_with_no_record_refuses(self, tmp_path: Path) -> None:
+        superset, _ = _setup(tmp_path)
+        (tmp_path / "superset.json").unlink()
+        with pytest.raises(PhotoGuardError, match="missing"):
+            members_pass(GAF, superset_table=superset, source=_source(tmp_path / "photo"))
+
+    def test_a_table_measured_for_another_cut_refuses(self, tmp_path: Path) -> None:
+        superset, neighbours = _setup(tmp_path)
+        out = tmp_path / "photo"
+        members_pass(GAF, superset_table=superset, source=_source(out))
+        record = json.loads((tmp_path / "neighbours.json").read_text())
+        (tmp_path / "neighbours.json").write_text(json.dumps({**record, "cut_release": 205}))
+        with pytest.raises(PhotoGuardError, match="written for cut 205"):
+            rows_pass(
+                GAF,
+                members_path=out / "members.parquet",
+                neighbours_path=neighbours,
+                source=_source(out),
+            )
+
+    def test_clusters_published_after_the_cut_refuse(self, tmp_path: Path) -> None:
+        superset, neighbours = _setup(tmp_path)
+        out = tmp_path / "photo"
+        members_pass(GAF, superset_table=superset, source=_source(out))
+        _record(
+            tmp_path / "neighbours.json", "neighbours", release="2022_04", published="2022-10-12"
+        )
+        with pytest.raises(PhotoGuardError):
+            rows_pass(
+                GAF,
+                members_path=out / "members.parquet",
+                neighbours_path=neighbours,
+                source=_source(out),
+            )
+
+    def test_a_superset_table_its_record_does_not_describe_refuses(self, tmp_path: Path) -> None:
+        superset, _ = _setup(tmp_path)
+        superset.write_bytes(canonical_table({**MD5, "P3": "c" * 32}))
+        with pytest.raises(PhotoGuardError, match="its record says"):
+            members_pass(GAF, superset_table=superset, source=_source(tmp_path / "photo"))
+
+    def test_an_accession_in_two_clusters_refuses(self, tmp_path: Path) -> None:
+        superset, neighbours = _setup(tmp_path)
+        out = tmp_path / "photo"
+        members_pass(GAF, superset_table=superset, source=_source(out))
+        pq.write_table(
+            pa.table(
+                {
+                    "cluster": ["C1", "C1", "C2"],
+                    "accession": ["P1", "N1", "N1"],
+                    "in_superset": [True, False, False],
+                }
+            ),
+            neighbours,
+        )
+        with pytest.raises(PhotoGuardError, match="more than one cluster"):
+            rows_pass(
+                GAF,
+                members_path=out / "members.parquet",
+                neighbours_path=neighbours,
+                source=_source(out),
+            )
+
+    def test_clusters_measured_against_another_superset_refuse(self, tmp_path: Path) -> None:
+        superset, neighbours = _setup(tmp_path)
+        out = tmp_path / "photo"
+        members_pass(GAF, superset_table=superset, source=_source(out))
+        pq.write_table(
+            pa.table({"cluster": ["C1"], "accession": ["N1"], "in_superset": [True]}), neighbours
+        )
+        with pytest.raises(PhotoGuardError, match="superset does not"):
+            rows_pass(
+                GAF,
+                members_path=out / "members.parquet",
+                neighbours_path=neighbours,
+                source=_source(out),
+            )
 
 
 class TestRowsAndProfiles:
@@ -134,8 +241,8 @@ class TestRowsAndProfiles:
 
 
 class TestTheManifest:
-    def _sequences(self, tmp_path: Path, out: Path) -> None:
-        fasta = gzip.compress(b">sp|P1|ONE_HUMAN\nMKV\n>sp|P2|TWO_HUMAN\nMAA\nGG\n")
+    def _sequences(self, tmp_path: Path, out: Path, extra: bytes = b"") -> None:
+        fasta = gzip.compress(b">sp|P1|ONE_HUMAN\nMKV\n>sp|P2|TWO_HUMAN\nMAA\nGG\n" + extra)
         archive = tmp_path / "sprot.tar.gz"
         with tarfile.open(archive, "w:gz") as tar:
             info = tarfile.TarInfo("uniprot_sprot.fasta.gz")
@@ -161,6 +268,27 @@ class TestTheManifest:
         assert json.loads((out / "photo.json").read_text())["status"] == "complete"
         sequences = pq.read_table(out / "sequences.parquet").to_pylist()
         assert [s["sequence"] for s in sequences] == ["MKV", "MAAGG"]
+
+    def test_the_manifest_names_its_sources(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, GAF)
+        self._sequences(tmp_path, out)
+        sources = manifest_pass(out, revision="abc")["sources"]
+        assert sources["goa"] == {"release": CUT, "published": CUT_DATE.isoformat()}
+        assert sources["uniprot"]["release"] == "2022_03"
+        assert (
+            sources["uniprot"]["superset_sha256"]
+            == hashlib.sha256(canonical_table(MD5)).hexdigest()
+        )
+        assert sources["uniref"]["release"] == "2022_03"
+
+    def test_sequences_of_another_release_refuse_the_photo(self, tmp_path: Path) -> None:
+        out = _build(tmp_path, GAF)
+        self._sequences(tmp_path, out, extra=b">sp|P3|THREE_HUMAN\nMW\n")
+        manifest = manifest_pass(out, revision="abc")
+        assert manifest["status"] == "refused"
+        disagreements = manifest["refusals"]["source_disagreements"]
+        assert any("superset holds 2 entries, sequences 3" in d for d in disagreements)
+        assert any("canonical" in d or "hashes to" in d for d in disagreements)
 
     def test_the_cli_exits_3_on_a_refused_photo(self, tmp_path: Path) -> None:
         out = _build(tmp_path, [*GAF, UNKNOWN_ROW])
