@@ -12,6 +12,7 @@ claims that happen to agree. Standard library only, on purpose.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator
 from typing import Any
 
 
@@ -25,40 +26,37 @@ def canonical_table(members: dict[str, str]) -> bytes:
     return "".join(f"{acc}\t{members[acc]}\n" for acc in sorted(members)).encode()
 
 
-def parse_swissprot_fasta(lines: Any) -> dict[str, str]:
-    """Accession to md5 of its sequence, from a Swiss-Prot FASTA stream.
+def iter_swissprot_records(lines: Any) -> Iterator[tuple[str, str, str]]:
+    """``(accession, md5, sequence)`` for each record of a Swiss-Prot FASTA stream.
 
     ``lines`` yields ``bytes``. The header is ``>sp|<accession>|<ENTRY_NAME>``
     and the md5 is taken over the sequence lines joined with nothing, each
     stripped, encoded UTF-8 -- the same convention the reference tables use, so
-    the digests are comparable.
+    the digests are comparable. This is the one parser: the loader's table and a
+    photo's sequences are both read through it.
 
-    :raises ValueError: on a record with no sequence, or a duplicated
-        accession. Both would otherwise make the count silently wrong.
+    :raises ValueError: on a record with no sequence or an unparseable header.
     """
-    members: dict[str, str] = {}
     accession: str | None = None
     chunks: list[str] = []
 
-    def flush() -> None:
-        if accession is None:
-            return
+    def record() -> tuple[str, str, str]:
         if not chunks:
             raise ValueError(f"{accession} has a header but no sequence")
+        sequence = "".join(chunks)
         # md5 is UniProt's own sequence fingerprint, not a security primitive:
         # the digests have to match the ones the reference tables carry, so the
         # algorithm is fixed by the data and not a choice made here.
-        digest = hashlib.md5("".join(chunks).encode(), usedforsecurity=False).hexdigest()
-        if accession in members:
-            raise ValueError(f"{accession} appears twice in the FASTA")
-        members[accession] = digest
+        digest = hashlib.md5(sequence.encode(), usedforsecurity=False).hexdigest()
+        return str(accession), digest, sequence
 
     for raw in lines:
         line = raw.decode("utf-8", "strict").strip()
         if not line:
             continue
         if line.startswith(">"):
-            flush()
+            if accession is not None:
+                yield record()
             parts = line.split("|")
             if len(parts) < 3:
                 raise ValueError(f"unparseable FASTA header: {line[:80]!r}")
@@ -66,7 +64,21 @@ def parse_swissprot_fasta(lines: Any) -> dict[str, str]:
             chunks = []
         else:
             chunks.append(line)
-    flush()
+    if accession is not None:
+        yield record()
+
+
+def parse_swissprot_fasta(lines: Any) -> dict[str, str]:
+    """Accession to md5 of its sequence, from a Swiss-Prot FASTA stream.
+
+    :raises ValueError: on a record with no sequence, or a duplicated
+        accession. Both would otherwise make the count silently wrong.
+    """
+    members: dict[str, str] = {}
+    for accession, digest, _ in iter_swissprot_records(lines):
+        if accession in members:
+            raise ValueError(f"{accession} appears twice in the FASTA")
+        members[accession] = digest
     return members
 
 
