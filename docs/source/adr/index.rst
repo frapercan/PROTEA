@@ -341,7 +341,7 @@ later revision) or *Superseded* (a named later decision replaces it).
      - T-PLATFORM
    * - D61
      - :doc:`The homology table of a cut: its superset searched against its photo with a pinned MMseqs2 <D61-the-homology-table-of-a-cut>`
-     - Proposed
+     - Accepted
      - T-PLATFORM
 
 .. toctree::

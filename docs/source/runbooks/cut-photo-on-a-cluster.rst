@@ -156,6 +156,33 @@ Steps
    parts after the build, and the GOA file once the photo is loaded. Keep
    ``photo.json`` with the photo's files until the load succeeds.
 
+The homology table of a cut
+---------------------------
+
+ADR-D61. It is built from a photo that is already on the cluster, so nothing is
+downloaded but the MMseqs2 binary and no data is sent.
+
+1. **Fetch the pinned MMseqs2 on the login node.** Download
+   ``mmseqs-linux-avx2.tar.gz`` of the release the record pins (``18-8cc5c``)
+   and check it against the digest GitHub publishes for the asset. Unpack it and
+   take the sha256 of ``mmseqs/bin/mmseqs``: the job refuses any other binary.
+2. **Ship the code** with ``send_builder_code.sh`` at a merged integration
+   revision. The homology builder and its job are in ``builder_files.txt``.
+3. **Measure first.** Submit ``homology_build.sh`` with a SAMPLE, for example
+   10,000 queries against the bank of 211. Its manifest says ``measurement`` and
+   the platform never loads it. Size the full jobs from its time, memory and hits
+   per query, keeping each job under two hours.
+4. **Build each cut**, with the author's word for parallel jobs::
+
+     sbatch -p cpu_partition --constraint=cpu homology_build.sh PYTHON CODE_DIR \
+       PHOTO_DIR OUT REVISION MMSEQS_BIN MMSEQS_SHA256
+
+   The job writes ``queries.fasta``, ``bank.fasta``, ``hits.parquet`` and
+   ``homology.json``. Only ``hits.parquet`` is an output; the FASTA files are
+   recorded by their sha256 and can be deleted.
+5. **Fetch** ``hits.parquet`` and ``homology.json`` and check the output against
+   the manifest before loading.
+
 The run at 211, measured
 ------------------------
 

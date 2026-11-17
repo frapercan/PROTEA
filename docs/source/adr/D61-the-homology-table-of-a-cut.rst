@@ -1,14 +1,15 @@
 ADR-D61: The homology table of a cut: its superset searched against its photo with a pinned MMseqs2
 ====================================================================================================
 
-:Status: Proposed. ADR-D60 (decision 1) puts in the universe of each cut "one
-         PLM-free homology table and the exclusion groups built from it, with a
-         pinned MMseqs2" and leaves its shape open. The author approved on
-         2026-11-16 the order of the rest of phase 2 (windows, information
-         accretion per cut, this table, then the embeddings of the new members)
-         and asked for this record ("Perfecto, dale"). The scope, the storage
-         and the use of UniRef50 for the exclusion groups below are this
-         record's own and wait for the author's word.
+:Status: Accepted (2026-11-17, the author: "Perfecto. Tienes mi palabra para
+         continuar", after the explanation of the exclusion groups), with its
+         three open points as written: the scope of decision 2, UniRef50 as the
+         exclusion groups (decision 8) and parallel jobs after the measured
+         first one (decision 9). ADR-D60 (decision 1) puts in the universe of
+         each cut "one PLM-free homology table and the exclusion groups built
+         from it, with a pinned MMseqs2" and leaves its shape open; the author
+         approved on 2026-11-16 the order of the rest of phase 2 and asked for
+         this record ("Perfecto, dale").
 :Date: 2026-11-16
 :Author: Francisco Miguel Perez Canales
 :Phase: platform refactor, phase 2 (the universe from zero)
@@ -70,7 +71,12 @@ accessions through ``cut_photo_member.sequence_md5``.
 
 - The version is the MMseqs2 release current when the job is written. It is
   pinned by its tag and the sha256 of its static binary, and both go into the
-  manifest.
+  manifest. Written on 2026-11-17: release ``18-8cc5c`` (published 2025-07-27),
+  ``mmseqs-linux-avx2.tar.gz`` with GitHub's published digest
+  ``bd9b0234da5949ad528d5b5f9ea4cda9c1e23dce14b46c0791d4d919a76e61ce``,
+  whose binary hashes to
+  ``b7ef6e0e33df5dd4fa9cf988cbd8b4988c11a3a1255d2c377f13e1bb40c157fb`` and
+  answers ``version`` with commit ``8cc5ce367b5638c4306c2d7cfc652dd099a4643f``.
 - The search uses the tool's defaults (sensitivity, e-value, maximum number of
   hits per query). The full command line is recorded.
 - No threshold of ours is applied to the table. Identity bands, coverage cuts
