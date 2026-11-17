@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -342,6 +343,10 @@ class EvaluationSet(Base):
     #: way to compare two of these: it refuses to conclude anything from an
     #: unidentifying value instead of reporting agreement.
     code_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: What the row IS, in a sentence its writer derives (ADR-D58's long
+    #: descriptor); NULL on rows written before the column, which read as
+    #: "nothing says", never as a default.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     old_annotation_set: Mapped[AnnotationSet] = relationship(
         "AnnotationSet", foreign_keys=[old_annotation_set_id]

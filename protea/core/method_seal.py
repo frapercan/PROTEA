@@ -170,6 +170,21 @@ _EXECUTION_COLUMNS: Mapping[str, str] = {
         "the container, not a field. It is classified key by key below; comparing "
         "the whole object would refuse on job_id, which is execution"
     ),
+    "description": (
+        "a sentence the writer derives from the other fields (ADR-D58). It names "
+        "nothing they do not, and its wording can change between revisions while "
+        "the predictions stay the same"
+    ),
+    "job_id": (
+        "which job row created the set: provenance and not method, for the reason "
+        "meta's job_id is. A set re-run under a new job is the same method"
+    ),
+    "producer_git_sha": (
+        "the code that wrote the row, kept for the sets gate. The revision that "
+        "identifies the method is meta's code_revision, which run_receipt writes and "
+        "_IDENTITY_META compares; the column is not compared, so the sets written "
+        "before it existed compare as they did"
+    ),
 }
 
 #: ``meta`` keys that are NOT method identity, each with why.

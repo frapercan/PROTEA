@@ -462,6 +462,12 @@ def _annotation_set(
             "gaf_go_version": goa.get("go_version", ""),
             "gaf_date_generated": goa.get("date_generated", ""),
         },
+        description=(
+            f"GOA {sources.cut}, published {sources.cut_date}, as the photo of cut "
+            f"{sources.cut} loaded it (ADR-D59): the rows of the photo's members on the GO "
+            f"graph {sources.snapshot.obo_version}."
+        ),
+        code_revision=code_revision(),
     )
     session.add(created)
     session.flush()

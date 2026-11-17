@@ -38,6 +38,7 @@ from pydantic import field_validator
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.ia import (
     PROPAGATE_RELATIONS,
@@ -135,6 +136,15 @@ class _Dag:
     proteins_per_term: dict[str, set[str]]
     ia: dict[str, float]
 
+
+
+def _describe(ia_set: InformationAccretionSet, inp: Any) -> None:
+    """Stamp what the table is and the code that computed it (the sets gate)."""
+    ia_set.description = (
+        f"Information accretion over {inp.corpus.source} {inp.corpus.source_version} "
+        f"on {inp.snapshot.obo_version}, evidence regime {inp.p.evidence_regime}."
+    )
+    ia_set.code_revision = code_revision()
 
 class ComputeInformationAccretionOperation:
     name = "compute_information_accretion"
@@ -483,6 +493,7 @@ class ComputeInformationAccretionOperation:
             list(inp.evidence_codes) if inp.evidence_codes else None
         )
         ia_set.job_id = job_id_from_payload(inp.payload)
+        _describe(ia_set, inp)
 
         key, uri, digest = cls._write_artifact(ia, ia_set.id)
 

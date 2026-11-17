@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -62,6 +62,13 @@ class AnnotationSet(Base):
         DateTime(timezone=True), nullable=True
     )
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    #: What the row IS, in a sentence its writer derives (ADR-D58's long
+    #: descriptor); NULL on rows written before the column, which read as
+    #: "nothing says", never as a default.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The code that wrote the row (``protea.core.code_revision``); NULL on
+    #: rows written before the column.
+    code_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     ontology_snapshot: Mapped[OntologySnapshot] = relationship(
         "OntologySnapshot", back_populates="annotation_sets"

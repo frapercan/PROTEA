@@ -107,6 +107,19 @@ class _AssemblyOutcome(NamedTuple):
     eval_snapshot_pair: str | None
     key_prefix: str
     storage_backend: str
+    #: The sha256 of the two staged parquets, hashed before upload.
+    train_sha256: str | None = None
+    eval_sha256: str | None = None
+
+
+def _file_sha256(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 22), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 class ExportWriteOperation:
@@ -464,6 +477,13 @@ def _insert_dataset_row(
         producer_version=None,
         producer_git_sha=resolve_protea_git_sha(),
         meta={},
+        description=(
+            f"Re-ranker dataset {p.output_name}, assembled from per-pair feature shards: "
+            f"train pairs {list(outcome.train_snapshot_pairs)}, eval pair "
+            f"{outcome.eval_snapshot_pair}."
+        ),
+        train_sha256=outcome.train_sha256,
+        eval_sha256=outcome.eval_sha256,
     )
     session.add(dataset)
     session.flush()
@@ -492,6 +512,7 @@ def _assemble_and_publish(
             asm.n_eval_rows,
             asm.schema_sha,
         )
+        train_sha256, eval_sha256 = _file_sha256(asm.train_path), _file_sha256(asm.eval_path)
         train_uri, eval_uri, manifest_uri, manifest_sha = _upload_artefacts(
             store, key_prefix, asm, manifest, stage
         )
@@ -507,6 +528,8 @@ def _assemble_and_publish(
         eval_snapshot_pair=asm.eval_pair,
         key_prefix=key_prefix,
         storage_backend=settings.storage_backend,
+        train_sha256=train_sha256,
+        eval_sha256=eval_sha256,
     )
     dataset_id = _insert_dataset_row(session, p, outcome, parent_id)
     _emit_terminal_events(emit, p, outcome, dataset_id)
