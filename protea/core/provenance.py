@@ -20,7 +20,9 @@ following keys (in declaration order):
 * ``python_version``  — full ``sys.version`` string (compiler + build
   date), useful for reproducibility audits.
 * ``platform``        — ``platform.platform()``: OS, kernel, arch.
-* ``hostname``        — ``socket.gethostname()``; cheap.
+* ``hostname``        — :func:`protea.core.host.compute_host`, the one
+  definition (``PROTEA_COMPUTE_HOST``, else the socket's hostname, else
+  ``"unknown"``); cheap.
 * ``libraries``       — versions of the packages that decide what a vector
   contains; see :func:`_library_versions`. Read from distribution metadata,
   so nothing heavy is imported.
@@ -35,11 +37,11 @@ working dir doesn't poison the manifest.
 from __future__ import annotations
 
 import platform as _platform
-import socket
 import sys
 from typing import Any
 
 from protea.core.code_revision import code_revision
+from protea.core.host import compute_host
 from protea.core.parquet_export import resolve_protea_git_sha
 from protea.core.utils import utcnow
 
@@ -101,11 +103,9 @@ def _library_versions() -> dict[str, str | None]:
     return out
 
 
-def _safe_hostname() -> str | None:
-    try:
-        return socket.gethostname() or None
-    except Exception:
-        return None
+def _safe_hostname() -> str:
+    """The machine's name by the one definition (:mod:`protea.core.host`); never raises."""
+    return compute_host()
 
 
 def _safe_platform() -> str | None:
@@ -193,7 +193,9 @@ def where_it_runs() -> dict[str, Any]:
     must not leave them indistinguishable. All three answers are free: the
     hostname from the socket module, the interpreter from ``platform``, and the
     revision stamped at import, which names the code this process loaded rather
-    than whatever the tree says when asked. Nothing here shells out.
+    than whatever the tree says when asked. Nothing here shells out. The host is
+    :func:`protea.core.host.compute_host`, the definition every child event of
+    the job uses too, so a job and its batches name the same machine.
     """
     return {
         "host": _safe_hostname(),

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from protea.infrastructure.queue._host import compute_host
+from protea.core.host import compute_host
 
 
 @pytest.fixture(autouse=True)

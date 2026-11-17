@@ -16,11 +16,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.host import compute_host
 from protea.core.provenance import stamp_library_provenance
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue import _failure_aggregation as _agg
 from protea.infrastructure.queue._deadletter import DLX_NAME, setup_dead_letter
-from protea.infrastructure.queue._host import compute_host
 from protea.infrastructure.queue._job_pump import ack_when_done, run_while_pumping
 from protea.infrastructure.queue._operation_window import OperationWatchdog
 from protea.infrastructure.queue._stoppable import Stoppable
