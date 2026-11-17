@@ -152,7 +152,7 @@ These three operations form the **post-reranker functional-enrichment stage, the
 1. **Claim session**: transitions `QUEUED → RUNNING`, flushes `job.started`.
 2. **Execute session**: resolves the operation, runs it, transitions to `SUCCEEDED` or `FAILED` (storing `error_code` / `error_message`).
 
-Every state transition is recorded as a `JobEvent` row for a full audit trail. This is the primary extension point: new worker implementations (e.g. queue-driven) must preserve this two-session pattern and the `emit` contract.
+Every state transition is recorded as a `JobEvent` row for a full audit trail. Message stages run under `OperationConsumer` (`protea/infrastructure/queue/consumer.py`), whose transient failures are bounded (ADR-D60, phase 3, `queue/_retry.py`): `RetryLaterError` and a lost connection to the database, the broker or the object store (`is_connection_error`, which also looks through wrapped causes) are republished after a wait (the error's own `delay_seconds`, or an exponential backoff) with the `x-protea-retry` header raised, and dead-lettered with a `child.retry_exhausted` event once it reaches `queue.transient_max_retries`; CUDA out-of-memory keeps its own `x-oom-retry` count and cap. This is the primary extension point: new worker implementations (e.g. queue-driven) must preserve this two-session pattern and the `emit` contract.
 
 ### HTTP API (`protea/api/routers/jobs.py`)
 

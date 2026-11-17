@@ -23,6 +23,7 @@ from protea.infrastructure.queue import _failure_aggregation as _agg
 from protea.infrastructure.queue._deadletter import DLX_NAME, setup_dead_letter
 from protea.infrastructure.queue._job_pump import ack_when_done, run_while_pumping
 from protea.infrastructure.queue._operation_window import OperationWatchdog
+from protea.infrastructure.queue._retry import Delivery, is_connection_error, retry_or_dead_letter
 from protea.infrastructure.queue._stoppable import Stoppable
 from protea.infrastructure.queue.publisher import publish_operation, safe_republish_job
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
@@ -504,10 +505,11 @@ class OperationConsumer(Stoppable):
     ) -> None:
         """Execute the operation inside a CONSUMER span and route the result.
 
-        ACKs on success, nacks with requeue=True on ``RetryLaterError``
-        (T-INFRA.NACK: the broker retries instead of an in-process sleep),
-        delegates CUDA OOM to the backoff handler, and routes other
-        exceptions to ``_handle_general_failure`` (which nacks with the
+        ACKs on success. ``RetryLaterError`` and a lost connection are
+        transient: republished after a wait with the count raised, and
+        dead-lettered at the cap (:mod:`protea.infrastructure.queue._retry`,
+        ADR-D60 phase 3). CUDA OOM keeps its own backoff handler, and other
+        exceptions go to ``_handle_general_failure`` (which nacks with the
         configured requeue flag).
         """
         # T5.1b: open a CONSUMER span using the inbound traceparent so
@@ -535,48 +537,22 @@ class OperationConsumer(Stoppable):
                     publish_operation(self._amqp_url, queue_name, op_payload)
                 channel.basic_ack(delivery_tag=method.delivery_tag)
                 logger.info("Operation acked. operation=%s", decoded.operation_name)
-            except RetryLaterError as exc:
-                self._handle_retry_later(channel, method, session, decoded, span, exc)
             except Exception as exc:
                 span.record_exception(exc)
                 try:
                     session.rollback()
                 except Exception:
                     pass
-                if "CUDA out of memory" in str(exc):
+                delivery = Delivery(channel, method, body, self._queue_name)
+                if isinstance(exc, RetryLaterError) or is_connection_error(exc):
+                    kind = "retry_later" if isinstance(exc, RetryLaterError) else "connection"
+                    retry_or_dead_letter(delivery, decoded, exc, kind, self._emit_parent_event)
+                elif "CUDA out of memory" in str(exc):
                     self._handle_cuda_oom(channel, method, body, decoded, exc)
                 else:
                     self._handle_general_failure(channel, method, decoded, exc)
             finally:
                 session.close()
-
-    @staticmethod
-    def _handle_retry_later(
-        channel: BlockingChannel,
-        method: Basic.Deliver,
-        session: Session,
-        decoded: _DecodedMessage,
-        span: Any,
-        exc: RetryLaterError,
-    ) -> None:
-        """Nack with requeue=True on ``RetryLaterError``.
-
-        T-INFRA.NACK: an operation raising ``RetryLaterError`` is an
-        explicit retry signal (e.g. GPU temporarily busy), not a failure.
-        The broker is asked to redeliver instead of running an
-        in-process sleep/republish that would hold the prefetch slot.
-        """
-        span.record_exception(exc)
-        try:
-            session.rollback()
-        except Exception:
-            pass
-        logger.info(
-            "Operation requested retry. operation=%s reason=%s",
-            decoded.operation_name,
-            exc,
-        )
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
     @staticmethod
     def _decode_message(body: bytes, properties: BasicProperties) -> _DecodedMessage | None:
