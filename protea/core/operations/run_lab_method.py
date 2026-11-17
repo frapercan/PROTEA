@@ -65,7 +65,6 @@ import dataclasses
 import hashlib
 import json
 import posixpath
-import socket
 import subprocess
 import tempfile
 import threading
@@ -88,6 +87,7 @@ from protea.core.contracts.operation import (
     ProteaPayload,
     RetryLaterError,
 )
+from protea.core.host import compute_host
 from protea.core.operations import _card_guard
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.embedding_config import (
@@ -549,7 +549,7 @@ class RunLabMethodOperation:
         check_provenance(p, out)
         run = {
             "job_id": job_id,
-            "node": socket.gethostname(),
+            "node": compute_host(),
             "image": p.image,
             "image_id": p.image_id,
             "bundle_path": p.bundle_path,

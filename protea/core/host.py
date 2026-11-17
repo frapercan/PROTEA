@@ -1,4 +1,15 @@
-"""Which machine computed a batch, recorded on the event rather than inferred.
+"""Which machine did the work: the one definition, read by every record that names it.
+
+Phase 3 of ADR-D60 (the executor rules) made this the only definition. Before,
+``job.started`` named the machine by ``socket.gethostname()`` while the batch
+events and the laboratory method runner used another source, so a job and its
+own batches could disagree about where they ran. Now ``job.started`` (through
+:func:`protea.core.provenance.where_it_runs`), every child event of a queue
+consumer, ``capture_provenance`` and ``run_lab_method`` all read
+:func:`compute_host`. It lives in core, a leaf module, because core records it
+and must not import the queue layer.
+
+Which machine computed a batch, recorded on the event rather than inferred.
 
 The compute is distributed: a coordinator partitions a run into batches, the
 batches go to a shared queue, and whichever worker is free takes one. That is the
