@@ -167,6 +167,7 @@ from protea.core.operations.retire_evaluation_sets import (
     RetireEvaluationSetsPayload,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
+from protea.core.operations.run_count_map import RunCountMapPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
 )
@@ -400,6 +401,16 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "manifest_sha256": "0" * 64,
         },
         ("model_weights_id",),
+    ),
+    # A count map read on a window, with the lexicon bank whose cut gives its units (ADR-D65).
+    (
+        "run_count_map",
+        RunCountMapPayload,
+        {
+            "evaluation_set_id": "not-a-uuid",
+            "lexicon_bank_id": "6ab4cbfd-711d-432f-be6c-2ad1738cd438",
+        },
+        ("evaluation_set_id",),
     ),
     # The members' taxa of a loaded photo, named by its manifest's sha256.
     (

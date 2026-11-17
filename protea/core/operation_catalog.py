@@ -135,6 +135,7 @@ from protea.core.operations.retire_evaluation_sets import (
     RetireEvaluationSetsOperation,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
+from protea.core.operations.run_count_map import RunCountMapOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
 from protea.core.operations.run_lab_method import RunLabMethodOperation
 from protea.core.operations.seal_evaluation_frames import (
@@ -361,6 +362,9 @@ _METHOD: tuple[_Row, ...] = (
     # TrainRerankerAutoOperation in-process to run the dump-only pipeline.
     (ExportResearchDatasetOperation, _EXPORT),
     (ExportTransitionsDatasetOperation, replace(_EXPORT, family="world-model")),
+    # The explainable-units family's count map, fitted at a window's start and read on its
+    # targets inside the platform (ADR-D64, ADR-D65).
+    (RunCountMapOperation, replace(_METHOD_JOB, queue=queues.TRAINING, family="explainable-units")),
     (RegisterIngestedMethodOperation, _METHOD_JOB),
     (
         RunLabMethodOperation,

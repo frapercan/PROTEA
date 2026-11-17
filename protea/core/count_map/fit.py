@@ -11,6 +11,11 @@ donor's exclusion group (the donors that share its sequence): for every pair of
 a unit and a donor that carries it, over every term of the aspect, as a
 Bernoulli. The window's targets never enter.
 
+Every probability is kept inside [EPS, 1 - EPS] before a logarithm. Only a term
+every donor of the aspect holds (a base rate of one, which in a real aspect is
+its root, never a column) reaches either bound; the laboratory clipped the one
+value its data could push there and left the rest, and nothing else changes.
+
 Everything that does not depend on m is built once. A pair (unit, group) with
 N' = N_u minus the group's donors in u scores a term off the unit's support at
 ``c * pi(t)``, with ``c = m / (N' + m)``; ``F`` sums that over every term of the
@@ -127,7 +132,7 @@ class StrengthFit:
             xc, xt = self.x_combo[lo : lo + STEP], self.x_t[lo : lo + STEP]
             den = self.x_np[xc].astype(np.float64) + m
             q0 = np.minimum((self.x_k[lo : lo + STEP] + m * pi[xt]) / den, 1.0 - EPS)
-            values = np.log2(1.0 - q0) - np.log2(1.0 - (m / den) * pi[xt])
+            values = np.log2(1.0 - q0) - np.log2(1.0 - np.minimum((m / den) * pi[xt], 1.0 - EPS))
             out += np.bincount(xc, weights=values, minlength=self.n_combo)
         return out
 
@@ -135,10 +140,11 @@ class StrengthFit:
         """The log-likelihood in bits of every donor's state, its group out of each of its units."""
         pi = self.base_rate
         c = m / (self.np_vals + m)
-        prior = (self.pi_cnt[None, :] * np.log2(1.0 - c[:, None] * self.pi_vals[None, :])).sum(1)
+        off_support = np.minimum(c[:, None] * self.pi_vals[None, :], 1.0 - EPS)
+        prior = (self.pi_cnt[None, :] * np.log2(1.0 - off_support)).sum(1)
         base = (self.n_r * (prior[self.np_idx] + self._support_correction(m)[self.combo_r])).sum()
         den = self.np_r[self.e_r] + m
-        q1 = (self.e_ku - self.e_kug + m * pi[self.e_t]) / den
+        q1 = np.clip((self.e_ku - self.e_kug + m * pi[self.e_t]) / den, EPS, 1.0 - EPS)
         q0 = np.minimum((self.e_ku + m * pi[self.e_t]) / den, 1.0 - EPS)
         delta = np.log2(1.0 - q1) - np.log2(1.0 - q0)
         own = self.e_kug * (np.log2(q1) - np.log2(1.0 - q1))

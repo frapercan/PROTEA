@@ -151,3 +151,40 @@ def test_an_exclusion_larger_than_its_unit_is_refused() -> None:
     )
     with pytest.raises(ValueError, match="took out more"):
         read(cmap, targets)
+
+
+# ---------------------------------------------------------------- the matrices a cut becomes
+
+
+def test_an_aspect_problem_keeps_donors_with_a_column_and_excludes_by_sequence() -> None:
+    from protea.core.count_map.inputs import Columns, aspect_problem, columns_of
+
+    cols = columns_of({"GO:0008150": "P", "GO:1": "P", "GO:2": "P", "GO:3": "F"})
+    assert cols["P"] == Columns("P", ("GO:1", "GO:2")) and cols["F"].terms == ("GO:3",)
+    positives = {
+        "A": {"P": {"GO:1", "GO:0008150"}},
+        "B": {"P": {"GO:2"}},
+        "C": {"P": {"GO:0008150"}, "F": {"GO:3"}},  # only the root in P: not a donor of P
+        "D": {"P": {"GO:1", "GO:2"}},
+    }
+    md5_of = {"A": "m1", "B": "m1", "C": "m2", "D": "m3", "Q": "m1", "R": "m9"}
+    units = ({"m1": np.array([0, 2]), "m2": np.array([1]), "m3": np.array([2])}, 4)
+    problem = aspect_problem(
+        cols["P"],
+        positives,
+        {"Q": {"GO:2", "GO:3"}},
+        md5_of,
+        units,
+        (["A", "B", "C", "D"], ["Q", "R", "A"]),
+    )
+    assert problem.donors == ["A", "B", "D"]
+    assert problem.group[0] == problem.group[1] != problem.group[2]  # A and B share a sequence
+    assert problem.states.toarray().tolist() == [[1, 0], [0, 1], [1, 1]]
+    assert problem.carriers.toarray().tolist() == [[1, 0, 1, 0], [1, 0, 1, 0], [0, 0, 1, 0]]
+    assert np.allclose(problem.base_rate, [2 / 3, 2 / 3])
+    view = problem.target_view
+    # Q shares m1 with A and B: both are taken out of its units; R shares nothing; A takes out A and B
+    assert view.excluded.toarray().tolist() == [[1, 1], [0, 0], [1, 1]]
+    assert view.excluded_n.tolist() == [2, 0, 2]
+    assert view.units.toarray().tolist() == [[1, 0, 1, 0], [0, 0, 0, 0], [1, 0, 1, 0]]
+    assert view.denied.toarray().tolist() == [[0, 1], [0, 0], [0, 0]]  # GO:3 is not a P column
