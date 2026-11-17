@@ -69,6 +69,7 @@ EXPECTED: dict[str, str] = {
     "information_accretion_set": "the IA weights, identified by snapshot x corpus x evidence regime",
     "dataset": "the frozen re-ranker dump the laboratory pulls to train",
     "cut_photo": "the corpus at a cut: Swiss-Prot, live tiers and annotated UniRef50 neighbours",
+    "homology_table": "the homology of a cut: its superset searched against its photo (MMseqs2)",
 }
 
 #: Tables whose name ends in ``_set`` but which are membership or join rows,

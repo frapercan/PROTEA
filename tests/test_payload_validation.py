@@ -129,6 +129,7 @@ from protea.core.operations.load_cut_photo import LoadCutPhotoPayload
 from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsPayload,
 )
+from protea.core.operations.load_homology_table import LoadHomologyTablePayload
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingPayload,
 )
@@ -365,6 +366,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "manifest_sha256": "not-a-digest",
             "ontology_snapshot_id": "7c5cf2d8-6f0a-4a43-9a43-25e7b8c0a2a1",
         },
+        ("manifest_sha256",),
+    ),
+    # A homology table is named the same way, by its manifest's sha256 (ADR-D61).
+    (
+        "load_homology_table",
+        LoadHomologyTablePayload,
+        {"table_dir": "/srv/homology/211", "manifest_sha256": "not-a-digest"},
         ("manifest_sha256",),
     ),
     # missing-required: source_version
@@ -637,8 +645,10 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         # verifica el manifiesto contra ESTE valor antes de leer una fila.
         "declare_exam_population",
         DeclareExamPopulationPayload,
-        {"manifest_key": "exam-population/sitios/manifest-524f1133208d.json",
-         "manifest_sha256": "524f1133208d"},
+        {
+            "manifest_key": "exam-population/sitios/manifest-524f1133208d.json",
+            "manifest_sha256": "524f1133208d",
+        },
         ("manifest_sha256",),
     ),
     (
