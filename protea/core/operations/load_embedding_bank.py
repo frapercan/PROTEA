@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.embedding_identity import derive_embedding_config_id, recipe_of
+from protea.core.operations._bank_population import population_gaps
 from protea.core.source_guards import SourceGuardError
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.cut_photo import CutPhoto
@@ -182,52 +183,17 @@ def _raw(session: Session) -> Any:
     return session.connection().connection.driver_connection
 
 
-_POPULATION_GAPS = {
-    "md5s with no sequence row": (
-        "SELECT count(*) FROM bank_md5 b WHERE NOT EXISTS "
-        "(SELECT 1 FROM sequence s WHERE s.sequence_hash = b.md5)"
-    ),
-    "member md5s the bank lacks": (
-        "SELECT count(*) FROM (SELECT DISTINCT m.sequence_md5 AS md5 FROM cut_photo_member m "
-        "WHERE m.photo_id = ANY(%(photos)s) AND m.sequence_md5 IS NOT NULL) x "
-        "WHERE NOT EXISTS (SELECT 1 FROM bank_md5 b WHERE b.md5 = x.md5)"
-    ),
-    "bank md5s that are no member's": (
-        "SELECT count(*) FROM bank_md5 b WHERE NOT EXISTS (SELECT 1 FROM cut_photo_member m "
-        "WHERE m.photo_id = ANY(%(photos)s) AND m.sequence_md5 = b.md5)"
-    ),
-}
-
-
 def check_population(
     session: Session, bank_dir: Path, manifest: dict[str, Any], photos: list[CutPhoto]
 ) -> None:
-    """The bank's md5s are unique, each a sequence, and exactly the photos' member md5s.
-
-    The md5s go into a temporary table that the transaction drops; the shards are read
-    by their md5 column alone.
-    """
-    import psycopg
-
+    """The bank's md5s are unique, each a sequence, and exactly the photos' member md5s."""
     config_id = uuid.UUID(manifest["config_id"])
-    with _raw(session).cursor() as cur:
-        cur.execute("CREATE TEMP TABLE bank_md5 (md5 varchar(32) PRIMARY KEY) ON COMMIT DROP")
-        try:
-            with cur.copy("COPY bank_md5 (md5) FROM STDIN") as copy:
-                for shard in manifest["shards"]:
-                    path = shard_path(bank_dir, config_id, int(shard["shard"]))
-                    for md5 in pq.read_table(path, columns=["md5"]).column("md5").to_pylist():
-                        copy.write_row((md5,))
-        except psycopg.errors.UniqueViolation as dup:
-            raise EmbeddingBankRefused("a sequence md5 appears twice in the bank") from dup
-        params = {"photos": [photo.id for photo in photos]}
-        gaps = {}
-        for name, sql in _POPULATION_GAPS.items():
-            cur.execute(sql, params)
-            gaps[name] = int(cur.fetchone()[0])
-    found = {name: count for name, count in gaps.items() if count}
-    if found:
-        raise EmbeddingBankRefused(f"the bank is not the photos' members: {found}")
+    paths = [shard_path(bank_dir, config_id, int(s["shard"])) for s in manifest["shards"]]
+    gaps = population_gaps(session, paths, [photo.id for photo in photos])
+    if gaps.get("duplicates"):
+        raise EmbeddingBankRefused("a sequence md5 appears twice in the bank")
+    if gaps:
+        raise EmbeddingBankRefused(f"the bank is not the photos' members: {gaps}")
 
 
 def bank_key_for(config_id: uuid.UUID, manifest_sha256: str) -> str:

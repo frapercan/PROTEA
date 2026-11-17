@@ -1,11 +1,12 @@
 # The files a cluster needs to measure and build a cut photo, its homology table and the
-# embedding bank of the photos: the import closure of protea.core.cut_photo.measure and
-# .build, of protea.core.homology.build (the standard library and pyarrow are all they
-# need) and of protea.core.embedding_bank.build (which also needs numpy, and torch with
-# the protea-backends plugins in the cluster's own environment) inside protea/, and the
-# job scripts that run them. send_builder_code.sh ships exactly these, and
-# tests/test_cluster_builder_files.py fails when the closure and the protea/ lines
-# disagree, or when a job script here is missing.
+# embedding and lexicon banks of the photos, and the job scripts that run them: the import
+# closure inside protea/ of protea.core.cut_photo.measure and .build and of
+# protea.core.homology.build (the standard library and pyarrow are all they need), of
+# protea.core.embedding_bank.build (which also needs numpy, and torch with the
+# protea-backends plugins in the cluster's own environment) and of
+# protea.core.lexicon_bank.build (numpy, torch and Triton). send_builder_code.sh ships
+# exactly these, and tests/test_cluster_builder_files.py fails when the closure and the
+# protea/ lines disagree, or when a job script here is missing.
 protea/__init__.py
 protea/core/__init__.py
 protea/core/cut_photo/__init__.py
@@ -21,8 +22,18 @@ protea/core/embedding_bank/__init__.py
 protea/core/embedding_bank/build.py
 protea/core/embedding_identity.py
 protea/core/evidence_codes.py
+protea/core/file_stage.py
 protea/core/homology/__init__.py
 protea/core/homology/build.py
+protea/core/lexicon/__init__.py
+protea/core/lexicon/candidates.py
+protea/core/lexicon/decode.py
+protea/core/lexicon/kernels_dp.py
+protea/core/lexicon/kernels_filter.py
+protea/core/lexicon/kernels_trace.py
+protea/core/lexicon/model.py
+protea/core/lexicon_bank/__init__.py
+protea/core/lexicon_bank/build.py
 protea/core/marks.py
 protea/core/plugins.py
 protea/core/row_alignment.py
@@ -34,3 +45,4 @@ deploy/cluster/cut_photo_truth.sh
 deploy/cluster/homology_build.sh
 deploy/cluster/embedding_bank_prepare.sh
 deploy/cluster/embedding_bank.sh
+deploy/cluster/lexicon_bank.sh

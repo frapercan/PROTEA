@@ -101,6 +101,7 @@ from protea.core.operations.load_homology_table import LoadHomologyTableOperatio
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingOperation,
 )
+from protea.core.operations.load_lexicon_bank import LoadLexiconBankOperation
 from protea.core.operations.load_ontology_aliases import (
     LoadOntologyAliasesOperation,
 )
@@ -293,6 +294,8 @@ _REPRESENTATION: tuple[_Row, ...] = (
     (CountBackendParametersOperation, _REPRESENTATION_JOB),
     # The bank computed on the cluster (ADR-D62), loaded where the database is.
     (LoadEmbeddingBankOperation, _REPRESENTATION_JOB),
+    # The lexicon bank decoded on the cluster (ADR-D63), for the explainable-units family.
+    (LoadLexiconBankOperation, replace(_REPRESENTATION_JOB, family="explainable-units")),
     (
         ExportGateBundleOperation,
         replace(_REPRESENTATION_JOB, family="world-model", status="review"),

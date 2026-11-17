@@ -71,6 +71,7 @@ EXPECTED: dict[str, str] = {
     "cut_photo": "the corpus at a cut: Swiss-Prot, live tiers and annotated UniRef50 neighbours",
     "homology_table": "the homology of a cut: its superset searched against its photo (MMseqs2)",
     "embedding_bank": "one configuration's vectors of every member sequence of a set of photos",
+    "lexicon_bank": "one lexicon's cut and theme mass of every member sequence of a set of photos",
 }
 
 #: Tables whose name ends in ``_set`` but which are membership or join rows,
