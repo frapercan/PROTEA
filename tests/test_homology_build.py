@@ -202,6 +202,9 @@ class TestSearch:
         table, dropped = hits_table(m8)
         assert dropped == 1
         assert table.column_names == list(build.HIT_COLUMNS)
+        # Ninety million hits do not fit the offsets of a ``string`` array.
+        assert table.schema.field("query_md5").type == pa.large_string()
+        assert table.schema.field("target_md5").type == pa.large_string()
         pairs = list(
             zip(table["query_md5"].to_pylist(), table["target_md5"].to_pylist(), strict=True)
         )

@@ -106,18 +106,32 @@ def photo_of(session: Session, manifest: dict[str, Any]) -> CutPhoto:
     return photo
 
 
+def distinct_md5s(hits_path: Path, batch_rows: int = 2_000_000) -> tuple[int, set[str], set[str]]:
+    """The row count and the distinct query and target md5s, read batch by batch.
+
+    A cut holds about ninety million hits, some six gigabytes of md5 text, and the
+    worker that runs this is capped at two: the parquet is walked in batches and
+    only the distinct values are kept (at most the superset and the members).
+    """
+    handle = pq.ParquetFile(hits_path)
+    queries: set[str] = set()
+    targets: set[str] = set()
+    for batch in handle.iter_batches(batch_size=batch_rows, columns=["query_md5", "target_md5"]):
+        queries.update(pc.unique(batch.column("query_md5")).to_pylist())
+        targets.update(pc.unique(batch.column("target_md5")).to_pylist())
+    return handle.metadata.num_rows, queries, targets
+
+
 def check_hits(
     session: Session, table_dir: Path, manifest: dict[str, Any], photo: CutPhoto
 ) -> None:
     """Every query a superset member's sequence, every target a member's; counts as recorded."""
-    hits = pq.read_table(table_dir / "hits.parquet", columns=["query_md5", "target_md5"])
+    rows, queries, targets = distinct_md5s(table_dir / "hits.parquet")
     search = manifest["counts"]["search"]
-    if hits.num_rows != int(search["hits"]):
+    if rows != int(search["hits"]):
         raise HomologyTableRefused(
-            f"hits.parquet holds {hits.num_rows} hits and the manifest counted {search['hits']}"
+            f"hits.parquet holds {rows} hits and the manifest counted {search['hits']}"
         )
-    queries = set(pc.unique(hits.column("query_md5")).to_pylist())
-    targets = set(pc.unique(hits.column("target_md5")).to_pylist())
     if len(queries) != int(search["queries_with_hits"]):
         raise HomologyTableRefused("the queries with hits are not the ones the manifest counted")
     members = session.execute(
