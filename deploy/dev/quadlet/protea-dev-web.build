@@ -1,0 +1,13 @@
+# The image of the development web front, built from the dev clone's apps/web with
+# deploy/dev/web/Containerfile (rootless podman, Quadlet). Rebuilt whenever the web
+# unit starts; podman's layer cache makes that a no-op when apps/web did not change.
+[Build]
+ImageTag=localhost/protea-dev-web:current
+File=%h/protea-dev/deploy/PROTEA/deploy/dev/web/Containerfile
+SetWorkingDirectory=%h/protea-dev/deploy/PROTEA/apps/web
+Pull=missing
+
+[Service]
+Slice=protea-dev.slice
+# next build is the heavy part (measured 2026-11-17: a few minutes on this machine).
+TimeoutStartSec=1800
