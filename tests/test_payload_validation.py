@@ -129,6 +129,7 @@ from protea.core.operations.load_cut_photo import LoadCutPhotoPayload
 from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsPayload,
 )
+from protea.core.operations.load_embedding_bank import LoadEmbeddingBankPayload
 from protea.core.operations.load_homology_table import LoadHomologyTablePayload
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingPayload,
@@ -374,6 +375,17 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         LoadHomologyTablePayload,
         {"table_dir": "/srv/homology/211", "manifest_sha256": "not-a-digest"},
         ("manifest_sha256",),
+    ),
+    # An embedding bank too, and the configuration it is the bank of (ADR-D62).
+    (
+        "load_embedding_bank",
+        LoadEmbeddingBankPayload,
+        {
+            "bank_dir": "/srv/banks/photos",
+            "embedding_config_id": "not-a-uuid",
+            "manifest_sha256": "not-a-digest",
+        },
+        ("embedding_config_id",),
     ),
     # missing-required: source_version
     (

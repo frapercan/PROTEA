@@ -183,6 +183,64 @@ downloaded but the MMseqs2 binary and no data is sent.
 5. **Fetch** ``hits.parquet`` and ``homology.json`` and check the output against
    the manifest before loading.
 
+The embedding bank of the photos
+--------------------------------
+
+ADR-D62. Every member sequence of the photos already on the cluster, embedded
+with one configuration per card, so nothing is downloaded but the models' weights
+and no data is sent but the recipes.
+
+1. **Build the environment on the login node**, once. A virtual environment with
+   the stage-1 regime (torch ``2.11.0+cu130`` and torchvision ``0.26.0+cu130``
+   from PyTorch's cu130 index, transformers ``4.48.1``, tokenizers ``0.21.4``,
+   esm ``3.2.1.post1`` installed without its torchtext requirement, httpx,
+   sentencepiece, pyarrow, numpy), then protea-contracts at the commit
+   protea-backends pins, and protea-backends at a commit with
+   ``embed_chunks_padded``. Keep the environment's ``pip freeze`` beside it.
+2. **Fetch the weights on the login node**, each at a fixed revision (the one the
+   development node pins, or the hub's current one, recorded). Point each
+   repository's ``refs/main`` in the cache at that revision, so an offline
+   ``from_pretrained(name)`` loads exactly that snapshot. The jobs set
+   ``HF_HUB_OFFLINE=1``.
+3. **Ship the code** with ``send_builder_code.sh`` at a merged integration
+   revision, and copy ``recipes.json`` into the bank directory. The file holds
+   the configurations exported from the platform, each with its id; every pass
+   refuses a recipe that does not derive its id.
+4. **Prepare** in one CPU job::
+
+     sbatch embedding_bank_prepare.sh PYTHON CODE_DIR BANK_DIR 8000000 \
+       PHOTO_DIR [PHOTO_DIR ...]
+
+   It writes ``sequences.parquet`` (one row group per shard), ``shards.json`` and
+   ``prepare.json``.
+5. **Measure first.** One ``compare`` job per configuration on the card the bank
+   will use::
+
+     sbatch -p gpu_partition --gres=gpu:1 --constraint=b200 -c 8 --mem=64G \
+       -t 00:30:00 embedding_bank.sh PYTHON CODE_DIR BANK_DIR HF_HOME REVISION \
+       CONFIG_ID compare 2000 65536
+
+   Read the gap and both speeds in ``compare-<config>-<job>.json``, and size the
+   full jobs from the padded speed.
+6. **Embed** each configuration over ranges of shards, one card per job::
+
+     sbatch -p gpu_partition --gres=gpu:1 --constraint=b200 -c 8 --mem=64G \
+       embedding_bank.sh PYTHON CODE_DIR BANK_DIR HF_HOME REVISION CONFIG_ID \
+       embed FIRST LAST TOKEN_BUDGET
+
+   A job stops before a shard it could not finish by its limit and exits 4.
+   Submit the same range again and it resumes; done shards are skipped.
+7. **Write the manifest** once every shard is there::
+
+     sbatch -c 2 --mem=8G embedding_bank.sh PYTHON CODE_DIR BANK_DIR HF_HOME \
+       REVISION CONFIG_ID manifest
+
+   It exits 3 when refused: a shard missing or changed, a vector that is not
+   finite, or shards computed under two revisions, software sets or cards.
+8. **Fetch** ``bank-<config>.json`` and ``vectors/<config>/`` and run
+   ``load_embedding_bank`` with the manifest's sha256. It verifies everything
+   again before writing, then loads shard by shard and can be rerun.
+
 The run at 211, measured
 ------------------------
 

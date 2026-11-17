@@ -94,6 +94,7 @@ from protea.core.operations.ingest_method_predictions import (
 )
 from protea.core.operations.insert_proteins import InsertProteinsOperation
 from protea.core.operations.load_cut_photo import LoadCutPhotoOperation
+from protea.core.operations.load_embedding_bank import LoadEmbeddingBankOperation
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
 from protea.core.operations.load_homology_table import LoadHomologyTableOperation
 from protea.core.operations.load_interpro_go_mapping import (
@@ -288,6 +289,8 @@ _REPRESENTATION: tuple[_Row, ...] = (
     ),
     (ApplyLearnedEncoderOperation, replace(_REPRESENTATION_JOB, status="review")),
     (CountBackendParametersOperation, _REPRESENTATION_JOB),
+    # The bank computed on the cluster (ADR-D62), loaded where the database is.
+    (LoadEmbeddingBankOperation, _REPRESENTATION_JOB),
     (
         ExportGateBundleOperation,
         replace(_REPRESENTATION_JOB, family="world-model", status="review"),

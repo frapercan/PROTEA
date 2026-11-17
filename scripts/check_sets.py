@@ -70,6 +70,7 @@ EXPECTED: dict[str, str] = {
     "dataset": "the frozen re-ranker dump the laboratory pulls to train",
     "cut_photo": "the corpus at a cut: Swiss-Prot, live tiers and annotated UniRef50 neighbours",
     "homology_table": "the homology of a cut: its superset searched against its photo (MMseqs2)",
+    "embedding_bank": "one configuration's vectors of every member sequence of a set of photos",
 }
 
 #: Tables whose name ends in ``_set`` but which are membership or join rows,
