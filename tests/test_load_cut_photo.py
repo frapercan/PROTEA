@@ -109,6 +109,7 @@ _VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 _MIGRATION = _VERSIONS / "d4a7c2e9f310_cut_photo_tables.py"
 _MEMBERS_MIGRATION = _VERSIONS / "384568a09847_cut_photo_members.py"
 _KIND_MIGRATION = _VERSIONS / "a6e1e05d3c8b_cut_photo_kind.py"
+_TAXON_MIGRATION = _VERSIONS / "c3a9e7d1f5b2_every_member_names_its_own_taxon.py"
 
 
 def _flat(entries: list[tuple[str, str]]) -> bytes:
@@ -476,7 +477,8 @@ class TestTheSchema:
         sources = {
             CutPhoto: _MIGRATION.read_text(encoding="utf-8")
             + _KIND_MIGRATION.read_text(encoding="utf-8"),
-            CutPhotoMember: _MEMBERS_MIGRATION.read_text(encoding="utf-8"),
+            CutPhotoMember: _MEMBERS_MIGRATION.read_text(encoding="utf-8")
+            + _TAXON_MIGRATION.read_text(encoding="utf-8"),
         }
         for table, source in sources.items():
             for column in table.__table__.columns:

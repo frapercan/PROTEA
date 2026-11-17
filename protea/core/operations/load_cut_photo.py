@@ -55,6 +55,7 @@ from sqlalchemy.orm import Session
 from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.cut_photo.build import OUTPUTS_BY_KIND, channel_table_digest
+from protea.core.cut_photo.taxa import member_taxa
 from protea.core.operations._cut_photo_channel_table import (
     check_stored_channel_table,
     declare_channel_table,
@@ -609,6 +610,8 @@ def _store_members(
 ) -> dict[str, int]:
     """One ``cut_photo_member`` row per member, with the md5 of its paired sequence.
 
+    Its own taxon comes from the cut's GOA rows (:func:`member_taxa`).
+
     A superset member's md5 is in ``members.parquet`` (the canonical Swiss-Prot table);
     any other member's is the one the TrEMBL pass found, or NULL when the paired
     release does not hold the accession.
@@ -617,6 +620,8 @@ def _store_members(
     unreviewed = photo_dir / "unreviewed_sequences.parquet"
     for batch in _batches(unreviewed, ["accession", "md5"]) if unreviewed.exists() else ():
         trembl.update((row["accession"], row["md5"]) for row in batch)
+    taxa, taxon_counts = member_taxa(photo_dir / "rows.parquet")
+    emit("load_cut_photo.member_taxa", None, taxon_counts, "info")
     counts: Counter[str] = Counter()
     progress = _Progress(emit, "members")
     columns = ["accession", "superset", "truth", "curated", "neighbour", "cluster", "md5"]
@@ -624,9 +629,11 @@ def _store_members(
         values = []
         for row in batch:
             md5 = row.pop("md5") or trembl.get(row["accession"])
-            values.append({**row, "photo_id": photo_id, "sequence_md5": md5})
+            taxon = taxa.get(row["accession"])
+            values.append({**row, "photo_id": photo_id, "sequence_md5": md5, "taxon_id": taxon})
             counts["members"] += 1
             counts["members_with_paired_sequence"] += md5 is not None
+            counts["members_with_taxon"] += taxon is not None
             counts["neighbours"] += bool(row["neighbour"])
         session.execute(pg_insert(CutPhotoMember.__table__).values(values))
         progress.batch(len(values))

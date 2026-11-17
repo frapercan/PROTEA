@@ -59,6 +59,7 @@ from protea.core.operations.declare_corpus_population import (
 from protea.core.operations.declare_exam_population import (
     DeclareExamPopulationOperation,
 )
+from protea.core.operations.declare_member_taxa import DeclareMemberTaxaOperation
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenanceOperation,
 )
@@ -191,6 +192,7 @@ _UNIVERSE: tuple[_Row, ...] = (
     (LoadSwissProtReleaseOperation, _FETCHED),
     (LoadCutPhotoOperation, _DERIVED),
     (LoadHomologyTableOperation, _DERIVED),
+    (DeclareMemberTaxaOperation, _DERIVED),
     (RefreshGoaReleaseDatesOperation, _FETCHED),
     (LoadInterProGoMappingOperation, replace(_FETCHED, status="mirror")),
     (RunInterProScanBatchOperation, replace(_DERIVED, status="mirror")),
