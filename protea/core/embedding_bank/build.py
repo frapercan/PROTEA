@@ -389,14 +389,14 @@ def _embed_shard(bank: Path, shard: int, ctx: dict[str, Any], run: dict) -> dict
     started = time.monotonic()
     md5s, sequences = _shard_rows(bank, shard)
     vectors = embed_rows(ctx["plugin"], ctx["loaded"], sequences, ctx["config"], run)
-    finite = np.isfinite(vectors.astype(np.float32)).all(axis=1)
+    finite: list[bool] = np.isfinite(vectors.astype(np.float32)).all(axis=1).tolist()
     path = write_shard(ctx["out"], shard, md5s, vectors)
     record = {
         "shard": shard,
         "rows": len(md5s),
         "dim": int(vectors.shape[1]) if len(md5s) else 0,
         "residues": sum(len(s) for s in sequences),
-        "not_finite": int((~finite).sum()),
+        "not_finite": finite.count(False),
         "not_finite_examples": [m for m, ok in zip(md5s, finite, strict=True) if not ok][:5],
         "sha256": _file_sha256(path),
         "seconds": round(time.monotonic() - started, 1),
@@ -429,7 +429,8 @@ def embed_pass(bank: Path, config_id: str, run: dict[str, Any]) -> dict[str, Any
     ctx = _load(recipe, run["device"]) if todo else {}
     if ctx:
         ctx["out"] = out
-    done, slowest, stopped = [], 0.0, False
+    done: list[dict[str, Any]] = []
+    slowest, stopped = 0.0, False
     for shard in todo:
         elapsed = time.monotonic() - started
         if run.get("stop_after") and done and elapsed + 1.25 * slowest > run["stop_after"]:
