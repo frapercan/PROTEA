@@ -19,8 +19,8 @@ Context: the arm's representation is a lexicon that lives in the laboratory
 
 The explainable-units family reads proteins without any language model. Its
 units come from our lexicon: a segmental model, one hidden Markov model per
-protein in which a background and 4,096 themes compete. Each theme is a profile
-with match, insert and delete states per column, and a protein is explained as a
+protein in which a background and 32,768 themes compete. Each theme is a profile
+of up to 272 columns with match, insert and delete states per column, and a protein is explained as a
 succession of hits of themes. The lexicon was trained without any label, a
 principle of the author's ("es imprescindible que el lexico no vea la
 funcion"), on UniRef50 2022_03 representatives and UniRef90 variants: 146.8
@@ -65,7 +65,10 @@ saw a function.
   theme mass, from the expected occupancy of each state) and in the max semiring
   with its traceback (the cut).
 
-Training stays in the laboratory. The port is accepted only on parity: on a
+The Triton kernels are exempt from the platform's parameter limit only (their
+arguments are the pointers the launch requires); they keep the length limit,
+each split into jitted pieces. Training stays in the laboratory. The port is
+accepted only on parity: on a
 sample of the bank spread over the lengths, its segments equal the laboratory's
 and its theme masses agree within the tolerance of the kernels. The parity
 record is part of the bank's manifest.
@@ -77,7 +80,7 @@ with no length cut):
 - **the cut:** per segment the sequence md5, start, end and theme, and per
   residue its theme column, which the column fingerprints read;
 - **the theme mass:** per protein, the expected residues of each theme over its
-  length, a sparse vector of 4,096 values (a median of 8 themes active).
+  length, a sparse vector over the 32,768 themes (few are active in a protein).
 
 The two lost lexicons' theme masses are not rebuilt: the theme mass is computed
 with the two kept lexicons.
@@ -132,8 +135,8 @@ Alternatives considered
   author asked for the photos and which holds here for the same reason.
   Rejected.
 - **The theme mass as an embedding configuration in** ``sequence_embedding``.
-  It is a per-protein vector, but 4,096 halves for a vector that is almost all
-  zeros costs about 20 GB in rows. Rejected for now; the sparse file serves its
+  It is a per-protein vector, but 32,768 halves for a vector that is almost all
+  zeros would cost some 165 GB in rows. Rejected; the sparse file serves its
   readers.
 - **Retrain** ``lexico-2h`` **and** ``lexico-receta-w2``. The replication
   rebuilds its sources over the kept lexicons. Rejected.
