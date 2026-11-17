@@ -1281,8 +1281,9 @@ class TestQueueConsumerCancellationNack:
     """Regression for T-INFRA.NACK on QueueConsumer.
 
     Reproduces the queue-deadlock bug: a CANCELLED Job arriving on the
-    queue must be nack'd with requeue=False so prefetch=1 cannot wedge
-    on a backlog of cancellations awaiting the 30 min consumer_timeout.
+    queue must leave it at once so prefetch=1 cannot wedge on a backlog of
+    cancellations awaiting the 30 min consumer_timeout. It is ACKED with an
+    event (ADR-D60, phase 3), so it does not land in the dead-letter queue.
     """
 
     def _make_consumer_with_status(self, status):
@@ -1297,21 +1298,23 @@ class TestQueueConsumerCancellationNack:
         worker._factory.return_value = session
         return _consumer(worker), worker, session
 
-    def test_cancelled_job_is_nacked_without_requeue_and_not_dispatched(self):
-        """Acceptance: CANCELLED → basic_nack(requeue=False); basic_ack not called.
+    def test_cancelled_job_is_acked_with_an_event_and_not_dispatched(self):
+        """Acceptance: CANCELLED → basic_ack and a job event; never the DLQ.
 
         Mirrors the integration assertion 'queue depth returns to zero
         within 5 s without manual purge' — the message exits the queue
         immediately without a worker pull-cycle.
         """
-        consumer, worker, _ = self._make_consumer_with_status("cancelled")
+        consumer, worker, session = self._make_consumer_with_status("cancelled")
         channel = MagicMock()
         method = _make_method(123)
 
         consumer._on_message(channel, method, MagicMock(), _encode(uuid4()))
 
-        channel.basic_nack.assert_called_once_with(delivery_tag=123, requeue=False)
-        channel.basic_ack.assert_not_called()
+        channel.basic_ack.assert_called_once_with(delivery_tag=123)
+        channel.basic_nack.assert_not_called()
+        events = [c.args[0].event for c in session.add.call_args_list]
+        assert events == ["job.cancelled_message_acked"]
         # Worker.handle_job MUST NOT be called for cancelled jobs.
         worker.handle_job.assert_not_called()
 
@@ -1348,7 +1351,7 @@ class TestQueueConsumerCancellationNack:
 class TestOperationConsumerCancellationAndRetryNack:
     """Regression for T-INFRA.NACK on OperationConsumer.
 
-    Cancelled parent-job: nack(requeue=False) and skip dispatch.
+    Cancelled parent-job: acked with an event, never dispatched, never the DLQ.
     RetryLaterError: republished after its delay with the retry count raised.
     """
 
@@ -1390,20 +1393,21 @@ class TestOperationConsumerCancellationAndRetryNack:
     def _body(self, job_id):
         return json.dumps({"operation": "test_op", "job_id": str(job_id), "payload": {}}).encode()
 
-    def test_cancelled_parent_nacks_without_requeue_and_skips_execute(self):
-        """Acceptance: CANCELLED parent → basic_nack(requeue=False); op not run."""
+    def test_cancelled_parent_is_acked_with_an_event_and_skips_execute(self):
+        """Acceptance: CANCELLED parent → basic_ack and a child event; op not run."""
         consumer, sessions, op = self._make_consumer_with_parent_status("cancelled")
         channel = MagicMock()
         method = _make_method(200)
 
         consumer._on_message(channel, method, MagicMock(), self._body(uuid4()))
 
-        channel.basic_nack.assert_called_once_with(delivery_tag=200, requeue=False)
-        channel.basic_ack.assert_not_called()
+        channel.basic_ack.assert_called_once_with(delivery_tag=200)
+        channel.basic_nack.assert_not_called()
         op.execute.assert_not_called()
-        # Only the cancellation-check session was opened.
-        assert len(sessions) == 1
-        sessions[0].close.assert_called_once()
+        # The cancellation check, then the session that records the skip.
+        assert len(sessions) == 2
+        assert sessions[1].add.call_args.args[0].event == "child.cancelled_skipped"
+        assert all(s.close.call_count == 1 for s in sessions)
 
     def test_running_parent_proceeds_to_execute(self):
         """Sanity: a non-cancelled parent dispatches normally and acks."""
