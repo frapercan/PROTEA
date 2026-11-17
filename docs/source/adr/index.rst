@@ -12,7 +12,7 @@ ADRs come in two layers:
   PROTEA. They explain trade-offs of concrete code paths (KNN
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
-- **Strategic decisions** (``D1``-``D64``): plan-level decisions. The
+- **Strategic decisions** (``D1``-``D65``): plan-level decisions. The
   ``D1``-``D31`` block was taken in the master plan revision 3 (2026-05-05)
   and drives the structure of the project, the deployment story, and the
   thesis writing cadence. Later records (``D34`` onward) were added as the
@@ -355,6 +355,10 @@ later revision) or *Superseded* (a named later decision replaces it).
      - :doc:`Methods are fitted inside the platform, tuned on 211->227 and decided once on 227->230 <D64-methods-are-fitted-inside-the-platform>`
      - Proposed
      - T-PLATFORM
+   * - D65
+     - :doc:`The explainable sources of a cut: segment families and count maps, built from what the cut knows <D65-the-explainable-sources-of-a-cut>`
+     - Proposed
+     - T-PLATFORM
 
 .. toctree::
    :maxdepth: 1
@@ -431,3 +435,4 @@ later revision) or *Superseded* (a named later decision replaces it).
    D62-the-embedding-bank-of-the-photos
    D63-the-lexicon-bank-of-the-photos
    D64-methods-are-fitted-inside-the-platform
+   D65-the-explainable-sources-of-a-cut
