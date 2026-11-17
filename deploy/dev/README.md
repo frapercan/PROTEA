@@ -23,6 +23,7 @@ containers.
 | `protea-dev-wait-infra.service` | waits until the three answer | | |
 | `protea-dev-worker@<queue>.service` | one queue worker per instance | | 2G each |
 | `protea-dev-api.service` | the API | `127.0.0.1:26800` | 768M |
+| `protea-dev-web` (Quadlet, with `protea-dev-web.build`) | the web front (Next.js) | `127.0.0.1:26300` | 768M |
 | `protea-dev.slice` | holds all of the above | | 9G in total, CPUWeight 50 |
 | `protea-dev.target` | groups them | | |
 
@@ -30,8 +31,10 @@ The images are the ones `docker-compose.yml` pins, by the same digests.
 
 Files:
 
-- `quadlet/`: the three containers for rootless podman (Quadlet) and the
-  broker's `rabbitmq.conf`.
+- `quadlet/`: the three infrastructure containers and the web front for rootless
+  podman (Quadlet), the web front's image build, and the broker's
+  `rabbitmq.conf`.
+- `web/Containerfile`: the web front's image (below, "The web front").
 - `systemd/`: the slice, the target, the readiness gate, the worker template
   and the API unit.
 - `protea-dev-clock-gate.sh`: the clock gate every dev process runs before it
@@ -376,3 +379,27 @@ systemctl --user daemon-reload
 The data under `~/protea-dev`, the podman secrets
 (`podman secret rm protea-dev-...`) and the files under `~/.secrets` stay
 until removed by hand.
+
+## The web front
+
+`protea-dev-web` serves `apps/web` of the dev clone on `127.0.0.1:26300`, built
+by `protea-dev-web.build` from `web/Containerfile`: the production Dockerfile with
+the variables Next.js bakes in at build time, on the same Node major, pinned by
+digest. The browser talks to the API through the app's own proxy
+(`/api-proxy`, rewritten to `127.0.0.1:26800`), so the API keeps its loopback
+binding and its allowed origins. The container runs on the host's network so its
+server side reaches the API on the loopback too, and it binds to loopback for the
+same reason the API does: the API's reads need no credential.
+
+The image is rebuilt whenever the unit starts. Podman's layer cache makes that
+free when `apps/web` did not change, and a few minutes when it did, so a move of
+the clone to another revision is followed by `systemctl --user restart
+protea-dev-web`. Install it with the other Quadlet files:
+
+```bash
+cp deploy/dev/quadlet/protea-dev-web.build deploy/dev/quadlet/protea-dev-web.container \
+  ~/.config/containers/systemd/protea-dev/
+systemctl --user daemon-reload
+systemctl --user start protea-dev-web
+```
+
