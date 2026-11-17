@@ -95,6 +95,7 @@ from protea.core.operations.ingest_method_predictions import (
 from protea.core.operations.insert_proteins import InsertProteinsOperation
 from protea.core.operations.load_cut_photo import LoadCutPhotoOperation
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
+from protea.core.operations.load_homology_table import LoadHomologyTableOperation
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingOperation,
 )
@@ -188,6 +189,7 @@ _UNIVERSE: tuple[_Row, ...] = (
     (LoadGOAAnnotationsOperation, replace(_FETCHED, publishes_to=(queues.JOBS,))),
     (LoadSwissProtReleaseOperation, _FETCHED),
     (LoadCutPhotoOperation, _DERIVED),
+    (LoadHomologyTableOperation, _DERIVED),
     (RefreshGoaReleaseDatesOperation, _FETCHED),
     (LoadInterProGoMappingOperation, replace(_FETCHED, status="mirror")),
     (RunInterProScanBatchOperation, replace(_DERIVED, status="mirror")),
