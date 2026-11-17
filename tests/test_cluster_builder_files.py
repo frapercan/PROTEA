@@ -19,7 +19,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 CLUSTER = ROOT / "deploy" / "cluster"
-ENTRY_POINTS = ("protea.core.cut_photo.build", "protea.core.cut_photo.measure")
+ENTRY_POINTS = (
+    "protea.core.cut_photo.build",
+    "protea.core.cut_photo.measure",
+    "protea.core.homology.build",
+)
 #: What a compute node is allowed to need beyond the standard library.
 THIRD_PARTY = frozenset({"pyarrow"})
 
@@ -76,6 +80,7 @@ def test_the_shipped_list_is_the_import_closure_and_the_job_scripts() -> None:
         "deploy/cluster/cut_photo_measure.sh",
         "deploy/cluster/cut_photo_build.sh",
         "deploy/cluster/cut_photo_truth.sh",
+        "deploy/cluster/homology_build.sh",
     }
     assert all((ROOT / name).is_file() for name in scripts)
 
