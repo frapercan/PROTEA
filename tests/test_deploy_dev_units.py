@@ -7,7 +7,8 @@ breaks one fails in CI instead of on the machine:
 
 * no laptop path and no production worker unit name anywhere in deploy/dev;
 * every unit is protea-dev-*, inside protea-dev.slice, with a memory cap;
-* the infra images are the digests docker-compose.yml pins;
+* the infra images are the digests docker-compose.yml pins, and the web front's
+  image is built from a Containerfile whose every base is pinned by digest;
 * every published port is loopback and in the 26xxx range, and the
   readiness gate waits on exactly those ports;
 * every unit needs the dev data root on the system disk, and every service
@@ -33,6 +34,9 @@ QUADLET = DEV / "quadlet"
 SYSTEMD = DEV / "systemd"
 
 CONTAINERS = sorted(QUADLET.glob("*.container"))
+#: The web front's image is built here, not pulled: its own rule below.
+WEB = QUADLET / "protea-dev-web.container"
+INFRA = [p for p in CONTAINERS if p != WEB]
 UNITS = sorted(p for p in SYSTEMD.iterdir() if p.suffix in {".service", ".slice", ".target"})
 PROCESS_UNITS = [SYSTEMD / "protea-dev-worker@.service", SYSTEMD / "protea-dev-api.service"]
 
@@ -75,6 +79,7 @@ def test_there_is_something_to_check():
         "protea-dev-minio.container",
         "protea-dev-postgres.container",
         "protea-dev-rabbitmq.container",
+        "protea-dev-web.container",
     }
     assert set(PROCESS_UNITS) <= set(UNITS)
 
@@ -131,13 +136,14 @@ def _bytes(value: str) -> int:
     return int(match.group(1)) * {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30}[match.group(2)]
 
 
-def test_the_always_on_processes_and_one_worker_fit_in_the_slice():
+def test_the_always_on_processes_one_worker_and_the_web_fit_in_the_slice():
     caps = [
         _keys(QUADLET / "protea-dev-postgres.container")["MemoryMax"][0],
         _keys(QUADLET / "protea-dev-rabbitmq.container")["MemoryMax"][0],
         _keys(QUADLET / "protea-dev-minio.container")["MemoryMax"][0],
         _keys(SYSTEMD / "protea-dev-api.service")["MemoryMax"][0],
         _keys(SYSTEMD / "protea-dev-worker@.service")["MemoryMax"][0],
+        _keys(WEB)["MemoryMax"][0],
     ]
     ceiling = _keys(SYSTEMD / "protea-dev.slice")["MemoryMax"][0]
     assert sum(_bytes(cap) for cap in caps) <= _bytes(ceiling)
@@ -167,11 +173,35 @@ def test_the_images_are_the_digests_docker_compose_pins():
     def bare(repo: str) -> str:
         return re.sub(r"^(docker\.io/)?(library/)?", "", repo)
 
-    for path in CONTAINERS:
+    for path in INFRA:
         (image,) = _keys(path)["Image"]
         repo, _, digest = image.partition("@sha256:")
         assert digest in pinned, path.name
         assert bare(repo) == bare(pinned[digest]), path.name
+
+
+def test_the_web_image_is_built_from_bases_pinned_by_digest():
+    # Built from the dev clone's apps/web, never pulled by a tag: the container names
+    # its build unit, the build names the Containerfile, and every FROM is a digest.
+    assert _keys(WEB)["Image"] == ["protea-dev-web.build"]
+    build = _keys(QUADLET / "protea-dev-web.build")
+    assert build["File"] == [f"{DATA_ROOT}/deploy/PROTEA/deploy/dev/web/Containerfile"]
+    assert build["SetWorkingDirectory"] == [f"{DATA_ROOT}/deploy/PROTEA/apps/web"]
+    assert build["Slice"] == ["protea-dev.slice"]
+    bases = [
+        line.split()[1]
+        for line in (DEV / "web" / "Containerfile").read_text().splitlines()
+        if line.startswith("FROM ")
+    ]
+    assert bases and all(re.search(r"@sha256:[0-9a-f]{64}$", base) for base in bases)
+
+
+def test_the_web_listens_on_loopback_in_the_dev_range():
+    # On the host's network, so it publishes nothing: its own variables bind it.
+    env = _environment(WEB)
+    assert env["HOSTNAME"] == "127.0.0.1"
+    assert 26000 <= int(env["PORT"]) <= 26999
+    assert env["PROTEA_INTERNAL_API_URL"] == "http://127.0.0.1:26800"
 
 
 def _published() -> dict[int, str]:
