@@ -259,7 +259,9 @@ class QueueConsumer(Stoppable):
         # to the dead-letter queue, where a cancellation reads as a failure.
         if self._is_job_cancelled(job_id):
             logger.info("Skipping cancelled job. job_id=%s queue=%s", job_id, self._queue_name)
-            record_skip(self._worker._factory, job_id, "job.cancelled_message_acked", self._queue_name)
+            record_skip(
+                self._worker._factory, job_id, "job.cancelled_message_acked", self._queue_name
+            )
             channel.basic_ack(delivery_tag=method.delivery_tag)
             return
 
