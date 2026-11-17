@@ -34,6 +34,11 @@ WEIGHT_KINDS = (
     #: this", which is the one question it exists for, and would break the
     #: project's rule that every set is DESCRIBED.
     "term_text_vectors",
+    #: The segmental lexicon of the explainable-units family (ADR-D63): a background
+    #: and thousands of profile themes, trained without labels on UniRef sequences.
+    #: Not a residue vocabulary (that one is a dictionary over a language model's
+    #: states) and not an encoder: it cuts a sequence into hits of its themes.
+    "lexicon",
 )
 
 

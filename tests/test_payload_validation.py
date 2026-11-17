@@ -135,6 +135,7 @@ from protea.core.operations.load_homology_table import LoadHomologyTablePayload
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingPayload,
 )
+from protea.core.operations.load_lexicon_bank import LoadLexiconBankPayload
 from protea.core.operations.load_ontology_aliases import (
     LoadOntologyAliasesPayload,
 )
@@ -387,6 +388,18 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "manifest_sha256": "not-a-digest",
         },
         ("embedding_config_id",),
+    ),
+    # A lexicon bank, by its lexicon's registered weights and its manifest (ADR-D63).
+    (
+        "load_lexicon_bank",
+        LoadLexiconBankPayload,
+        {
+            "bank_dir": "/srv/banks/photos",
+            "name": "lexico-93k",
+            "model_weights_id": "not-a-uuid",
+            "manifest_sha256": "0" * 64,
+        },
+        ("model_weights_id",),
     ),
     # The members' taxa of a loaded photo, named by its manifest's sha256.
     (
