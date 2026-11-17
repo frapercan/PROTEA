@@ -1,9 +1,11 @@
-# The files a cluster needs to measure and build a cut photo and its homology table: the
-# import closure of protea.core.cut_photo.measure and .build and of
-# protea.core.homology.build inside protea/ (the standard library and pyarrow are all
-# they need), and the job scripts that run them. send_builder_code.sh
-# ships exactly these, and tests/test_cluster_builder_files.py fails when the closure
-# and the protea/ lines disagree, or when a job script here is missing.
+# The files a cluster needs to measure and build a cut photo, its homology table and the
+# embedding bank of the photos: the import closure of protea.core.cut_photo.measure and
+# .build, of protea.core.homology.build (the standard library and pyarrow are all they
+# need) and of protea.core.embedding_bank.build (which also needs numpy, and torch with
+# the protea-backends plugins in the cluster's own environment) inside protea/, and the
+# job scripts that run them. send_builder_code.sh ships exactly these, and
+# tests/test_cluster_builder_files.py fails when the closure and the protea/ lines
+# disagree, or when a job script here is missing.
 protea/__init__.py
 protea/core/__init__.py
 protea/core/cut_photo/__init__.py
@@ -15,10 +17,14 @@ protea/core/cut_photo/members.py
 protea/core/cut_photo/photo_io.py
 protea/core/cut_photo/rows.py
 protea/core/cut_photo/sequences.py
+protea/core/embedding_bank/__init__.py
+protea/core/embedding_bank/build.py
+protea/core/embedding_identity.py
 protea/core/evidence_codes.py
 protea/core/homology/__init__.py
 protea/core/homology/build.py
 protea/core/marks.py
+protea/core/plugins.py
 protea/core/row_alignment.py
 protea/core/source_guards.py
 protea/core/swissprot_table.py
@@ -26,3 +32,5 @@ deploy/cluster/cut_photo_measure.sh
 deploy/cluster/cut_photo_build.sh
 deploy/cluster/cut_photo_truth.sh
 deploy/cluster/homology_build.sh
+deploy/cluster/embedding_bank_prepare.sh
+deploy/cluster/embedding_bank.sh

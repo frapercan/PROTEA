@@ -19,13 +19,15 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 CLUSTER = ROOT / "deploy" / "cluster"
-ENTRY_POINTS = (
-    "protea.core.cut_photo.build",
-    "protea.core.cut_photo.measure",
-    "protea.core.homology.build",
-)
-#: What a compute node is allowed to need beyond the standard library.
-THIRD_PARTY = frozenset({"pyarrow"})
+#: Each tool a cluster runs, with what its compute node may need beyond the standard
+#: library. The embedding bank runs the protea-backends plugins, so its node has the
+#: cluster's own environment (numpy, torch and the plugins it discovers by entry point).
+ENTRY_POINTS = {
+    "protea.core.cut_photo.build": frozenset({"pyarrow"}),
+    "protea.core.cut_photo.measure": frozenset({"pyarrow"}),
+    "protea.core.homology.build": frozenset({"pyarrow"}),
+    "protea.core.embedding_bank.build": frozenset({"pyarrow", "numpy", "torch"}),
+}
 
 
 def _path_of(module: str) -> Path | None:
@@ -38,9 +40,9 @@ def _path_of(module: str) -> Path | None:
     return None
 
 
-def _closure() -> tuple[set[str], set[str]]:
+def _closure(entry_points: tuple[str, ...] = tuple(ENTRY_POINTS)) -> tuple[set[str], set[str]]:
     """The files under ``protea/`` the entry points import, and every outside module."""
-    todo, seen, outside = list(ENTRY_POINTS), set(), set()
+    todo, seen, outside = list(entry_points), set(), set()
     while todo:
         module = todo.pop()
         path = _path_of(module)
@@ -81,13 +83,17 @@ def test_the_shipped_list_is_the_import_closure_and_the_job_scripts() -> None:
         "deploy/cluster/cut_photo_build.sh",
         "deploy/cluster/cut_photo_truth.sh",
         "deploy/cluster/homology_build.sh",
+        "deploy/cluster/embedding_bank_prepare.sh",
+        "deploy/cluster/embedding_bank.sh",
     }
     assert all((ROOT / name).is_file() for name in scripts)
 
 
-def test_the_closure_needs_only_the_standard_library_and_pyarrow() -> None:
-    _, outside = _closure()
-    unexpected = outside - set(sys.stdlib_module_names) - THIRD_PARTY - {"__future__"}
+@pytest.mark.parametrize("entry_point", sorted(ENTRY_POINTS))
+def test_each_tool_needs_only_what_its_node_has(entry_point: str) -> None:
+    _, outside = _closure((entry_point,))
+    allowed = ENTRY_POINTS[entry_point] | {"__future__"}
+    unexpected = outside - set(sys.stdlib_module_names) - allowed
     assert not unexpected, f"a compute node would need {sorted(unexpected)}"
 
 
