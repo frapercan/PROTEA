@@ -64,9 +64,13 @@ HIT_COLUMNS: tuple[str, ...] = (
     "evalue",
     "bits",
 )
+#: The md5 columns are ``large_string``: a cut holds about ninety million hits, so
+#: each column carries some three gigabytes of text, past the two a ``string``
+#: array can address. With ``string`` the sort's ``take`` fails with an offset
+#: overflow (measured on cut 160, job 3693081, 2026-11-17).
 _HIT_TYPES = {
-    "query_md5": pa.string(),
-    "target_md5": pa.string(),
+    "query_md5": pa.large_string(),
+    "target_md5": pa.large_string(),
     "fident": pa.float32(),
     "alnlen": pa.int32(),
     "qcov": pa.float32(),

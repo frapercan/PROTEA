@@ -94,6 +94,26 @@ def stored(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     return calls
 
 
+class TestTheHitsAreReadInBatches:
+    def test_the_distinct_md5s_do_not_depend_on_the_batch_size(self, tmp_path: Path) -> None:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        from protea.core.operations.load_homology_table import distinct_md5s
+
+        path = tmp_path / "hits.parquet"
+        table = pa.table(
+            {
+                "query_md5": pa.array(["a", "a", "b", "c", "c"], type=pa.large_string()),
+                "target_md5": pa.array(["x", "y", "x", "z", "y"], type=pa.large_string()),
+            }
+        )
+        pq.write_table(table, path, row_group_size=2)
+        for batch_rows in (1, 2, 10):
+            rows, queries, targets = distinct_md5s(path, batch_rows=batch_rows)
+            assert (rows, queries, targets) == (5, {"a", "b", "c"}, {"x", "y", "z"})
+
+
 class TestThePayload:
     def test_a_digest_that_is_not_one_is_refused(self) -> None:
         with pytest.raises(ValueError, match="64 hexadecimal"):
