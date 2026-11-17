@@ -26,6 +26,7 @@ from .anon_quota import AnonQuota  # noqa: F401
 from .api_key import ApiKey  # noqa: F401
 from .auth_audit import AuthAudit  # noqa: F401
 from .embedding.dataset import Dataset  # noqa: F401
+from .embedding.embedding_bank import EmbeddingBank  # noqa: F401
 from .embedding.embedding_config import EmbeddingConfig  # noqa: F401
 from .embedding.go_prediction import GOPrediction  # noqa: F401
 from .embedding.model_weights import ModelWeights  # noqa: F401
