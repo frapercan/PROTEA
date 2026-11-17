@@ -149,3 +149,6 @@ class CutPhotoMember(Base):
     cluster: Mapped[str | None] = mapped_column(String(64), nullable=True)
     #: The md5 of its sequence in the paired release; NULL when the release lacks it.
     sequence_md5: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: Its own NCBI taxon as the cut's GOA rows name it (protea.core.cut_photo.taxa);
+    #: NULL for a member without rows at the cut or whose rows name two own taxa.
+    taxon_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

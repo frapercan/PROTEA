@@ -81,6 +81,7 @@ from protea.core.operations.declare_corpus_population import (
 from protea.core.operations.declare_exam_population import (
     DeclareExamPopulationPayload,
 )
+from protea.core.operations.declare_member_taxa import DeclareMemberTaxaPayload
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenancePayload,
 )
@@ -126,10 +127,10 @@ from protea.core.operations.ingest_method_predictions import (
 )
 from protea.core.operations.insert_proteins import InsertProteinsPayload
 from protea.core.operations.load_cut_photo import LoadCutPhotoPayload
+from protea.core.operations.load_embedding_bank import LoadEmbeddingBankPayload
 from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsPayload,
 )
-from protea.core.operations.load_embedding_bank import LoadEmbeddingBankPayload
 from protea.core.operations.load_homology_table import LoadHomologyTablePayload
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingPayload,
@@ -386,6 +387,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "manifest_sha256": "not-a-digest",
         },
         ("embedding_config_id",),
+    ),
+    # The members' taxa of a loaded photo, named by its manifest's sha256.
+    (
+        "declare_member_taxa",
+        DeclareMemberTaxaPayload,
+        {"photo_dir": "/srv/photos/211", "manifest_sha256": "not-a-digest"},
+        ("manifest_sha256",),
     ),
     # missing-required: source_version
     (
