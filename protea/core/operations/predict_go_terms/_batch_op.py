@@ -205,7 +205,7 @@ class PredictGOTermsBatchOperation(
             prediction_set_id=ctx.prediction_set_id,
             prediction_dicts=prediction_dicts,
         )
-        self._finalize_parent_if_last(session, ctx.parent_job_id, emit)
+        self._count_batch_done(session, ctx.parent_job_id, emit)
         return OperationResult(
             result={
                 "predictions": len(prediction_dicts),
@@ -215,54 +215,41 @@ class PredictGOTermsBatchOperation(
         )
 
     @staticmethod
-    def _finalize_parent_if_last(session: Session, parent_job_id: UUID, emit: EmitFn) -> None:
-        """Atomically bump ``meta.batches_completed`` and mark the parent
-        ``predict_go_terms`` Job ``SUCCEEDED`` when the count reaches
-        ``meta.expected_batches`` (FIX-PREDICT-COORD-CLAIM, 2026-06-01).
+    def _count_batch_done(session: Session, parent_job_id: UUID, emit: EmitFn) -> None:
+        """Atomically bump ``meta.batches_completed`` on the parent; never close it.
 
-        Without this, the coord job returns ``deferred=True`` and stays
-        ``RUNNING`` forever; the stale-job reaper eventually kills it as
-        ``lease_expired`` even though every batch has succeeded.
+        THE WRITE STAGE CLOSES THE JOB (ADR-D60, phase 3). This stage used to
+        mark the parent ``SUCCEEDED`` when the last batch was COMPUTED
+        (FIX-PREDICT-COORD-CLAIM, 2026-06-01), while that batch's predictions
+        were still on their way to ``store_predictions``: the job read as done
+        with rows not yet written, or with a write that later failed. The
+        closing now happens where the rows land: each batch's final chunk
+        advances ``progress_current`` in ``store_predictions``
+        (:func:`protea.core.contracts.parent_progress.update_parent_progress`),
+        and the parent closes when it reaches ``progress_total``, the number of
+        batches. The reason the batch stage took over then (a NULL counter that
+        ``NULL + 1`` could never advance) was fixed in that function on
+        2026-11-08. This count stays, for whoever reads how far the computing got.
         """
         row = session.execute(
             text(
-                "UPDATE job SET "
-                "  meta = jsonb_set("
-                "    COALESCE(meta, '{}'::jsonb),"
-                "    '{batches_completed}',"
-                "    to_jsonb(COALESCE((meta->>'batches_completed')::int, 0) + 1)"
-                "  ),"
-                "  status = CASE"
-                "    WHEN COALESCE((meta->>'batches_completed')::int, 0) + 1"
-                "         >= COALESCE((meta->>'expected_batches')::int, 2147483647)"
-                "    THEN 'SUCCEEDED'::job_status"
-                "    ELSE status"
-                "  END,"
-                "  finished_at = CASE"
-                "    WHEN COALESCE((meta->>'batches_completed')::int, 0) + 1"
-                "         >= COALESCE((meta->>'expected_batches')::int, 2147483647)"
-                "    THEN NOW()"
-                "    ELSE finished_at"
-                "  END,"
-                # FIX-UI-PROVENANCE: on the terminal SUCCEEDED transition snap
-                # progress_current up to progress_total so the UI shows 100%
-                # instead of a stale sub-total left by the last batch emit.
-                "  progress_current = CASE"
-                "    WHEN COALESCE((meta->>'batches_completed')::int, 0) + 1"
-                "         >= COALESCE((meta->>'expected_batches')::int, 2147483647)"
-                "    THEN COALESCE(progress_total, progress_current)"
-                "    ELSE progress_current"
-                "  END "
-                "WHERE id = :pid AND status = 'RUNNING'::job_status "
-                "RETURNING (status = 'SUCCEEDED'::job_status) AS finalized, "
-                "          (meta->>'batches_completed')::int AS done, "
-                "          (meta->>'expected_batches')::int AS expected"
+                "UPDATE job SET meta = jsonb_set("
+                "  COALESCE(meta, '{}'::jsonb),"
+                "  '{batches_completed}',"
+                "  to_jsonb(COALESCE((meta->>'batches_completed')::int, 0) + 1)"
+                ") "
+                "WHERE id = :pid "
+                "RETURNING (meta->>'batches_completed')::int AS done, "
+                "          (meta->>'expected_batches')::int AS expected, "
+                "          COALESCE((meta->>'batches_completed')::int, 0)"
+                "            >= COALESCE((meta->>'expected_batches')::int, 2147483647)"
+                "            AS all_computed"
             ),
             {"pid": parent_job_id},
         ).first()
-        if row is not None and row.finalized:
+        if row is not None and row.all_computed:
             emit(
-                "predict_go_terms.coord_finalized",
+                "predict_go_terms.batches_computed",
                 None,
                 {"batches_completed": row.done, "expected_batches": row.expected},
                 "info",
