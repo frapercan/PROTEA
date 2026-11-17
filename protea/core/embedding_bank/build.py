@@ -389,7 +389,8 @@ def _embed_shard(bank: Path, shard: int, ctx: dict[str, Any], run: dict) -> dict
     started = time.monotonic()
     md5s, sequences = _shard_rows(bank, shard)
     vectors = embed_rows(ctx["plugin"], ctx["loaded"], sequences, ctx["config"], run)
-    finite: list[bool] = np.isfinite(vectors.astype(np.float32)).all(axis=1).tolist()
+    rows_ok = np.asarray(np.isfinite(vectors.astype(np.float32)).all(axis=1), dtype=bool)
+    finite: list[bool] = [bool(v) for v in rows_ok]
     path = write_shard(ctx["out"], shard, md5s, vectors)
     record = {
         "shard": shard,
