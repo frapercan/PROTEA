@@ -77,6 +77,28 @@ class QueueTuning(BaseModel):
         ge=1,
         description="Cap del backoff OOM en segundos (5 min default).",
     )
+    transient_max_retries: int = Field(
+        default=5,
+        ge=0,
+        description=(
+            "How many times an operation message that failed for a passing reason "
+            "(RetryLaterError, a lost connection to the database, the broker or the "
+            "object store) is republished before it is dead-lettered (ADR-D60, phase 3)."
+        ),
+    )
+    transient_base_delay: int = Field(
+        default=30,
+        ge=0,
+        description=(
+            "First wait in seconds before republishing after a lost connection; "
+            "doubles with each attempt. RetryLaterError waits its own delay_seconds."
+        ),
+    )
+    transient_max_delay: int = Field(
+        default=600,
+        ge=1,
+        description="Cap in seconds on any wait before a transient retry.",
+    )
     amqp_heartbeat: int = Field(
         default=600,
         ge=0,

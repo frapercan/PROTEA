@@ -1349,7 +1349,7 @@ class TestOperationConsumerCancellationAndRetryNack:
     """Regression for T-INFRA.NACK on OperationConsumer.
 
     Cancelled parent-job: nack(requeue=False) and skip dispatch.
-    RetryLaterError: nack(requeue=True) so the broker reschedules.
+    RetryLaterError: republished after its delay with the retry count raised.
     """
 
     def _make_consumer_with_parent_status(self, status, op=None):
@@ -1417,9 +1417,9 @@ class TestOperationConsumerCancellationAndRetryNack:
         channel.basic_ack.assert_called_once_with(delivery_tag=201)
         channel.basic_nack.assert_not_called()
 
-    def test_retry_later_nacks_with_requeue_true(self):
-        """RetryLaterError is an explicit retry signal: nack(requeue=True),
-        no manual republish, no dead-letter."""
+    def test_retry_later_is_republished_with_its_count_after_its_wait(self):
+        """RetryLaterError is a transient failure (ADR-D60, phase 3): republished
+        after its own delay with ``x-protea-retry`` raised, never requeued blind."""
         from protea.core.contracts.operation import RetryLaterError
 
         op = MagicMock()
@@ -1428,12 +1428,13 @@ class TestOperationConsumerCancellationAndRetryNack:
         channel = MagicMock()
         method = _make_method(202)
 
-        consumer._on_message(channel, method, MagicMock(), self._body(uuid4()))
+        consumer._on_message(channel, method, MagicMock(headers=None), self._body(uuid4()))
 
-        channel.basic_nack.assert_called_once_with(delivery_tag=202, requeue=True)
-        channel.basic_ack.assert_not_called()
-        # No republish on RetryLaterError — the broker handles redelivery.
-        channel.basic_publish.assert_not_called()
+        channel.connection.sleep.assert_called_once_with(10)
+        published = channel.basic_publish.call_args.kwargs
+        assert published["properties"].headers == {"x-protea-retry": 1}
+        channel.basic_ack.assert_called_once_with(delivery_tag=202)
+        channel.basic_nack.assert_not_called()
 
 
 class TestOperationConsumerRun:
