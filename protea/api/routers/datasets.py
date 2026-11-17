@@ -636,6 +636,10 @@ def _build_imported_dataset(
         producer_version=body.producer_version,
         producer_git_sha=body.producer_git_sha,
         meta=merged_meta,
+        description=(
+            f"Dataset {body.name}, imported by reference from {body.manifest_uri}; "
+            "its parquets were not read here, so their sha256 is not recorded."
+        ),
     )
 
 

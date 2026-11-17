@@ -11,6 +11,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from protea.core import queues
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import (
     EmitFn,
     OperationResult,
@@ -229,6 +230,21 @@ def _frame_asked_for(p: LoadGOAAnnotationsPayload, emit: EmitFn) -> bool:
     return p.enqueue_evaluation_set_against_prior
 
 
+
+def _new_goa_set(
+    p: LoadGOAAnnotationsPayload, snapshot_id: uuid.UUID, job_id: uuid.UUID | None
+) -> AnnotationSet:
+    """A new set for this release: the job that opens it, its source, what it is and the code."""
+    return AnnotationSet(
+        source="goa",
+        source_version=p.source_version,
+        ontology_snapshot_id=snapshot_id,
+        job_id=job_id,
+        meta={"gaf_url": p.gaf_url, "job_ids": [str(job_id)] if job_id else []},
+        description=f"GOA {p.source_version} as load_goa_annotations read it from {p.gaf_url}.",
+        code_revision=code_revision(),
+    )
+
 class LoadGOAAnnotationsOperation:
     """Streams a GOA GAF file (gzip or plain) and upserts ProteinGOAnnotation rows.
 
@@ -409,13 +425,7 @@ class LoadGOAAnnotationsOperation:
                 "info",
             )
             return existing
-        annotation_set = AnnotationSet(
-            source="goa",
-            source_version=p.source_version,
-            ontology_snapshot_id=snapshot_id,
-            job_id=job_id,
-            meta={"gaf_url": p.gaf_url, "job_ids": [str(job_id)] if job_id else []},
-        )
+        annotation_set = _new_goa_set(p, snapshot_id, job_id)
         session.add(annotation_set)
         session.flush()
         emit(

@@ -101,6 +101,15 @@ class Dataset(Base):
     # tags, curator notes). Keep schema fields that actually gate
     # behaviour out of here.
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    #: What the row IS, in a sentence its writer derives (ADR-D58's long
+    #: descriptor); NULL on rows written before the column, which read as
+    #: "nothing says", never as a default.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The sha256 of the two parquets ``train_uri`` and ``eval_uri`` point at,
+    #: hashed from the staged files before upload; NULL when the writer could not
+    #: see the bytes (an import by reference) and on rows written before them.
+    train_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    eval_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

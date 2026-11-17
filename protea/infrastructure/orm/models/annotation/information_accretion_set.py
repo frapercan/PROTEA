@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -111,6 +112,13 @@ class InformationAccretionSet(Base):
 
     #: Gate results and shape counters recorded at computation time.
     stats: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    #: What the row IS, in a sentence its writer derives (ADR-D58's long
+    #: descriptor); NULL on rows written before the column, which read as
+    #: "nothing says", never as a default.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The code that wrote the row (``protea.core.code_revision``); NULL on
+    #: rows written before the column.
+    code_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

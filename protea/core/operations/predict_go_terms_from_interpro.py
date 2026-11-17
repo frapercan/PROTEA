@@ -71,8 +71,9 @@ from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.utils import contract_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.interpro_annotation import (
@@ -244,6 +245,7 @@ class PredictGOTermsFromInterProOperation:
             return OperationResult(result={"proteins": 0, "predictions": 0})
 
         prediction_set = self._create_prediction_set(session, p, ids)
+        prediction_set.job_id = job_id_from_payload(payload)
         ctx = _RunContext(
             p=p, ids=ids, accessions=accessions, prediction_set_id=prediction_set.id
         )
@@ -389,6 +391,11 @@ class PredictGOTermsFromInterProOperation:
             limit_per_entry=0,
             distance_threshold=None,
             meta={"algorithm": _ALGORITHM_TAG, "pending": True},
+            description=(
+                f"GO terms transferred from InterPro hits through the InterPro2GO mapping, "
+                f"over annotation set {ids.annotation_set_id}."
+            ),
+            producer_git_sha=code_revision(),
         )
         session.add(ps)
         session.flush()

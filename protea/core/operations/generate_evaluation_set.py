@@ -194,6 +194,19 @@ def _declared_rules(
     return applied
 
 
+def window_description(
+    ends: tuple[AnnotationSet, AnnotationSet], ident: _Identity, ask: _Ask
+) -> str:
+    """The sentence a window says about itself: its two corpora, its rules, targets, role."""
+    old_set, new_set = ends
+    rules = ask.rule_set or f"{ident.truth_profile}, {ident.toi_rule}, NOT {ident.not_codes}"
+    return (
+        f"The window {old_set.source} {old_set.source_version} -> {new_set.source} "
+        f"{new_set.source_version}: truth rules {rules}, targets {ident.target_population}, "
+        f"role {ask.window_role or 'none'}."
+    )
+
+
 def _served_rules(row: Any) -> dict[str, str] | None:
     """The stored rules of a served row, or None when it holds none (legacy)."""
     stored = getattr(row, "truth_rules", None)
@@ -320,6 +333,7 @@ class GenerateEvaluationSetOperation:
         self._refuse_empty_delta(session, ident, stats)
 
         eval_set = self._new_row(ident, ask, stats, job_id_from_payload(payload))
+        eval_set.description = window_description((old_set, new_set), ident, ask)
         session.add(eval_set)
         session.flush()
         uri = self._persist_groundtruth(eval_set, data, emit)

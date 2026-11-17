@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.operations.predict_go_terms._common import (
     _BATCH_QUEUE,
@@ -83,6 +84,29 @@ def _refuse_an_undeclared_corpus(count: int) -> None:
         "handles afterwards, including ones somebody else sent"
     )
 
+
+
+def _new_prediction_set(
+    p: PredictGOTermsPayload, ids: tuple[Any, Any, Any], queries: int, parent_job_id: UUID
+) -> PredictionSet:
+    """The set this run writes into: its inputs, its receipt, what it is and who made it."""
+    embedding_config_id, annotation_set_id, ontology_snapshot_id = ids
+    return PredictionSet(
+        embedding_config_id=embedding_config_id,
+        annotation_set_id=annotation_set_id,
+        ontology_snapshot_id=ontology_snapshot_id,
+        query_set_id=uuid.UUID(p.query_set_id) if p.query_set_id else None,
+        limit_per_entry=p.limit_per_entry,
+        distance_threshold=p.distance_threshold,
+        meta=run_receipt(p, parent_job_id),
+        description=(
+            f"Nearest-neighbour transfer from embedding configuration {embedding_config_id} "
+            f"over annotation set {annotation_set_id}, {queries} queries, at most "
+            f"{p.limit_per_entry} per entry."
+        ),
+        job_id=parent_job_id,
+        producer_git_sha=code_revision(),
+    )
 
 class PredictGOTermsOperation:
     """Coordinator: validates, creates PredictionSet, dispatches N batch messages.
@@ -171,15 +195,8 @@ class PredictGOTermsOperation:
             emit("predict_go_terms.no_queries", None, {}, "warning")
             return OperationResult(result={"batches": 0, "queries": 0})
 
-        prediction_set = PredictionSet(
-            embedding_config_id=embedding_config_id,
-            annotation_set_id=annotation_set_id,
-            ontology_snapshot_id=ontology_snapshot_id,
-            query_set_id=uuid.UUID(p.query_set_id) if p.query_set_id else None,
-            limit_per_entry=p.limit_per_entry,
-            distance_threshold=p.distance_threshold,
-            meta=run_receipt(p, parent_job_id),
-        )
+        ids = (embedding_config_id, annotation_set_id, ontology_snapshot_id)
+        prediction_set = _new_prediction_set(p, ids, len(query_accessions), parent_job_id)
         session.add(prediction_set)
         session.flush()
 

@@ -4,7 +4,17 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -87,6 +97,21 @@ class PredictionSet(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    #: What the row IS, in a sentence its writer derives (ADR-D58's long
+    #: descriptor); NULL on rows written before the column, which read as
+    #: "nothing says", never as a default.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The job that created the set, and the code it ran; NULL on rows written
+    #: before the columns. The code is ``producer_git_sha`` and not
+    #: ``code_revision``: ``meta["code_revision"]`` already names the revision that
+    #: identifies the method (``protea.core.method_seal``), and one name for two
+    #: fields would make the seal's flat partition ambiguous.
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("job.id", ondelete="SET NULL", name="fk_prediction_set_job"),
+        nullable=True,
+    )
+    producer_git_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     embedding_config: Mapped[EmbeddingConfig | None] = relationship("EmbeddingConfig")
     method: Mapped[Method | None] = relationship("Method")

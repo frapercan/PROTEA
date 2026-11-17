@@ -70,13 +70,14 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import (
     EmitFn,
     OperationResult,
     ProteaPayload,
 )
 from protea.core.operations._encoder_artifact import resolve_encoder_artifact
-from protea.core.utils import contract_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -315,6 +316,13 @@ class IngestMethodPredictionsOperation:
                 ontology_snapshot_id=snapshot.id,
                 query_set_id=uuid.UUID(p.query_set_id) if p.query_set_id else None,
                 limit_per_entry=p.limit_per_entry or counters.max_terms_per_protein,
+                description=(
+                    f"The predictions of method {p.method}, ingested from a file hashing to "
+                    f"{digest[:12]}, against annotation set {corpus.id} on ontology "
+                    f"snapshot {snapshot.id}."
+                ),
+                job_id=job_id_from_payload(payload),
+                producer_git_sha=code_revision(),
                 meta={
                     "algorithm": "ingested_method",
                     "method": p.method,
