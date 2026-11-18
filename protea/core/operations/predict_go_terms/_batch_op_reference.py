@@ -32,6 +32,7 @@ from protea.core.operations.predict_go_terms._common import (
     _REF_CACHE,
     _UNIFIED_REF_KEY,
 )
+from protea.core.operations.predict_go_terms._photo_sequences import donor_pool_base
 from protea.core.operations.predict_go_terms._reference_aspect import _ASPECT_SLICE
 from protea.core.operations.predict_go_terms._reference_binary import fill_from_binary
 from protea.core.operations.predict_go_terms._reference_needs import reference_dtype_needs
@@ -214,7 +215,7 @@ def _restrict_annotations(annotations: Any, donor_policy: Any) -> Any:
     return annotations
 
 
-def _bank_order() -> tuple[Any, ...]:
+def _bank_order(accession: Any = Protein.accession) -> tuple[Any, ...]:
     """The ORDER BY the donor-pool query carries, and why it is a result.
 
     91 per cent of queries have neighbours at distance ~0 -- themselves, or twins
@@ -248,7 +249,7 @@ def _bank_order() -> tuple[Any, ...]:
     exists for. No config in this campaign chunks today, so it costs nothing now
     and removes a trap later.
     """
-    return (Protein.accession.collate("C"), SequenceEmbedding.chunk_index_s)
+    return (accession.collate("C"), SequenceEmbedding.chunk_index_s)
 
 
 def _pin_annotation_order(
@@ -497,14 +498,8 @@ class _ReferenceMixin:
         annotations = _restrict_annotations(annotations, policy)
         annotated_sq = annotations.distinct().subquery()
 
-        query = (
-            session.query(Protein.accession)
-            .join(
-                SequenceEmbedding,
-                (SequenceEmbedding.sequence_id == Protein.sequence_id)
-                & (SequenceEmbedding.embedding_config_id == request.embedding_config_id),
-            )
-            .join(annotated_sq, Protein.accession == annotated_sq.c.protein_accession)
+        query, accession = donor_pool_base(
+            session, request.annotation_set_id, request.embedding_config_id, annotated_sq
         )
         if policy is not None and getattr(policy, "reviewed_only", False):
             # ``reviewed`` is nullable, and an unknown review status is not a
@@ -522,7 +517,7 @@ class _ReferenceMixin:
             # donors in the full length ankh bank. On the indexed column, and a
             # NULL is not <= anything: a protein no pass admitted is no member.
             query = query.filter(Protein.first_admitted_release <= int(admitted_by))
-        return query.order_by(*_bank_order())
+        return query.order_by(*_bank_order(accession))
 
     def _stream_reference_pool(
         self,

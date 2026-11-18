@@ -26,6 +26,7 @@ from protea.core.operations.predict_go_terms._common import (
 from protea.core.operations.predict_go_terms._missing_query_vectors import (
     report_queries_without_vector,
 )
+from protea.core.operations.predict_go_terms._photo_sequences import member_sequences, photo_of
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -187,17 +188,7 @@ class _FeatureLoadingMixin:
                 .all()
             )
         else:
-            rows = (
-                session.query(Protein.accession, SequenceEmbedding.embedding)
-                .join(Protein.sequence)
-                .join(
-                    SequenceEmbedding,
-                    (SequenceEmbedding.sequence_id == Protein.sequence_id)
-                    & (SequenceEmbedding.embedding_config_id == embedding_config_id),
-                )
-                .filter(Protein.accession.in_(query_accessions))
-                .all()
-            )
+            rows = _vectors_by_accession(session, p, query_accessions, embedding_config_id)
 
         if not rows:
             report_queries_without_vector(
@@ -207,8 +198,10 @@ class _FeatureLoadingMixin:
 
         valid_accessions = [r[0] for r in rows]
         report_queries_without_vector(
-            query_accessions, valid_accessions,
-            embedding_config_id=embedding_config_id, emit=emit,
+            query_accessions,
+            valid_accessions,
+            embedding_config_id=embedding_config_id,
+            emit=emit,
         )
         # Rows return pgvector HalfVector instances (halfvec column since 2026-04-11).
         embeddings = np.array([r[1].to_list() for r in rows], dtype=np.float32)
@@ -343,3 +336,36 @@ class _FeatureLoadingMixin:
             gid = rec.get("go_term_id")
             if gid is not None and gid in aspect_by_id:
                 rec["aspect"] = aspect_by_id[gid]
+
+
+def _vectors_by_accession(
+    session: Session,
+    p: PredictGOTermsBatchPayload,
+    query_accessions: list[str],
+    embedding_config_id: uuid.UUID,
+) -> list[Any]:
+    """(accession, vector) of the queries, by the photo's sequences on a photo's run."""
+    photo = photo_of(session, p.annotation_set_id)
+    if photo is not None:
+        members = member_sequences(photo)
+        return (
+            session.query(members.c.accession, SequenceEmbedding.embedding)
+            .join(
+                SequenceEmbedding,
+                (SequenceEmbedding.sequence_id == members.c.sequence_id)
+                & (SequenceEmbedding.embedding_config_id == embedding_config_id),
+            )
+            .filter(members.c.accession.in_(query_accessions))
+            .all()
+        )
+    return (
+        session.query(Protein.accession, SequenceEmbedding.embedding)
+        .join(Protein.sequence)
+        .join(
+            SequenceEmbedding,
+            (SequenceEmbedding.sequence_id == Protein.sequence_id)
+            & (SequenceEmbedding.embedding_config_id == embedding_config_id),
+        )
+        .filter(Protein.accession.in_(query_accessions))
+        .all()
+    )

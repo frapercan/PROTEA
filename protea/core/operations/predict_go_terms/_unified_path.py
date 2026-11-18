@@ -136,7 +136,9 @@ def unified_predict_via_pipeline(
                 sequence_keys
                 if sequence_keys is not None
                 else load_sequence_identities(
-                    session, set(ctx.valid_accessions) | set(unique_neighbors)
+                    session,
+                    set(ctx.valid_accessions) | set(unique_neighbors),
+                    ctx.p.annotation_set_id,
                 )
             ),
         )
@@ -156,7 +158,9 @@ def _unified_sequence_keys(session: Session, ctx: _UnifiedPredictContext) -> dic
     if not bool(getattr(ctx.p, "exclude_self_neighbour", False)):
         return None
     return load_sequence_identities(
-        session, set(ctx.valid_accessions) | set(ctx.ref_data["accessions"])
+        session,
+        set(ctx.valid_accessions) | set(ctx.ref_data["accessions"]),
+        ctx.p.annotation_set_id,
     )
 
 
@@ -214,7 +218,9 @@ def unified_load_annotations(
     # pool, which let a protein admitted on one experimental annotation
     # donate every annotation it had.
     annotations = op._load_annotations_for(
-        session, ctx.annotation_set_id, unique_neighbors,
+        session,
+        ctx.annotation_set_id,
+        unique_neighbors,
         donor_policy=getattr(ctx.p, "donor_policy", None),
     )
     return annotations, unique_neighbors

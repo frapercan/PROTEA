@@ -20,6 +20,7 @@ from protea.core.operations.predict_go_terms._common import (
     _RerankerBinding,
     _RerankerDispatch,
 )
+from protea.core.operations.predict_go_terms._photo_sequences import member_sequences, photo_of
 from protea.core.operations.predict_go_terms._receipt import run_receipt
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -85,7 +86,6 @@ def _refuse_an_undeclared_corpus(count: int) -> None:
     )
 
 
-
 def _new_prediction_set(
     p: PredictGOTermsPayload, ids: tuple[Any, Any, Any], queries: int, parent_job_id: UUID
 ) -> PredictionSet:
@@ -107,6 +107,7 @@ def _new_prediction_set(
         job_id=parent_job_id,
         producer_git_sha=code_revision(),
     )
+
 
 class PredictGOTermsOperation:
     """Coordinator: validates, creates PredictionSet, dispatches N batch messages.
@@ -355,9 +356,7 @@ class PredictGOTermsOperation:
             # Forwarded, and dumped rather than passed as objects: this payload
             # is JSON-serialised onto AMQP. Both were silently dropped before,
             # see test_coordinator_forwards_payload_fields.
-            "donor_policy": (
-                p.donor_policy.model_dump(mode="json") if p.donor_policy else None
-            ),
+            "donor_policy": (p.donor_policy.model_dump(mode="json") if p.donor_policy else None),
             # Retriever, not donor policy: who may be a neighbour, not which
             # annotations may donate. Measured 2026-08-28 with self-retrieval
             # allowed: the query was its own nearest neighbour for 95.0 per
@@ -470,18 +469,7 @@ class PredictGOTermsOperation:
                 .all()
             )
         else:
-            q = (
-                session.query(Protein.accession)
-                .join(Protein.sequence)
-                .join(
-                    SequenceEmbedding,
-                    (SequenceEmbedding.sequence_id == Protein.sequence_id)
-                    & (SequenceEmbedding.embedding_config_id == embedding_config_id),
-                )
-            )
-            if p.query_accessions:
-                q = q.filter(Protein.accession.in_(p.query_accessions))
-            rows = q.order_by(Protein.accession).all()
+            rows = _accessions_with_a_vector(session, p, embedding_config_id, emit)
         accessions = [r[0] for r in rows]
         implicit = not p.query_set_id and not p.query_accessions
         emit(
@@ -493,6 +481,42 @@ class PredictGOTermsOperation:
         if implicit:
             _refuse_an_undeclared_corpus(len(accessions))
         return accessions
+
+
+def _accessions_with_a_vector(
+    session: Session, p: PredictGOTermsPayload, embedding_config_id: uuid.UUID, emit: EmitFn
+) -> list[Any]:
+    """The queries with a vector of the config, by the photo's sequences on a photo's run."""
+    photo = photo_of(session, p.annotation_set_id)
+    if photo is not None:
+        # A photo's run: each query searches with its sequence at the cut.
+        if p.compute_alignments:
+            raise ValueError(
+                "alignments read today's sequences, and this run transfers from a photo; "
+                "run it with compute_alignments off"
+            )
+        members = member_sequences(photo)
+        q = session.query(members.c.accession).join(
+            SequenceEmbedding,
+            (SequenceEmbedding.sequence_id == members.c.sequence_id)
+            & (SequenceEmbedding.embedding_config_id == embedding_config_id),
+        )
+        if p.query_accessions:
+            q = q.filter(members.c.accession.in_(p.query_accessions))
+        emit("predict_go_terms.photo_sequences", None, {"photo_id": str(photo)}, "info")
+        return q.order_by(members.c.accession).all()
+    q = (
+        session.query(Protein.accession)
+        .join(Protein.sequence)
+        .join(
+            SequenceEmbedding,
+            (SequenceEmbedding.sequence_id == Protein.sequence_id)
+            & (SequenceEmbedding.embedding_config_id == embedding_config_id),
+        )
+    )
+    if p.query_accessions:
+        q = q.filter(Protein.accession.in_(p.query_accessions))
+    return q.order_by(Protein.accession).all()
 
 
 def _refuse_a_snapshot_the_terms_do_not_come_from(

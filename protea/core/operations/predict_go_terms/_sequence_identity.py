@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from protea.core.operations.predict_go_terms._photo_sequences import member_sequences, photo_of
 from protea.infrastructure.orm.models.protein.protein import Protein
 
 if TYPE_CHECKING:
@@ -34,7 +35,7 @@ __all__ = ("load_sequence_identities",)
 
 
 def load_sequence_identities(
-    session: Session, accessions: set[str]
+    session: Session, accessions: set[str], annotation_set_id: object = None
 ) -> dict[str, str] | None:
     """Read one sequence identity per accession, in chunks.
 
@@ -64,13 +65,24 @@ def load_sequence_identities(
     chunk_size = get_tuning().operation.annotation_chunk_size
     identities: dict[str, str] = {}
     acc_list = list(accessions)
+    # A run that transfers from a photo counts sequences at the photo's cut.
+    photo = photo_of(session, annotation_set_id) if annotation_set_id is not None else None
+    members = member_sequences(photo) if photo is not None else None
     for start in range(0, len(acc_list), chunk_size):
-        rows = (
-            session.query(Protein.accession, Protein.sequence_id)
-            .filter(Protein.accession.in_(acc_list[start : start + chunk_size]))
-            .filter(Protein.sequence_id.isnot(None))
-            .all()
-        )
+        chunk = acc_list[start : start + chunk_size]
+        if members is not None:
+            rows = (
+                session.query(members.c.accession, members.c.sequence_id)
+                .filter(members.c.accession.in_(chunk))
+                .all()
+            )
+        else:
+            rows = (
+                session.query(Protein.accession, Protein.sequence_id)
+                .filter(Protein.accession.in_(chunk))
+                .filter(Protein.sequence_id.isnot(None))
+                .all()
+            )
         for accession, sequence_id in rows:
             identities[accession] = str(sequence_id)
     return identities or None
