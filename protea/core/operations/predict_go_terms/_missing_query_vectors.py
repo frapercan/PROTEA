@@ -76,10 +76,10 @@ def report_queries_without_vector(
             "accessions": dropped[:MAX_LISTED],
             "truncated": len(dropped) > MAX_LISTED,
             "reason": "the declared query set holds these, this embedding config "
-            "has no vector for them, and the population join is an inner "
-            "join, so they are not scored at all. A second config that "
-            "does have their vectors answers about more proteins under "
-            "the same query_set_id",
+                      "has no vector for them, and the population join is an inner "
+                      "join, so they are not scored at all. A second config that "
+                      "does have their vectors answers about more proteins under "
+                      "the same query_set_id",
         },
         "warning",
     )

@@ -32,7 +32,7 @@ from protea.core.operations.predict_go_terms._common import (
     _REF_CACHE,
     _UNIFIED_REF_KEY,
 )
-from protea.core.operations.predict_go_terms._photo_sequences import member_sequences, photo_of
+from protea.core.operations.predict_go_terms._photo_sequences import donor_pool_base
 from protea.core.operations.predict_go_terms._reference_aspect import _ASPECT_SLICE
 from protea.core.operations.predict_go_terms._reference_binary import fill_from_binary
 from protea.core.operations.predict_go_terms._reference_needs import reference_dtype_needs
@@ -498,32 +498,9 @@ class _ReferenceMixin:
         annotations = _restrict_annotations(annotations, policy)
         annotated_sq = annotations.distinct().subquery()
 
-        accession: Any = Protein.accession
-        photo = photo_of(session, request.annotation_set_id)
-        if photo is not None:
-            # A photo's run: every donor searches with its sequence at the cut.
-            members = member_sequences(photo)
-            accession = members.c.accession
-            query = (
-                session.query(accession)
-                .join(
-                    SequenceEmbedding,
-                    (SequenceEmbedding.sequence_id == members.c.sequence_id)
-                    & (SequenceEmbedding.embedding_config_id == request.embedding_config_id),
-                )
-                .join(annotated_sq, accession == annotated_sq.c.protein_accession)
-                .join(Protein, Protein.accession == accession)
-            )
-        else:
-            query = (
-                session.query(Protein.accession)
-                .join(
-                    SequenceEmbedding,
-                    (SequenceEmbedding.sequence_id == Protein.sequence_id)
-                    & (SequenceEmbedding.embedding_config_id == request.embedding_config_id),
-                )
-                .join(annotated_sq, Protein.accession == annotated_sq.c.protein_accession)
-            )
+        query, accession = donor_pool_base(
+            session, request.annotation_set_id, request.embedding_config_id, annotated_sq
+        )
         if policy is not None and getattr(policy, "reviewed_only", False):
             # ``reviewed`` is nullable, and an unknown review status is not a
             # reviewed one. Comparing to true excludes the nulls, which is the

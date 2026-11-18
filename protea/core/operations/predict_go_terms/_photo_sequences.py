@@ -24,6 +24,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.infrastructure.orm.models.annotation.cut_photo import CutPhoto, CutPhotoMember
+from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
+from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 
@@ -63,4 +65,40 @@ def member_sequences(photo_id: uuid.UUID) -> Any:
     )
 
 
-__all__ = ["member_sequences", "photo_of"]
+def donor_pool_base(
+    session: Session, annotation_set_id: object, embedding_config_id: uuid.UUID, annotated: Any
+) -> tuple[Any, Any]:
+    """The donors with a vector of the config and an annotation, and the column naming them.
+
+    On a photo's run every donor searches with its sequence at the cut and the
+    bank is ordered by the photo's accession column, with ``protein`` joined for
+    the donor policy's filters; otherwise today's sequence, as before.
+    """
+    photo = photo_of(session, annotation_set_id)
+    if photo is not None:
+        members = member_sequences(photo)
+        accession = members.c.accession
+        query = (
+            session.query(accession)
+            .join(
+                SequenceEmbedding,
+                (SequenceEmbedding.sequence_id == members.c.sequence_id)
+                & (SequenceEmbedding.embedding_config_id == embedding_config_id),
+            )
+            .join(annotated, accession == annotated.c.protein_accession)
+            .join(Protein, Protein.accession == accession)
+        )
+        return query, accession
+    query = (
+        session.query(Protein.accession)
+        .join(
+            SequenceEmbedding,
+            (SequenceEmbedding.sequence_id == Protein.sequence_id)
+            & (SequenceEmbedding.embedding_config_id == embedding_config_id),
+        )
+        .join(annotated, Protein.accession == annotated.c.protein_accession)
+    )
+    return query, Protein.accession
+
+
+__all__ = ["donor_pool_base", "member_sequences", "photo_of"]
