@@ -164,6 +164,13 @@ def test_the_training_and_evaluation_workers_have_room_and_no_swap():
         assert keys["MemorySwapMax"] == ["0"], queue
 
 
+def test_the_prediction_batch_worker_has_room_for_every_evidence_and_no_swap():
+    """A whole window's kNN over donors of every evidence code fails at once rather than crawl."""
+    keys = _keys(SYSTEMD / "protea-dev-worker@protea.predictions.batch.service.d" / "memory.conf")
+    assert keys["MemoryMax"] == ["12G"]
+    assert keys["MemorySwapMax"] == ["0"]
+
+
 def test_postgres_is_sized_as_planned():
     keys = _keys(QUADLET / "protea-dev-postgres.container")
     assert keys["MemoryMax"] == ["3G"]
