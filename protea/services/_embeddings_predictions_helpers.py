@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -230,14 +231,8 @@ def build_predictions_for_protein(
     logic); this helper assumes the caller has already verified the id.
     """
     rows = (
-        session.query(GOPrediction, GOTerm, PredictionExplanation.payload)
+        session.query(GOPrediction, GOTerm)
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .outerjoin(
-            PredictionExplanation,
-            (PredictionExplanation.prediction_set_id == GOPrediction.prediction_set_id)
-            & (PredictionExplanation.accession == GOPrediction.protein_accession)
-            & (PredictionExplanation.go_term_id == GOPrediction.go_term_id),
-        )
         .filter(
             GOPrediction.prediction_set_id == prediction_set_id,
             GOPrediction.protein_accession == accession,
@@ -245,4 +240,29 @@ def build_predictions_for_protein(
         .order_by(GOPrediction.distance, GOPrediction.method_score.desc())
         .all()
     )
-    return [_prediction_row_to_dict(pred, gt, why) for pred, gt, why in rows]
+    why = _explanations(session, prediction_set_id, accession) if _from_a_method(rows) else {}
+    return [_prediction_row_to_dict(pred, gt, why.get(gt.go_id)) for pred, gt in rows]
+
+
+def _from_a_method(rows: list[Any]) -> bool:
+    """Whether the rows carry a method's own score, the only ones that may be explained."""
+    return any(getattr(pred, "method_score", None) is not None for pred, _ in rows)
+
+
+def _explanations(
+    session: Session, prediction_set_id: uuid.UUID, accession: str
+) -> dict[str, dict[str, Any]]:
+    """go_id -> the explanation the method wrote for one protein's row.
+
+    Keyed by the term's go_id, never by ``go_term_id``: the surrogate is per
+    snapshot, and two tables are only compared through the accession it names.
+    """
+    found = session.execute(
+        select(GOTerm.go_id, PredictionExplanation.payload)
+        .join(GOTerm, GOTerm.id == PredictionExplanation.go_term_id)
+        .where(
+            PredictionExplanation.prediction_set_id == prediction_set_id,
+            PredictionExplanation.accession == accession,
+        )
+    ).all()
+    return {str(go_id): payload for go_id, payload in found}
