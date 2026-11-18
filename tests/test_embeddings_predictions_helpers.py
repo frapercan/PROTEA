@@ -7,6 +7,7 @@ pure (takes two ORM rows, returns a dict) so we pin its column contract
 in isolation here. Future GOPrediction columns added without updating
 this helper will fail the count assertion.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
