@@ -3,9 +3,10 @@
 The donors are the ``truth`` members of the photo whose annotation set starts
 the window, each with its state at the cut (``protea.core._cut_state``). The
 targets are the window's own: the proteins its truth scores. Both are named by
-their sequence's md5 in the photo, which is how the lexicon bank names its
-units. Per aspect, the columns are the pivot's terms of that aspect without its
-root, and a donor whose state holds none of them is not a donor of the aspect.
+their sequence's md5 in the photo, which is how the lexicon bank and the
+segment families name their units. Per aspect, the columns are the pivot's
+terms of that aspect without its root, and a donor whose state holds none of
+them is not a donor of the aspect.
 """
 
 from __future__ import annotations
@@ -89,6 +90,30 @@ def theme_units(
             if md5 in wanted:
                 out[md5] = np.unique(np.asarray(row, dtype=np.int64))
     return out
+
+
+def family_units(
+    store: Any, outputs: list[dict[str, Any]], scope: str, wanted: set[str]
+) -> dict[str, np.ndarray]:
+    """md5 -> the sorted families of its cores in ``scope``, read from the verified families file.
+
+    A core no family took (``family`` -1) and a masked one (a promiscuous
+    component, ADR-D65) give no unit.
+    """
+    name = f"families-{scope}.parquet"
+    entry = next((o for o in outputs if o["name"] == name), None)
+    if entry is None:
+        raise ValueError(f"the segment families hold no {name}")
+    blob = fetch_and_verify(store, entry["uri"], entry["sha256"], name)
+    table = pq.read_table(io.BytesIO(blob), columns=["md5", "family", "masked"])
+    md5 = np.asarray(table.column("md5").to_pylist(), dtype=object)
+    family = table.column("family").to_numpy()
+    keep = (family >= 0) & ~table.column("masked").to_numpy(zero_copy_only=False)
+    keep &= np.fromiter((m in wanted for m in md5), bool, len(md5))
+    out: dict[str, list[int]] = {}
+    for m, f in zip(md5[keep], family[keep], strict=True):
+        out.setdefault(m, []).append(int(f))
+    return {m: np.unique(np.asarray(fs, dtype=np.int64)) for m, fs in out.items()}
 
 
 def unit_matrix(md5s: list[str], units: Mapping[str, np.ndarray], n_units: int) -> sp.csr_matrix:

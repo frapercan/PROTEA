@@ -167,6 +167,7 @@ from protea.core.operations.retire_evaluation_sets import (
     RetireEvaluationSetsPayload,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
+from protea.core.operations.load_segment_families import LoadSegmentFamiliesPayload
 from protea.core.operations.run_count_map import RunCountMapPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
@@ -401,6 +402,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "manifest_sha256": "0" * 64,
         },
         ("model_weights_id",),
+    ),
+    # Segment families, by their directory and their manifest (ADR-D65).
+    (
+        "load_segment_families",
+        LoadSegmentFamiliesPayload,
+        {"families_dir": "/srv/families/211", "manifest_sha256": "not-a-digest"},
+        ("manifest_sha256",),
     ),
     # A count map read on a window, with the lexicon bank whose cut gives its units (ADR-D65).
     (
