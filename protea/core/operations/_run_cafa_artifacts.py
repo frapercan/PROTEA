@@ -21,7 +21,7 @@ import requests
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from protea.core.operations import _depth_guard, _pred_base_cache
+from protea.core.operations import _depth_guard, _method_score_predictions, _pred_base_cache
 from protea.core.operations._base_frame_recount import (
     build_base_frame,
     ledger_columns,
@@ -86,7 +86,6 @@ _BASE_SCORE_COLS: tuple[str, ...] = (
 )
 
 _LOG = logging.getLogger(__name__)
-
 
 
 @dataclass(frozen=True)
@@ -318,6 +317,10 @@ def write_predictions(
             reranker_bundle=reranker_bundle,
             known_gos=known_gos,
         )
+        return
+    if _method_score_predictions.applies(ctx, scoring_config):
+        # A method's own scores: three columns straight from Postgres, the same file.
+        _method_score_predictions.write_method_predictions(session, ctx)
         return
     base = _pred_base_cache.load_or_build_base(
         _pred_base_cache.BaseFrameKey.of(
@@ -553,9 +556,14 @@ def write_predictions_reranked(
     if ctx.max_sequence_rank is not None:
         q = q.filter(GOPrediction.sequence_rank <= ctx.max_sequence_rank)
 
-    records: list[dict[str, Any]] = drop_denied_records(session, ctx, [
-        _record_from_pred(pred, go_id, aspect=aspect) for pred, go_id, aspect in q.yield_per(5000)
-    ])
+    records: list[dict[str, Any]] = drop_denied_records(
+        session,
+        ctx,
+        [
+            _record_from_pred(pred, go_id, aspect=aspect)
+            for pred, go_id, aspect in q.yield_per(5000)
+        ],
+    )
 
     if not records:
         with open(ctx.path, "w") as f:
