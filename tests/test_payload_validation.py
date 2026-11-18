@@ -145,6 +145,7 @@ from protea.core.operations.load_ontology_snapshot import (
 from protea.core.operations.load_quickgo_annotations import (
     LoadQuickGOAnnotationsPayload,
 )
+from protea.core.operations.load_segment_families import LoadSegmentFamiliesPayload
 from protea.core.operations.load_swissprot_release import (
     LoadSwissProtReleasePayload,
 )
@@ -167,12 +168,12 @@ from protea.core.operations.retire_evaluation_sets import (
     RetireEvaluationSetsPayload,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
-from protea.core.operations.load_segment_families import LoadSegmentFamiliesPayload
 from protea.core.operations.run_count_map import RunCountMapPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
 )
 from protea.core.operations.run_lab_method import RunLabMethodPayload
+from protea.core.operations.run_own_annotations import RunOwnAnnotationsPayload
 from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
 from protea.core.operations.seal_evaluation_groundtruth import (
     SealEvaluationGroundtruthPayload,
@@ -418,6 +419,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "evaluation_set_id": "not-a-uuid",
             "lexicon_bank_id": "6ab4cbfd-711d-432f-be6c-2ad1738cd438",
         },
+        ("evaluation_set_id",),
+    ),
+    # A window's targets read from their own non-experimental annotations at t0.
+    (
+        "run_own_annotations",
+        RunOwnAnnotationsPayload,
+        {"evaluation_set_id": "not-a-uuid"},
         ("evaluation_set_id",),
     ),
     # The members' taxa of a loaded photo, named by its manifest's sha256.

@@ -61,8 +61,14 @@ def window_of(eset: EvaluationSet) -> ReconciledWindow:
     )
 
 
-def cut_state(session: Session, window: ReconciledWindow) -> CutState:
-    """The t0 side of ``window`` as the evaluator builds it, with t0's NOT terms only."""
+def cut_state(
+    session: Session, window: ReconciledWindow, raw: dict[str, set[str]] | None = None
+) -> CutState:
+    """The t0 side of ``window`` as the evaluator builds it, with t0's NOT terms only.
+
+    ``raw`` (``{protein: {native go_id}}``, t0's direct annotations of other
+    evidence) is reconciled in place of the experimental rows, by the same steps.
+    """
     refuse_unknown_rules(window)
     pivot_go_ids, pivot_aspect = _load_pivot_term_universe(session, window.pivot_snapshot_id)
     pivot_children = _load_children_by_go_id(session, window.pivot_snapshot_id)
@@ -71,7 +77,7 @@ def cut_state(session: Session, window: ReconciledWindow) -> CutState:
     # As the evaluator does for the t0 side: it remaps and never projects.
     t0_project = project._replace(graph=project.graph._replace(live=set())) if project else None
     positives, _ = _reconcile_experimental_side(
-        session, old, pivot_go_ids, pivot_aspect, t0_project
+        session, old, pivot_go_ids, pivot_aspect, t0_project, raw=raw
     )
     negatives, _ = _reconcile_not_side(
         session,
