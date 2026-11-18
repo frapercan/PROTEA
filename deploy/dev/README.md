@@ -21,10 +21,10 @@ containers.
 | `protea-dev-rabbitmq` (Quadlet) | RabbitMQ 4.3.5 | `127.0.0.1:26672` (AMQP), `127.0.0.1:26673` (management) | 1G |
 | `protea-dev-minio` (Quadlet) | MinIO | `127.0.0.1:26900` (API), `127.0.0.1:26901` (console) | 768M |
 | `protea-dev-wait-infra.service` | waits until the three answer | | |
-| `protea-dev-worker@<queue>.service` | one queue worker per instance | | 2G each |
+| `protea-dev-worker@<queue>.service` | one queue worker per instance | | 2G each; 8G and no swap for `protea.training` and `protea.evaluations` (drop-ins, 2026-11-18) |
 | `protea-dev-api.service` | the API | `127.0.0.1:26800` | 768M |
 | `protea-dev-web` (Quadlet, with `protea-dev-web.build`) | the web front (Next.js) | `127.0.0.1:26300` | 768M |
-| `protea-dev.slice` | holds all of the above | | 9G in total, CPUWeight 50 |
+| `protea-dev.slice` | holds all of the above | | 20G in total (9G until 2026-11-18), CPUWeight 50 |
 | `protea-dev.target` | groups them | | |
 
 The images are the ones `docker-compose.yml` pins, by the same digests.
@@ -224,7 +224,10 @@ Copy the sources into place. Copying starts nothing:
 ```bash
 mkdir -p ~/.config/containers/systemd/protea-dev
 install -m 0644 ~/protea-dev/deploy/PROTEA/deploy/dev/quadlet/* ~/.config/containers/systemd/protea-dev/
-install -m 0644 ~/protea-dev/deploy/PROTEA/deploy/dev/systemd/* ~/.config/systemd/user/
+find ~/protea-dev/deploy/PROTEA/deploy/dev/systemd -maxdepth 1 -type f -exec install -m 0644 {} ~/.config/systemd/user/ \;
+for d in ~/protea-dev/deploy/PROTEA/deploy/dev/systemd/*.service.d; do
+  install -d ~/.config/systemd/user/"$(basename "$d")" && install -m 0644 "$d"/*.conf ~/.config/systemd/user/"$(basename "$d")"/
+done
 ```
 
 `rabbitmq.conf` goes with the Quadlet files on purpose: the broker reads it
