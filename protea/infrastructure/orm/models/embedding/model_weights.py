@@ -39,6 +39,11 @@ WEIGHT_KINDS = (
     #: Not a residue vocabulary (that one is a dictionary over a language model's
     #: states) and not an encoder: it cuts a sequence into hits of its themes.
     "lexicon",
+    #: A count map of the explainable-units family (ADR-D65): per aspect, how many
+    #: donors of a cut carry each unit and hold each term, the base rates and the
+    #: fitted strength. Fitted on GO labels at one cut, so it is registered with
+    #: the annotation set it counted.
+    "count_map",
 )
 
 
