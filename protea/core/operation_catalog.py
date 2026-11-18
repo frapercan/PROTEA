@@ -107,6 +107,7 @@ from protea.core.operations.load_ontology_aliases import (
 )
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
+from protea.core.operations.load_segment_families import LoadSegmentFamiliesOperation
 from protea.core.operations.load_swissprot_release import (
     LoadSwissProtReleaseOperation,
 )
@@ -297,6 +298,8 @@ _REPRESENTATION: tuple[_Row, ...] = (
     (LoadEmbeddingBankOperation, _REPRESENTATION_JOB),
     # The lexicon bank decoded on the cluster (ADR-D63), for the explainable-units family.
     (LoadLexiconBankOperation, replace(_REPRESENTATION_JOB, family="explainable-units")),
+    # The segment families built on the cluster (ADR-D65), units of the count map.
+    (LoadSegmentFamiliesOperation, replace(_REPRESENTATION_JOB, family="explainable-units")),
     (
         ExportGateBundleOperation,
         replace(_REPRESENTATION_JOB, family="world-model", status="review"),

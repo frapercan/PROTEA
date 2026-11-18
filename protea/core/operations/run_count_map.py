@@ -4,7 +4,9 @@ The explainable-units family's first source, run inside the platform (ADR-D64).
 For the window named by ``evaluation_set_id`` (t0 -> t1):
 
 1. The photo whose annotation set starts the window, and the lexicon bank named,
-   which must cover that photo.
+   which must cover that photo. The units are the lexicon's themes, or the
+   families of one scope of the segment families named, which must be that
+   photo's under that bank.
 2. Every protein's state at t0 (``protea.core._cut_state``): the window's own
    rules, with t0's NOT terms alone.
 3. The donors are the photo's truth members and the targets the proteins the
@@ -14,7 +16,8 @@ For the window named by ``evaluation_set_id`` (t0 -> t1):
    (``protea.core.count_map``).
 5. The map is registered as ``count_map`` weights fitted on t0's annotation set;
    the method row is derived from its spec (instance at t0; pins: the lexicon,
-   the bank's manifest, the map); one prediction set holds its ``method_score``
+   the bank's manifest, the families' manifest when they give the units, the
+   map); one prediction set holds its ``method_score``
    rows and one explanation per row.
 
 It reads GO labels at t0 and nothing later, so its instance is the cut and it
@@ -32,7 +35,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import PositiveInt, field_validator
+from pydantic import PositiveInt, field_validator, model_validator
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -40,7 +43,13 @@ from protea.core._cut_state import CutState, cut_state, window_of
 from protea.core._evaluation_groundtruth import load_evaluation_data_for_set
 from protea.core.contracts.method import Family, InstanceCut, MethodSpec, Pin
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.count_map.inputs import aspect_problem, columns_of, member_md5s, theme_units
+from protea.core.count_map.inputs import (
+    aspect_problem,
+    columns_of,
+    family_units,
+    member_md5s,
+    theme_units,
+)
 from protea.core.count_map.run import AspectResult, fit_and_read, map_bytes
 from protea.core.method_write import (
     SetContext,
@@ -56,6 +65,7 @@ from protea.infrastructure.orm.models.annotation.evaluation_set import Evaluatio
 from protea.infrastructure.orm.models.embedding.lexicon_bank import LexiconBank
 from protea.infrastructure.orm.models.embedding.model_weights import ModelWeights
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.orm.models.embedding.segment_families import SegmentFamilies
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
 from protea.services import model_weights_service as weights_service
@@ -66,17 +76,38 @@ class CountMapRefused(SourceGuardError):
 
 
 class RunCountMapPayload(ProteaPayload, frozen=True):
-    """The window to read, the lexicon bank whose cut gives the units, and the reading's depth."""
+    """The window to read, the lexicon bank whose cut gives the units, and the reading's depth.
+
+    ``units`` are the lexicon's themes, or the families of one ``scope`` of the
+    segment families named by ``segment_families_id``; the two fields go
+    together and only with families.
+    """
 
     evaluation_set_id: str
     lexicon_bank_id: str
-    units: Literal["themes"] = "themes"
+    units: Literal["themes", "families"] = "themes"
+    segment_families_id: str | None = None
+    scope: Literal["strict", "permissive"] | None = None
     top: PositiveInt = 100
 
-    @field_validator("evaluation_set_id", "lexicon_bank_id", mode="before")
+    @field_validator("evaluation_set_id", "lexicon_bank_id", "segment_families_id", mode="before")
     @classmethod
-    def must_be_a_uuid(cls, v: Any) -> str:
-        return str(uuid.UUID(str(v)))
+    def must_be_a_uuid(cls, v: Any) -> str | None:
+        return None if v is None else str(uuid.UUID(str(v)))
+
+    @model_validator(mode="after")
+    def families_need_their_table_and_scope(self) -> RunCountMapPayload:
+        named = self.segment_families_id is not None and self.scope is not None
+        if self.units == "families" and not named:
+            raise ValueError("families as units need segment_families_id and scope")
+        if self.units == "themes" and (self.segment_families_id or self.scope):
+            raise ValueError("segment_families_id and scope go only with families as units")
+        return self
+
+    @property
+    def label(self) -> str:
+        """The units as names spell them: ``themes`` or ``families-<scope>``."""
+        return "themes" if self.units == "themes" else f"families-{self.scope}"
 
 
 @dataclass(frozen=True)
@@ -87,6 +118,16 @@ class Sources:
     photo: CutPhoto
     bank: LexiconBank
     lexicon: ModelWeights
+    #: The segment families and the scope whose families are the units; None for themes.
+    families: SegmentFamilies | None = None
+    scope: str | None = None
+
+    @property
+    def units(self) -> str:
+        """The units in prose: the lexicon's themes or one scope's segment families."""
+        if self.families is None:
+            return f"{self.lexicon.name}'s themes"
+        return f"{self.lexicon.name}'s segment families ({self.scope})"
 
 
 def resolve(session: Session, p: RunCountMapPayload) -> Sources:
@@ -109,7 +150,16 @@ def resolve(session: Session, p: RunCountMapPayload) -> Sources:
     lexicon = session.get(ModelWeights, bank.model_weights_id)
     if lexicon is None:
         raise CountMapRefused("the bank's lexicon is not registered")
-    return Sources(eset, photo, bank, lexicon)
+    if p.units == "themes":
+        return Sources(eset, photo, bank, lexicon)
+    families = session.get(SegmentFamilies, uuid.UUID(str(p.segment_families_id)))
+    if families is None:
+        raise CountMapRefused(f"segment families {p.segment_families_id} not found")
+    if families.cut_photo_id != photo.id or families.lexicon_bank_id != bank.id:
+        raise CountMapRefused(
+            f"the segment families {families.short_name} are not the photo's under this bank"
+        )
+    return Sources(eset, photo, bank, lexicon, families, p.scope)
 
 
 @dataclass(frozen=True)
@@ -132,7 +182,11 @@ def gather(session: Session, store: Any, src: Sources) -> Gathered:
     targets = sorted(set(truth.nk) | set(truth.lk) | set(truth.pk))
     target_md5 = member_md5s(session, src.photo.id, targets)
     md5_of = {**donor_md5, **target_md5}
-    units = theme_units(store, list(src.bank.shards), set(md5_of.values()))
+    wanted = set(md5_of.values())
+    if src.families is None:
+        units = theme_units(store, list(src.bank.shards), wanted)
+    else:
+        units = family_units(store, list(src.families.outputs), str(src.scope), wanted)
     n_units = 1 + max((int(u.max()) for u in units.values() if len(u)), default=0)
     return Gathered(
         state,
@@ -195,9 +249,9 @@ def register_map(
         kind="count_map",
         name=name,
         description=(
-            f"The count map of {src.lexicon.name}'s themes at cut {src.photo.cut_release}: per aspect, "
-            "the donors that carry each theme and hold each term, the base rates and the strength "
-            "fitted on the donors alone (ADR-D65)."
+            f"The count map of {src.units} at cut {src.photo.cut_release}: per aspect, the donors "
+            "that carry each unit and hold each term, the base rates and the strength fitted on "
+            "the donors alone (ADR-D65)."
         ),
         meta={
             "aspects": {
@@ -211,14 +265,32 @@ def register_map(
 
 
 def method_spec(src: Sources, weights: ModelWeights, p: RunCountMapPayload) -> MethodSpec:
-    """The method a run is: the recipe, at the photo's cut, pinned to its three files."""
+    """The method a run is: the recipe, at the photo's cut, pinned to its files.
+
+    A themes run's spec is exactly what it was before families existed, so its
+    method keeps its id; a families run adds its scope and its families' pin.
+    """
+    scoped = {} if src.families is None else {"scope": p.scope}
+    pins = (
+        Pin("lexicon", src.lexicon.sha256, (f"model_weights:{src.lexicon.id}",)),
+        Pin("lexicon-bank", src.bank.manifest_sha256, (f"lexicon_bank:{src.bank.id}",)),
+    )
+    if src.families is not None:
+        pins += (
+            Pin(
+                "segment-families",
+                src.families.manifest_sha256,
+                (f"segment_families:{src.families.id}",),
+            ),
+        )
     return MethodSpec(
         family=Family.EXPLAINABLE_UNITS,
-        code=f"count-map-{p.units}-{src.lexicon.name}",
+        code=f"count-map-{p.label}-{src.lexicon.name}",
         instance=InstanceCut(src.photo.cut_release, src.photo.ontology_snapshot_id),
         recipe={
             "source": "count map (ADR-D65)",
             "units": p.units,
+            **scoped,
             "donors": "the photo's truth members",
             "state": "the window's rules at t0, with t0's NOT terms only",
             "exclusion": "the donors that share the target's sequence md5",
@@ -226,11 +298,7 @@ def method_spec(src: Sources, weights: ModelWeights, p: RunCountMapPayload) -> M
             "reading": "the best unit per term, floored at the base rate, NOT terms at t0 and their descendants out, roots out",
             "top": p.top,
         },
-        pins=(
-            Pin("lexicon", src.lexicon.sha256, (f"model_weights:{src.lexicon.id}",)),
-            Pin("lexicon-bank", src.bank.manifest_sha256, (f"lexicon_bank:{src.bank.id}",)),
-            Pin("count-map", weights.sha256, (f"model_weights:{weights.id}",)),
-        ),
+        pins=(*pins, Pin("count-map", weights.sha256, (f"model_weights:{weights.id}",))),
         runtime="native",
         explains=True,
     )
@@ -276,7 +344,10 @@ class RunCountMapOperation:
     )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
-        return f"count map of {payload.get('units', 'themes')} for window {str(payload.get('evaluation_set_id', ''))[:8]}"
+        units = payload.get("units", "themes")
+        if units == "families":
+            units = f"families ({payload.get('scope', '')})"
+        return f"count map of {units} for window {str(payload.get('evaluation_set_id', ''))[:8]}"
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -296,7 +367,7 @@ class RunCountMapOperation:
             "info",
         )
         results = fit_all(data, p.top, emit)
-        name = f"count-map-{p.units}-{src.lexicon.name}-{src.photo.cut_release}"
+        name = f"count-map-{p.label}-{src.lexicon.name}-{src.photo.cut_release}"
         weights = register_map(session, store, src, results, name)
         method = ensure_method(session, method_spec(src, weights, p))
         done = session.execute(
@@ -327,7 +398,7 @@ class RunCountMapOperation:
                 ontology_snapshot_id=src.eset.pivot_snapshot_id,
                 limit_per_entry=3 * p.top,
                 description=(
-                    f"The count map of {src.lexicon.name}'s {p.units} at cut {src.photo.cut_release}, "
+                    f"The count map of {src.units} at cut {src.photo.cut_release}, "
                     f"read on the {len(data.targets):,} targets of window {src.eset.id}."
                 ),
                 meta={

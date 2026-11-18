@@ -35,6 +35,7 @@ from .embedding.prediction_set import PredictionSet  # noqa: F401
 from .embedding.reranker_model import RerankerModel  # noqa: F401
 from .embedding.residue_code import ResidueCode  # noqa: F401
 from .embedding.scoring_config import ScoringConfig  # noqa: F401
+from .embedding.segment_families import SegmentFamilies  # noqa: F401
 from .embedding.sequence_embedding import SequenceEmbedding  # noqa: F401
 from .experiment_run import ExperimentRun, ExperimentRunStatus  # noqa: F401
 from .exploration.exploration import Exploration  # noqa: F401
