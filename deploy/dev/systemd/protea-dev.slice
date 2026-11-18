@@ -23,5 +23,9 @@
 Description=PROTEA development stack (containers, workers, API)
 
 [Slice]
-MemoryMax=9G
+# 20G since 2026-11-18 (the author: "OK"), when the training and evaluation workers
+# went from 2G to 8G each. With the production worker's own 48G ceiling the two
+# could ask for more than the machine's 61 if both ran full at once; the
+# production worker idles on this machine, so that is accepted, not solved.
+MemoryMax=20G
 CPUWeight=50
