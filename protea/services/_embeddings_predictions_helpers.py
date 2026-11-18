@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.method.prediction_explanation import PredictionExplanation
 from protea.infrastructure.session import session_scope
 
 PREDICTIONS_TSV_COLUMNS: tuple[str, ...] = (
@@ -166,7 +167,9 @@ def iter_predictions_tsv(
             yield buf.getvalue()
 
 
-def _prediction_row_to_dict(pred: GOPrediction, gt: GOTerm) -> dict[str, Any]:
+def _prediction_row_to_dict(
+    pred: GOPrediction, gt: GOTerm, explanation: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Shape one ``(GOPrediction, GOTerm)`` join row for the API response.
 
     Owns the column list so any future GOPrediction column reaches every
@@ -207,6 +210,10 @@ def _prediction_row_to_dict(pred: GOPrediction, gt: GOTerm) -> dict[str, Any]:
         "go_term_frequency": pred.go_term_frequency,
         "ref_annotation_density": pred.ref_annotation_density,
         "neighbor_distance_std": pred.neighbor_distance_std,
+        # A method that scores its own candidates (ADR-D60): its score, and
+        # the explanation it wrote for the row when its spec says it explains.
+        "method_score": pred.method_score,
+        "explanation": explanation,
     }
 
 
@@ -216,20 +223,26 @@ def build_predictions_for_protein(
     prediction_set_id: uuid.UUID,
     accession: str,
 ) -> list[dict[str, Any]]:
-    """Return all predicted GO terms for one protein, sorted by distance.
+    """Return all predicted GO terms for one protein, sorted by distance, then by the method's score.
 
     The PredictionSet existence check stays in the service layer (so
     the domain exception type lives next to the rest of the validation
     logic); this helper assumes the caller has already verified the id.
     """
     rows = (
-        session.query(GOPrediction, GOTerm)
+        session.query(GOPrediction, GOTerm, PredictionExplanation.payload)
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
+        .outerjoin(
+            PredictionExplanation,
+            (PredictionExplanation.prediction_set_id == GOPrediction.prediction_set_id)
+            & (PredictionExplanation.accession == GOPrediction.protein_accession)
+            & (PredictionExplanation.go_term_id == GOPrediction.go_term_id),
+        )
         .filter(
             GOPrediction.prediction_set_id == prediction_set_id,
             GOPrediction.protein_accession == accession,
         )
-        .order_by(GOPrediction.distance)
+        .order_by(GOPrediction.distance, GOPrediction.method_score.desc())
         .all()
     )
-    return [_prediction_row_to_dict(pred, gt) for pred, gt in rows]
+    return [_prediction_row_to_dict(pred, gt, why) for pred, gt, why in rows]

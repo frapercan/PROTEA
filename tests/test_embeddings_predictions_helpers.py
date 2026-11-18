@@ -45,6 +45,7 @@ def _make_pred() -> MagicMock:
     pred.go_term_frequency = 0.02
     pred.ref_annotation_density = 0.4
     pred.neighbor_distance_std = 0.05
+    pred.method_score = None
     return pred
 
 
@@ -90,6 +91,8 @@ def test_returns_expected_column_set() -> None:
         "go_term_frequency",
         "ref_annotation_density",
         "neighbor_distance_std",
+        "method_score",
+        "explanation",
     }
 
 
@@ -104,3 +107,14 @@ def test_go_term_fields_are_lifted_from_gt() -> None:
     assert out["go_id"] == "GO:0008150"
     assert out["name"] == "biological process"
     assert out["aspect"] == "P"
+
+
+def test_a_native_method_row_carries_its_score_and_its_explanation() -> None:
+    pred = _make_pred()
+    pred.distance = None
+    pred.method_score = 0.62
+    why = {"unit": 17, "k": 150.0, "n": 200.0, "strength": 24.1, "base_rate": 0.08}
+    out = _prediction_row_to_dict(pred, _make_gt(), why)
+    assert out["distance"] is None and out["method_score"] == 0.62
+    assert out["explanation"] == why
+    assert _prediction_row_to_dict(_make_pred(), _make_gt())["explanation"] is None

@@ -303,6 +303,33 @@ function scoreColor(score: number): string {
   return "text-red-500";
 }
 
+/**
+ * The witness of a native method's row (ADR-D65): which unit gave the score and
+ * how many of its donors hold the term, or the base rate the row was floored at.
+ * A method that wrote no explanation shows its name, as before.
+ */
+function MethodWitness({ pred }: { pred: Prediction }) {
+  const why = pred.explanation;
+  const num = (v: unknown) => (typeof v === "number" ? v : null);
+  if (why && num(why.unit) != null) {
+    const k = num(why.k), n = num(why.n);
+    return (
+      <span className="font-mono text-slate-700" title={`m ${num(why.strength)?.toFixed(2) ?? "?"}, base rate ${num(why.base_rate)?.toFixed(4) ?? "?"}`}>
+        theme {num(why.unit)}
+        {k != null && n != null && <span className="text-slate-500"> · {k} of {n} donors</span>}
+      </span>
+    );
+  }
+  if (why && why.prior) {
+    return (
+      <span className="text-slate-500" title="no unit of the protein scores the term above its base rate">
+        prior · base rate {num(why.base_rate)?.toFixed(4) ?? "?"}
+      </span>
+    );
+  }
+  return <span className="font-mono text-slate-500">{pred.ref_protein_accession}</span>;
+}
+
 // Evidence code quality tier colours
 function evidenceBadgeClass(code: string): string {
   const w = DEFAULT_EVIDENCE_WEIGHTS[code] ?? DEFAULT_EVIDENCE_WEIGHT_FALLBACK;
@@ -363,6 +390,8 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
   const hasTaxonomy = preds.some((p) => p.taxonomic_relation != null);
   const hasReranker = preds.some((p) => p.vote_count != null);
   const hasScore = !!scoringConfig;
+  // A native method (ADR-D60): its own score and a witness instead of a donor and a distance.
+  const isMethod = !hasDistance && preds.some((p) => p.method_score != null);
   const hasDetail = hasAlignment || hasTaxonomy || hasReranker;
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -372,26 +401,31 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
   // reads the same way twice.
   const sorted = hasScore
     ? [...preds].sort((a, b) => computeScore(b, scoringConfig!) - computeScore(a, scoringConfig!))
+    : isMethod
+    ? [...preds].sort((a, b) => (b.method_score ?? 0) - (a.method_score ?? 0) || a.go_id.localeCompare(b.go_id))
     : hasDistance
       ? [...preds].sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
       : [...preds].sort((a, b) => a.go_id.localeCompare(b.go_id));
 
   // Tailwind requires complete class strings — no dynamic construction
-  const gridClass = hasScore
+  const gridClass = isMethod
+    ? "grid-cols-[60px_90px_1fr_210px_65px]"
+    : hasScore
     ? "grid-cols-[60px_90px_1fr_110px_60px_60px_65px]"
     : "grid-cols-[90px_1fr_110px_60px_60px_65px]";
+  const methodScore = (p: Prediction) => p.method_score ?? 0;
 
   return (
     <div className="rounded-md border bg-white text-xs">
       {/* Desktop header */}
       <div className={`hidden lg:grid ${gridClass} gap-x-3 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-600`}>
-        {hasScore && <div>Score</div>}
+        {(hasScore || isMethod) && <div>Score</div>}
         <div>GO ID</div>
         <div>Name</div>
-        <div>Via (ref)</div>
-        <div>Pred. ev.</div>
+        {isMethod ? <div>Witness</div> : <div>Via (ref)</div>}
+        {!isMethod && <div>Pred. ev.</div>}
         <div>Known ev.</div>
-        <div>Dist</div>
+        {!isMethod && <div>Dist</div>}
       </div>
 
       {sorted.length === 0 ? (
@@ -415,18 +449,23 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                       {computeScore(pred, scoringConfig!).toFixed(3)}
                     </span>
                   )}
-                  <span className="font-mono text-slate-500 text-[10px]">{pred.distance != null ? pred.distance.toFixed(4) : "—"}</span>
+                  {isMethod && !hasScore && (
+                    <span className={`font-mono text-[10px] ${scoreColor(methodScore(pred))}`}>
+                      {methodScore(pred).toFixed(3)}
+                    </span>
+                  )}
+                  {!isMethod && <span className="font-mono text-slate-500 text-[10px]">{pred.distance != null ? pred.distance.toFixed(4) : "—"}</span>}
                   {hasDetail && <span className="text-slate-300 text-[10px]">{isExpanded ? "▲" : "▼"}</span>}
                 </div>
               </div>
               <p className="text-slate-700 leading-snug text-xs mb-1">{pred.name ?? "—"}</p>
               <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                <span className="text-slate-600">via</span>
-                <Link
+                {isMethod ? <MethodWitness pred={pred} /> : <span className="text-slate-600">via</span>}
+                {!isMethod && <Link
                   href={`/${locale}/instrument/proteins/${pred.ref_protein_accession}`}
                   className="font-mono text-blue-500 hover:underline"
                   onClick={(e) => e.stopPropagation()}
-                >{pred.ref_protein_accession}</Link>
+                >{pred.ref_protein_accession}</Link>}
                 {pred.evidence_code && (
                   <span className={`rounded border px-1 py-0.5 font-mono font-medium ${evidenceBadgeClass(pred.evidence_code)}`}>
                     {pred.evidence_code}
@@ -452,8 +491,14 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                   {computeScore(pred, scoringConfig!).toFixed(3)}
                 </span>
               )}
+              {isMethod && !hasScore && (
+                <span className={`font-mono ${scoreColor(methodScore(pred))}`}>{methodScore(pred).toFixed(3)}</span>
+              )}
               <span className="font-mono text-blue-600">{pred.go_id}</span>
               <span className="text-slate-700 leading-snug">{pred.name ?? "—"}</span>
+              {isMethod ? (
+                <MethodWitness pred={pred} />
+              ) : (
               <div className="flex items-start gap-1">
                 <Link
                   href={`/${locale}/instrument/proteins/${pred.ref_protein_accession}`}
@@ -462,13 +507,16 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                 >{pred.ref_protein_accession}</Link>
                 {hasDetail && <span className="text-slate-300 text-[10px] mt-0.5">{isExpanded ? "▲" : "▼"}</span>}
               </div>
-              <div>
-                {pred.evidence_code ? (
-                  <span className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(pred.evidence_code)}`}>
-                    {pred.evidence_code}
-                  </span>
-                ) : <span className="text-slate-300">—</span>}
-              </div>
+              )}
+              {!isMethod && (
+                <div>
+                  {pred.evidence_code ? (
+                    <span className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(pred.evidence_code)}`}>
+                      {pred.evidence_code}
+                    </span>
+                  ) : <span className="text-slate-300">—</span>}
+                </div>
+              )}
               <div className="flex flex-wrap gap-0.5">
                 {knownAnn ? knownAnn.evidence_codes.map((ec) => (
                   <span key={ec} className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(ec)}`}>
@@ -476,7 +524,9 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                   </span>
                 )) : <span className="text-slate-300">—</span>}
               </div>
-              <span className="font-mono text-slate-500">{pred.distance != null ? pred.distance.toFixed(4) : "—"}</span>
+              {!isMethod && (
+                <span className="font-mono text-slate-500">{pred.distance != null ? pred.distance.toFixed(4) : "—"}</span>
+              )}
             </div>
 
             {/* Expanded: alignment + taxonomy + reranker detail */}
