@@ -139,6 +139,7 @@ from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperatio
 from protea.core.operations.run_count_map import RunCountMapOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
 from protea.core.operations.run_lab_method import RunLabMethodOperation
+from protea.core.operations.run_own_annotations import RunOwnAnnotationsOperation
 from protea.core.operations.seal_evaluation_frames import (
     SealEvaluationFramesOperation,
 )
@@ -368,6 +369,11 @@ _METHOD: tuple[_Row, ...] = (
     # The explainable-units family's count map, fitted at a window's start and read on its
     # targets inside the platform (ADR-D64, ADR-D65).
     (RunCountMapOperation, replace(_METHOD_JOB, queue=queues.TRAINING, family="explainable-units")),
+    # democafa's goa_nonexp baseline: a target's own non-experimental annotations at t0.
+    (
+        RunOwnAnnotationsOperation,
+        replace(_METHOD_JOB, queue=queues.TRAINING, family="explainable-units"),
+    ),
     (RegisterIngestedMethodOperation, _METHOD_JOB),
     (
         RunLabMethodOperation,

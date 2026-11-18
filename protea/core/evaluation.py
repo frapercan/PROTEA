@@ -477,6 +477,7 @@ def _reconcile_experimental_side(
     pivot_go_ids: set[str],
     pivot_aspect: dict[str, str],
     project: ProjectionRequest | None = None,
+    raw: dict[str, set[str]] | None = None,
 ) -> tuple[dict[str, dict[str, set[str]]], tuple[Projection | None, Applied | None, int]]:
     """CAFA steps 1–2 for experimental positives on one side.
 
@@ -484,9 +485,14 @@ def _reconcile_experimental_side(
     intersect with the pivot term universe, then bucket by the pivot aspect.
     Step 3 (re-propagate under pivot) is deferred to cafaeval, which applies
     ancestor propagation before scoring and produces the same closure.
+
+    ``raw`` (``{protein: {native go_id}}``) replaces the side's experimental
+    rows with other direct annotations of the same side, reconciled by the same
+    steps; None, the default, reads the experimental rows as always.
     """
     native_parents = _load_parents_by_go_id(session, side.native_snapshot_id)
-    raw = _load_experimental_raw_go_ids(session, side.annotation_set_id)
+    if raw is None:
+        raw = _load_experimental_raw_go_ids(session, side.annotation_set_id)
     projection = None
     remapped = None
     if project is not None:
