@@ -151,8 +151,17 @@ def test_the_always_on_processes_one_worker_and_the_web_fit_in_the_slice():
 
 def test_the_slice_is_the_dev_ceiling():
     keys = _keys(SYSTEMD / "protea-dev.slice")
-    assert keys["MemoryMax"] == ["9G"]
+    # 9G until 2026-11-18, when the author raised it with the two workers below.
+    assert keys["MemoryMax"] == ["20G"]
     assert keys["CPUWeight"] == ["50"]
+
+
+def test_the_training_and_evaluation_workers_have_room_and_no_swap():
+    """A count map or a whole window's evaluation fails at once rather than crawl in swap."""
+    for queue in ("protea.training", "protea.evaluations"):
+        keys = _keys(SYSTEMD / f"protea-dev-worker@{queue}.service.d" / "memory.conf")
+        assert keys["MemoryMax"] == ["8G"], queue
+        assert keys["MemorySwapMax"] == ["0"], queue
 
 
 def test_postgres_is_sized_as_planned():
