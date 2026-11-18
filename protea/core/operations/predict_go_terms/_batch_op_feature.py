@@ -26,6 +26,7 @@ from protea.core.operations.predict_go_terms._common import (
 from protea.core.operations.predict_go_terms._missing_query_vectors import (
     report_queries_without_vector,
 )
+from protea.core.operations.predict_go_terms._photo_sequences import member_sequences, photo_of
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -186,6 +187,18 @@ class _FeatureLoadingMixin:
                 )
                 .all()
             )
+        elif (photo := photo_of(session, p.annotation_set_id)) is not None:
+            members = member_sequences(photo)
+            rows = (
+                session.query(members.c.accession, SequenceEmbedding.embedding)
+                .join(
+                    SequenceEmbedding,
+                    (SequenceEmbedding.sequence_id == members.c.sequence_id)
+                    & (SequenceEmbedding.embedding_config_id == embedding_config_id),
+                )
+                .filter(members.c.accession.in_(query_accessions))
+                .all()
+            )
         else:
             rows = (
                 session.query(Protein.accession, SequenceEmbedding.embedding)
@@ -207,8 +220,10 @@ class _FeatureLoadingMixin:
 
         valid_accessions = [r[0] for r in rows]
         report_queries_without_vector(
-            query_accessions, valid_accessions,
-            embedding_config_id=embedding_config_id, emit=emit,
+            query_accessions,
+            valid_accessions,
+            embedding_config_id=embedding_config_id,
+            emit=emit,
         )
         # Rows return pgvector HalfVector instances (halfvec column since 2026-04-11).
         embeddings = np.array([r[1].to_list() for r in rows], dtype=np.float32)

@@ -252,7 +252,9 @@ def _sequence_keys_for(
     if not getattr(p, "exclude_self_neighbour", False):
         return None
     return load_sequence_identities(
-        session, set(ctx.valid_accessions) | _pool_accessions(ctx.ref_data_by_aspect)
+        session,
+        set(ctx.valid_accessions) | _pool_accessions(ctx.ref_data_by_aspect),
+        p.annotation_set_id,
     )
 
 
@@ -335,7 +337,7 @@ def _build_aspect_adapter_inputs(
         # able to recognise the query's own; with only the bank mapped it
         # refuses, which is correct and useless.
         ref_sequence_identities=load_sequence_identities(
-            session, set(ctx.valid_accessions) | set(all_unique_neighbors)
+            session, set(ctx.valid_accessions) | set(all_unique_neighbors), p.annotation_set_id
         ),
     )
 

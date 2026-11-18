@@ -304,16 +304,28 @@ def apply_protst_text(
     if not predictions:
         return
     config_id = _resolve_protst_config_id(protst_config_id)
-    accessions = sorted({r.get("protein_accession", "") for r in predictions if r.get("protein_accession")})
+    accessions = sorted(
+        {r.get("protein_accession", "") for r in predictions if r.get("protein_accession")}
+    )
     if not accessions:
         return
     query_emb = _load_query_embeddings(session, config_id, accessions)
     if not query_emb:
-        emit("predict_go_terms_batch.protst_text_done", None, {"queries_covered": 0, "scores": 0}, "info")
+        emit(
+            "predict_go_terms_batch.protst_text_done",
+            None,
+            {"queries_covered": 0, "scores": 0},
+            "info",
+        )
         return
     bank = _get_reference_bank(session, config_id, t0_annotation_set_id)
     if not bank[0]:
-        emit("predict_go_terms_batch.protst_text_done", None, {"queries_covered": 0, "scores": 0}, "info")
+        emit(
+            "predict_go_terms_batch.protst_text_done",
+            None,
+            {"queries_covered": 0, "scores": 0},
+            "info",
+        )
         return
     go_id_by_int, _aspect = _load_go_id_and_aspect(
         session,

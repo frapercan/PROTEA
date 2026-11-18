@@ -63,9 +63,7 @@ def attach_query_category(
     whose ``go_term_id`` is missing are left untouched (no category written).
     """
     accessions = {
-        rec.get("protein_accession", "")
-        for rec in prediction_dicts
-        if rec.get("protein_accession")
+        rec.get("protein_accession", "") for rec in prediction_dicts if rec.get("protein_accession")
     }
     own_exp = _own_exp_for(op, session, annotation_set_id, accessions)
     known_aspects_by_protein = _known_aspects_by_protein(session, own_exp)
