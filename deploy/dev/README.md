@@ -21,7 +21,7 @@ containers.
 | `protea-dev-rabbitmq` (Quadlet) | RabbitMQ 4.3.5 | `127.0.0.1:26672` (AMQP), `127.0.0.1:26673` (management) | 1G |
 | `protea-dev-minio` (Quadlet) | MinIO | `127.0.0.1:26900` (API), `127.0.0.1:26901` (console) | 768M |
 | `protea-dev-wait-infra.service` | waits until the three answer | | |
-| `protea-dev-worker@<queue>.service` | one queue worker per instance | | 2G each; 8G and no swap for `protea.training` and `protea.evaluations` (drop-ins, 2026-11-18) |
+| `protea-dev-worker@<queue>.service` | one queue worker per instance | | 2G each; 8G and no swap for `protea.training` and `protea.evaluations`, 12G and no swap for `protea.predictions.batch` (drop-ins, 2026-11-18) |
 | `protea-dev-api.service` | the API | `127.0.0.1:26800` | 768M |
 | `protea-dev-web` (Quadlet, with `protea-dev-web.build`) | the web front (Next.js) | `127.0.0.1:26300` | 768M |
 | `protea-dev.slice` | holds all of the above | | 20G in total (9G until 2026-11-18), CPUWeight 50 |
