@@ -1,12 +1,13 @@
-# The files a cluster needs to measure and build a cut photo, its homology table and the
-# embedding and lexicon banks of the photos, and the job scripts that run them: the import
-# closure inside protea/ of protea.core.cut_photo.measure and .build and of
-# protea.core.homology.build (the standard library and pyarrow are all they need), of
-# protea.core.embedding_bank.build (which also needs numpy, and torch with the
-# protea-backends plugins in the cluster's own environment) and of
-# protea.core.lexicon_bank.build (numpy, torch and Triton). send_builder_code.sh ships
-# exactly these, and tests/test_cluster_builder_files.py fails when the closure and the
-# protea/ lines disagree, or when a job script here is missing.
+# The files a cluster needs to measure and build a cut photo, its homology table, the
+# embedding and lexicon banks of the photos and a cut's segment families, and the job
+# scripts that run them: the import closure inside protea/ of
+# protea.core.cut_photo.measure and .build and of protea.core.homology.build (the standard
+# library and pyarrow are all they need), of protea.core.embedding_bank.build (which also
+# needs numpy, and torch with the protea-backends plugins in the cluster's own environment),
+# of protea.core.lexicon_bank.build (numpy, torch and Triton) and of
+# protea.core.segment_families.build (pyarrow, numpy and a pinned MMseqs2 binary).
+# send_builder_code.sh ships exactly these, and tests/test_cluster_builder_files.py fails
+# when the closure and the protea/ lines disagree, or when a job script here is missing.
 protea/__init__.py
 protea/core/__init__.py
 protea/core/cut_photo/__init__.py
@@ -37,6 +38,10 @@ protea/core/lexicon_bank/build.py
 protea/core/marks.py
 protea/core/plugins.py
 protea/core/row_alignment.py
+protea/core/segment_families/__init__.py
+protea/core/segment_families/algorithms.py
+protea/core/segment_families/build.py
+protea/core/segment_families/searches.py
 protea/core/source_guards.py
 protea/core/swissprot_table.py
 deploy/cluster/cut_photo_measure.sh
@@ -46,3 +51,4 @@ deploy/cluster/homology_build.sh
 deploy/cluster/embedding_bank_prepare.sh
 deploy/cluster/embedding_bank.sh
 deploy/cluster/lexicon_bank.sh
+deploy/cluster/segment_families.sh
