@@ -845,6 +845,14 @@ export type Prediction = {
   go_term_frequency: number | null;
   ref_annotation_density: number | null;
   neighbor_distance_std: number | null;
+  /** A method's own score (ADR-D60): null for a retrieval arm, read under the method_score formula. */
+  method_score: number | null;
+  /**
+   * The row's explanation, when the method's spec says it explains. A count map
+   * (ADR-D65) writes `{unit, k, n, strength, base_rate}` for a row a lexicon unit
+   * gave, and `{prior: true, base_rate}` for a row floored at the base rate.
+   */
+  explanation: Record<string, unknown> | null;
 };
 
 export function getProteinPredictions(setId: string, accession: string) {
