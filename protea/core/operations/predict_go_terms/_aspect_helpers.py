@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -31,7 +32,11 @@ from protea.core.operations.predict_go_terms._common import (
     AspectSeparatedKnnContext,
     PredictGOTermsBatchPayload,
 )
-from protea.core.operations.predict_go_terms._reference_aspect import aspect_bank
+from protea.core.operations.predict_go_terms._reference_aspect import (
+    aspect_bank,
+    search_aspect_in_blocks,
+    uncut_aspect,
+)
 from protea.core.operations.predict_go_terms._sequence_identity import (
     load_sequence_identities,
 )
@@ -55,6 +60,54 @@ class _AspectKnnPreSearch:
     """
 
     @staticmethod
+    def _search_aspect(
+        queries: Queries,
+        aspect_refs: dict[str, Any],
+        k: int,
+        p: PredictGOTermsBatchPayload,
+        use_cos: bool,
+    ) -> list[list[tuple[str, float]]]:
+        """One aspect's ``k`` nearest donors per query, before any self exclusion.
+
+        On the numpy backend an aspect still inside the pool is searched block by
+        block from it, with the same neighbours and no copy of the aspect
+        (``_reference_aspect``); otherwise the aspect is cut here and let go when
+        this returns, which on the serial path is one aspect's bank resident
+        instead of three.
+        """
+        from protea.config.tuning import get_tuning
+
+        block_rows = get_tuning().operation.aspect_search_block_rows
+        if p.search_backend == "numpy" and block_rows > 0:
+            uncut = uncut_aspect(aspect_refs, use_cos=use_cos)
+            if uncut is not None:
+                return search_aspect_in_blocks(
+                    queries.embeddings,
+                    uncut,
+                    k=k,
+                    block_rows=block_rows,
+                    distance_threshold=p.distance_threshold,
+                    search=partial(
+                        search_knn, backend="numpy", metric=p.metric, pre_normalized=use_cos
+                    ),
+                )
+        return search_knn(
+            queries.embeddings,
+            aspect_bank(aspect_refs, use_cos=use_cos),
+            list(aspect_refs["accessions"]),
+            k=k,
+            distance_threshold=p.distance_threshold,
+            backend=p.search_backend,
+            metric=p.metric,
+            pre_normalized=use_cos,
+            faiss_index_type=p.faiss_index_type,
+            faiss_nlist=p.faiss_nlist,
+            faiss_nprobe=p.faiss_nprobe,
+            faiss_hnsw_m=p.faiss_hnsw_m,
+            faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+        )
+
+    @staticmethod
     def _knn_one_aspect(
         aspect: str,
         queries: Queries,
@@ -67,9 +120,6 @@ class _AspectKnnPreSearch:
         aspect_refs = ref_data_by_aspect[aspect]
         if not aspect_refs["accessions"]:
             return aspect, [[] for _ in queries.accessions]
-        # Cut here and let it go when this returns: on the serial path that is
-        # one aspect's bank resident instead of three.
-        ref_f32 = aspect_bank(aspect_refs, use_cos=use_cos)
         # Per aspect, the same rule as the unified path: ask for one more when
         # the query may not be its own neighbour, then drop it. Aspect-separated
         # retrieval hits this harder, because a protein present in all three
@@ -85,20 +135,8 @@ class _AspectKnnPreSearch:
         keys = sequence_keys if bool(getattr(p, "exclude_self_neighbour", False)) else None
         accs = list(aspect_refs["accessions"])
         margin = extra_neighbours_for(queries.accessions, accs, keys) if keys else 0
-        result = search_knn(
-            queries.embeddings,
-            ref_f32,
-            accs,
-            k=p.limit_per_entry + margin,
-            distance_threshold=p.distance_threshold,
-            backend=p.search_backend,
-            metric=p.metric,
-            pre_normalized=use_cos,
-            faiss_index_type=p.faiss_index_type,
-            faiss_nlist=p.faiss_nlist,
-            faiss_nprobe=p.faiss_nprobe,
-            faiss_hnsw_m=p.faiss_hnsw_m,
-            faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+        result = _AspectKnnPreSearch._search_aspect(
+            queries, aspect_refs, p.limit_per_entry + margin, p, use_cos
         )
         if keys is None:
             return aspect, result
