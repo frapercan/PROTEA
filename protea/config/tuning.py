@@ -351,6 +351,23 @@ class OperationTuning(BaseModel):
             "por lo que la ganancia es real. 1 desactiva la paralelización."
         ),
     )
+    aspect_search_block_rows: int = Field(
+        default=150_000,
+        ge=0,
+        description=(
+            "Rows of an aspect's donors one numpy search reads at a time, rounded up "
+            "to a multiple of the search kernel's own block (50,000) so every float64 "
+            "product is computed in the call a whole search makes. The aspect is "
+            "searched block by block straight from the shared pool and the blocks' "
+            "nearest are merged by distance and then by position, the order a single "
+            "search over the whole aspect gives, so the neighbours are the same to the "
+            "bit; only the copy of the whole aspect is gone. With every evidence code "
+            "but ND, aspect P of photo 211 is 1,383,730 donors: 13.2 GiB of float32 at "
+            "ESM-2 3B's 2,560 dimensions, which did not fit beside the pool. 0 searches "
+            "the whole aspect at once, as before. Override: "
+            "PROTEA_TUNING__operation__aspect_search_block_rows."
+        ),
+    )
     method_scratch_dir: str | None = Field(
         default=None,
         description=(
