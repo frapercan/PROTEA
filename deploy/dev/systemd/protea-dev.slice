@@ -24,8 +24,12 @@ Description=PROTEA development stack (containers, workers, API)
 
 [Slice]
 # 20G since 2026-11-18 (the author: "OK"), when the training and evaluation workers
-# went from 2G to 8G each. With the production worker's own 48G ceiling the two
-# could ask for more than the machine's 61 if both ran full at once; the
-# production worker idles on this machine, so that is accepted, not solved.
-MemoryMax=20G
+# went from 2G to 8G each. 50G since 2026-11-19 (the author: "Tenemos 64GB de ram...
+# aprovechalos"), for the kNN of a whole window with donors of every evidence code
+# but ND, whose batch worker reached 36.1 GiB of anonymous memory with ESM-2 3B
+# (protea-dev-worker@protea.predictions.batch.service.d). With the production
+# worker's own 48G ceiling the two could ask for more than the machine's 61 if both
+# ran full at once; the production worker idles on this machine, so that is
+# accepted, not solved.
+MemoryMax=50G
 CPUWeight=50
