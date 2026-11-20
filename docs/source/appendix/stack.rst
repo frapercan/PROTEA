@@ -1,14 +1,17 @@
 PROTEA stack
 ============
 
+.. protea-stack:start
+
 .. note::
 
-   This page is generated from ``docs/source/_data/stack.yaml``.
-   Run ``python scripts/sync_stack.py`` to regenerate it.
+   This table is generated from ``docs/source/_data/stack.yaml`` by
+   ``scripts/sync_stack.py``. Edit the registry and run the script; do not
+   edit this block by hand.
 
-PROTEA is split across eight repositories. The platform repository
-(this one) hosts the orchestration, ORM, queue, and HTTP surface;
-the rest are pluggable contracts, runtime modules, and tooling.
+The registry lists 8 repositories: this platform, its contract package
+and plugins, and the tools, libraries and models around it. The platform
+repository hosts the orchestration, ORM, queue and HTTP surface.
 
 .. list-table::
    :header-rows: 1
@@ -24,7 +27,7 @@ the rest are pluggable contracts, runtime modules, and tooling.
      - Backend platform. Hosts the ORM, job queue, FastAPI surface, frontend, and orchestration.
    * - `protea-contracts <https://github.com/frapercan/protea-contracts>`_
      - Contracts
-     - ``beta``
+     - ``active``
      - Shared contract surface. ABCs, pydantic payloads, feature schema, schema_sha. Imported by every other repo.
    * - `protea-method <https://github.com/frapercan/protea-method>`_
      - Inference
@@ -50,6 +53,8 @@ the rest are pluggable contracts, runtime modules, and tooling.
      - Evaluator
      - ``active``
      - Standalone fork of cafaeval (CAFA-evaluator-PK) with the PK-coverage fix and a bit-exact parity guarantee against the upstream.
+
+.. protea-stack:end
 
 Cross-cutting concerns
 ----------------------
