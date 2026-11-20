@@ -288,19 +288,26 @@ Evaluation flow in PROTEA
    4. POST /jobs  (compute_embeddings, query_set_id=...)
       → compute ESM-2 embeddings for delta proteins
    5. POST /embeddings/predict  (predict_go_terms, query_set_id=...)
-      → run KNN GO transfer; creates PredictionSet
-   6. POST /annotations/evaluation-sets/{id}/run
+      → run kNN GO transfer; creates a PredictionSet of candidates
+   6. POST /jobs  (score_prediction_set, prediction_set_id=..., scoring_config_id=...)
+      → scores each candidate once and stores the scores; creates the scored set
+   7. POST /annotations/evaluation-sets/{id}/run  (prediction_set_id = the scored set)
       → queues run_cafa_evaluation job
-      → runs cafaeval for NK, LK, PK; creates EvaluationResult
-   7. View results in the Evaluation UI or download artifacts.zip.
+      → runs cafaeval for NK, LK, PK over the window's terms of interest;
+        creates EvaluationResult
+   8. View results in the Evaluation UI or download artifacts.zip.
 
-The ``cafaeval`` command equivalent (for manual inspection):
+The ``cafaeval`` command equivalent, on the files ``artifacts.zip`` holds, with
+the pivot's OBO and the IA table the run was given:
 
 .. code-block:: bash
 
-   python -m cafaeval go-basic.obo predictions/ ground_truth_NK.tsv -out_dir results/NK
-   python -m cafaeval go-basic.obo predictions/ ground_truth_LK.tsv -out_dir results/LK
-   python -m cafaeval go-basic.obo predictions/ ground_truth_PK.tsv \
+   python -m cafaeval go-basic.obo predictions/ gt_NK.tsv -ia ia.tsv \
+     -toi terms_of_interest.txt -prop fill -norm cafa -no_orphans -th_step 0.01 -out_dir results/NK
+   python -m cafaeval go-basic.obo predictions/ gt_LK.tsv -ia ia.tsv \
+     -toi terms_of_interest.txt -prop fill -norm cafa -no_orphans -th_step 0.01 -out_dir results/LK
+   python -m cafaeval go-basic.obo predictions/ gt_PK.tsv -ia ia.tsv \
+     -toi terms_of_interest.txt -prop fill -norm cafa -no_orphans -th_step 0.01 \
      -known pk_known_terms.tsv -out_dir results/PK
 
 Data model
@@ -548,6 +555,63 @@ GO terms) are superseded by IA-weighted ``f_micro_w``; they are kept for
 history but are not LAFA-comparable. Numbers from the v226 evaluation window
 are also kept for history but should not be compared head-to-head with LAFA
 v227 results (different band, different ground truth shape).
+
+Checked against a second implementation
+---------------------------------------
+
+The evaluator is checked against the lab's: ``sfjepa.eval.cafa.evaluate_cell``
+in the thesis' lab repository, a separate call of ``cafaeval-protea`` with
+LAFA's flags, written for the lab's own campaigns. Both pin ``cafaeval-protea``
+203af0a, the commit that names each NK and LK per-protein row by the truth
+protein it came from.
+
+The check reads one evaluation result back through the API: the files the run
+stored (``artifacts.zip``), the information accretion table it was given, and
+the ontologies of the window's pivot and two ends. It evaluates every cell with
+the lab's evaluator on those files, and compares, protein by protein:
+
+- the IA-weighted true-positive and predicted mass at every threshold, and the
+  truth mass. The platform stores the per-threshold grid in float32 and the
+  scalars in float64 (the contract in
+  ``protea/core/operations/_paired_panels_artifact.py``), so the grid is
+  compared with the lab's float64 masses cast to float32. That is equality
+  when both computed the same values;
+- each protein's masses at the cell's chosen threshold, in float64;
+- the published ``f_micro_w``, which the platform stores to four decimals.
+
+It also asks, input by input, whether a reader outside could rerun every cell
+from the public API alone. On the development store, for the ESM-2 650M
+nearest-neighbour set at cut 211 scored with ``embedding_only``, on the window
+211 -> 227 of LAFA's frame:
+
+.. literalinclude:: ../_data/lab-evaluator-parity-211-227.json
+   :language: json
+
+Every cell agrees, protein by protein.
+
+Two cells, PK's biological process and cellular component, are compared at
+the chosen threshold only. The platform does not store their grid, because its
+weighted and unweighted branches score different proteins: 38 and 4 PK
+proteins whose remaining truth carries no information accretion. The grid
+holds one row per protein for both variants, so it refuses those namespaces
+and records the refusal (``per_protein_grid_namespace_dropped``,
+``variant_populations_differ``). Those proteins come from the truth, not from
+the method, so on this window every method loses those two grids. This is a
+known limitation, and it goes when the grid can hold a population per variant.
+
+Every input has a door:
+
+- The CAFA export restricted to the window, and the three ground-truth
+  downloads, are byte-identical to the files the run read.
+- The known-terms download is a superset of the PK cell's known terms. Its
+  extra rows lie in aspects where the protein has no PK truth, and it gives
+  the same PK numbers.
+- The terms of interest are the window's rule applied to the two ends'
+  ontologies.
+
+The record names the platform's revision, the lab's, and the
+``cafaeval-protea`` commit on both sides. The check is repeated whenever the
+evaluator or that commit changes.
 
 Implementation reference
 -------------------------
