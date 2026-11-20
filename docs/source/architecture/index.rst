@@ -39,6 +39,10 @@ concern and links to the others where they intersect.
    The four windows methods are compared on, their information accretion, how
    a method is scored on them, and the held-out test.
 
+:doc:`scoring`
+   How a transfer method's candidates become scores: the scoring step, what a
+   scored set records, and the check that it is the evaluator's reading.
+
 :doc:`orchestration`
    How PROTEA relates to the rest of the working tree: the satellite
    repositories, the optional ``agent-farm`` orchestration system, and
@@ -105,6 +109,7 @@ The full ADR index lives at :doc:`/adr/index`.
    evaluation
    lafa-frame
    benchmark
+   scoring
    orchestration
    auth
    export-coordinator

@@ -1,0 +1,733 @@
+{
+ "what": "A scored set's prediction file against the file the evaluator writes from the candidates with the same ScoringConfig, byte for byte, over every protein of each candidate set. Each case ran in a transaction that was rolled back: nothing was left in the store.",
+ "store": "development store",
+ "code": {
+  "commit": "15386fecffda3430721bdff70a77fe918064d069",
+  "files": {
+   "protea/core/denials.py": "3625a2e5aef8b5fbfc51627f9a52baed7f00107ac82acc121ddef005c9a6c198",
+   "protea/core/operations/_candidate_scoring.py": "6d06274fa552b0c80991005baa77baed5091317413b1f186bc6cecf362e114bb",
+   "protea/core/operations/_method_score_predictions.py": "45c1b2132a0cdcd0fe87cf32001306ee602d54b25d81e5f46c4f820a2f84a7d5",
+   "protea/core/operations/_run_cafa_artifacts.py": "eec1b74c348d5934010ef406b82c7387867e9e221a68cf89a362bfd66d687e1e",
+   "protea/core/operations/score_prediction_set.py": "5393eb8f0b0f921048d3981a8e9aa486c0605bf414f31c367733f39fef1e9ab8"
+  }
+ },
+ "date": "2026-11-20",
+ "runs": "Two runs of the same code: 30 cases before the node was shut down, the remaining 4 after it came back.",
+ "all_identical": true,
+ "cases": [
+  {
+   "prediction_set_id": "1cda9a10-58ec-4a88-83c9-5aa76fca6a4c",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 543751,
+   "denied_removed": 804,
+   "evaluator_file": {
+    "lines": 542947,
+    "sha256": "bbac151ffdf17e9a4020c5918e952547e3a6a0417e5891f14eb826a018f90caf"
+   },
+   "scored_file": {
+    "lines": 542947,
+    "sha256": "bbac151ffdf17e9a4020c5918e952547e3a6a0417e5891f14eb826a018f90caf"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 21.7,
+    "scoring": 36.6
+   }
+  },
+  {
+   "prediction_set_id": "1cda9a10-58ec-4a88-83c9-5aa76fca6a4c",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 543751,
+   "denied_removed": 804,
+   "evaluator_file": {
+    "lines": 542947,
+    "sha256": "73c28e54ddcbaedb7c83fadec49460f1fb539e06f6e4cd6d32174ed09a74069c"
+   },
+   "scored_file": {
+    "lines": 542947,
+    "sha256": "73c28e54ddcbaedb7c83fadec49460f1fb539e06f6e4cd6d32174ed09a74069c"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.3,
+    "scoring": 34.1
+   }
+  },
+  {
+   "prediction_set_id": "31397a55-dc79-41d1-b106-0cd24df0183b",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 534212,
+   "denied_removed": 810,
+   "evaluator_file": {
+    "lines": 533402,
+    "sha256": "24276e427503dc82b9b2910deb69d8480641f07d9064a976f124d8575da96a62"
+   },
+   "scored_file": {
+    "lines": 533402,
+    "sha256": "24276e427503dc82b9b2910deb69d8480641f07d9064a976f124d8575da96a62"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 17.7,
+    "scoring": 33.3
+   }
+  },
+  {
+   "prediction_set_id": "31397a55-dc79-41d1-b106-0cd24df0183b",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 534212,
+   "denied_removed": 810,
+   "evaluator_file": {
+    "lines": 533402,
+    "sha256": "92912ebff9d6ef288fa059bb9c38b4f48b0b2132339880dfa5aa2e70b56e73b2"
+   },
+   "scored_file": {
+    "lines": 533402,
+    "sha256": "92912ebff9d6ef288fa059bb9c38b4f48b0b2132339880dfa5aa2e70b56e73b2"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.1,
+    "scoring": 32.2
+   }
+  },
+  {
+   "prediction_set_id": "41177ccb-1cf6-4543-ba3a-119a1d2b1fa0",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 528877,
+   "denied_removed": 804,
+   "evaluator_file": {
+    "lines": 528073,
+    "sha256": "c7027d05264b23891f1fdb8d23dc9315b50c101b5140f5f2f73ee5e2b825f23c"
+   },
+   "scored_file": {
+    "lines": 528073,
+    "sha256": "c7027d05264b23891f1fdb8d23dc9315b50c101b5140f5f2f73ee5e2b825f23c"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 29.3,
+    "scoring": 40.3
+   }
+  },
+  {
+   "prediction_set_id": "41177ccb-1cf6-4543-ba3a-119a1d2b1fa0",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 528877,
+   "denied_removed": 804,
+   "evaluator_file": {
+    "lines": 528073,
+    "sha256": "9775811f4cc9ae728d9e6eec9bca5d9b92f24e949a67c29eb8b4b385bed55d82"
+   },
+   "scored_file": {
+    "lines": 528073,
+    "sha256": "9775811f4cc9ae728d9e6eec9bca5d9b92f24e949a67c29eb8b4b385bed55d82"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.5,
+    "scoring": 39.8
+   }
+  },
+  {
+   "prediction_set_id": "79cbe3a6-a641-4d2e-bb0c-b646d33691d4",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 723585,
+   "denied_removed": 971,
+   "evaluator_file": {
+    "lines": 722614,
+    "sha256": "d7532a1f4e9fce2ea3aa71c91eedc7e467956bdee5e29db83d988d81e458a767"
+   },
+   "scored_file": {
+    "lines": 722614,
+    "sha256": "d7532a1f4e9fce2ea3aa71c91eedc7e467956bdee5e29db83d988d81e458a767"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 19.2,
+    "scoring": 41.8
+   }
+  },
+  {
+   "prediction_set_id": "79cbe3a6-a641-4d2e-bb0c-b646d33691d4",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 723585,
+   "denied_removed": 971,
+   "evaluator_file": {
+    "lines": 722614,
+    "sha256": "e6f41e236f18435514a71b934802e088576871cc818de2afae476bdfdf45cfef"
+   },
+   "scored_file": {
+    "lines": 722614,
+    "sha256": "e6f41e236f18435514a71b934802e088576871cc818de2afae476bdfdf45cfef"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.9,
+    "scoring": 47.4
+   }
+  },
+  {
+   "prediction_set_id": "7e420e89-d811-4d0b-9e7f-53f418f2f06c",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 535839,
+   "denied_removed": 806,
+   "evaluator_file": {
+    "lines": 535033,
+    "sha256": "e93365786860a37e524919d6070cc74bdc253e991880a3ef9451cdb48a0896c6"
+   },
+   "scored_file": {
+    "lines": 535033,
+    "sha256": "e93365786860a37e524919d6070cc74bdc253e991880a3ef9451cdb48a0896c6"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 22.1,
+    "scoring": 35.1
+   }
+  },
+  {
+   "prediction_set_id": "7e420e89-d811-4d0b-9e7f-53f418f2f06c",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 535839,
+   "denied_removed": 806,
+   "evaluator_file": {
+    "lines": 535033,
+    "sha256": "124d53d1c473179bd1d9bec62cea0701bbf38ee72d97678cc29d7e98ee6e47b9"
+   },
+   "scored_file": {
+    "lines": 535033,
+    "sha256": "124d53d1c473179bd1d9bec62cea0701bbf38ee72d97678cc29d7e98ee6e47b9"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.5,
+    "scoring": 34.2
+   }
+  },
+  {
+   "prediction_set_id": "86b6a900-4244-4650-bbd3-117b92b57543",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 552395,
+   "denied_removed": 822,
+   "evaluator_file": {
+    "lines": 551573,
+    "sha256": "dd32da2a916675e9cde43bff5524cb0451cbda33364844db5da10d8e1b6f4fd8"
+   },
+   "scored_file": {
+    "lines": 551573,
+    "sha256": "dd32da2a916675e9cde43bff5524cb0451cbda33364844db5da10d8e1b6f4fd8"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 18.7,
+    "scoring": 37.6
+   }
+  },
+  {
+   "prediction_set_id": "86b6a900-4244-4650-bbd3-117b92b57543",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 552395,
+   "denied_removed": 822,
+   "evaluator_file": {
+    "lines": 551573,
+    "sha256": "c29c08aa71046eb4b37141c35ac9a7f0b6683f47b54948f529ca5a8e76404876"
+   },
+   "scored_file": {
+    "lines": 551573,
+    "sha256": "c29c08aa71046eb4b37141c35ac9a7f0b6683f47b54948f529ca5a8e76404876"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 16.6,
+    "scoring": 42.0
+   }
+  },
+  {
+   "prediction_set_id": "8f128a51-aec1-48dc-8520-730b00a2880f",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 726042,
+   "denied_removed": 907,
+   "evaluator_file": {
+    "lines": 725135,
+    "sha256": "8e0a3902a36f964ab5f9af429c71db893e466b970260d7d6ecd1ff7b91948cd5"
+   },
+   "scored_file": {
+    "lines": 725135,
+    "sha256": "8e0a3902a36f964ab5f9af429c71db893e466b970260d7d6ecd1ff7b91948cd5"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 22.1,
+    "scoring": 41.4
+   }
+  },
+  {
+   "prediction_set_id": "8f128a51-aec1-48dc-8520-730b00a2880f",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 726042,
+   "denied_removed": 907,
+   "evaluator_file": {
+    "lines": 725135,
+    "sha256": "1d62b6a8a2b91e9b6878b0b0769a13afa3570fbb6fd7125caac4996a16b64856"
+   },
+   "scored_file": {
+    "lines": 725135,
+    "sha256": "1d62b6a8a2b91e9b6878b0b0769a13afa3570fbb6fd7125caac4996a16b64856"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 27.4,
+    "scoring": 67.1
+   }
+  },
+  {
+   "prediction_set_id": "8fbd2ef9-fcc9-4a38-89e0-31dfb74e4f4c",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 708474,
+   "denied_removed": 986,
+   "evaluator_file": {
+    "lines": 707488,
+    "sha256": "c300c4e0697e8521e4debc46eb9e9ab6214f82af9c65b2423dcfbd0b30e89999"
+   },
+   "scored_file": {
+    "lines": 707488,
+    "sha256": "c300c4e0697e8521e4debc46eb9e9ab6214f82af9c65b2423dcfbd0b30e89999"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 33.4,
+    "scoring": 47.1
+   }
+  },
+  {
+   "prediction_set_id": "8fbd2ef9-fcc9-4a38-89e0-31dfb74e4f4c",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 708474,
+   "denied_removed": 986,
+   "evaluator_file": {
+    "lines": 707488,
+    "sha256": "26099c8dc9f1fbc12813c6ca2e36f83c398b80f04feb79b2eeeee9332408c1fc"
+   },
+   "scored_file": {
+    "lines": 707488,
+    "sha256": "26099c8dc9f1fbc12813c6ca2e36f83c398b80f04feb79b2eeeee9332408c1fc"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.2,
+    "scoring": 40.7
+   }
+  },
+  {
+   "prediction_set_id": "9e74811b-7a23-4390-a0ce-7c8a6931c5b9",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 555085,
+   "denied_removed": 794,
+   "evaluator_file": {
+    "lines": 554291,
+    "sha256": "e0f1d91a2f082f2992deb90b1efa344895937ee6e522766cf8d76fbb3084d66e"
+   },
+   "scored_file": {
+    "lines": 554291,
+    "sha256": "e0f1d91a2f082f2992deb90b1efa344895937ee6e522766cf8d76fbb3084d66e"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 17.9,
+    "scoring": 37.7
+   }
+  },
+  {
+   "prediction_set_id": "9e74811b-7a23-4390-a0ce-7c8a6931c5b9",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 555085,
+   "denied_removed": 794,
+   "evaluator_file": {
+    "lines": 554291,
+    "sha256": "c4ac632ced673ab689cdc87005458b8798d2c7e6becb29eccd86f9aeba8a5a00"
+   },
+   "scored_file": {
+    "lines": 554291,
+    "sha256": "c4ac632ced673ab689cdc87005458b8798d2c7e6becb29eccd86f9aeba8a5a00"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.3,
+    "scoring": 38.1
+   }
+  },
+  {
+   "prediction_set_id": "a6491058-bb0b-40fe-9065-81b4e174c0db",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 696958,
+   "denied_removed": 982,
+   "evaluator_file": {
+    "lines": 695976,
+    "sha256": "ddbe3dfdf1612102819cbd01a183171541b13572e0adb73b799c88898d8b6a6e"
+   },
+   "scored_file": {
+    "lines": 695976,
+    "sha256": "ddbe3dfdf1612102819cbd01a183171541b13572e0adb73b799c88898d8b6a6e"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 18.9,
+    "scoring": 40.8
+   }
+  },
+  {
+   "prediction_set_id": "a6491058-bb0b-40fe-9065-81b4e174c0db",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 696958,
+   "denied_removed": 982,
+   "evaluator_file": {
+    "lines": 695976,
+    "sha256": "812d4cd2a672c1a166211e00a0c22f131a043d2b64e87a1a7ab4630a6954813a"
+   },
+   "scored_file": {
+    "lines": 695976,
+    "sha256": "812d4cd2a672c1a166211e00a0c22f131a043d2b64e87a1a7ab4630a6954813a"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.3,
+    "scoring": 41.4
+   }
+  },
+  {
+   "prediction_set_id": "c806e9ae-a06b-44d8-acef-0a8889278ec2",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 533778,
+   "denied_removed": 802,
+   "evaluator_file": {
+    "lines": 532976,
+    "sha256": "4098442d42de0e26444da2aa5090e438d7e15fdea8d9736b367af45eaf0d0fb8"
+   },
+   "scored_file": {
+    "lines": 532976,
+    "sha256": "4098442d42de0e26444da2aa5090e438d7e15fdea8d9736b367af45eaf0d0fb8"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 27.3,
+    "scoring": 42.2
+   }
+  },
+  {
+   "prediction_set_id": "c806e9ae-a06b-44d8-acef-0a8889278ec2",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 533778,
+   "denied_removed": 802,
+   "evaluator_file": {
+    "lines": 532976,
+    "sha256": "d48a6e5abb02be743d4fc536adf249ee2f3ff181ac2246127d892a3bdbf3ea4c"
+   },
+   "scored_file": {
+    "lines": 532976,
+    "sha256": "d48a6e5abb02be743d4fc536adf249ee2f3ff181ac2246127d892a3bdbf3ea4c"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 24.3,
+    "scoring": 42.1
+   }
+  },
+  {
+   "prediction_set_id": "d1cf7501-4dd0-4155-a9fc-a8bdc682be30",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 539297,
+   "denied_removed": 810,
+   "evaluator_file": {
+    "lines": 538487,
+    "sha256": "a98a2a87ffd5d7311071f91e266d757bdbab8178b79fa94a665134e590618d79"
+   },
+   "scored_file": {
+    "lines": 538487,
+    "sha256": "a98a2a87ffd5d7311071f91e266d757bdbab8178b79fa94a665134e590618d79"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 24.5,
+    "scoring": 43.8
+   }
+  },
+  {
+   "prediction_set_id": "d1cf7501-4dd0-4155-a9fc-a8bdc682be30",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 539297,
+   "denied_removed": 810,
+   "evaluator_file": {
+    "lines": 538487,
+    "sha256": "ed7a540dc3ef5e46918050bcbdb9e0c92abd513f0b887992baf4607a9dfa2e95"
+   },
+   "scored_file": {
+    "lines": 538487,
+    "sha256": "ed7a540dc3ef5e46918050bcbdb9e0c92abd513f0b887992baf4607a9dfa2e95"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 16.3,
+    "scoring": 45.1
+   }
+  },
+  {
+   "prediction_set_id": "e0993acf-f37a-4d19-a716-84d7e2d18247",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 692230,
+   "denied_removed": 1004,
+   "evaluator_file": {
+    "lines": 691226,
+    "sha256": "83970769c82acf62cef79340943333b2b442222df2cb0352489bb2552d857285"
+   },
+   "scored_file": {
+    "lines": 691226,
+    "sha256": "83970769c82acf62cef79340943333b2b442222df2cb0352489bb2552d857285"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 23.5,
+    "scoring": 44.9
+   }
+  },
+  {
+   "prediction_set_id": "e0993acf-f37a-4d19-a716-84d7e2d18247",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 692230,
+   "denied_removed": 1004,
+   "evaluator_file": {
+    "lines": 691226,
+    "sha256": "b18916f1c1452e94740cb740b519b58065da7b7d0ae33994733b996eb9cdc45b"
+   },
+   "scored_file": {
+    "lines": 691226,
+    "sha256": "b18916f1c1452e94740cb740b519b58065da7b7d0ae33994733b996eb9cdc45b"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.1,
+    "scoring": 38.0
+   }
+  },
+  {
+   "prediction_set_id": "e0993acf-f37a-4d19-a716-84d7e2d18247",
+   "scoring_config": "embedding_only",
+   "max_k_position": 3,
+   "proteins": 20811,
+   "candidates_read": 495060,
+   "denied_removed": 784,
+   "evaluator_file": {
+    "lines": 494276,
+    "sha256": "53b3508f0a0db086d46671d8398bf5e6730433961d922bb95a08be892c77186d"
+   },
+   "scored_file": {
+    "lines": 494276,
+    "sha256": "53b3508f0a0db086d46671d8398bf5e6730433961d922bb95a08be892c77186d"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 23.4,
+    "scoring": 41.6
+   }
+  },
+  {
+   "prediction_set_id": "e0993acf-f37a-4d19-a716-84d7e2d18247",
+   "scoring_config": "vote_fraction",
+   "max_k_position": 3,
+   "proteins": 20811,
+   "candidates_read": 495060,
+   "denied_removed": 784,
+   "evaluator_file": {
+    "lines": 494276,
+    "sha256": "d8e0f70ce0e0557e8261ce8fe5602a73fa6a43659234d9643fa3cf72f5655c3f"
+   },
+   "scored_file": {
+    "lines": 494276,
+    "sha256": "d8e0f70ce0e0557e8261ce8fe5602a73fa6a43659234d9643fa3cf72f5655c3f"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.7,
+    "scoring": 44.8
+   }
+  },
+  {
+   "prediction_set_id": "ec7f668a-4d03-4fc0-9e24-ce9afc50dd1c",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 714741,
+   "denied_removed": 945,
+   "evaluator_file": {
+    "lines": 713796,
+    "sha256": "169bc13024076ae5cffa18c3ecc04d1d6cb7c3d4d5cd8f5ba589f735a9ff85e5"
+   },
+   "scored_file": {
+    "lines": 713796,
+    "sha256": "169bc13024076ae5cffa18c3ecc04d1d6cb7c3d4d5cd8f5ba589f735a9ff85e5"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 19.1,
+    "scoring": 41.8
+   }
+  },
+  {
+   "prediction_set_id": "ec7f668a-4d03-4fc0-9e24-ce9afc50dd1c",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 714741,
+   "denied_removed": 945,
+   "evaluator_file": {
+    "lines": 713796,
+    "sha256": "4ac2f3ced07071a32fb96e653470aa5eae56269b0a14c68d7cfd677f77289781"
+   },
+   "scored_file": {
+    "lines": 713796,
+    "sha256": "4ac2f3ced07071a32fb96e653470aa5eae56269b0a14c68d7cfd677f77289781"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.8,
+    "scoring": 43.2
+   }
+  },
+  {
+   "prediction_set_id": "f909a466-3172-4174-bc59-f5048fc18e86",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 702977,
+   "denied_removed": 984,
+   "evaluator_file": {
+    "lines": 701993,
+    "sha256": "70e24951518d9b010ef2a1cb65cf2d37daea97089b2e8f0b5812d7d29042c205"
+   },
+   "scored_file": {
+    "lines": 701993,
+    "sha256": "70e24951518d9b010ef2a1cb65cf2d37daea97089b2e8f0b5812d7d29042c205"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 20.2,
+    "scoring": 50.5
+   }
+  },
+  {
+   "prediction_set_id": "f909a466-3172-4174-bc59-f5048fc18e86",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 702977,
+   "denied_removed": 984,
+   "evaluator_file": {
+    "lines": 701993,
+    "sha256": "e9a4b40a47ac7181168bb352586a0687a1e51bdb0f54b616d04f125503b72a7f"
+   },
+   "scored_file": {
+    "lines": 701993,
+    "sha256": "e9a4b40a47ac7181168bb352586a0687a1e51bdb0f54b616d04f125503b72a7f"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.6,
+    "scoring": 40.6
+   }
+  },
+  {
+   "prediction_set_id": "fc2ba7ef-1123-4fc8-88d6-6cc9c366393e",
+   "scoring_config": "embedding_only",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 685216,
+   "denied_removed": 1003,
+   "evaluator_file": {
+    "lines": 684213,
+    "sha256": "afbedf148fe0d7b898d3bb11bf9773cfe87eca5ac9f40a90ac0febc44da3c08a"
+   },
+   "scored_file": {
+    "lines": 684213,
+    "sha256": "afbedf148fe0d7b898d3bb11bf9773cfe87eca5ac9f40a90ac0febc44da3c08a"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 19.5,
+    "scoring": 46.7
+   }
+  },
+  {
+   "prediction_set_id": "fc2ba7ef-1123-4fc8-88d6-6cc9c366393e",
+   "scoring_config": "vote_fraction",
+   "max_k_position": null,
+   "proteins": 20811,
+   "candidates_read": 685216,
+   "denied_removed": 1003,
+   "evaluator_file": {
+    "lines": 684213,
+    "sha256": "2e39d7f42ab4996a7cdc11f9537ae51fb1bc91aba86e518ecf0a69d9aca0c4f0"
+   },
+   "scored_file": {
+    "lines": 684213,
+    "sha256": "2e39d7f42ab4996a7cdc11f9537ae51fb1bc91aba86e518ecf0a69d9aca0c4f0"
+   },
+   "identical": true,
+   "seconds": {
+    "evaluator": 15.5,
+    "scoring": 38.6
+   }
+  }
+ ]
+}
