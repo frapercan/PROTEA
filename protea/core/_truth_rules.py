@@ -25,7 +25,13 @@ from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 
-from protea.core._binding_rule import PROTEIN_BINDING
+from protea.core._binding_rule import (
+    DESCENDANTS_STEP,
+    PROTEIN_BINDING,
+    REQUESTABLE_BINDING_RULES,
+    BindingStep,
+    binding_step,
+)
 from protea.core._evaluation_graph import (
     _bfs_closure,
     _live_terms_with_aspect,
@@ -117,6 +123,7 @@ def refuse_unknown_rules(window: ReconciledWindow) -> None:
         ("truth_profile", TRUTH_PROFILES),
         ("toi_rule", GAIN_RULES),
         ("not_codes", NOT_CODE_RULES),
+        ("binding_rule", REQUESTABLE_BINDING_RULES),
     ):
         value = getattr(window, name)
         if value not in rules:
@@ -132,7 +139,8 @@ class ReconciledWindow(NamedTuple):
     four. The profile joins them because it decides what the delta IS, not
     how it is stored: two profiles over the same five ids are two different
     truths, which is why it is part of the window's identity in the database
-    too.
+    too. ``binding_rule`` is the last for the same reason: which protein-binding
+    rule runs (:mod:`protea.core._binding_rule`) changes the F side of the delta.
     """
 
     old_annotation_set_id: uuid.UUID
@@ -143,6 +151,7 @@ class ReconciledWindow(NamedTuple):
     truth_profile: str = TRUTH_PROFILES[0]
     toi_rule: str = GAIN_RULES[0]
     not_codes: str = NOT_CODE_RULES[0]
+    binding_rule: str = REQUESTABLE_BINDING_RULES[0]
 
 
 def toi_restricts_the_gain(toi_rule: str) -> bool:
@@ -306,6 +315,9 @@ class _Side(NamedTuple):
     #: that has to come from that one snapshot. ``None`` unless the profile
     #: remaps. See :mod:`protea.core._truth_remap`.
     frame: SideFrame | None = None
+    #: Where this end applies the window's protein-binding rule. The rule is the
+    #: window's, the step is the side's: ``cafa`` drops at t1 and not at t0.
+    binding: BindingStep = DESCENDANTS_STEP
 
 
 def _sides_of(
@@ -322,11 +334,13 @@ def _sides_of(
             window.old_annotation_set_id,
             window.old_native_snapshot_id,
             frames.get(window.old_native_snapshot_id),
+            binding_step(window.binding_rule, t1_side=False),
         ),
         _Side(
             window.new_annotation_set_id,
             window.new_native_snapshot_id,
             frames.get(window.new_native_snapshot_id),
+            binding_step(window.binding_rule, t1_side=True),
         ),
     )
 
