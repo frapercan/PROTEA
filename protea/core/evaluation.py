@@ -733,9 +733,10 @@ def compute_evaluation_data_reconciled(
 
     NOT-qualifier exclusion preserves PROTEA's True Path Rule contrapositive:
     NOT terms are propagated to descendants under the native DAG, intersected
-    with pivot, then further propagated under the pivot DAG. The union across
-    both annotation sets is applied to both sides, matching same-snapshot
-    behaviour.
+    with pivot, then further propagated under the pivot DAG, and the union
+    across both annotation sets is applied to both sides. AFTER the closure,
+    unlike the same-snapshot path: an ancestor that only a negated annotation
+    supported stays in this truth (``protea.core.lafa_frame`` negates first).
     """
     refuse_unknown_rules(window)
     pivot_go_ids, pivot_aspect = _load_pivot_term_universe(session, window.pivot_snapshot_id)

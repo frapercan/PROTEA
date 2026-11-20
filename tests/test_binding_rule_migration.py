@@ -15,6 +15,7 @@ import json
 import pathlib
 import re
 import uuid
+from dataclasses import replace
 from types import ModuleType
 
 import pytest
@@ -25,7 +26,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from protea.core._binding_rule import REQUESTABLE_BINDING_RULES
-from protea.core.window_declarations import BENCHMARK_FRAME, OCTOBER_HEADLINE_FRAME
+from protea.core.window_declarations import OCTOBER_HEADLINE_FRAME
 from protea.infrastructure.orm.base import Base
 from protea.infrastructure.orm.models.annotation import evaluation_set as model
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -34,11 +35,16 @@ from protea.infrastructure.orm.models.annotation.ontology_snapshot import Ontolo
 
 _VERSIONS = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions"
 _MIGRATION = _VERSIONS / "7c2e9b4d1a6f_a_window_declares_its_protein_binding_rule.py"
+#: The migration that widened the truth-rules check after this one.
+_NEXT = _VERSIONS / "5d3a8c1f7b24_a_window_can_be_built_by_lafa_s_frame.py"
+
+#: The October rules with CAFA's binding rule: a set the checks must accept.
+_CAFA_RULES = replace(OCTOBER_HEADLINE_FRAME, binding="cafa")
 
 
-def _module() -> ModuleType:
+def _module(path: pathlib.Path = _MIGRATION) -> ModuleType:
     """Loaded by path: ``alembic/`` is not a package and the library shadows the name."""
-    spec = importlib.util.spec_from_file_location("_7c2e9b4d1a6f", _MIGRATION)
+    spec = importlib.util.spec_from_file_location(f"_{path.name[:12]}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -58,7 +64,8 @@ def test_it_follows_a_revision_that_exists() -> None:
 def test_it_carries_the_models_check_texts() -> None:
     module = _module()
     assert module.BINDING_RULE_CHECK == model.BINDING_RULE_CHECK
-    assert module.TRUTH_RULES_CHECK == model.TRUTH_RULES_CHECK
+    # The truth-rules check moved on with LAFA's frame, which restores this text.
+    assert module.TRUTH_RULES_CHECK == _module(_NEXT).PREVIOUS_TRUTH_RULES_CHECK
 
 
 def test_the_column_check_lists_the_requestable_rules() -> None:
@@ -211,9 +218,9 @@ def test_the_column_check_refuses_what_a_payload_cannot_ask(pg_engine, columns) 
 @pytest.mark.parametrize(
     "rules",
     [
-        {k: v for k, v in BENCHMARK_FRAME.as_json().items() if k != "binding"},
-        {**BENCHMARK_FRAME.as_json(), "binding": "democafa"},
-        {**BENCHMARK_FRAME.as_json(), "binding": None},
+        {k: v for k, v in _CAFA_RULES.as_json().items() if k != "binding"},
+        {**_CAFA_RULES.as_json(), "binding": "democafa"},
+        {**_CAFA_RULES.as_json(), "binding": None},
     ],
     ids=["missing-key", "unknown", "json-null"],
 )
@@ -226,16 +233,14 @@ def test_the_rules_check_refuses_a_missing_or_unknown_binding(pg_engine, rules) 
 def test_the_binding_rule_separates_two_windows_in_the_key(pg_engine) -> None:
     snapshot, corpus = _graphs(pg_engine)
     _insert(pg_engine, corpus, snapshot)
-    _insert(pg_engine, corpus, snapshot, binding_rule="cafa", truth_rules=BENCHMARK_FRAME.as_json())
+    _insert(pg_engine, corpus, snapshot, binding_rule="cafa", truth_rules=_CAFA_RULES.as_json())
     with pytest.raises(DBAPIError, match="uq_evaluation_set_identity"):
-        _insert(
-            pg_engine, corpus, snapshot, binding_rule="cafa", truth_rules=BENCHMARK_FRAME.as_json()
-        )
+        _insert(pg_engine, corpus, snapshot, binding_rule="cafa", truth_rules=_CAFA_RULES.as_json())
 
 
 def test_the_downgrade_refuses_while_a_window_was_built_under_cafa(pg_engine) -> None:
     snapshot, corpus = _graphs(pg_engine)
-    _insert(pg_engine, corpus, snapshot, binding_rule="cafa", truth_rules=BENCHMARK_FRAME.as_json())
+    _insert(pg_engine, corpus, snapshot, binding_rule="cafa", truth_rules=_CAFA_RULES.as_json())
 
     with pytest.raises(RuntimeError, match="CAFA's binding rule"):
         _apply(pg_engine, "downgrade")

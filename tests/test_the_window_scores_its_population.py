@@ -47,12 +47,17 @@ _MIGRATION = (
 )
 
 
-def _migration() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("target_population_migration", _MIGRATION)
+def _migration(path: Path | None = None) -> ModuleType:
+    spec = importlib.util.spec_from_file_location("target_population_migration", path or _MIGRATION)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _lafa_migration() -> ModuleType:
+    """The migration that added LAFA's targets to the check."""
+    return _migration(_MIGRATION.with_name("5d3a8c1f7b24_a_window_can_be_built_by_lafa_s_frame.py"))
 
 
 def _delta() -> EvaluationData:
@@ -73,8 +78,9 @@ SUPERSET = frozenset({"P1", "P2", "P3"})
 
 
 class TestTheVocabularyIsClosed:
-    def test_the_two_populations(self) -> None:
-        assert TARGET_POPULATIONS == ("every_protein", "superset_at_t0")
+    def test_the_three_populations(self) -> None:
+        # The third is LAFA's targets (2026-11-20, protea.core.lafa_frame).
+        assert TARGET_POPULATIONS == ("every_protein", "superset_at_t0", "swissprot_same_sequence")
 
     def test_every_protein_is_the_default_so_no_stored_window_moves(self) -> None:
         payload = GenerateEvaluationSetPayload(
@@ -259,7 +265,11 @@ class TestTheRowKeepsThemApart:
 
     def test_the_model_the_migration_and_the_vocabulary_agree(self) -> None:
         migration = _migration()
-        assert migration.TARGET_POPULATION_CHECK == model.TARGET_POPULATION_CHECK
+        # The check moved on with LAFA's targets, whose migration restores this text.
+        assert (
+            migration.TARGET_POPULATION_CHECK == _lafa_migration().PREVIOUS_TARGET_POPULATION_CHECK
+        )
+        assert _lafa_migration().TARGET_POPULATION_CHECK == model.TARGET_POPULATION_CHECK
         quoted = ", ".join(f"'{value}'" for value in population.TARGET_POPULATIONS)
         assert model.TARGET_POPULATION_CHECK == f"target_population IN ({quoted})"
 

@@ -41,8 +41,16 @@ Layers
    files verify against their own ``.sha256``. Runs when the package is
    present (``PROTEA_LAFA_ACCEPTANCE_DIR``, default
    ``~/handoff/sfjepa-2026-10-27``).
-3. PROTEA's own profile output equals the contract. Runs once
-   ``protea.core.lafa_profile`` exists.
+3. PROTEA's own profile output equals the contract. Stays skipped: see below.
+
+Both missing rules exist since 2026-11-20, the targets as the population
+``swissprot_same_sequence`` and the binding rule as ``cafa``, and
+:mod:`protea.core.lafa_frame` assembles them with LAFA's other steps, read from
+LAFA's own code (``docs/source/architecture/lafa-frame.rst``). Layer 3 compares
+that truth with LAFA's published files of ``Sep_2025_Mar_2026``, which is this
+project's held-out test window (227 -> 230), read once and never in
+development; there, the frame is checked against LAFA's own code on windows
+that may be read.
 """
 
 from __future__ import annotations
@@ -483,16 +491,18 @@ _PROFILE_PIECES = (
 @pytest.mark.skipif(
     True,
     reason=(
-        "protea.core.lafa_profile does not exist yet; it is the subject of "
-        "six changes: " + "; ".join(_PROFILE_PIECES)
+        "LAFA's published files of Sep_2025_Mar_2026 are this project's held-out "
+        "test (227 -> 230), read once and never in development; the frame these "
+        "six pieces describe is protea.core.lafa_frame: " + "; ".join(_PROFILE_PIECES)
     ),
 )
 class TestProteaReproducesTheContract:
     """The diana. Each of the six pieces lands against these assertions.
 
-    Enabling this class is the definition of done for the profile: drop
-    the ``skipif`` once :mod:`protea.core.lafa_profile` can build the
-    window truth, and every number above becomes a pass/fail.
+    Enabling this class would turn every number above into a pass or a
+    fail for :mod:`protea.core.lafa_frame`, and it reads the held-out
+    test's truth, so it is enabled only for the single read of that
+    window, by the author's word.
     """
 
     def test_target_count(self) -> None:

@@ -39,6 +39,17 @@ protein-binding rule built the F side, if any. Rows stored before it was
 declared were given the rule their path applied when the migration added it:
 ``none`` on the same-snapshot path, ``descendants_both_ends`` on every other.
 
+THE BUILDERS. Three paths build a window, and the rules say which one ran: the
+closure ``direct_terms`` is the same-snapshot path
+(:func:`protea.core.evaluation.compute_evaluation_data`), the profile
+``own_graph`` is LAFA's frame (:mod:`protea.core.lafa_frame`), and every other
+row is the reconciled path. They do not negate at the same moment, which the
+vocabularies cannot say and this paragraph does. The same-snapshot path and
+LAFA's frame take a ``NOT`` row's term and everything under it out of the
+DIRECT annotations, before anything is propagated. The reconciled path takes
+them out of its closure, after, so an ancestor that only a negated annotation
+supported stays in its truth.
+
 A row written before the rules were stored holds NULL, and NULL reads as
 legacy: "nothing says", never "the defaults".
 """
@@ -74,15 +85,24 @@ WINDOW_ROLES: tuple[str, ...] = LEGACY_WINDOW_ROLES + FRAME_WINDOW_ROLES
 #: * ``t0_graph``: both sides closed under the t0 corpus's graph, which is also
 #:   the pivot. The October headline frame.
 #: * ``t1_graph``: both sides and the pivot at the t1 corpus's graph.
+#: * ``per_side_t0_pivot``: each side closed under its own corpus's graph, and
+#:   the pivot is the t0 one, which is the graph LAFA scores with. LAFA's frame.
 #: * ``explicit``: any other combination, which only an explicit override can
 #:   produce. The row's own three graph ids say which; a frame helper cannot
 #:   compare it across cuts and refuses it.
 #: * ``direct_terms``: no graph closes either side at build time, which is the
 #:   same-snapshot path. See :data:`SAME_SNAPSHOT_RULES`.
-CLOSURES: tuple[str, ...] = ("per_side", "t0_graph", "t1_graph", "explicit", "direct_terms")
+CLOSURES: tuple[str, ...] = (
+    "per_side",
+    "t0_graph",
+    "t1_graph",
+    "per_side_t0_pivot",
+    "explicit",
+    "direct_terms",
+)
 
 #: The closures a named rule set may fix: the ones stated by the window's ends.
-NAMEABLE_CLOSURES: tuple[str, ...] = ("per_side", "t0_graph", "t1_graph")
+NAMEABLE_CLOSURES: tuple[str, ...] = ("per_side", "t0_graph", "t1_graph", "per_side_t0_pivot")
 
 #: The payload fields a named rule set fixes, in :class:`TruthRules` order.
 RULE_FIELDS: tuple[str, ...] = ("truth_profile", "toi_rule", "not_codes", "binding_rule")
@@ -178,16 +198,17 @@ OCTOBER_HEADLINE_FRAME = TruthRules(
     binding="descendants_both_ends",
 )
 
-#: The truth rules of the benchmark: the October headline frame with CAFA's and
-#: LAFA's protein-binding rule in place of PROTEA's own, so that the F side of a
-#: window is the one the community scores. The author chose it on 2026-11-20,
-#: together with the target population ``superset_at_t0`` (ADR-D60), which is a
-#: field of its own and not a truth rule.
-BENCHMARK_FRAME = TruthRules(
-    profile="projected",
-    toi_rule="live_in_both_ends",
+#: The truth rules of LAFA's frame (:mod:`protea.core.lafa_frame`): each end
+#: named and closed under its own ontology, both ends trimmed to the terms live
+#: in both, ``NOT`` rows only when experimental, scored at t0's graph, and the
+#: protein-binding rule LAFA applies. The benchmark's rules: the author asked on
+#: 2026-11-20 for the benchmark to be faithful to CAFA and LAFA, with one
+#: departure of his, the ``NOT`` rows, which the module explains.
+LAFA_FRAME = TruthRules(
+    profile="own_graph",
+    toi_rule="both_ends_trimmed",
     not_codes="experimental",
-    closure="t0_graph",
+    closure="per_side_t0_pivot",
     binding="cafa",
 )
 
@@ -195,7 +216,14 @@ BENCHMARK_FRAME = TruthRules(
 #: whose choice each one is. Every closure here must be in
 #: :data:`NAMEABLE_CLOSURES`, or the operation could not resolve its graphs.
 NAMED_TRUTH_RULES: Mapping[str, TruthRules] = MappingProxyType(
-    {"october-headline-frame": OCTOBER_HEADLINE_FRAME, "benchmark-frame": BENCHMARK_FRAME}
+    {"october-headline-frame": OCTOBER_HEADLINE_FRAME, "lafa-frame": LAFA_FRAME}
+)
+
+#: The target population a named rule set fixes, when it fixes one. LAFA's
+#: frame scores LAFA's targets; the October frame fixes none, and its windows
+#: were built with two.
+NAMED_TARGET_POPULATIONS: Mapping[str, str] = MappingProxyType(
+    {"lafa-frame": "swissprot_same_sequence"}
 )
 
 
@@ -211,19 +239,28 @@ def named_truth_rules(name: object) -> TruthRules:
 def payload_with_named_rules(payload: Mapping[str, Any]) -> dict[str, Any]:
     """The payload with the four rule fields its named rule set fixes filled in.
 
-    A field the payload already carries must agree with the set: a payload that
-    names ``october-headline-frame`` and asks for ``as_closed`` asks for two
-    truths, and picking either would be a guess. The closure is not a payload
-    field; :func:`closing_graphs_by_default` resolves it against the corpora.
+    And the target population, when the set fixes one
+    (:data:`NAMED_TARGET_POPULATIONS`). A field the payload already carries must
+    agree with the set: a payload that names ``october-headline-frame`` and asks
+    for ``as_closed`` asks for two truths, and picking either would be a guess.
+    The closure is not a payload field; :func:`closing_graphs_by_default`
+    resolves it against the corpora.
     """
     filled = dict(payload)
     name = filled.get("truth_rule_set")
     if name is None:
         return filled
     rules = named_truth_rules(name)
-    for field, value in zip(
-        RULE_FIELDS, (rules.profile, rules.toi_rule, rules.not_codes, rules.binding), strict=True
-    ):
+    fixed = list(
+        zip(
+            RULE_FIELDS,
+            (rules.profile, rules.toi_rule, rules.not_codes, rules.binding),
+            strict=True,
+        )
+    )
+    if name in NAMED_TARGET_POPULATIONS:
+        fixed.append(("target_population", NAMED_TARGET_POPULATIONS[name]))
+    for field, value in fixed:
         asked = filled.setdefault(field, value)
         if asked != value:
             raise ValueError(
@@ -240,19 +277,29 @@ def closing_graphs_by_default(
 
     ``t0_era`` and ``t1_era`` are the ontologies the two corpora were loaded
     under. ``per_side`` is what every call that names no rule set gets, which is
-    what the operation always did. The pivot is not here: it keeps defaulting
-    to the graph that closes t1.
+    what the operation always did. The pivot is not here: see
+    :func:`pivot_by_default`.
     """
     defaults = {
         "per_side": (t0_era, t1_era),
         "t0_graph": (t0_era, t0_era),
         "t1_graph": (t1_era, t1_era),
+        "per_side_t0_pivot": (t0_era, t1_era),
     }
     if closure not in defaults:
         raise ValueError(
             f"closure {closure!r} cannot be resolved; it is one of {NAMEABLE_CLOSURES}"
         )
     return defaults[closure]
+
+
+def pivot_by_default(closure: str, old_native: uuid.UUID, new_native: uuid.UUID) -> uuid.UUID:
+    """The pivot when the payload names none: the graph that closes t1, except under LAFA's closure.
+
+    ``per_side_t0_pivot`` puts it at the graph that closes t0, which is the one
+    LAFA scores with; every other closure keeps what the operation always did.
+    """
+    return old_native if closure == "per_side_t0_pivot" else new_native
 
 
 class WindowGraphs(NamedTuple):
@@ -286,6 +333,8 @@ def closure_applied(graphs: WindowGraphs) -> str:
         return "per_side"
     if used == (t1, t1, t1):
         return "t1_graph"
+    if used == (t0, t1, t0):
+        return "per_side_t0_pivot"
     return "explicit"
 
 
@@ -378,8 +427,10 @@ def _ids(ids: Iterable[uuid.UUID]) -> str:
 __all__ = [
     "CLOSURES",
     "FRAME_WINDOW_ROLES",
+    "LAFA_FRAME",
     "LEGACY_WINDOW_ROLES",
     "NAMEABLE_CLOSURES",
+    "NAMED_TARGET_POPULATIONS",
     "NAMED_TRUTH_RULES",
     "OCTOBER_HEADLINE_FRAME",
     "RULE_FIELDS",
@@ -395,6 +446,7 @@ __all__ = [
     "common_truth_rules_of",
     "named_truth_rules",
     "payload_with_named_rules",
+    "pivot_by_default",
     "refuse_unless_named_rules_apply",
     "stored_truth_rules",
 ]
