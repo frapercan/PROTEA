@@ -389,8 +389,9 @@ Evaluation
    │ ontology_snapshot_id (FK)    │           │ scoring_config_id (FK, nullable)  │
    │ stats (JSONB)                │           │ reranker_model_id (FK, nullable)  │
    │ job_id (FK)                  │           │ results (JSONB)                   │
-   │ created_at                   │           │ max_distance (Float, nullable)    │
-   └──────────────────────────────┘           │ job_id (FK)                       │
+   │ created_at                   │           │ max_k_position (nullable)         │
+   └──────────────────────────────┘           │ max_sequence_rank (nullable)      │
+                                              │ job_id (FK)                       │
                                               │ created_at                        │
                                               └───────────────────────────────────┘
 
@@ -403,8 +404,12 @@ Evaluation
    Stores the output of running ``cafaeval`` against a prediction set for
    a given evaluation set. The ``results`` JSONB column contains per-category
    (NK/LK/PK) per-namespace (BPO/MFO/CCO) Fmax, precision, recall, τ, and
-   coverage. Optionally references a ``ScoringConfig`` or ``RerankerModel``
-   when predictions were scored or re-ranked before evaluation.
+   coverage. The evaluator scores the prediction set's stored scores as they
+   are; when the set was scored by ``score_prediction_set``, the result row
+   copies the ``ScoringConfig`` and the depth cut from the set's record, so a
+   result names how its scores were made. Rows written before 2026-11-20 keep
+   the ``ScoringConfig``, ``RerankerModel`` and cut the evaluator applied
+   itself.
 
 Support
 -------

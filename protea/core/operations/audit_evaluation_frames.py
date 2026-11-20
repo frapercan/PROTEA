@@ -14,9 +14,8 @@ nullable with no default, so the guarantee is opt-in, which means it is not a
 guarantee.
 
 Nothing in the platform derives ``frame`` from a run. It is a payload field:
-``run_cafa_evaluation`` stamps onto the row whatever its caller passed, and
-``batch_rescore_evaluation`` forwards that same value unchanged to every config
-in the batch. So a row without a frame is missing a *declaration*, not a
+``run_cafa_evaluation`` stamps onto the row whatever its caller passed. So a
+row without a frame is missing a *declaration*, not a
 computation, and re-running it produces another unframed row unless whoever
 dispatches it declares one. The census says so in those words, because a verdict
 that promises recomputation will supply the frame describes work that does not
@@ -147,8 +146,7 @@ def _emit_verdict(emit: EmitFn, needs_declaration: int, deletable_only: int) -> 
 
     The verdict names a missing DECLARATION, not a missing computation. Nothing
     in this platform computes ``frame``: it is a payload field that
-    ``run_cafa_evaluation`` and ``batch_rescore_evaluation`` stamp from whatever
-    the dispatcher declared. So these rows need someone to decide which frame
+    ``run_cafa_evaluation`` stamps from whatever the dispatcher declared. So these rows need someone to decide which frame
     they belong to before re-running them means anything. The wording this
     replaced promised that a recomputation would supply the frame, which sends a
     reader looking for a step in the pipeline that has never existed.

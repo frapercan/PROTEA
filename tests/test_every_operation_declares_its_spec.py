@@ -84,12 +84,10 @@ TODAY: dict[str, str] = {
     "run_own_annotations": queues.TRAINING,
     # Docs and dispatchers: the residue vocabulary's coordinator (architecture/
     # operations.rst; the weights dialog posts it), build_go_cooccurrence
-    # (runbooks/lafa-native-parity.rst), batch_rescore_evaluation
-    # (scripts/hpo_champion_score.py) and apply_learned_encoder (its pull request:
+    # (runbooks/lafa-native-parity.rst) and apply_learned_encoder (its pull request:
     # "Registered on protea.jobs").
     "encode_residue_vocabulary": queues.EMBEDDINGS,
     "build_go_cooccurrence": queues.JOBS,
-    "batch_rescore_evaluation": queues.EVALUATIONS,
     "apply_learned_encoder": queues.JOBS,
     # The plan's section C table: see ROUTED_BY_THE_PLAN.
     "encode_residue_sparse": queues.EMBEDDINGS,
@@ -287,7 +285,7 @@ def _constant(module: str, name: str) -> str:
 def test_every_registered_operation_declares_a_spec() -> None:
     registry = build_operation_registry()
     assert set(registry.specs()) == set(registry._ops)
-    assert len(CATALOG) == len(registry._ops) == 68
+    assert len(CATALOG) == len(registry._ops) == 67
 
 
 def test_each_spec_routes_where_the_code_routes_today(specs: dict[str, OperationSpec]) -> None:

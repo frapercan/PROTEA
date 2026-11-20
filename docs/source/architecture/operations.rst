@@ -1009,6 +1009,13 @@ for a given ``EvaluationSet`` × ``PredictionSet`` pair. Persists an
 ``EvaluationResult`` row with per-namespace Fmax, precision, recall, τ, and
 coverage for each setting.
 
+It scores what a method stored and nothing else: the prediction set's
+``method_score``, read as it is. Scoring a transfer method's candidates,
+cutting them to a depth, reranking them, grafting InterPro onto them and
+honouring the bank's denials are the method's work, done when it predicts and
+written in its prediction set's record (:doc:`/architecture/scoring`). A set
+that stores candidates without scores is refused before anything is staged.
+
 Payload fields
 ~~~~~~~~~~~~~~
 
@@ -1024,33 +1031,7 @@ Payload fields
      - UUID of the ``EvaluationSet`` to evaluate against.
    * - ``prediction_set_id``
      - *(required)*
-     - UUID of the ``PredictionSet`` containing predictions to score.
-   * - ``max_distance``
-     - ``null``
-     - Discard predictions with cosine distance above this threshold before
-       scoring (range 0 – 2). ``null`` = no threshold.
-   * - ``scoring_config_id``
-     - ``null``
-     - UUID of a ``ScoringConfig`` to apply to the prediction set before
-       evaluation. ``null`` = score with the raw KNN-distance derived
-       probability.
-   * - ``reranker_id_nk``
-     - ``null``
-     - UUID of a ``RerankerModel`` to apply to NK-category predictions
-       before evaluation. Validated against the live feature schema; falls
-       back to KNN ordering on ``feature_schema_sha`` mismatch.
-   * - ``reranker_id_lk``
-     - ``null``
-     - Same as ``reranker_id_nk`` but for the LK category.
-   * - ``reranker_id_pk``
-     - ``null``
-     - Same as ``reranker_id_nk`` but for the PK category.
-   * - ``rerankers``
-     - ``null``
-     - Nested mapping of category → aspect → reranker_model_id, e.g.
-       ``{"nk": {"bpo": "<uuid>", "mfo": "<uuid>"}, "lk": {...}}``.
-       Overrides the flat ``reranker_id_*`` fields when present and lets
-       a single run mix per-aspect boosters within a category.
+     - UUID of the ``PredictionSet`` whose stored scores are evaluated.
    * - ``ia_file``
      - ``null``
      - Path to an Information Accretion (IA) TSV file (two columns:
@@ -1068,6 +1049,21 @@ Payload fields
        (e.g. a re-eval of a frozen lab dump where this filter has already
        been applied).
 
+Retired on 2026-11-20 (the closure, step 4), with where the work happens now.
+A payload that still carries one of these with a value is refused with the
+pointer; one that carries it empty asked for nothing and is accepted.
+
+- ``scoring_config_id``, ``max_distance``, ``max_k_position``,
+  ``max_sequence_rank``: ``score_prediction_set`` takes the configuration and
+  the cut, and stores the scores as a set of their own.
+- ``reranker_id_nk``, ``reranker_id_lk``, ``reranker_id_pk``, ``rerankers``:
+  a reranker runs when the method predicts, and its score is stored as the
+  row's ``method_score``.
+- ``interpro_graft`` and its files and weight: the InterPro BP graft runs when
+  predicting, on top of a reranker, and the record says so.
+- ``softprop``: the platform no longer propagates scores; a method that
+  propagates its scores stores them propagated.
+
 Execution flow
 ~~~~~~~~~~~~~~
 
@@ -1078,8 +1074,8 @@ Execution flow
    3. download OBO file from snapshot.obo_url to a temp directory
    4. write ground-truth TSVs: gt_NK.tsv, gt_LK.tsv, gt_PK.tsv,
       known_terms.tsv, pk_known_terms.tsv
-   5. write predictions in CAFA format (protein \\t go_id \\t score),
-      score = max(0, 1 - distance), filtered to delta proteins only
+   5. write predictions in CAFA format (protein \\t go_id \\t score): the
+      stored method_score of the delta proteins, as stored, at four decimals
    6. session.commit(): releases DB connection before cafaeval forks workers
    7. for each setting in (NK, LK, PK):
       a. NK pass: cafa_eval(obo, predictions/, gt_NK.tsv)

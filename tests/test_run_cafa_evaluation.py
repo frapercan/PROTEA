@@ -19,13 +19,22 @@ from pydantic import ValidationError
 
 from protea.core.band_registry import BandMismatchError
 from protea.core.evaluation import EvaluationData
-from protea.core.operations._run_cafa_artifacts import WritePredictionsContext
 from protea.core.operations.run_cafa_evaluation import (
     _NS_LABELS,
     _NS_SHORT,
     RunCafaEvaluationOperation,
     RunCafaEvaluationPayload,
 )
+
+
+@pytest.fixture(autouse=True)
+def _every_set_here_is_scored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sessions here are doubles, and the check that a set stores scores is a
+    query; it is tested against Postgres in test_method_score_predictions.py."""
+    monkeypatch.setattr(
+        "protea.core.operations.run_cafa_evaluation.refuse_unless_scored",
+        lambda _session, _set_id: None,
+    )
 
 
 def _gets(eval_set=None, pred_set=None, snapshot=None, config=None, scoring_cfg=None):
@@ -64,6 +73,7 @@ def _gets(eval_set=None, pred_set=None, snapshot=None, config=None, scoring_cfg=
         return None
 
     return get
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -231,8 +241,6 @@ class TestRunCafaEvaluationPayload:
         )
         assert p.evaluation_set_id == EVAL_SET_ID
         assert p.prediction_set_id == PRED_SET_ID
-        assert p.max_distance is None
-        assert p.scoring_config_id is None
         assert p.ia_file is None
 
     def test_lafa_parity_defaults(self):
@@ -264,17 +272,63 @@ class TestRunCafaEvaluationPayload:
                 max_terms=0,
             )
 
-    def test_valid_payload_all_fields(self):
-        p = RunCafaEvaluationPayload(
-            evaluation_set_id=EVAL_SET_ID,
-            prediction_set_id=PRED_SET_ID,
-            max_distance=1.5,
-            scoring_config_id=SCORING_CONFIG_ID,
-            ia_file="/tmp/ia.tsv",
+    @pytest.mark.parametrize(
+        ("field", "value", "pointer"),
+        [
+            ("scoring_config_id", SCORING_CONFIG_ID, "score_prediction_set"),
+            ("max_distance", 1.5, "score_prediction_set"),
+            ("max_k_position", 3, "score_prediction_set"),
+            ("max_sequence_rank", 3, "score_prediction_set"),
+            ("reranker_id_nk", SCORING_CONFIG_ID, "when predicting"),
+            ("rerankers", {"nk": {"bpo": SCORING_CONFIG_ID}}, "when predicting"),
+            ("interpro_graft", True, "on top of a reranker"),
+            ("softprop", True, "stores them propagated"),
+        ],
+    )
+    def test_a_retired_field_asking_for_work_is_refused_with_where_it_is_done(
+        self, field, value, pointer
+    ):
+        with pytest.raises(ValidationError, match=pointer):
+            RunCafaEvaluationPayload.model_validate(
+                {"evaluation_set_id": EVAL_SET_ID, "prediction_set_id": PRED_SET_ID, field: value}
+            )
+
+    def test_every_retired_field_has_a_pointer(self):
+        from protea.core.operations._run_cafa_payload import RETIRED_FIELDS
+
+        assert set(RETIRED_FIELDS) == {
+            "scoring_config_id",
+            "max_distance",
+            "max_k_position",
+            "max_sequence_rank",
+            "reranker_id_nk",
+            "reranker_id_lk",
+            "reranker_id_pk",
+            "rerankers",
+            "interpro_graft",
+            "interpro_protein2ipr_file",
+            "interpro_ipr2go_file",
+            "interpro_graft_weight",
+            "softprop",
+        }
+        assert all(RETIRED_FIELDS.values())
+
+    def test_a_retired_field_left_empty_asked_for_nothing_and_is_accepted(self):
+        """A caller built before the change sends the old defaults; they ask for nothing."""
+        p = RunCafaEvaluationPayload.model_validate(
+            {
+                "evaluation_set_id": EVAL_SET_ID,
+                "prediction_set_id": PRED_SET_ID,
+                "scoring_config_id": None,
+                "max_k_position": None,
+                "softprop": False,
+                "interpro_graft": False,
+                "rerankers": {},
+                "ia_file": "/tmp/ia.tsv",
+            }
         )
-        assert p.max_distance == 1.5
-        assert p.scoring_config_id == SCORING_CONFIG_ID
         assert p.ia_file == "/tmp/ia.tsv"
+        assert not hasattr(p, "scoring_config_id")
 
     def test_empty_evaluation_set_id_raises(self):
         with pytest.raises(ValidationError, match="non-empty"):
@@ -295,22 +349,6 @@ class TestRunCafaEvaluationPayload:
             RunCafaEvaluationPayload(
                 evaluation_set_id=123,
                 prediction_set_id=PRED_SET_ID,
-            )
-
-    def test_max_distance_out_of_range(self):
-        with pytest.raises(ValidationError):
-            RunCafaEvaluationPayload(
-                evaluation_set_id=EVAL_SET_ID,
-                prediction_set_id=PRED_SET_ID,
-                max_distance=3.0,
-            )
-
-    def test_max_distance_negative(self):
-        with pytest.raises(ValidationError):
-            RunCafaEvaluationPayload(
-                evaluation_set_id=EVAL_SET_ID,
-                prediction_set_id=PRED_SET_ID,
-                max_distance=-0.1,
             )
 
     def test_strips_whitespace(self):
@@ -402,18 +440,12 @@ class TestEvalProvenanceStamping:
         es = _make_eval_set()
         es.window_role = "valid"
         p = RunCafaEvaluationPayload(evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID)
-        frame, window, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
-            p, es, has_rerankers=False
-        )
+        frame, window, role, arms = RunCafaEvaluationOperation._build_eval_provenance(p, es)
         assert role == "select"
-        assert arms == {
-            "knn": True,
-            "reranker": False,
-            "mlp_tower": False,
-            "interpro": False,
-            "interpro_graft": False,
-        }
         assert frame is None and window is None
+        # No longer derived: the evaluator runs no arm, and what the method ran
+        # is in its prediction set's record.
+        assert arms is None
 
     def test_build_provenance_explicit_wins(self):
         es = _make_eval_set()
@@ -426,51 +458,16 @@ class TestEvalProvenanceStamping:
             leakage_role="probe",
             arms_enabled={"knn": True, "reranker": True},
         )
-        frame, window, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
-            p, es, has_rerankers=False
-        )
+        frame, window, role, arms = RunCafaEvaluationOperation._build_eval_provenance(p, es)
         assert (frame, window, role) == ("internal", "SELECT_220_227", "probe")
         assert arms == {"knn": True, "reranker": True}
 
-    def test_build_provenance_reranker_arm_reflects_run(self):
+    def test_build_provenance_without_a_role_leaves_leakage_unknown(self):
         es = _make_eval_set()
         es.window_role = None
         p = RunCafaEvaluationPayload(evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID)
-        _, _, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
-            p, es, has_rerankers=True
-        )
-        # No window_role on the set and none in the payload -> leakage unknown.
+        _, _, role, _ = RunCafaEvaluationOperation._build_eval_provenance(p, es)
         assert role is None
-        assert arms["reranker"] is True
-
-    def test_build_provenance_interpro_graft_off_by_default(self):
-        es = _make_eval_set()
-        es.window_role = None
-        p = RunCafaEvaluationPayload(evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID)
-        _, _, _, arms = RunCafaEvaluationOperation._build_eval_provenance(
-            p, es, has_rerankers=True
-        )
-        # Payload did not opt into the graft -> arm off even with rerankers.
-        assert arms["interpro_graft"] is False
-
-    def test_build_provenance_interpro_graft_needs_rerankers(self):
-        es = _make_eval_set()
-        es.window_role = None
-        p = RunCafaEvaluationPayload(
-            evaluation_set_id=EVAL_SET_ID,
-            prediction_set_id=PRED_SET_ID,
-            interpro_graft=True,
-        )
-        # Opted in but no rerankers -> the graft is skipped, so it must stay off.
-        _, _, _, arms_no_rr = RunCafaEvaluationOperation._build_eval_provenance(
-            p, es, has_rerankers=False
-        )
-        assert arms_no_rr["interpro_graft"] is False
-        # Opted in with rerankers -> the graft applies, so it is recorded on.
-        _, _, _, arms_rr = RunCafaEvaluationOperation._build_eval_provenance(
-            p, es, has_rerankers=True
-        )
-        assert arms_rr["interpro_graft"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -802,587 +799,6 @@ class TestDownloadTsv:
 
 
 # ---------------------------------------------------------------------------
-# _write_predictions
-# ---------------------------------------------------------------------------
-
-
-# Base-row column order matches ``_BASE_SCORE_COLS`` in the Core columnar fetch.
-_BASE_COLS_ORDER = (
-    "protein_accession",
-    "go_id",
-    "distance",
-    "identity_nw",
-    "identity_sw",
-    "evidence_code",
-    "taxonomic_distance",
-    "neighbor_vote_fraction",
-)
-
-
-def _base_row(
-    protein="P1",
-    go_id="GO:0000001",
-    distance=0.4,
-    identity_nw=None,
-    identity_sw=None,
-    evidence_code=None,
-    taxonomic_distance=None,
-    neighbor_vote_fraction=None,
-    *,
-    alignment_length_nw=None,
-    gaps_pct_nw=None,
-    alignment_length_sw=None,
-    gaps_pct_sw=None,
-    length_query=None,
-    ref_annotation_density=None,
-    anc2vec_neighbor_cos=None,
-    anc2vec_neighbor_maxcos=None,
-    go_term_frequency=None,
-    donor_count=None,
-    method_score=None,
-):
-    """Build a single Core row in ``_BASE_SCORE_COLS`` order.
-
-    Assembled by name and then ordered by the real column tuple, so a
-    column added to that tuple lands in its own slot instead of shifting
-    every value after it by one. The previous version was a bare tuple
-    and did exactly that.
-    """
-    from protea.core.operations._run_cafa_artifacts import _BASE_SCORE_COLS
-
-    named = {
-        "protein_accession": protein,
-        "go_id": go_id,
-        "distance": distance,
-        "identity_nw": identity_nw,
-        "identity_sw": identity_sw,
-        "evidence_code": evidence_code,
-        "taxonomic_distance": taxonomic_distance,
-        "neighbor_vote_fraction": neighbor_vote_fraction,
-        "donor_count": donor_count,
-        "alignment_length_nw": alignment_length_nw,
-        "gaps_pct_nw": gaps_pct_nw,
-        "alignment_length_sw": alignment_length_sw,
-        "gaps_pct_sw": gaps_pct_sw,
-        "length_query": length_query,
-        "ref_annotation_density": ref_annotation_density,
-        "anc2vec_neighbor_cos": anc2vec_neighbor_cos,
-        "anc2vec_neighbor_maxcos": anc2vec_neighbor_maxcos,
-        "go_term_frequency": go_term_frequency,
-        # None on every row these tests build: they are retrieval rows, and
-        # the method formula is covered in test_method_score_is_the_score.
-        "method_score": method_score,
-    }
-    missing = set(_BASE_SCORE_COLS) - set(named)
-    assert not missing, f"the row builder does not know these columns: {sorted(missing)}"
-    return tuple(named[name] for name in _BASE_SCORE_COLS)
-
-
-def _core_session(rows):
-    """Mock a Session whose ``execute(stmt).all()`` returns ``rows`` (base tuples).
-
-    Routed by statement rather than answering everything identically. The
-    writer asks two further questions of the session (which bank the
-    prediction set transferred from, and what that bank denies), and a double
-    that hands the base rows back to every caller made those denials look like
-    the whole frame. These tests seed no prediction set, so the honest answer
-    to both is nothing.
-    """
-    session = MagicMock()
-    base = MagicMock()
-    base.all.return_value = list(rows)
-    # A COUNT over the same filter must agree with what the SELECT returns,
-    # or the depth guard fires on the double rather than on the code.
-    base.scalar_one.return_value = len(rows)
-    empty = MagicMock()
-    empty.all.return_value = []
-    empty.first.return_value = None
-
-    def _route(stmt, *args, **kwargs):
-        sql = str(getattr(stmt, "text", stmt))
-        asks_elsewhere = "FROM prediction_set" in sql or "RECURSIVE" in sql
-        return empty if asks_elsewhere else base
-
-    session.execute.side_effect = _route
-    return session
-
-
-def _real_scoring_config(formula="linear", weights=None, evidence_weights=None):
-    from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
-
-    return ScoringConfig(
-        formula=formula,
-        weights=weights if weights is not None else {"embedding_similarity": 1.0},
-        evidence_weights=evidence_weights,
-    )
-
-
-class TestWritePredictions:
-    @pytest.fixture(autouse=True)
-    def _setup(self, tmp_path, monkeypatch):
-        # Redirect the parquet base-fetch cache to an isolated temp dir so
-        # tests neither pollute the repo nor share state.
-        monkeypatch.setattr("protea.core.operations._pred_base_cache._PRED_CACHE_DIR", tmp_path)
-        self.op = RunCafaEvaluationOperation()
-
-    def _write(self, rows, *, scoring_config=None, max_distance=None):
-        session = _core_session(rows)
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        self.op._write_predictions(
-            session,
-            WritePredictionsContext(
-                pred_set_id=uuid.uuid4(),
-                delta_proteins={"P1", "P2"},
-                max_distance=max_distance,
-                path=path,
-            ),
-            scoring_config=scoring_config,
-        )
-        try:
-            with open(path) as f:
-                return f.read().strip()
-        finally:
-            os.unlink(path)
-
-    def test_write_predictions_without_scoring_config(self):
-        out = self._write([_base_row(distance=0.4)])
-        # score = max(0, 1 - 0.4/2) = 0.8
-        assert out == "P1\tGO:0000001\t0.8000"
-
-    def test_write_predictions_deduplicates(self):
-        rows = [
-            _base_row(distance=0.6),
-            _base_row(distance=0.2),
-        ]
-        out = self._write(rows)
-        # Only the closest (lowest-distance) row survives → 1 - 0.2/2 = 0.9
-        assert out == "P1\tGO:0000001\t0.9000"
-
-    def test_write_predictions_with_scoring_config(self):
-        rows = [_base_row(distance=0.4)]
-        # embedding_similarity = 1 - 0.4/2 = 0.8, sole signal weight 1.0 → 0.8
-        out = self._write(rows, scoring_config=_real_scoring_config())
-        assert out == "P1\tGO:0000001\t0.8000"
-
-    def test_write_predictions_zero_distance(self):
-        out = self._write([_base_row(distance=0.0)])
-        assert out == "P1\tGO:0000001\t1.0000"
-
-    def test_write_predictions_with_max_distance(self):
-        out = self._write([_base_row(distance=0.3)], max_distance=0.5)
-        assert out == "P1\tGO:0000001\t0.8500"
-
-    def test_write_predictions_none_distance_fallback(self):
-        out = self._write([_base_row(distance=None)])
-        # None distance → 0.0 → 1 - 0/2 = 1.0
-        assert out == "P1\tGO:0000001\t1.0000"
-
-    def test_write_predictions_empty_writes_empty_file(self):
-        out = self._write([])
-        assert out == ""
-
-
-class TestBaseSelectSql:
-    """The Core SELECT / COUNT must carry the max_distance filter when set."""
-
-    def _ctx(self, max_distance):
-        return WritePredictionsContext(
-            pred_set_id=uuid.uuid4(),
-            delta_proteins={"P1"},
-            max_distance=max_distance,
-            path="x.tsv",
-        )
-
-    def test_select_includes_distance_filter_when_set(self):
-        from protea.core.operations._run_cafa_artifacts import _base_select, _count_base_rows
-
-        assert "distance <=" in str(_base_select(self._ctx(0.5))).lower()
-        # _count_base_rows builds a COUNT(*) statement we can render via the op.
-        op = RunCafaEvaluationOperation()
-        session = _core_session([])
-        assert _count_base_rows(session, self._ctx(0.5)) == 0
-        assert op is not None
-
-    def test_select_omits_distance_filter_when_unset(self):
-        from protea.core.operations._run_cafa_artifacts import _base_select
-
-        assert "distance <=" not in str(_base_select(self._ctx(None))).lower()
-
-
-class TestVectorizedScoreEquivalence:
-    """The vectorised baseline scorer must be byte-for-byte equivalent to the
-    OLD per-row ``_score_unranked_pred`` / ``compute_score`` output (same rows,
-    same dedup winner, same 4dp TSV)."""
-
-    @pytest.fixture(autouse=True)
-    def _setup(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("protea.core.operations._pred_base_cache._PRED_CACHE_DIR", tmp_path)
-        self.op = RunCafaEvaluationOperation()
-
-    # Raw rows include an intentional (P1, GO:0000001) duplicate to exercise
-    # dedup, plus None-valued signals and varied evidence codes.
-    _RAW_ROWS = [
-        _base_row("P1", "GO:0000001", 0.4, 0.8, 0.9, "IDA", 2, 0.5),
-        _base_row("P1", "GO:0000001", 0.6, 0.1, 0.2, "IEA", 5, 0.1),  # dropped (farther)
-        _base_row("P1", "GO:0000002", 0.2, None, 0.3, "IEA", None, 0.7),
-        _base_row("P2", "GO:0000003", 1.0, 0.5, None, None, 1, None),
-        _base_row("P2", "GO:0000001", 0.8, 0.2, 0.2, "ND", 0, 0.0),
-    ]
-
-    def _oracle(self, scoring_config):
-        """Replicate the OLD path: dedup (min distance), then _score_unranked_pred."""
-        from protea.core.operations._run_cafa_artifacts import (
-            _BASE_SCORE_COLS,
-            _score_unranked_pred,
-        )
-
-        winners: dict[tuple[str, str], tuple] = {}
-        for row in sorted(self._RAW_ROWS, key=lambda r: (r[0], r[1], r[2])):
-            winners.setdefault((row[0], row[1]), row)
-        lines = []
-        for (_p, _g), row in sorted(winners.items()):
-            # By name, not by index. The positional version silently shifted
-            # every field after the eighth when a column was added to
-            # _BASE_SCORE_COLS, and still produced plausible scores.
-            pred = SimpleNamespace(**dict(zip(_BASE_SCORE_COLS, row, strict=True)))
-            score = _score_unranked_pred(pred, scoring_config)
-            lines.append(f"{row[0]}\t{row[1]}\t{score:.4f}")
-        return sorted(lines)
-
-    def _new_path(self, scoring_config):
-        session = _core_session(self._RAW_ROWS)
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        self.op._write_predictions(
-            session,
-            WritePredictionsContext(
-                pred_set_id=uuid.uuid4(),
-                delta_proteins={"P1", "P2"},
-                max_distance=None,
-                path=path,
-            ),
-            scoring_config=scoring_config,
-        )
-        try:
-            with open(path) as f:
-                return sorted(line for line in f.read().splitlines() if line)
-        finally:
-            os.unlink(path)
-
-    def test_equivalence_none_config_fallback(self):
-        assert self._new_path(None) == self._oracle(None)
-
-    def test_equivalence_linear_multi_signal(self):
-        cfg = _real_scoring_config(
-            formula="linear",
-            weights={
-                "embedding_similarity": 0.5,
-                "identity_nw": 0.3,
-                "identity_sw": 0.0,
-                "evidence_weight": 0.2,
-                "taxonomic_proximity": 0.1,
-                "neighbor_vote_fraction": 0.4,
-            },
-            evidence_weights={"IEA": 0.3},
-        )
-        assert self._new_path(cfg) == self._oracle(cfg)
-
-    def test_equivalence_evidence_weighted_formula(self):
-        cfg = _real_scoring_config(
-            formula="evidence_weighted",
-            weights={"embedding_similarity": 1.0, "evidence_weight": 0.0},
-            evidence_weights={"IEA": 0.5, "ND": 0.05},
-        )
-        assert self._new_path(cfg) == self._oracle(cfg)
-
-    # --- A-SCORE rich axes: vectorised path must still match the per-row scorer ---
-    _RICH_ROWS = [
-        _base_row(
-            "P1",
-            "GO:0000001",
-            0.4,
-            0.8,
-            0.9,
-            "IDA",
-            2,
-            0.5,
-            alignment_length_sw=120.0,
-            gaps_pct_sw=0.1,
-            length_query=200,
-            ref_annotation_density=7,
-            anc2vec_neighbor_cos=0.6,
-            anc2vec_neighbor_maxcos=0.8,
-            go_term_frequency=5000,
-        ),
-        _base_row(
-            "P2",
-            "GO:0000003",
-            0.2,
-            None,
-            0.3,
-            "IEA",
-            None,
-            0.7,
-            alignment_length_nw=180.0,
-            gaps_pct_nw=0.0,
-            length_query=200,
-            ref_annotation_density=0,
-            anc2vec_neighbor_cos=-0.4,
-            anc2vec_neighbor_maxcos=None,
-            go_term_frequency=10,
-        ),
-        _base_row(
-            "P2",
-            "GO:0000005",
-            0.8,
-            0.2,
-            0.2,
-            "ND",
-            1,
-            0.1,
-            alignment_length_sw=None,
-            length_query=None,
-            ref_annotation_density=None,
-            go_term_frequency=None,
-        ),
-    ]
-
-    def _oracle_rich(self, scoring_config):
-        from protea.core.operations._run_cafa_artifacts import (
-            _BASE_SCORE_COLS,
-            _score_unranked_pred,
-        )
-
-        winners: dict[tuple[str, str], tuple] = {}
-        for row in sorted(self._RICH_ROWS, key=lambda r: (r[0], r[1], r[2])):
-            winners.setdefault((row[0], row[1]), row)
-        lines = []
-        for (_p, _g), row in sorted(winners.items()):
-            # By name, not by index. See the sibling oracle above.
-            pred = SimpleNamespace(**dict(zip(_BASE_SCORE_COLS, row, strict=True)))
-            lines.append(f"{row[0]}\t{row[1]}\t{_score_unranked_pred(pred, scoring_config):.4f}")
-        return sorted(lines)
-
-    def _new_path_rich(self, scoring_config):
-        session = _core_session(self._RICH_ROWS)
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        self.op._write_predictions(
-            session,
-            WritePredictionsContext(
-                pred_set_id=uuid.uuid4(),
-                delta_proteins={"P1", "P2"},
-                max_distance=None,
-                path=path,
-            ),
-            scoring_config=scoring_config,
-        )
-        try:
-            with open(path) as f:
-                return sorted(line for line in f.read().splitlines() if line)
-        finally:
-            os.unlink(path)
-
-    def test_equivalence_rich_signals(self):
-        cfg = _real_scoring_config(
-            formula="linear",
-            weights={
-                "embedding_similarity": 0.4,
-                "coverage": 0.3,
-                "ref_annotation_density": 0.1,
-                "anc2vec_neighbor_cos": 0.1,
-                "anc2vec_neighbor_maxcos": 0.1,
-            },
-        )
-        assert self._new_path_rich(cfg) == self._oracle_rich(cfg)
-
-    def test_equivalence_ia_prior_frequency(self):
-        cfg = _real_scoring_config(
-            formula="linear",
-            weights={"embedding_similarity": 1.0, "coverage": 0.5},
-        )
-        cfg.params = {"ia_prior": {"enabled": True, "gamma": 1.5, "source": "frequency"}}
-        assert self._new_path_rich(cfg) == self._oracle_rich(cfg)
-
-
-# ---------------------------------------------------------------------------
-# universal-booster routing in the eval-artifacts path (F-RERANK-UNIVERSAL)
-# ---------------------------------------------------------------------------
-
-
-def _make_reranked_pred_mock():
-    """A GOPrediction-shaped mock carrying every column ``_record_from_pred`` reads."""
-    pred = MagicMock()
-    pred.protein_accession = "P1"
-    pred.qualifier = "enables"
-    pred.evidence_code = "EXP"
-    pred.taxonomic_relation = "same"
-    pred.distance = 0.2
-    # _record_from_pred uses getattr(pred, col, None) for numeric cols; a
-    # MagicMock would auto-create truthy attrs, so force them to plain floats.
-    from protea.core.operations._run_cafa_helpers import _NUMERIC_ORM_COLS
-
-    for col in _NUMERIC_ORM_COLS:
-        setattr(pred, col, 1.0)
-    pred.distance = 0.2
-    return pred
-
-
-def _reranked_session(pred, go_id="GO:0000001", aspect="F"):
-    session = MagicMock()
-    query = MagicMock()
-    session.query.return_value = query
-    query.join.return_value = query
-    query.filter.return_value = query
-    query.yield_per.return_value = [(pred, go_id, aspect)]
-    return session
-
-
-class TestUniversalBoosterRoutingInEval:
-    """The eval-artifacts writers must route universal boosters through
-    ``score_universal`` (not the generic ``reranker_predict``) and leave the
-    per-cell path unchanged (F-RERANK-UNIVERSAL eval wiring)."""
-
-    _UNIVERSAL_CTX = {
-        "categorical_codes": {
-            "qualifier": ["", "enables"],
-            "evidence_code": ["EXP", "IEA"],
-            "taxonomic_relation": ["same", "distant"],
-            "plm_id": ["prot_t5"],
-        },
-        "plm_id": "prot_t5",
-        "k_context": 10.0,
-    }
-
-    def test_write_predictions_reranked_routes_universal(self):
-        import numpy as np
-
-        from protea.core.operations import _run_cafa_artifacts as _art
-
-        pred = _make_reranked_pred_mock()
-        session = _reranked_session(pred)
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        try:
-            with (
-                patch("protea.core.reranker.model_from_string", return_value=MagicMock()),
-                patch(
-                    "protea.core._universal_reranker.score_universal",
-                    return_value=np.array([0.7]),
-                ) as mock_uni,
-                patch("protea.core.reranker.predict") as mock_generic,
-            ):
-                _art.write_predictions_reranked(
-                    session,
-                    WritePredictionsContext(
-                        pred_set_id=uuid.uuid4(),
-                        delta_proteins={"P1"},
-                        max_distance=None,
-                        path=path,
-                    ),
-                    reranker_bundle={
-                        "model": "ignored-by-mock",
-                        "cat_codes": None,
-                        "universal": self._UNIVERSAL_CTX,
-                    },
-                )
-            mock_uni.assert_called_once()
-            mock_generic.assert_not_called()
-            kwargs = mock_uni.call_args.kwargs
-            assert kwargs["plm_id"] == "prot_t5"
-            assert kwargs["k_context"] == 10.0
-            assert kwargs["categorical_codes"] == self._UNIVERSAL_CTX["categorical_codes"]
-            with open(path) as fh:
-                assert fh.read().strip() == "P1\tGO:0000001\t0.7000"
-        finally:
-            os.unlink(path)
-
-    def test_write_predictions_reranked_per_cell_unchanged(self):
-        import numpy as np
-
-        from protea.core.operations import _run_cafa_artifacts as _art
-
-        pred = _make_reranked_pred_mock()
-        session = _reranked_session(pred)
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        try:
-            with (
-                patch("protea.core.reranker.model_from_string", return_value=MagicMock()),
-                patch(
-                    "protea.core.reranker.predict", return_value=np.array([0.42])
-                ) as mock_generic,
-                patch("protea.core._universal_reranker.score_universal") as mock_uni,
-            ):
-                _art.write_predictions_reranked(
-                    session,
-                    WritePredictionsContext(
-                        pred_set_id=uuid.uuid4(),
-                        delta_proteins={"P1"},
-                        max_distance=None,
-                        path=path,
-                    ),
-                    reranker_bundle={
-                        "model": "ignored-by-mock",
-                        "cat_codes": None,
-                        "universal": None,
-                    },
-                )
-            mock_generic.assert_called_once()
-            mock_uni.assert_not_called()
-            with open(path) as fh:
-                assert fh.read().strip() == "P1\tGO:0000001\t0.4200"
-        finally:
-            os.unlink(path)
-
-    def test_apply_per_aspect_scores_routes_universal(self):
-        import numpy as np
-
-        from protea.core.operations import _run_cafa_artifacts as _art
-
-        df = pd.DataFrame(
-            [
-                {
-                    "protein_accession": "P1",
-                    "go_id": "GO:1",
-                    "aspect": "F",
-                    "distance": 0.1,
-                    "qualifier": "enables",
-                    "evidence_code": "EXP",
-                    "taxonomic_relation": "same",
-                },
-                {
-                    "protein_accession": "P2",
-                    "go_id": "GO:2",
-                    "aspect": "P",
-                    "distance": 0.3,
-                    "qualifier": "enables",
-                    "evidence_code": "EXP",
-                    "taxonomic_relation": "same",
-                },
-            ]
-        )
-        aspect_models = {
-            "F": {"model": "m-uni", "cat_codes": None, "universal": self._UNIVERSAL_CTX},
-            "P": {"model": "m-cell", "cat_codes": None, "universal": None},
-        }
-        with (
-            patch("protea.core.reranker.model_from_string", return_value=MagicMock()),
-            patch(
-                "protea.core._universal_reranker.score_universal",
-                return_value=np.array([0.9]),
-            ) as mock_uni,
-            patch("protea.core.reranker.predict", return_value=np.array([0.1])) as mock_generic,
-        ):
-            _art._apply_per_aspect_scores(df, aspect_models)
-        mock_uni.assert_called_once()
-        mock_generic.assert_called_once()
-        assert df.loc[df["aspect"] == "F", "score"].iloc[0] == 0.9
-        assert df.loc[df["aspect"] == "P", "score"].iloc[0] == 0.1
-
-
-# ---------------------------------------------------------------------------
 # execute — error paths
 # ---------------------------------------------------------------------------
 
@@ -1426,9 +842,7 @@ class TestExecuteErrors:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=pred_set, snapshot=snapshot)
 
         with pytest.raises(ValueError, match="No delta proteins"):
             self.op.execute(
@@ -1438,27 +852,28 @@ class TestExecuteErrors:
             )
 
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
-    def test_missing_scoring_config(self, mock_compute):
-        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
-        session = MagicMock()
-        eval_set = _make_eval_set()
-        pred_set = _make_pred_set()
-        snapshot = _make_snapshot()
-        # get calls: eval_set, pred_set, ann_old, snapshot, scoring_config (None)
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+    def test_a_set_of_candidates_is_refused_before_anything_is_computed(
+        self, mock_compute, monkeypatch
+    ):
+        from protea.core.scoring import MethodScoreMissing
 
-        with pytest.raises(ValueError, match="ScoringConfig.*not found"):
+        def refuse(_session, set_id):
+            raise MethodScoreMissing(f"prediction set {set_id} stores candidates without scores")
+
+        monkeypatch.setattr(
+            "protea.core.operations.run_cafa_evaluation.refuse_unless_scored", refuse
+        )
+        session = MagicMock()
+        session.get.side_effect = _gets(
+            eval_set=_make_eval_set(), pred_set=_make_pred_set(), snapshot=_make_snapshot()
+        )
+        with pytest.raises(MethodScoreMissing, match="candidates without scores"):
             self.op.execute(
                 session,
-                {
-                    "evaluation_set_id": EVAL_SET_ID,
-                    "prediction_set_id": PRED_SET_ID,
-                    "scoring_config_id": SCORING_CONFIG_ID,
-                },
+                {"evaluation_set_id": EVAL_SET_ID, "prediction_set_id": PRED_SET_ID},
                 emit=self.emit,
             )
+        mock_compute.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1502,9 +917,7 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=pred_set, snapshot=snapshot)
 
         # Mock the DB query for _write_predictions
         query = MagicMock()
@@ -1548,9 +961,7 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=pred_set, snapshot=snapshot)
 
         query = MagicMock()
         session.query.return_value = query
@@ -1591,9 +1002,7 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=pred_set, snapshot=snapshot)
 
         query = MagicMock()
         session.query.return_value = query
@@ -1643,9 +1052,7 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=pred_set, snapshot=snapshot)
 
         query = MagicMock()
         session.query.return_value = query
@@ -1687,9 +1094,7 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot(ia_url=None)  # no ia_url
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=pred_set, snapshot=snapshot)
 
         query = MagicMock()
         session.query.return_value = query
@@ -1721,9 +1126,7 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot(ia_url="https://example.com/ia.tsv")
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=pred_set, snapshot=snapshot)
 
         query = MagicMock()
         session.query.return_value = query
@@ -1762,9 +1165,7 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot(ia_url="https://example.com/ia.tsv")
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=pred_set, snapshot=snapshot)
 
         query = MagicMock()
         session.query.return_value = query
@@ -1896,9 +1297,7 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=pred_set, snapshot=snapshot)
 
         query = MagicMock()
         session.query.return_value = query
@@ -1939,9 +1338,7 @@ class TestExecuteHappyPath:
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
         snapshot = _make_snapshot()
-        session.get.side_effect = _gets(
-            eval_set=eval_set, pred_set=pred_set, snapshot=snapshot
-        )
+        session.get.side_effect = _gets(eval_set=eval_set, pred_set=pred_set, snapshot=snapshot)
 
         query = MagicMock()
         session.query.return_value = query
@@ -1976,60 +1373,6 @@ class TestExecuteHappyPath:
         # the cafaeval.write_results patch — what matters is the operation
         # finishes cleanly and the store is consulted.
         assert mock_get_store.called
-
-    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
-    def test_scoring_config_snapshot(self, mock_compute):
-        """When scoring_config_id is provided and found, it snapshots the config."""
-        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
-
-        session = MagicMock()
-        eval_set = _make_eval_set()
-        pred_set = _make_pred_set()
-        snapshot = _make_snapshot()
-        scoring_cfg = MagicMock()
-        scoring_cfg.formula = "linear"
-        scoring_cfg.weights = {"embedding_similarity": 1.0}
-        scoring_cfg.params = None
-        session.get.side_effect = _gets(
-            eval_set=eval_set,
-            pred_set=pred_set,
-            snapshot=snapshot,
-            scoring_cfg=scoring_cfg,
-        )
-
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = []
-
-        with (
-            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
-            patch(
-                "cafaeval.evaluation.cafa_eval",
-                return_value=(MagicMock(), _dfs_best_fixture()),
-            ),
-            patch("protea.core.operations.run_cafa_evaluation.ScoringConfig") as mock_sc_cls,
-        ):
-            mock_sc_cls.return_value = MagicMock()
-            result = self.op.execute(
-                session,
-                {
-                    "evaluation_set_id": EVAL_SET_ID,
-                    "prediction_set_id": PRED_SET_ID,
-                    "scoring_config_id": SCORING_CONFIG_ID,
-                },
-                emit=self.emit,
-            )
-
-        # ScoringConfig constructor was called for snapshotting
-        mock_sc_cls.assert_called_once_with(
-            formula="linear",
-            weights={"embedding_similarity": 1.0},
-            params=None,
-        )
-        assert "evaluation_result_id" in result.result
 
 
 # ---------------------------------------------------------------------------
@@ -2101,14 +1444,7 @@ class TestCafaevalInvocationLafaParity:
         from protea.core.operations._run_cafa_eval_driver import CafaEvalRunContext
 
         base = dict(
-            pred_set_id=uuid.uuid4(),
-            delta_proteins=set(),
-            max_distance=None,
             artifacts_root=__import__("pathlib").Path("/tmp"),
-            has_rerankers=False,
-            reranker_models={},
-            scoring_config_snapshot=None,
-            data=EvaluationData(),
             obo_path="/tmp/go.obo",
             nk_path="/tmp/nk.tsv",
             lk_path="/tmp/lk.tsv",
@@ -2308,15 +1644,12 @@ class TestAnEmptySettingFailsTheJob:
             events.append(code)
 
         ctx = MagicMock()
-        with (
-            patch.object(driver, "_resolve_setting_pred_dir", return_value="/tmp/preds"),
-            patch.object(
-                driver,
-                "_run_cafaeval_for_setting",
-                side_effect=lambda **kw: per_setting[kw["setting"]],
-            ),
+        with patch.object(
+            driver,
+            "_run_cafaeval_for_setting",
+            side_effect=lambda **kw: per_setting[kw["setting"]],
         ):
-            out = driver.evaluate_all_settings(MagicMock(), ctx=ctx, emit=emit)
+            out = driver.evaluate_all_settings(ctx=ctx, emit=emit)
         return out, events
 
     def test_all_three_failing_raises_and_names_all_three(self):
@@ -2351,11 +1684,10 @@ class TestAnEmptySettingFailsTheJob:
             return {}
 
         with (
-            patch.object(driver, "_resolve_setting_pred_dir", return_value="/tmp/preds"),
             patch.object(driver, "_run_cafaeval_for_setting", side_effect=record),
             pytest.raises(SettingEvaluationError),
         ):
-            driver.evaluate_all_settings(MagicMock(), ctx=MagicMock(), emit=lambda *a, **k: None)
+            driver.evaluate_all_settings(ctx=MagicMock(), emit=lambda *a, **k: None)
 
         assert calls == ["NK", "LK", "PK"]
 

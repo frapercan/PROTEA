@@ -61,7 +61,6 @@ from protea.core.operations.audit_evaluation_frames import (
 from protea.core.operations.audit_per_protein_artifacts import (
     AuditPerProteinArtifactsPayload,
 )
-from protea.core.operations.batch_rescore_evaluation import BatchRescoreEvaluationPayload
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrencePayload
 from protea.core.operations.compare_paired_panels import ComparePairedPanelsPayload
 from protea.core.operations.compute_embeddings import (
@@ -493,12 +492,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         {"evaluation_set_id": "eval"},
         ("prediction_set_id",),
     ),
-    # missing-required: scoring_config_ids
+    # retired: the evaluator scores what a method stored, so a request that asks
+    # it to score with a config is refused with where that is done now
     (
-        "batch_rescore_evaluation",
-        BatchRescoreEvaluationPayload,
-        {"evaluation_set_id": "eval", "prediction_set_id": "pred"},
-        ("scoring_config_ids",),
+        "run_cafa_evaluation",
+        RunCafaEvaluationPayload,
+        {"evaluation_set_id": "eval", "prediction_set_id": "pred", "scoring_config_id": "c"},
+        (),
     ),
     # invariant-violation: must provide exactly one of
     # query_set_id / accessions (model_validator after-mode)

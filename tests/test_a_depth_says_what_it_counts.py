@@ -3,8 +3,9 @@
 The failure this stands against is quiet. ``sequence_rank`` is null on
 every row retrieved before the column existed, ``NULL <= 2`` is null, and
 null is not true, so a sequence-depth cut against those rows selects no
-rows at all. The evaluation then runs on an empty candidate set, writes
-its metrics and reports success.
+rows at all. The scoring then runs on an empty candidate set and reports
+success. A depth is the scoring step's (``score_prediction_set``): the
+evaluator no longer takes one.
 
 The verdict and the query that feeds it are tested apart, because they
 fail in different ways. A verdict tested through a fake query proves
@@ -27,8 +28,7 @@ from protea.core.operations._depth_unit_guard import (
     ledger_coverage,
     why_the_unit_is_unavailable,
 )
-from protea.core.operations._pred_base_cache import _cache_paths
-from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
+from protea.core.operations.score_prediction_set import ScorePredictionSetPayload
 from protea.infrastructure.orm.base import Base
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 
@@ -37,31 +37,37 @@ _OTHER = uuid.UUID("22222222-2222-2222-2222-222222222222")
 
 
 class TestAPayloadNamesOneUnit:
+    _BASE = {"prediction_set_id": str(_SET), "scoring_config_id": str(_OTHER)}
+
     def test_naming_both_is_refused(self) -> None:
         """Two candidate sets in one run has no reading, so it is not resolved."""
         with pytest.raises(ValueError, match="proteins or in sequences"):
-            RunCafaEvaluationPayload.model_validate({
-                "evaluation_set_id": str(_SET),
-                "prediction_set_id": str(_SET),
-                "max_k_position": 3,
-                "max_sequence_rank": 3,
-            })
+            ScorePredictionSetPayload.model_validate(
+                {
+                    **self._BASE,
+                    "max_k_position": 3,
+                    "max_sequence_rank": 3,
+                }
+            )
 
     def test_naming_neither_is_the_whole_neighbourhood(self) -> None:
-        got = RunCafaEvaluationPayload.model_validate({
-            "evaluation_set_id": str(_SET), "prediction_set_id": str(_SET),
-        })
+        got = ScorePredictionSetPayload.model_validate(self._BASE)
         assert got.max_k_position is None
         assert got.max_sequence_rank is None
 
     def test_either_one_alone_is_accepted(self) -> None:
-        base = {"evaluation_set_id": str(_SET), "prediction_set_id": str(_SET)}
-        assert RunCafaEvaluationPayload.model_validate(
-            {**base, "max_sequence_rank": 3}
-        ).max_sequence_rank == 3
-        assert RunCafaEvaluationPayload.model_validate(
-            {**base, "max_k_position": 3}
-        ).max_k_position == 3
+        assert (
+            ScorePredictionSetPayload.model_validate(
+                {**self._BASE, "max_sequence_rank": 3}
+            ).max_sequence_rank
+            == 3
+        )
+        assert (
+            ScorePredictionSetPayload.model_validate(
+                {**self._BASE, "max_k_position": 3}
+            ).max_k_position
+            == 3
+        )
 
 
 class TestTheVerdict:
@@ -143,24 +149,4 @@ class TestTheGuardWiresTheVerdictToTheStore:
             with pytest.raises(DepthUnitUnavailable, match="only the ranked part"):
                 assert_depth_unit_is_available(session, _SET, max_sequence_rank=2)
             # A protein depth needs no sequence rank, so it passes.
-            assert_depth_unit_is_available(
-                session, _SET, max_sequence_rank=None, max_k_position=2
-            )
-
-
-class TestTwoUnitsAreTwoCandidateSets:
-    def test_the_same_number_in_each_unit_gets_its_own_cache_entry(self) -> None:
-        """Sharing one would serve one arm's parquet to the other."""
-        by_protein = _cache_paths(_SET, None, 3, ["P1"])[0].name
-        by_sequence = _cache_paths(_SET, None, None, ["P1"], 3)[0].name
-        assert by_protein != by_sequence
-
-    def test_two_sequence_depths_get_their_own_entries(self) -> None:
-        assert (
-            _cache_paths(_SET, None, None, ["P1"], 2)[0].name
-            != _cache_paths(_SET, None, None, ["P1"], 3)[0].name
-        )
-
-    def test_the_protein_key_is_unchanged_so_cached_arms_still_hit(self) -> None:
-        """A new field must not invalidate every parquet already on disk."""
-        assert "__snone__" in _cache_paths(_SET, None, 3, ["P1"])[0].name
+            assert_depth_unit_is_available(session, _SET, max_sequence_rank=None, max_k_position=2)

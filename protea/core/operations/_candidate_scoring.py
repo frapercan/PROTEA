@@ -8,9 +8,8 @@ optionally multiplied by the evidence weight and by an information prior.
 
 This module is that arithmetic and the read of the candidates it needs, and
 nothing else. ``score_prediction_set`` applies it when it scores a candidate
-set and stores the result as the scored set's ``method_score``; the evaluator
-applies it, for now, to the sets it still scores itself. One implementation,
-so a scored set and the evaluator's reading of its candidates cannot disagree.
+set and stores the result as the scored set's ``method_score``, which is what
+the evaluator reads.
 """
 
 from __future__ import annotations
@@ -124,17 +123,16 @@ def count_candidates(session: Session, ctx: Any) -> int:
     return int(session.execute(stmt).scalar_one())
 
 
-def vectorized_scores(df: Any, scoring_config: ScoringConfig | None) -> np.ndarray:
+def vectorized_scores(df: Any, scoring_config: ScoringConfig) -> np.ndarray:
     """The score of every row of the frame under ``scoring_config``.
 
     Returns the *unrounded* base score array: the four-decimal formatting of
     the prediction file is the only rounding, applied by whoever writes it.
-    With no config the score is the distance fallback, ``1 - distance / 2``.
+    There is no default: the evaluator's old fallback for a run that named no
+    configuration, ``1 - distance / 2``, is ``embedding_only`` for every
+    candidate that carries a distance.
     """
     distance = df["distance"].to_numpy(dtype=np.float64)
-    if scoring_config is None:
-        return np.maximum(0.0, 1.0 - np.where(np.isnan(distance), 0.0, distance) / 2.0)
-
     if scoring_config.formula == FORMULA_METHOD_SCORE:
         return _method_score_array(df)
 

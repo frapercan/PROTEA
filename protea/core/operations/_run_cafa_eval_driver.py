@@ -2,7 +2,8 @@
 ``RunCafaEvaluationOperation.execute``.
 
 Wraps the per-setting (NK / LK / PK) loop that:
-  1. writes per-setting prediction TSVs (when a reranker applies),
+  1. reads the one prediction file every setting shares, the method's
+     stored scores (``_method_score_predictions``),
   2. invokes ``cafaeval.evaluation.cafa_eval`` with signal-safe
      handlers (default SIGTERM/SIGINT during the fork pool), which
      only applies on the main thread -- see
@@ -17,23 +18,17 @@ to keep the audit trail unchanged.
 
 from __future__ import annotations
 
-import os
 import signal
 import threading
-import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from protea.core.contracts.operation import EmitFn
-from protea.core.evaluation import EvaluationData
 from protea.core.operations import _run_cafa_artifacts as _artifacts
-from protea.core.operations._run_cafa_scale import annotate_maxima, read_and_report
-from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+from protea.core.operations._run_cafa_scale import annotate_maxima
 
 # The frame literals, named once. They are arguments to the cafaeval call AND
 # facts the grid artefact stamps, and a stamp thirty lines from the call it
@@ -59,19 +54,13 @@ class SettingEvaluationError(RuntimeError):
 class CafaEvalRunContext:
     """Bundle of per-run inputs consumed by :func:`evaluate_all_settings`.
 
-    Groups the 16 per-call inputs (artifact paths, reranker bundles,
-    delta cohort, scoring snapshot) so the entry-point signature stays
-    under flake8-bugbear's parameter ceiling.
+    Groups the per-call inputs (artifact paths, the ground truth, the frame
+    markers) so the entry-point signature stays under flake8-bugbear's
+    parameter ceiling. The predictions are the method's stored scores, one
+    file every setting reads: nothing here scores, reranks, cuts or filters.
     """
 
-    pred_set_id: uuid.UUID
-    delta_proteins: set[str]
-    max_distance: float | None
     artifacts_root: Path
-    has_rerankers: bool
-    reranker_models: dict[str, dict[str, dict[str, Any]]]
-    scoring_config_snapshot: ScoringConfig | None
-    data: EvaluationData
     obo_path: str
     nk_path: str
     lk_path: str
@@ -96,69 +85,10 @@ class CafaEvalRunContext:
     #: there is no weighted variant either.
     information_accretion_frame: str | None = None
     th_step: float = 0.01
-    #: How the prediction files are read before thresholding (ADR-D55). Applied
-    #: once per file: the shared file at staging, a per-setting file here,
-    #: after the arms that rewrite it.
+    #: How the prediction file is read before thresholding (ADR-D55), applied
+    #: once, to the shared file, at staging.
     score_reading: str = "raw"
     max_terms: int | None = None
-    max_k_position: int | None = None
-    #: The same depth counted in distinct sequences. Exactly one of the two
-    #: is set; ``_depth_unit_guard`` refuses a run that names both or that
-    #: names this one against candidates that cannot answer in it.
-    max_sequence_rank: int | None = None
-    softprop: bool = False
-    interpro_graft: bool = False
-    interpro_protein2ipr_file: str | None = None
-    interpro_ipr2go_file: str | None = None
-    interpro_graft_weight: float | None = None
-
-
-def _write_setting_predictions(
-    session: Session,
-    *,
-    setting: str,
-    ctx: CafaEvalRunContext,
-) -> str:
-    """Write the per-setting predictions TSV when a reranker applies.
-
-    Returns the prediction directory the cafaeval call should consume.
-    For settings without a reranker the caller falls back to the
-    pre-written shared `predictions/` dir.
-    """
-    pred_dir = os.path.join(str(ctx.artifacts_root), f"predictions_{setting}")
-    os.makedirs(pred_dir, exist_ok=True)
-    pred_path = os.path.join(pred_dir, "predictions.tsv")
-    rr_aspect_map = ctx.reranker_models.get(setting, {})
-    # anc2vec_query_known_* is only meaningful when the query has
-    # pre-cutoff annotations (LK / PK). NK proteins have nothing
-    # "known", so training/serving parity requires leaving the
-    # features at their predict-time NaN / 0.
-    setting_known = ctx.data.known if setting in ("LK", "PK") else None
-    write_ctx = _artifacts.WritePredictionsContext(
-        pred_set_id=ctx.pred_set_id,
-        delta_proteins=ctx.delta_proteins,
-        max_distance=ctx.max_distance,
-        max_k_position=ctx.max_k_position,
-        max_sequence_rank=ctx.max_sequence_rank,
-        path=pred_path,
-    )
-    if "" in rr_aspect_map:
-        bundle = rr_aspect_map[""]
-        _artifacts.write_predictions(
-            session,
-            write_ctx,
-            scoring_config=ctx.scoring_config_snapshot,
-            reranker_bundle=bundle,
-            known_gos=setting_known,
-        )
-    else:
-        _artifacts.write_predictions_per_aspect(
-            session,
-            write_ctx,
-            aspect_models=rr_aspect_map,
-            known_gos=setting_known,
-        )
-    return pred_dir
 
 
 def _new_per_protein_sink() -> Any:
@@ -492,67 +422,15 @@ def _run_cafaeval_for_setting(
         return {}
 
 
-def _resolve_setting_pred_dir(
-    session: Session,
-    *,
-    setting: str,
-    ctx: CafaEvalRunContext,
-    emit: EmitFn,
-) -> str:
-    """Return the prediction dir for one setting, applying the scoring arms.
-
-    With per-setting rerankers, writes a FRESH per-setting dir and applies the
-    softprop / InterPro-graft arms in place (idempotency: the shared dir is
-    reused across settings, so a noisy-OR arm would double-apply there). Without
-    rerankers, reuses ``ctx.shared_pred_dir`` and emits a skip per requested arm.
-    """
-    if not ctx.has_rerankers:
-        for enabled, arm in ((ctx.softprop, "softprop"), (ctx.interpro_graft, "interpro_graft")):
-            if enabled:
-                emit(
-                    f"run_cafa_evaluation.{arm}_skipped",
-                    None,
-                    {"reason": f"{arm} requires per-setting reranker predictions"},
-                    "warning",
-                )
-        return ctx.shared_pred_dir
-    pred_dir = _write_setting_predictions(session, setting=setting, ctx=ctx)
-    if ctx.softprop:
-        from protea.core.operations._run_cafa_softprop import apply_softprop
-
-        apply_softprop(pred_dir, ctx.obo_path, emit)
-    if ctx.interpro_graft:
-        from protea.core.operations._run_cafa_interpro_graft import apply_interpro_graft
-
-        apply_interpro_graft(
-            pred_dir,
-            ctx.obo_path,
-            ctx.interpro_protein2ipr_file,
-            ctx.interpro_ipr2go_file,
-            ctx.interpro_graft_weight,
-            emit,
-        )
-    read_and_report(
-        os.path.join(pred_dir, "predictions.tsv"),
-        reading=ctx.score_reading,
-        th_step=ctx.th_step,
-        label=setting,
-        emit=emit,
-    )
-    return pred_dir
-
-
 def evaluate_all_settings(
-    session: Session,
     *,
     ctx: CafaEvalRunContext,
     emit: EmitFn,
 ) -> dict[str, dict[str, Any]]:
     """Drive the per-setting NK / LK / PK cafaeval loop.
 
-    Writes per-setting predictions when a reranker applies (otherwise
-    reuses ``ctx.shared_pred_dir``), invokes cafaeval, parses results,
-    persists the full cafaeval artifact tree, and emits per-setting
+    Every setting reads the shared prediction file, invokes cafaeval, parses
+    results, persists the full cafaeval artifact tree, and emits per-setting
     audit events. Returns ``{setting → namespace metrics dict}``.
 
     Raises :class:`SettingEvaluationError` when any setting produced no
@@ -564,10 +442,9 @@ def evaluate_all_settings(
         ("LK", ctx.lk_path, None),
         ("PK", ctx.pk_path, ctx.pk_known_path),
     ]:
-        pred_dir = _resolve_setting_pred_dir(session, setting=setting, ctx=ctx, emit=emit)
         results[setting] = _run_cafaeval_for_setting(
             setting=setting,
-            pred_dir=pred_dir,
+            pred_dir=ctx.shared_pred_dir,
             gt_file=gt_file,
             known_file=known_file,
             ctx=ctx,

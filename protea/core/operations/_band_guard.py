@@ -4,8 +4,9 @@ The rule itself lives in :mod:`protea.core.band_registry`; this is the caller
 that binds it to a run's two artefacts, the pivot snapshot and the IA table.
 
 It sat as a private staticmethod of ``RunCafaEvaluationOperation`` and had two
-callers: the single run, while resolving the IA, and
-:mod:`batch_rescore_evaluation`, which reached it through ``self._single``.
+callers: the single run, while resolving the IA, and the batch rescorer (retired
+on 2026-11-20 with the evaluator's scoring), which reached it through
+``self._single``.
 A guard addressed through another operation's private attribute is harder to
 find than to skip, and it is a guard precisely because skipping it is silent:
 the run still produces a number, just one bound to nothing. So it lives here,

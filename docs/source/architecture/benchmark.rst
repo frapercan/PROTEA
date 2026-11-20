@@ -72,6 +72,13 @@ window's start, with LAFA's thirteen codes and only its Swiss-Prot cohort:
 How a method is scored on it
 ----------------------------
 
+A method is scored on what it stored. A set whose method scores its own
+candidates (a reranker at prediction time, a method run in the laboratory and
+ingested, the own-annotations baseline) is evaluated as it is. A
+nearest-neighbour or InterPro set stores candidates, and is scored first with
+``score_prediction_set`` (:doc:`scoring`), which names the configuration and
+the depth; the scored set is what is evaluated.
+
 PROTEA's evaluator, ``cafaeval-protea``, runs ``cafaeval`` with LAFA's flags
 (``-prop fill -norm cafa -no_orphans``, a threshold step of 0.01, and
 ``-known`` with PK's known terms for PK), at the window's pivot, which for this
