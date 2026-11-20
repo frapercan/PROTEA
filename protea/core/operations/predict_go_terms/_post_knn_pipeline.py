@@ -84,18 +84,46 @@ def run_post_knn_pipeline(
         scorer = op._reranker_scorer
         reranker_stats = scorer.apply(session, prediction_dicts, p, emit)
     if _interpro_bp_graft_enabled() and prediction_dicts:
-        from protea.core.operations.predict_go_terms._interpro_graft import (
-            apply_interpro_bp_graft,
-        )
-
-        prediction_dicts = apply_interpro_bp_graft(
-            session,
-            uuid.UUID(p.ontology_snapshot_id),
-            knn_result.query_batch.valid_accessions,
-            prediction_dicts,
-            emit,
+        prediction_dicts = _graft_onto_the_reranker(
+            session, ctx, knn_result, prediction_dicts, reranker_stats, emit
         )
     return _honour_denials(session, ctx, prediction_dicts, emit), reranker_stats
+
+
+def _graft_onto_the_reranker(
+    session: Session,
+    ctx: _BatchExecCtx,
+    knn_result: _KnnResult,
+    prediction_dicts: list[dict[str, Any]],
+    reranker_stats: dict[str, Any] | None,
+    emit: EmitFn,
+) -> list[dict[str, Any]]:
+    """The InterPro BP graft, on top of the reranker's scores, or nothing.
+
+    The graft combines InterPro's BP evidence with the reranker's score
+    (noisy-OR). Without that score it combined with 0.0 and stored rows whose
+    score was InterPro's alone beside rows with none, so it runs only on a
+    batch a reranker scored.
+    """
+    if not (reranker_stats and reranker_stats.get("applied")):
+        emit(
+            "predict_go_terms_batch.interpro_graft_skipped",
+            None,
+            {"reason": "no reranker score to graft onto"},
+            "warning",
+        )
+        return prediction_dicts
+    from protea.core.operations.predict_go_terms._interpro_graft import (
+        apply_interpro_bp_graft,
+    )
+
+    return apply_interpro_bp_graft(
+        session,
+        uuid.UUID(ctx.p.ontology_snapshot_id),
+        knn_result.query_batch.valid_accessions,
+        prediction_dicts,
+        emit,
+    )
 
 
 def _honour_denials(
