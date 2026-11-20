@@ -16,7 +16,7 @@ rolled back at the end, so nothing is left in the store:
     PROTEA_DB_URL=... PROTEA_PRED_CACHE_DIR=<scratch> \\
     python scripts/score_parity/compare_on_store.py record.json \\
         --set <id> [--set <id> ...] --config embedding_only --config vote_fraction \\
-        [--cut <k>]
+        [--cut <k> --cut-set <id>]
 
 The DSN is read from the environment and never printed. Point
 ``PROTEA_PRED_CACHE_DIR`` at a scratch directory: the evaluator's path caches
@@ -145,7 +145,8 @@ def main() -> None:
     parser.add_argument("record", type=Path)
     parser.add_argument("--set", dest="sets", action="append", required=True)
     parser.add_argument("--config", dest="configs", action="append", required=True)
-    parser.add_argument("--cut", type=int, default=None)
+    parser.add_argument("--cut", dest="cuts", action="append", type=int, default=[])
+    parser.add_argument("--cut-set", dest="cut_sets", action="append", default=[])
     parser.add_argument("--store", default="development store")
     args = parser.parse_args()
 
@@ -162,12 +163,14 @@ def main() -> None:
         if missing:
             raise SystemExit(f"no scoring config named {missing}")
         for set_id in args.sets:
-            for name in args.configs:
-                with tempfile.TemporaryDirectory(prefix="score_parity_") as tmp:
-                    case = _one_case(session, uuid.UUID(set_id), configs[name], args.cut, Path(tmp))
-                session.rollback()
-                cases.append(case)
-                print(json.dumps(case), flush=True)
+            cuts = [None, *(args.cuts if set_id in args.cut_sets else [])]
+            for cut in cuts:
+                for name in args.configs:
+                    with tempfile.TemporaryDirectory(prefix="score_parity_") as tmp:
+                        case = _one_case(session, uuid.UUID(set_id), configs[name], cut, Path(tmp))
+                    session.rollback()
+                    cases.append(case)
+                    print(json.dumps(case), flush=True)
     record = {
         "what": (
             "A scored set's prediction file against the file the evaluator writes "
