@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core._artifact_identity import sha256_of_file
+from protea.core._binding_rule import REQUESTABLE_BINDING_RULES
 from protea.core._window_population import (
     TARGET_POPULATIONS,
     restricted_to,
@@ -65,6 +66,7 @@ class _Identity(NamedTuple):
     ids are two different truths and coexist, which is why the database key
     holds it too. ``target_population`` is the last: the three rules before it
     decide which terms are truth, it decides which proteins are targets.
+    ``binding_rule`` came after it and is a truth rule like the first three.
     """
 
     old_set_id: uuid.UUID
@@ -76,6 +78,22 @@ class _Identity(NamedTuple):
     toi_rule: str = GAIN_RULES[0]
     not_codes: str = NOT_CODE_RULES[0]
     target_population: str = TARGET_POPULATIONS[0]
+    binding_rule: str = REQUESTABLE_BINDING_RULES[0]
+
+
+def _reconciled_window(ident: _Identity) -> ReconciledWindow:
+    """The window the reconciled path builds: the five ids and the four truth rules."""
+    return ReconciledWindow(
+        ident.old_set_id,
+        ident.new_set_id,
+        ident.old_native,
+        ident.new_native,
+        ident.pivot_id,
+        ident.truth_profile,
+        ident.toi_rule,
+        ident.not_codes,
+        ident.binding_rule,
+    )
 
 
 def _reuse_verdict(served: str | None) -> tuple[str, str]:
@@ -151,7 +169,13 @@ def _rules_applied(
         ident.new_native,
         ident.pivot_id,
     )
-    return TruthRules(ident.truth_profile, ident.toi_rule, ident.not_codes, closure_applied(graphs))
+    return TruthRules(
+        profile=ident.truth_profile,
+        toi_rule=ident.toi_rule,
+        not_codes=ident.not_codes,
+        closure=closure_applied(graphs),
+        binding=ident.binding_rule,
+    )
 
 
 def _declared_rules(
@@ -175,6 +199,7 @@ def _declared_rules(
         "profile": ident.truth_profile,
         "toi_rule": ident.toi_rule,
         "not_codes": ident.not_codes,
+        "binding": ident.binding_rule,
     }
     if asked != {key: value for key, value in applied.as_json().items() if key in asked}:
         emit(
@@ -186,7 +211,7 @@ def _declared_rules(
                 "applied": applied.as_json(),
                 "note": (
                     "both corpora and every graph are one snapshot, so the same-snapshot "
-                    "path ran and it reads none of the three rules"
+                    "path ran and it reads none of the four rules"
                 ),
             },
             "warning",
@@ -199,7 +224,10 @@ def window_description(
 ) -> str:
     """The sentence a window says about itself: its two corpora, its rules, targets, role."""
     old_set, new_set = ends
-    rules = ask.rule_set or f"{ident.truth_profile}, {ident.toi_rule}, NOT {ident.not_codes}"
+    rules = ask.rule_set or (
+        f"{ident.truth_profile}, {ident.toi_rule}, NOT {ident.not_codes}, "
+        f"binding {ident.binding_rule}"
+    )
     return (
         f"The window {old_set.source} {old_set.source_version} -> {new_set.source} "
         f"{new_set.source_version}: truth rules {rules}, targets {ident.target_population}, "
@@ -232,6 +260,7 @@ def _identity_fields(row_id: uuid.UUID, ident: _Identity) -> dict[str, str]:
         "old_native_snapshot_id": str(ident.old_native),
         "new_native_snapshot_id": str(ident.new_native),
         "target_population": ident.target_population,
+        "binding_rule": ident.binding_rule,
     }
 
 
@@ -320,6 +349,7 @@ class GenerateEvaluationSetOperation:
             p.toi_rule,
             p.not_codes,
             p.target_population,
+            p.binding_rule,
         )
         # Before the reuse lookup, so a served row is compared with these.
         applied = _declared_rules(p.truth_rule_set, mode, ident, (old_set, new_set), emit)
@@ -361,6 +391,7 @@ class GenerateEvaluationSetOperation:
             toi_rule=ident.toi_rule,
             not_codes=ident.not_codes,
             target_population=ident.target_population,
+            binding_rule=ident.binding_rule,
             stats=stats,
             window_role=ask.window_role,
             truth_rules=ask.rules.as_json(),
@@ -437,6 +468,7 @@ class GenerateEvaluationSetOperation:
                 "truth_profile": ident.truth_profile,
                 "toi_rule": ident.toi_rule,
                 "not_codes": ident.not_codes,
+                "binding_rule": ident.binding_rule,
             },
             "info",
         )
@@ -445,25 +477,14 @@ class GenerateEvaluationSetOperation:
                 session, ident.old_set_id, ident.new_set_id, ident.pivot_id
             )
         else:
-            data = compute_evaluation_data_reconciled(
-                session,
-                ReconciledWindow(
-                    ident.old_set_id,
-                    ident.new_set_id,
-                    ident.old_native,
-                    ident.new_native,
-                    ident.pivot_id,
-                    ident.truth_profile,
-                    ident.toi_rule,
-                    ident.not_codes,
-                ),
-            )
+            data = compute_evaluation_data_reconciled(session, _reconciled_window(ident))
         stats = data.stats()
         stats["mode"] = mode
         stats["pivot_ontology_snapshot_id"] = str(ident.pivot_id)
         stats["truth_profile"] = ident.truth_profile
         stats["toi_rule"] = ident.toi_rule
         stats["not_codes"] = ident.not_codes
+        stats["binding_rule"] = ident.binding_rule
         emit("generate_evaluation_set.delta_done", None, stats, "info")
         return data, stats
 
@@ -551,6 +572,7 @@ class GenerateEvaluationSetOperation:
                 toi_rule=ident.toi_rule,
                 not_codes=ident.not_codes,
                 target_population=ident.target_population,
+                binding_rule=ident.binding_rule,
             )
             .one_or_none()
         )

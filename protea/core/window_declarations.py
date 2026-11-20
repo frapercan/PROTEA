@@ -34,6 +34,11 @@ graph ids are on the row, but ids cannot be compared across windows at different
 cuts, and a frame is exactly such a list. What compares is how the graphs relate
 to the window's own two ends: the ontology each end's corpus was loaded under.
 
+THE BINDING RULE is the fifth (:mod:`protea.core._binding_rule`): which
+protein-binding rule built the F side, if any. Rows stored before it was
+declared were given the rule their path applied when the migration added it:
+``none`` on the same-snapshot path, ``descendants_both_ends`` on every other.
+
 A row written before the rules were stored holds NULL, and NULL reads as
 legacy: "nothing says", never "the defaults".
 """
@@ -48,6 +53,7 @@ from typing import Any, NamedTuple, Protocol
 
 from sqlalchemy.orm import Session
 
+from protea.core._binding_rule import BINDING_RULES
 from protea.core._truth_rules import GAIN_RULES, NOT_CODE_RULES, TRUTH_PROFILES
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 
@@ -79,9 +85,9 @@ CLOSURES: tuple[str, ...] = ("per_side", "t0_graph", "t1_graph", "explicit", "di
 NAMEABLE_CLOSURES: tuple[str, ...] = ("per_side", "t0_graph", "t1_graph")
 
 #: The payload fields a named rule set fixes, in :class:`TruthRules` order.
-RULE_FIELDS: tuple[str, ...] = ("truth_profile", "toi_rule", "not_codes")
+RULE_FIELDS: tuple[str, ...] = ("truth_profile", "toi_rule", "not_codes", "binding_rule")
 
-_KEYS: tuple[str, ...] = ("profile", "toi_rule", "not_codes", "closure")
+_KEYS: tuple[str, ...] = ("profile", "toi_rule", "not_codes", "closure", "binding")
 
 
 class MixedTruthRulesError(ValueError):
@@ -90,10 +96,11 @@ class MixedTruthRulesError(ValueError):
 
 @dataclass(frozen=True)
 class TruthRules:
-    """The four rules that decide what a window's truth IS.
+    """The five rules that decide what a window's truth IS.
 
     ``profile``, ``toi_rule`` and ``not_codes`` take the vocabularies of
-    :mod:`protea.core._truth_rules`; ``closure`` takes :data:`CLOSURES`. An
+    :mod:`protea.core._truth_rules`; ``closure`` takes :data:`CLOSURES` and
+    ``binding`` takes :data:`protea.core._binding_rule.BINDING_RULES`. An
     unknown value raises at construction, so a stored set that reads back is a
     set the code knows how to apply.
     """
@@ -102,6 +109,7 @@ class TruthRules:
     toi_rule: str
     not_codes: str
     closure: str
+    binding: str
 
     def __post_init__(self) -> None:
         for name, value, vocabulary in (
@@ -109,6 +117,7 @@ class TruthRules:
             ("toi_rule", self.toi_rule, GAIN_RULES),
             ("not_codes", self.not_codes, NOT_CODE_RULES),
             ("closure", self.closure, CLOSURES),
+            ("binding", self.binding, BINDING_RULES),
         ):
             if value not in vocabulary:
                 raise ValueError(f"unknown {name} {value!r}; expected one of {vocabulary}")
@@ -120,6 +129,7 @@ class TruthRules:
             "toi_rule": self.toi_rule,
             "not_codes": self.not_codes,
             "closure": self.closure,
+            "binding": self.binding,
         }
 
     @classmethod
@@ -151,6 +161,8 @@ SAME_SNAPSHOT_RULES = TruthRules(
     toi_rule=GAIN_RULES[0],
     not_codes=NOT_CODE_RULES[0],
     closure="direct_terms",
+    # ``compute_evaluation_data`` runs no protein-binding rule at all.
+    binding="none",
 )
 
 #: The truth rules of the October headline frame, ``evaluation_set ea0f4334``:
@@ -163,13 +175,27 @@ OCTOBER_HEADLINE_FRAME = TruthRules(
     toi_rule="live_in_both_ends",
     not_codes="experimental",
     closure="t0_graph",
+    binding="descendants_both_ends",
+)
+
+#: The truth rules of the benchmark: the October headline frame with CAFA's and
+#: LAFA's protein-binding rule in place of PROTEA's own, so that the F side of a
+#: window is the one the community scores. The author chose it on 2026-11-20,
+#: together with the target population ``superset_at_t0`` (ADR-D60), which is a
+#: field of its own and not a truth rule.
+BENCHMARK_FRAME = TruthRules(
+    profile="projected",
+    toi_rule="live_in_both_ends",
+    not_codes="experimental",
+    closure="t0_graph",
+    binding="cafa",
 )
 
 #: Rule sets a ``generate_evaluation_set`` payload can name, by a name that says
 #: whose choice each one is. Every closure here must be in
 #: :data:`NAMEABLE_CLOSURES`, or the operation could not resolve its graphs.
 NAMED_TRUTH_RULES: Mapping[str, TruthRules] = MappingProxyType(
-    {"october-headline-frame": OCTOBER_HEADLINE_FRAME}
+    {"october-headline-frame": OCTOBER_HEADLINE_FRAME, "benchmark-frame": BENCHMARK_FRAME}
 )
 
 
@@ -183,7 +209,7 @@ def named_truth_rules(name: object) -> TruthRules:
 
 
 def payload_with_named_rules(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """The payload with the three rule fields its named rule set fixes filled in.
+    """The payload with the four rule fields its named rule set fixes filled in.
 
     A field the payload already carries must agree with the set: a payload that
     names ``october-headline-frame`` and asks for ``as_closed`` asks for two
@@ -196,7 +222,7 @@ def payload_with_named_rules(payload: Mapping[str, Any]) -> dict[str, Any]:
         return filled
     rules = named_truth_rules(name)
     for field, value in zip(
-        RULE_FIELDS, (rules.profile, rules.toi_rule, rules.not_codes), strict=True
+        RULE_FIELDS, (rules.profile, rules.toi_rule, rules.not_codes, rules.binding), strict=True
     ):
         asked = filled.setdefault(field, value)
         if asked != value:

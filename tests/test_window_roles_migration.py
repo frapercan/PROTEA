@@ -84,7 +84,14 @@ def test_the_module_pins_its_revision_and_names_an_existing_parent() -> None:
 def test_it_carries_the_models_check_text() -> None:
     module = _module()
     assert module.WINDOW_ROLE_CHECK == model.WINDOW_ROLE_CHECK
-    assert module.TRUTH_RULES_CHECK == model.TRUTH_RULES_CHECK
+    # The truth rules check moved on when the binding rule was declared
+    # (7c2e9b4d1a6f): this migration's text is what that one restores on a
+    # downgrade, and the model carries that one's.
+    later = _VERSIONS / "7c2e9b4d1a6f_a_window_declares_its_protein_binding_rule.py"
+    spec = importlib.util.spec_from_file_location("_7c2e9b4d1a6f", later)
+    binding = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(binding)
+    assert module.TRUTH_RULES_CHECK == binding.PREVIOUS_TRUTH_RULES_CHECK
 
 
 def test_the_downgrade_restores_the_check_of_d40() -> None:

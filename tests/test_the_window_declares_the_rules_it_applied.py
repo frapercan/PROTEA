@@ -29,6 +29,7 @@ from protea.core.operations.generate_evaluation_set import (
     GenerateEvaluationSetPayload,
 )
 from protea.core.window_declarations import (
+    BENCHMARK_FRAME,
     OCTOBER_HEADLINE_FRAME,
     SAME_SNAPSHOT_RULES,
     WINDOW_ROLES,
@@ -41,6 +42,7 @@ PER_SIDE_DEFAULTS = {
     "toi_rule": "pivot_terms",
     "not_codes": "any",
     "closure": "per_side",
+    "binding": "descendants_both_ends",
 }
 
 
@@ -100,6 +102,28 @@ class TestThePayloadNamesARuleSet:
         p = GenerateEvaluationSetPayload(**_ids())
         assert p.truth_rule_set is None
         assert (p.truth_profile, p.toi_rule, p.not_codes) == ("as_closed", "pivot_terms", "any")
+        assert p.binding_rule == "descendants_both_ends"
+
+    def test_the_benchmark_frame_fills_cafas_binding_rule(self) -> None:
+        p = GenerateEvaluationSetPayload(**_ids(), truth_rule_set="benchmark-frame")
+        assert (p.truth_profile, p.toi_rule, p.not_codes, p.binding_rule) == (
+            "projected",
+            "live_in_both_ends",
+            "experimental",
+            "cafa",
+        )
+
+    def test_the_benchmark_frame_refuses_protea_s_binding_rule(self) -> None:
+        with pytest.raises(ValueError, match="fixes binding_rule"):
+            GenerateEvaluationSetPayload(
+                **_ids(), truth_rule_set="benchmark-frame", binding_rule="descendants_both_ends"
+            )
+
+    @pytest.mark.parametrize("rule", ["none", "democafa", ""])
+    def test_a_payload_cannot_ask_for_a_binding_rule_it_cannot_request(self, rule: str) -> None:
+        # ``none`` is what the same-snapshot path applies, never a request.
+        with pytest.raises(ValueError, match="binding_rule"):
+            GenerateEvaluationSetPayload(**_ids(), binding_rule=rule)
 
 
 # ------------------------------------------------------ the operation stores
@@ -231,6 +255,18 @@ class TestTheOctoberRulesBuildTheOctoberWindow:
         row = added[0]
         assert row.truth_rules == OCTOBER_HEADLINE_FRAME.as_json()
         assert (row.old_native_snapshot_id, row.new_native_snapshot_id) == (t0, t0)
+
+    def test_the_benchmark_frame_builds_and_declares_cafas_binding_rule(self) -> None:
+        t0, t1 = uuid.uuid4(), uuid.uuid4()
+        session, added = _session(_corpus(t0), _corpus(t1))
+
+        rec, same, _ = _run(session, {**_ids(), "truth_rule_set": "benchmark-frame"})
+
+        assert not same.called
+        assert rec.call_args.args[1].binding_rule == "cafa"
+        row = added[0]
+        assert row.binding_rule == "cafa"
+        assert row.truth_rules == BENCHMARK_FRAME.as_json()
 
     def test_an_override_that_moves_the_closure_is_refused_before_computing(self) -> None:
         t0, t1 = uuid.uuid4(), uuid.uuid4()
