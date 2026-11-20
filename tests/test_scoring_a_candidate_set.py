@@ -1,0 +1,312 @@
+"""A candidate set is scored once, by its method, and the evaluator reads the scores.
+
+``score_prediction_set`` turns a transfer method's candidates into predictions
+with the same code the evaluator used to apply when it scored: the nearest row
+per term, the depth cut and its recount, the bank's denials, and the
+ScoringConfig's arithmetic. These pin, against Postgres, that the scored set's
+prediction file is byte for byte the file the evaluator writes from the
+candidates, with and without a cut and under two configurations; that the chunk
+size moves nothing; what the scored set records; and what is refused.
+"""
+
+from __future__ import annotations
+
+import uuid
+from pathlib import Path
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.orm import Session
+
+from protea.core.method_seal import EXECUTION_ONLY_FIELDS, METHOD_IDENTITY_FIELDS
+from protea.core.operations import _method_score_predictions, _pred_base_cache
+from protea.core.operations import _run_cafa_artifacts as artifacts
+from protea.core.operations.predict_go_terms._receipt import run_receipt
+from protea.core.operations.score_prediction_set import (
+    ScorePredictionSetOperation,
+    ScorePredictionSetPayload,
+)
+from protea.infrastructure.orm.base import Base
+from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+from tests.helpers.prediction_sets import make_parents
+from tests.test_prediction_run_receipt import _payload
+
+#: A chain PARENT -is_a- CHILD, so a denial of the parent reaches the child,
+#: and two terms off it that nothing denies.
+_PARENT, _CHILD, _T3, _T4 = 9101, 9102, 9103, 9104
+_GO = {_PARENT: "GO:0009101", _CHILD: "GO:0009102", _T3: "GO:0009103", _T4: "GO:0009104"}
+
+#: (protein, term, donor, distance, k_position, vote fraction, donor ledger).
+#: Q1's CHILD is denied by the bank; Q2's T4 sits at depth 3 with one donor.
+_CANDIDATES: tuple[tuple[str, int, str, float, int, float, list[int]], ...] = (
+    ("Q1", _CHILD, "D1", 0.20, 1, 1.0, [1]),
+    ("Q1", _T3, "D1", 0.20, 1, 1.0, [1, 2]),
+    ("Q1", _T4, "D2", 0.60, 2, 0.5, [2]),
+    ("Q2", _T3, "D3", 0.10, 1, 1.0, [1, 3]),
+    ("Q2", _T4, "D4", 0.90, 3, 1 / 3, [3]),
+    ("Q3", _T4, "D5", 0.30, 1, 1.0, [1]),
+)
+_PROTEINS = {"Q1", "Q2", "Q3"}
+
+
+def _noop_emit(*_args: Any, **_kwargs: Any) -> None:
+    return None
+
+
+@pytest.fixture()
+def pg(postgres_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setattr(_pred_base_cache, "_PRED_CACHE_DIR", tmp_path / "pred_cache")
+    engine = create_engine(postgres_url, future=True)
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    with Session(engine, future=True) as session:
+        yield session
+    engine.dispose()
+
+
+def _seed(session: Session, *, source_meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    # The bank's NOT and the candidates name proteins and terms no fixture
+    # loads; the foreign keys are not what these tests are about.
+    session.execute(text("SET session_replication_role = 'replica'"))
+    parents = make_parents(session)
+    snap, bank = parents["snapshot"], parents["annotation"]
+    for term_id, go_id in _GO.items():
+        session.execute(
+            text(
+                "INSERT INTO go_term (id, go_id, name, aspect, is_obsolete, ontology_snapshot_id) "
+                "VALUES (:i, :g, :g, 'F', false, :s)"
+            ),
+            {"i": term_id, "g": go_id, "s": snap},
+        )
+    session.execute(
+        text(
+            "INSERT INTO go_term_relationship "
+            "(parent_go_term_id, child_go_term_id, relation_type, ontology_snapshot_id) "
+            "VALUES (:p, :c, 'is_a', :s)"
+        ),
+        {"p": _PARENT, "c": _CHILD, "s": snap},
+    )
+    session.execute(
+        text(
+            "INSERT INTO protein_go_annotation "
+            "(annotation_set_id, protein_accession, go_term_id, qualifier, evidence_code) "
+            "VALUES (:a, 'Q1', :t, 'NOT|enables', 'IDA')"
+        ),
+        {"a": bank, "t": _PARENT},
+    )
+    source = PredictionSet(
+        embedding_config_id=parents["embedding"],
+        annotation_set_id=bank,
+        ontology_snapshot_id=snap,
+        limit_per_entry=30,
+        meta=source_meta if source_meta is not None else {"metric": "cosine"},
+    )
+    session.add(source)
+    session.flush()
+    for protein, term, donor, distance, k, vote, ledger in _CANDIDATES:
+        session.add(
+            GOPrediction(
+                prediction_set_id=source.id,
+                protein_accession=protein,
+                go_term_id=term,
+                ref_protein_accession=donor,
+                distance=distance,
+                evidence_code="IDA",
+                k_position=k,
+                sequence_rank=k,
+                neighbor_vote_fraction=vote,
+                donor_count=len(ledger),
+                donor_accessions=[f"{donor}-{i}" for i in ledger],
+                donor_k_positions=ledger,
+                donor_sequence_ranks=ledger,
+                donor_distances=[distance + 0.01 * i for i in range(len(ledger))],
+            )
+        )
+    configs = {
+        name: ScoringConfig(name=name, formula=formula, weights=weights)
+        for name, formula, weights in (
+            ("embedding_only", "linear", {"embedding_similarity": 1.0}),
+            ("vote_fraction", "linear", {"neighbor_vote_fraction": 1.0}),
+            ("method-score", "method_score", {}),
+        )
+    }
+    session.add_all(configs.values())
+    session.flush()
+    return {
+        "source": source.id,
+        "bank": bank,
+        "snapshot": snap,
+        "embedding": parents["embedding"],
+        "configs": configs,
+    }
+
+
+def _score(session: Session, source: uuid.UUID, config: ScoringConfig, **over: Any) -> uuid.UUID:
+    payload = {
+        "prediction_set_id": str(source),
+        "scoring_config_id": str(config.id),
+        "_job_id": str(uuid.uuid4()),
+        **over,
+    }
+    result = ScorePredictionSetOperation().execute(session, payload, emit=_noop_emit)
+    return uuid.UUID(result.result["prediction_set_id"])
+
+
+def _ctx(set_id: uuid.UUID, path: Path, cut: int | None = None) -> Any:
+    return artifacts.WritePredictionsContext(
+        pred_set_id=set_id,
+        delta_proteins=set(_PROTEINS),
+        max_distance=None,
+        path=str(path),
+        max_k_position=cut,
+    )
+
+
+@pytest.mark.integration
+class TestTheScoredSetIsTheEvaluatorsReading:
+    @pytest.mark.parametrize("config_name", ["embedding_only", "vote_fraction"])
+    @pytest.mark.parametrize("cut", [None, 2], ids=["whole", "cut_at_2"])
+    def test_the_prediction_file_is_the_same_byte_for_byte(
+        self, pg: Session, tmp_path: Path, config_name: str, cut: int | None
+    ) -> None:
+        seeded = _seed(pg)
+        config = seeded["configs"][config_name]
+        scored = _score(pg, seeded["source"], config, max_k_position=cut)
+
+        before = tmp_path / "evaluator.tsv"
+        artifacts.write_predictions(pg, _ctx(seeded["source"], before, cut), scoring_config=config)
+        after = tmp_path / "scored.tsv"
+        _method_score_predictions.write_method_predictions(pg, _ctx(scored, after))
+
+        assert before.read_text() == after.read_text()
+        lines = after.read_text().splitlines()
+        assert lines, "the comparison has to be over something"
+        # The bank denies Q1 the parent, so it denies the child.
+        assert not [line for line in lines if line.startswith(f"Q1\t{_GO[_CHILD]}\t")]
+        # The cut at 2 leaves out Q2's candidate at depth 3, and only it.
+        assert any(line.startswith(f"Q2\t{_GO[_T4]}\t") for line in lines) is (cut is None)
+
+    def test_the_chunk_size_moves_nothing(self, pg: Session) -> None:
+        seeded = _seed(pg)
+        config = seeded["configs"]["vote_fraction"]
+        one = _score(pg, seeded["source"], config, proteins_per_chunk=1)
+        all_at_once = _score(pg, seeded["source"], config, proteins_per_chunk=5_000)
+
+        def rows(set_id: uuid.UUID) -> list[tuple[Any, ...]]:
+            return [
+                tuple(r)
+                for r in pg.execute(
+                    select(
+                        GOPrediction.protein_accession,
+                        GOPrediction.go_term_id,
+                        GOPrediction.ref_protein_accession,
+                        GOPrediction.method_score,
+                    )
+                    .where(GOPrediction.prediction_set_id == set_id)
+                    .order_by(GOPrediction.protein_accession, GOPrediction.go_term_id)
+                )
+            ]
+
+        assert rows(one) == rows(all_at_once)
+        assert len(rows(one)) == len(_CANDIDATES) - 1
+
+
+@pytest.mark.integration
+class TestWhatTheScoredSetRecords:
+    def test_its_columns_are_the_candidates_and_its_record_says_how(self, pg: Session) -> None:
+        seeded = _seed(pg)
+        config = seeded["configs"]["embedding_only"]
+        scored = pg.get(PredictionSet, _score(pg, seeded["source"], config, max_k_position=2))
+        source = pg.get(PredictionSet, seeded["source"])
+        assert scored is not None and source is not None
+        for column in ("embedding_config_id", "annotation_set_id", "ontology_snapshot_id"):
+            assert getattr(scored, column) == getattr(source, column)
+        assert scored.limit_per_entry == source.limit_per_entry
+        meta = scored.meta
+        assert meta["metric"] == "cosine", "the candidates' record travels with the scores"
+        assert meta["scored_from"] == str(source.id)
+        assert meta["scoring_config_id"] == str(config.id)
+        assert meta["scoring"]["formula"] == "linear"
+        assert meta["scoring"]["weights"] == {"embedding_similarity": 1.0}
+        assert meta["scoring"]["depth"] == {
+            "max_distance": None,
+            "max_k_position": 2,
+            "max_sequence_rank": None,
+        }
+        assert meta["scoring"]["code_revision"]
+        assert meta["denials"]["honoured"] is True
+        assert meta["denied_removed"] == 1
+        assert "embedding_only" in (scored.description or "")
+        donors = dict(
+            pg.execute(
+                select(GOPrediction.protein_accession, GOPrediction.ref_protein_accession)
+                .where(GOPrediction.prediction_set_id == scored.id)
+                .where(GOPrediction.go_term_id == _T3)
+            ).all()
+        )
+        assert donors == {"Q1": "D1", "Q2": "D3"}, "the donor of the nearest row"
+
+    def test_every_key_it_writes_over_a_receipt_is_classified(self, pg: Session) -> None:
+        receipt = run_receipt(_payload(), uuid.uuid4())
+        seeded = _seed(pg, source_meta=receipt)
+        scored = pg.get(
+            PredictionSet, _score(pg, seeded["source"], seeded["configs"]["vote_fraction"])
+        )
+        assert scored is not None
+        classified = set(METHOD_IDENTITY_FIELDS) | set(EXECUTION_ONLY_FIELDS)
+        assert set(scored.meta) - classified == set()
+        assert "scoring" in METHOD_IDENTITY_FIELDS
+        assert {"scored_from", "scoring_config_id"} <= set(EXECUTION_ONLY_FIELDS)
+
+
+@pytest.mark.integration
+class TestWhatIsRefused:
+    def test_a_set_that_is_scored_already(self, pg: Session) -> None:
+        seeded = _seed(pg)
+        config = seeded["configs"]["embedding_only"]
+        scored = _score(pg, seeded["source"], config)
+        with pytest.raises(ValueError, match="scored already"):
+            _score(pg, scored, config)
+
+    def test_the_formula_that_returns_a_score_the_candidates_lack(self, pg: Session) -> None:
+        seeded = _seed(pg)
+        with pytest.raises(ValueError, match="a candidate set has none"):
+            _score(pg, seeded["source"], seeded["configs"]["method-score"])
+
+    def test_a_set_that_does_not_exist(self, pg: Session) -> None:
+        seeded = _seed(pg)
+        with pytest.raises(ValueError, match="not found"):
+            _score(pg, uuid.uuid4(), seeded["configs"]["embedding_only"])
+
+    def test_a_set_with_no_candidates(self, pg: Session) -> None:
+        seeded = _seed(pg)
+        empty = PredictionSet(
+            embedding_config_id=seeded["embedding"],
+            limit_per_entry=30,
+            annotation_set_id=seeded["bank"],
+            ontology_snapshot_id=seeded["snapshot"],
+            meta={},
+        )
+        pg.add(empty)
+        pg.flush()
+        with pytest.raises(ValueError, match="no candidates"):
+            _score(pg, empty.id, seeded["configs"]["embedding_only"])
+
+
+class TestThePayload:
+    def test_a_depth_is_counted_in_one_unit(self) -> None:
+        with pytest.raises(ValidationError):
+            ScorePredictionSetPayload(
+                prediction_set_id=str(uuid.uuid4()),
+                scoring_config_id=str(uuid.uuid4()),
+                max_k_position=2,
+                max_sequence_rank=2,
+            )
+
+    def test_the_arithmetic_is_named_never_defaulted(self) -> None:
+        with pytest.raises(ValidationError):
+            ScorePredictionSetPayload.model_validate({"prediction_set_id": str(uuid.uuid4())})

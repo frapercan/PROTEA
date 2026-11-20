@@ -140,6 +140,7 @@ from protea.core.operations.run_count_map import RunCountMapOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
 from protea.core.operations.run_lab_method import RunLabMethodOperation
 from protea.core.operations.run_own_annotations import RunOwnAnnotationsOperation
+from protea.core.operations.score_prediction_set import ScorePredictionSetOperation
 from protea.core.operations.seal_evaluation_frames import (
     SealEvaluationFramesOperation,
 )
@@ -363,6 +364,9 @@ _METHOD: tuple[_Row, ...] = (
         replace(_KNN_COORDINATOR, kind="write", queue=queues.PREDICTIONS_WRITE, publishes_to=()),
     ),
     (PredictGOTermsFromInterProOperation, replace(_METHOD_JOB, status="mirror")),
+    # A transfer method's candidates become predictions here, with a record: the
+    # evaluator scores what a method stored and nothing else (closure, step 4).
+    (ScorePredictionSetOperation, _METHOD_JOB),
     # The offline half of the association feature the prediction path reads.
     (BuildGoCooccurrenceOperation, replace(_METHOD_JOB, family="embedding-reranker")),
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer publicly

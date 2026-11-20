@@ -18,27 +18,23 @@ from typing import Any
 
 import numpy as np
 import requests
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from protea.core.operations import _depth_guard, _method_score_predictions, _pred_base_cache
 from protea.core.operations._base_frame_recount import (
     build_base_frame,
-    ledger_columns,
+)
+from protea.core.operations._candidate_scoring import (
+    BASE_SCORE_COLS,
+    candidate_select,
+    count_candidates,
+    vectorized_scores,
 )
 from protea.core.operations._denials import apply_denials, drop_denied_records
 from protea.core.operations._run_cafa_helpers import (
     _NS_LABELS,
     _patch_query_known_features,
     _record_from_pred,
-)
-from protea.core.operations._run_cafa_signal_arrays import (
-    _anc2vec_array,
-    _coverage_array,
-    _evidence_weight_array,
-    _ia_prior_array,
-    _method_score_array,
-    _ref_density_array,
 )
 from protea.core.row_alignment import assert_unique_key
 from protea.core.scoring import (
@@ -47,43 +43,16 @@ from protea.core.scoring import (
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.scoring_config import (
-    FORMULA_EVIDENCE_WEIGHTED,
-    FORMULA_METHOD_SCORE,
     ScoringConfig,
 )
 
-# Columns the baseline (no-reranker) scorer reads off each prediction. Fetched
-# as a Core columnar query (never 1.2M ORM objects), deduped to the
-# lowest-distance row per (protein, go_id), then vectorised.
-_BASE_SCORE_COLS: tuple[str, ...] = (
-    "protein_accession",
-    "go_id",
-    "distance",
-    "identity_nw",
-    "identity_sw",
-    "evidence_code",
-    "taxonomic_distance",
-    "neighbor_vote_fraction",
-    # Voters, as opposed to vote_count's annotation rows. Selected always,
-    # not only under a cut, so the frame's schema does not depend on which
-    # arm built it. Under a cut the recount overwrites it with the count at
-    # that depth; without one it is what the retrieval wrote.
-    "donor_count",
-    # --- A-SCORE rich axes (coverage A3 / ref-density F / anc2vec G / IA-prior E) ---
-    "alignment_length_nw",
-    "gaps_pct_nw",
-    "alignment_length_sw",
-    "gaps_pct_sw",
-    "length_query",
-    "ref_annotation_density",
-    "anc2vec_neighbor_cos",
-    "anc2vec_neighbor_maxcos",
-    "go_term_frequency",
-    # The method's own score, for the formula that returns it unchanged.
-    # Selected always, like donor_count, so the frame's schema does not
-    # depend on which formula will read it.
-    "method_score",
-)
+#: The scorer's columns and arithmetic live in ``_candidate_scoring``, which
+#: ``score_prediction_set`` shares; these names are the ones this module and
+#: its tests have always used.
+_BASE_SCORE_COLS = BASE_SCORE_COLS
+_base_select = candidate_select
+_count_base_rows = count_candidates
+_vectorized_scores = vectorized_scores
 
 _LOG = logging.getLogger(__name__)
 
@@ -338,62 +307,6 @@ def write_predictions(
     _write_scored_base(base, scoring_config, ctx.path)
 
 
-def _base_select(ctx: WritePredictionsContext, *, with_ledger: bool = False) -> Any:
-    """Core columnar SELECT of the baseline inputs; see ``ledger_columns``."""
-    stmt = (
-        select(
-            GOPrediction.protein_accession,
-            GOTerm.go_id,
-            GOPrediction.distance,
-            GOPrediction.identity_nw,
-            GOPrediction.identity_sw,
-            GOPrediction.evidence_code,
-            GOPrediction.taxonomic_distance,
-            GOPrediction.neighbor_vote_fraction,
-            GOPrediction.donor_count,
-            GOPrediction.alignment_length_nw,
-            GOPrediction.gaps_pct_nw,
-            GOPrediction.alignment_length_sw,
-            GOPrediction.gaps_pct_sw,
-            GOPrediction.length_query,
-            GOPrediction.ref_annotation_density,
-            GOPrediction.anc2vec_neighbor_cos,
-            GOPrediction.anc2vec_neighbor_maxcos,
-            GOPrediction.go_term_frequency,
-            GOPrediction.method_score,
-            *ledger_columns(with_ledger),
-        )
-        .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .where(GOPrediction.prediction_set_id == ctx.pred_set_id)
-        .where(GOPrediction.protein_accession.in_(ctx.delta_proteins))
-    )
-    if ctx.max_distance is not None:
-        stmt = stmt.where(GOPrediction.distance <= ctx.max_distance)
-    if ctx.max_k_position is not None:
-        stmt = stmt.where(GOPrediction.k_position <= ctx.max_k_position)
-    if ctx.max_sequence_rank is not None:
-        stmt = stmt.where(GOPrediction.sequence_rank <= ctx.max_sequence_rank)
-    return stmt
-
-
-def _count_base_rows(session: Session, ctx: WritePredictionsContext) -> int:
-    """Fresh ``COUNT(*)`` over the base filter (cheap cache-invalidation probe)."""
-    stmt = (
-        select(func.count())
-        .select_from(GOPrediction)
-        .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .where(GOPrediction.prediction_set_id == ctx.pred_set_id)
-        .where(GOPrediction.protein_accession.in_(ctx.delta_proteins))
-    )
-    if ctx.max_distance is not None:
-        stmt = stmt.where(GOPrediction.distance <= ctx.max_distance)
-    if ctx.max_k_position is not None:
-        stmt = stmt.where(GOPrediction.k_position <= ctx.max_k_position)
-    if ctx.max_sequence_rank is not None:
-        stmt = stmt.where(GOPrediction.sequence_rank <= ctx.max_sequence_rank)
-    return int(session.execute(stmt).scalar_one())
-
-
 def load_ia_map(ia_path: str) -> dict[str, float]:
     """Parse a cafaeval IA TSV (``go_id<TAB>raw_ia``) into ``{go_id: raw_ia}``.
 
@@ -443,59 +356,6 @@ def attach_term_ia(df: Any, ia_map: dict[str, float]) -> None:
         raw = ia_map.get(gid)
         out[i] = np.nan if raw is None else min(1.0, max(0.0, raw / anchor))
     df["term_ia"] = out
-
-
-def _vectorized_scores(df: Any, scoring_config: ScoringConfig | None) -> np.ndarray:
-    """Exact, vectorised equivalent of per-row :func:`_score_unranked_pred`.
-
-    Returns the *unrounded* base score array; callers apply ``round(_, 6)``
-    only for the ``ScoringConfig`` path (the ``None`` fallback is unrounded,
-    matching ``compute_score`` / the distance fallback respectively).
-    """
-    distance = df["distance"].to_numpy(dtype=np.float64)
-    if scoring_config is None:
-        return np.maximum(0.0, 1.0 - np.where(np.isnan(distance), 0.0, distance) / 2.0)
-
-    if scoring_config.formula == FORMULA_METHOD_SCORE:
-        return _method_score_array(df)
-
-    params = getattr(scoring_config, "params", None)
-    if not isinstance(params, dict):
-        params = {}
-    weights = scoring_config.weights
-    ev_overrides = scoring_config.evidence_weights or None
-    ev_w = _evidence_weight_array(df["evidence_code"].tolist(), ev_overrides)
-    tax = df["taxonomic_distance"].to_numpy(dtype=np.float64)
-    signals: tuple[tuple[str, np.ndarray], ...] = (
-        ("embedding_similarity", np.where(np.isnan(distance), np.nan, 1.0 - distance / 2.0)),
-        ("identity_nw", df["identity_nw"].to_numpy(dtype=np.float64)),
-        ("identity_sw", df["identity_sw"].to_numpy(dtype=np.float64)),
-        ("evidence_weight", ev_w),
-        ("taxonomic_proximity", np.where(np.isnan(tax), np.nan, 1.0 / (1.0 + tax))),
-        ("neighbor_vote_fraction", df["neighbor_vote_fraction"].to_numpy(dtype=np.float64)),
-        ("coverage", _coverage_array(df)),
-        ("ref_annotation_density", _ref_density_array(df)),
-        ("anc2vec_neighbor_cos", _anc2vec_array(df, "anc2vec_neighbor_cos")),
-        ("anc2vec_neighbor_maxcos", _anc2vec_array(df, "anc2vec_neighbor_maxcos")),
-    )
-    total_w = np.zeros(len(df), dtype=np.float64)
-    weighted_sum = np.zeros(len(df), dtype=np.float64)
-    for key, values in signals:
-        w = float(weights.get(key, 0.0))
-        if w == 0.0:
-            continue
-        valid = ~np.isnan(values)
-        weighted_sum += np.where(valid, w * np.clip(values, 0.0, 1.0), 0.0)
-        total_w += np.where(valid, w, 0.0)
-    base = np.divide(weighted_sum, total_w, out=np.zeros(len(df)), where=total_w > 0.0)
-    if scoring_config.formula == FORMULA_EVIDENCE_WEIGHTED:
-        base = base * ev_w
-    prior = _ia_prior_array(df, params)
-    if prior is not None:
-        base = base * prior
-    # Calibration (params["calibration"]) is a no-op stub today; the scalar
-    # path's apply_calibration() is also a pass-through, so the two stay equal.
-    return base
 
 
 def _write_scored_base(df: Any, scoring_config: ScoringConfig | None, path: str) -> None:

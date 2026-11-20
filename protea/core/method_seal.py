@@ -154,6 +154,9 @@ _IDENTITY_META: tuple[str, ...] = (
     "features",
     "metric",
     "rerankers",
+    # How a scored set's candidates became scores: the arithmetic, the depth
+    # cut and the code that applied them (score_prediction_set).
+    "scoring",
     "search_backend",
 )
 
@@ -192,6 +195,16 @@ _EXECUTION_COLUMNS: Mapping[str, str] = {
 
 #: ``meta`` keys that are NOT method identity, each with why.
 _EXECUTION_META: Mapping[str, str] = {
+    "scored_from": (
+        "which candidate set a scored set was scored from. The id of a row, "
+        "like id: a method re-run and scored again has another, and the method "
+        "it ran is the candidate set's record, copied into the scored set's"
+    ),
+    "scoring_config_id": (
+        "which ScoringConfig row the arithmetic was read from. Two rows holding "
+        "the same arithmetic score alike, and the arithmetic itself is the "
+        "scoring key, which is identity"
+    ),
     "denied_removed": (
         "how many candidates the bank's denials removed. A consequence of the "
         "data the method met, not a choice: two runs of the same method over "
