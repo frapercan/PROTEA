@@ -224,7 +224,7 @@ class CreateJobRequest(BaseModel):
 
 # Operations that consume the per-user daily quota on POST /jobs.
 _QUOTA_GATED_OPERATIONS: frozenset[str] = frozenset(
-    {"export_research_dataset", "run_cafa_evaluation", "batch_rescore_evaluation"}
+    {"export_research_dataset", "run_cafa_evaluation"}
 )
 
 

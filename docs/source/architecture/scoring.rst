@@ -12,9 +12,10 @@ and the share of neighbours that voted for the term. Turning that evidence into
 one number is a step of the method, ``score_prediction_set``, and its result is
 a prediction set of its own, a **scored set**, whose rows carry the score.
 
-The evaluator scores what a method stored. Today it still scores candidate sets
-itself, with the same code; the next step of the closure reduces it to reading
-scored sets, and this page is where a method's scores come from once it does.
+The evaluator scores what a method stored and nothing else. Every prediction
+file it reads is a set's ``method_score``, as stored, and a set that stores
+candidates without scores is refused before anything is staged, with this step
+named.
 
 What the step does
 ------------------
@@ -98,14 +99,21 @@ queries.
 How it was checked
 ------------------
 
-The scored set's prediction file, the file ``cafaeval`` reads, is the file the
-evaluator writes from the candidates with the same configuration, byte for byte:
+While the evaluator still scored candidates itself, the scored set's prediction
+file, the file ``cafaeval`` reads, was compared with the file the evaluator
+wrote from the candidates with the same configuration, byte for byte:
 
 - in the test suite, against Postgres, under two configurations, with and
-  without a cut (``tests/test_scoring_a_candidate_set.py``);
-- on the development store, over every protein of its nearest-neighbour
-  candidate sets, each case inside a transaction that was rolled back
-  (``scripts/score_parity/compare_on_store.py``).
+  without a cut;
+- on the development store, over every protein of the nearest-neighbour
+  candidate sets it had scored, each case inside a transaction that was rolled
+  back. The script that ran it compared against the evaluator's path and was
+  retired with it; the record below names the code by commit and by file
+  digest.
+
+Since then the test suite pins the prediction file the evaluator writes from a
+scored set against scores worked by hand, under the same two configurations,
+with and without a cut (``tests/test_scoring_a_candidate_set.py``).
 
 .. literalinclude:: ../_data/scored-set-parity-development-store.json
    :language: json

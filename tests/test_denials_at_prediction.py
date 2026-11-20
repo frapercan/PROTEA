@@ -6,8 +6,8 @@ k-nearest-neighbour transfer and the InterPro mirror, drop what the bank denies
 before they write, with the policy of :mod:`protea.core.denials`. These pin the
 policy's entry points, the last step of the k-nearest-neighbour pipeline, the
 InterPro mirror's counters and record, the receipt and the method's identity,
-and against Postgres that a writer drops exactly the pairs the evaluator's own
-test (``test_a_prediction_does_not_contradict_a_curated_not.py``) drops.
+and against Postgres that a writer drops exactly the pairs the policy's own test
+(``test_a_prediction_does_not_contradict_a_curated_not.py``) denies.
 """
 
 from __future__ import annotations
@@ -180,7 +180,7 @@ class TestTheInterProMirror:
 
 
 @pytest.mark.integration
-def test_a_writer_drops_exactly_what_the_evaluator_dropped(postgres_url: str) -> None:
+def test_a_writer_drops_the_denied_term_and_its_descendants(postgres_url: str) -> None:
     engine = create_engine(postgres_url, future=True)
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)

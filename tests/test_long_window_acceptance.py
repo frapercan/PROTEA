@@ -30,9 +30,10 @@ dump, so nothing here claims to reproduce it.
 
 WHY THE ROUNDING IS LOAD-BEARING. The predictions must reach cafaeval at four
 decimals. That is not a tolerance granted to make the test pass: it is what
-PROTEA's own production path does, in ``_run_cafa_artifacts._write_scored_base``,
-which formats every row as ``{score:.4f}``, and the comment there records why
--- two code paths that rounded differently put 9 of 396 cells exactly 0.0001
+PROTEA's own production path does, in
+``_method_score_predictions.write_method_predictions``, which formats every
+stored score as ``'%.4f' % score``; the writer it replaced did the same, after
+two code paths that rounded differently put 9 of 396 cells exactly 0.0001
 apart. The lab's wrapper does the same with ``float_format="%.4f"``. Feeding
 the dumps' full nine decimals instead moves the cells by up to 1.6e-04 and the
 means by 2.4e-05, which still rounds to the published 0.2930, 0.4531 and
@@ -303,6 +304,7 @@ def _arm_params() -> list:
         for arm in sorted(ARMS)
     ]
 
+
 _OBO_ENV = os.environ.get("PROTEA_LONG_WINDOW_OBO", "")
 OBO_PATH = Path(_OBO_ENV) if _OBO_ENV else None
 _OBO_PRESENT = OBO_PATH is not None and OBO_PATH.is_file()
@@ -426,10 +428,10 @@ class TestTheContractHoldsTogether:
         # Four decimals is what PROTEA writes. Read from the writer rather
         # than restated, so the day the format changes this fails instead of
         # going quietly stale.
-        from protea.core.operations import _run_cafa_artifacts
+        from protea.core.operations import _method_score_predictions
 
-        source = Path(_run_cafa_artifacts.__file__).read_text()
-        assert f":.{SCORING['score_decimals']}f" in source, (
+        source = Path(_method_score_predictions.__file__).read_text()
+        assert f"%.{SCORING['score_decimals']}f" in source, (
             "the production writer no longer formats scores to "
             f"{SCORING['score_decimals']} decimals, so layer 3 is reproducing "
             "something the platform does not do"

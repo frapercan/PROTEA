@@ -520,8 +520,9 @@ def test_pooled_sums_reproduce_the_sink(consumer: Any, tmp_path: Path) -> None:
     that is wrong everywhere it matters.
     """
     for setting, sink in (("NK", _nk_sink()), ("PK", _pk_sink())):
-        _assert_pooled(consumer, _write(tmp_path / setting, sink, setting=setting), sink,
-                       setting=setting)
+        _assert_pooled(
+            consumer, _write(tmp_path / setting, sink, setting=setting), sink, setting=setting
+        )
 
 
 def test_every_semantic_key_is_stamped(consumer: Any, tmp_path: Path) -> None:
@@ -647,9 +648,7 @@ def test_refuses_a_non_positive_n_gt(consumer: Any, tmp_path: Path) -> None:
         consumer.load_setting_grid(path, meta, variant="weighted", result_id="r")
 
 
-def test_refuses_a_grid_that_disagrees_with_its_own_th_step(
-    consumer: Any, tmp_path: Path
-) -> None:
+def test_refuses_a_grid_that_disagrees_with_its_own_th_step(consumer: Any, tmp_path: Path) -> None:
     """The two facts that should confirm each other must confirm each other."""
     path = _restamp(_write(tmp_path, _nk_sink()), {"th_step": repr(0.2)})
     meta = consumer.read_grid_metadata(path, "NK", result_id="r")
@@ -657,9 +656,7 @@ def test_refuses_a_grid_that_disagrees_with_its_own_th_step(
         consumer.load_setting_grid(path, meta, variant="weighted", result_id="r")
 
 
-def test_refuses_a_float32_grid_as_an_incomparable_frame(
-    consumer: Any, tmp_path: Path
-) -> None:
+def test_refuses_a_float32_grid_as_an_incomparable_frame(consumer: Any, tmp_path: Path) -> None:
     """A grid stored narrow passes its own file's gate and fails against a raw one.
 
     The two checks disagree about what "the same grid" means. Inside one file,
@@ -914,20 +911,35 @@ def test_alignment_gate_is_a_refusal_not_a_guess() -> None:
     from protea.core.operations._run_cafa_grid_artifact import _grid_accessions
 
     full = _record(
-        BP, "unweighted", _block(_UNWEIGHTED_TP, 3), _block(_UNWEIGHTED_PRED, 3),
-        np.array(_UNWEIGHTED_GT), ids=IDS, row_index=np.arange(3),
+        BP,
+        "unweighted",
+        _block(_UNWEIGHTED_TP, 3),
+        _block(_UNWEIGHTED_PRED, 3),
+        np.array(_UNWEIGHTED_GT),
+        ids=IDS,
+        row_index=np.arange(3),
     )
     assert _grid_accessions(full) == ["P00001", "P00002", "P00003"]
     narrowed = _record(
-        BP, "unweighted", _block(_UNWEIGHTED_TP, 3)[:2], _block(_UNWEIGHTED_PRED, 3)[:2],
-        np.array([2, 1]), ids=IDS, row_index=np.arange(2),
+        BP,
+        "unweighted",
+        _block(_UNWEIGHTED_TP, 3)[:2],
+        _block(_UNWEIGHTED_PRED, 3)[:2],
+        np.array([2, 1]),
+        ids=IDS,
+        row_index=np.arange(2),
     )
     with pytest.raises(SinkAlignmentError, match="flatnonzero"):
         _grid_accessions(narrowed)
     # The PK shape carries the mask, and flatnonzero is the real mapping.
     pk = _record(
-        BP, "unweighted", _block(_UNWEIGHTED_TP, 3)[:2], _block(_UNWEIGHTED_PRED, 3)[:2],
-        np.array([2, 1]), ids=IDS, row_index=np.array([0, 2]),
+        BP,
+        "unweighted",
+        _block(_UNWEIGHTED_TP, 3)[:2],
+        _block(_UNWEIGHTED_PRED, 3)[:2],
+        np.array([2, 1]),
+        ids=IDS,
+        row_index=np.array([0, 2]),
         protein_rows=np.array([True, True]),
     )
     assert _grid_accessions(pk) == ["P00001", "P00003"]
@@ -939,18 +951,10 @@ def test_alignment_gate_is_a_refusal_not_a_guess() -> None:
 
 
 def _context(root: Path) -> Any:
-    from protea.core.evaluation import EvaluationData
     from protea.core.operations._run_cafa_eval_driver import CafaEvalRunContext
 
     return CafaEvalRunContext(
-        pred_set_id=uuid.uuid4(),
-        delta_proteins=set(),
-        max_distance=None,
         artifacts_root=root,
-        has_rerankers=False,
-        reranker_models={},
-        scoring_config_snapshot=None,
-        data=EvaluationData(),
         obo_path="go.obo",
         nk_path="nk.tsv",
         lk_path="lk.tsv",
@@ -1023,13 +1027,18 @@ def test_the_legacy_file_still_holds_exactly_what_it_held(tmp_path: Path) -> Non
     from protea.core.operations._run_cafa_eval_driver import _persist_per_protein
 
     _, emit = _events()
-    _persist_per_protein(
-        _context(tmp_path), "NK", _nk_sink(), {"BPO": {"tau": 0.25}}, emit
-    )
+    _persist_per_protein(_context(tmp_path), "NK", _nk_sink(), {"BPO": {"tau": 0.25}}, emit)
     frame = pd.read_parquet(tmp_path / "NK" / "per_protein.parquet")
     assert list(frame.columns) == [
-        "protein_accession", "namespace", "tau",
-        "tp_w", "pred_w", "n_gt_w", "precision_w", "recall_w", "f_w",
+        "protein_accession",
+        "namespace",
+        "tau",
+        "tp_w",
+        "pred_w",
+        "n_gt_w",
+        "precision_w",
+        "recall_w",
+        "f_w",
     ]
     assert frame["protein_accession"].tolist() == ["P00001", "P00002", "P00003"]
     assert frame["tau"].tolist() == [0.25, 0.25, 0.25]
@@ -1183,10 +1192,18 @@ def _real_run(root: Path, ia: dict[str, float], known: str | None = None) -> tup
     )
 
     dfs = cafaeval.cafa_eval(
-        paths["obo"], paths["pred_dir"], paths["gt"], ia=paths["ia"],
+        paths["obo"],
+        paths["pred_dir"],
+        paths["gt"],
+        ia=paths["ia"],
         exclude=paths.get("known"),
-        prop=CAFAEVAL_PROP, norm=CAFAEVAL_NORM, no_orphans=CAFAEVAL_NO_ORPHANS,
-        toi_file=paths["toi"], max_terms=None, th_step=0.25, n_cpu=1,
+        prop=CAFAEVAL_PROP,
+        norm=CAFAEVAL_NORM,
+        no_orphans=CAFAEVAL_NO_ORPHANS,
+        toi_file=paths["toi"],
+        max_terms=None,
+        th_step=0.25,
+        n_cpu=1,
         per_protein_sink=sink,
     )
     return sink, (dfs[0] if isinstance(dfs, tuple) else dfs)
@@ -1207,7 +1224,10 @@ def test_end_to_end_through_the_real_kernel(consumer: Any, tmp_path: Path) -> No
     """
     from protea.core.operations._run_cafa_eval_driver import _persist_per_protein_grid
 
-    sink = _real_sink(tmp_path / "inputs", {g: v for (g, _), v in zip(_OBO_TERMS, [0.5, 1.0, 2.0, 3.5], strict=True)})
+    sink = _real_sink(
+        tmp_path / "inputs",
+        {g: v for (g, _), v in zip(_OBO_TERMS, [0.5, 1.0, 2.0, 3.5], strict=True)},
+    )
     artifacts = tmp_path / "artifacts"
     _, emit = _events()
     ctx = _context(artifacts)
@@ -1266,9 +1286,7 @@ def _published_curve(df: Any, namespace: str, column: str) -> list[float]:
     return [float(v) for v in rows[column]]
 
 
-def test_the_file_reproduces_the_number_cafaeval_published(
-    consumer: Any, tmp_path: Path
-) -> None:
+def test_the_file_reproduces_the_number_cafaeval_published(consumer: Any, tmp_path: Path) -> None:
     """The round trip that matters: a number out of the FILE against the frame.
 
     Everything else compares this producer to itself. ``test_pooled_sums...``
@@ -1333,9 +1351,7 @@ def test_pk_with_an_excluded_protein_that_predicts_is_refused_not_biased(
     wrong. What changed is which sum the frame publishes.
     """
     ia = {g: v for (g, _), v in zip(_OBO_TERMS, [0.5, 1.0, 2.0, 3.5], strict=True)}
-    sink, df = _real_run(
-        tmp_path / "inputs", ia, known="P3\tGO:0000002\nP3\tGO:0000001\n"
-    )
+    sink, df = _real_run(tmp_path / "inputs", ia, known="P3\tGO:0000002\nP3\tGO:0000001\n")
     weighted = next(r for r in sink.records if r["variant"] == "weighted")
     keep = np.asarray(weighted["n_gt"], dtype=np.float64) > 0.0
     full = weighted["pred_at_tau"].sum(axis=0)

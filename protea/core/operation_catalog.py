@@ -35,9 +35,6 @@ from protea.core.operations.audit_evaluation_frames import (
 from protea.core.operations.audit_per_protein_artifacts import (
     AuditPerProteinArtifactsOperation,
 )
-from protea.core.operations.batch_rescore_evaluation import (
-    BatchRescoreEvaluationOperation,
-)
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrenceOperation
 from protea.core.operations.compare_paired_panels import (
     ComparePairedPanelsOperation,
@@ -424,7 +421,6 @@ _METHOD: tuple[_Row, ...] = (
 #: Evaluation: one evaluator for every family (ADR-D60, decision 5).
 _EVALUATION: tuple[_Row, ...] = (
     (RunCafaEvaluationOperation, _EVALUATED),
-    (BatchRescoreEvaluationOperation, _EVALUATED),
     (StratifyEvaluationOperation, _EVALUATED),
     (ComparePairedPanelsOperation, _EVALUATED),
     (SealEvaluationFramesOperation, _EVALUATED),

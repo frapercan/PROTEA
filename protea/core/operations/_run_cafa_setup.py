@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from sqlalchemy.orm import Session
 
@@ -26,7 +26,6 @@ from protea.infrastructure.orm.models.annotation.evaluation_set import Evaluatio
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
-from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.storage import ArtifactStore
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -74,8 +73,6 @@ class _PipelineCtx(NamedTuple):
     """Bundle of run-pipeline inputs threaded through the tempdir block."""
 
     inputs: _EvalInputs
-    scoring_snapshot: ScoringConfig | None
-    reranker_models: dict[str, Any]
     result_id: uuid.UUID
     artifact_store: ArtifactStore
 
@@ -201,7 +198,7 @@ class StagedInputs(NamedTuple):
 
     It had no name, so the function that consumes it took eleven arguments and
     the size guard was right to object: a parameter list that long is usually a
-    missing noun. These seven values are exactly what staging writes or resolves,
+    missing noun. These four values are exactly what staging writes or resolves,
     and nothing else in the pipeline produces them.
     """
 
@@ -209,9 +206,6 @@ class StagedInputs(NamedTuple):
     ia_path: str | None
     gt_paths: dict[str, str]
     toi_path: str
-    data: Any
-    delta_proteins: set[str]
-    has_rerankers: bool
 
 
 def bundle_run_context(
@@ -231,16 +225,7 @@ def bundle_run_context(
     """
     inputs = ctx.inputs
     return CafaEvalRunContext(
-        pred_set_id=inputs.pred_set_id,
-        delta_proteins=staged.delta_proteins,
-        max_distance=p.max_distance,
-        max_k_position=p.max_k_position,
-        max_sequence_rank=p.max_sequence_rank,
         artifacts_root=artifacts_root,
-        has_rerankers=staged.has_rerankers,
-        reranker_models=ctx.reranker_models,
-        scoring_config_snapshot=ctx.scoring_snapshot,
-        data=staged.data,
         obo_path=staged.obo_path,
         nk_path=staged.gt_paths["nk"],
         lk_path=staged.gt_paths["lk"],
@@ -255,9 +240,4 @@ def bundle_run_context(
         th_step=p.th_step,
         score_reading=p.score_reading,
         max_terms=p.max_terms,
-        softprop=p.softprop,
-        interpro_graft=p.interpro_graft,
-        interpro_protein2ipr_file=p.interpro_protein2ipr_file,
-        interpro_ipr2go_file=p.interpro_ipr2go_file,
-        interpro_graft_weight=p.interpro_graft_weight,
     )

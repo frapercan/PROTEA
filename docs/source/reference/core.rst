@@ -308,9 +308,9 @@ the prediction transfers from, followed down ``is_a`` and ``part_of`` of the
 prediction set's ontology. PROTEA's k-nearest-neighbour transfer and its
 InterPro mirror apply it when they predict, as their last step before writing,
 and record it: in the receipt's ``denials`` field, and for the mirror also in
-the prediction set's ``meta``. Until the evaluator is reduced to scoring what a
-method stored, it applies the same policy to every set it scores, so a set
-written before its method honoured denials is scored as before.
+the prediction set's ``meta``. The evaluator applies no policy of its own: it
+scores what a method stored, so a set written before its method honoured
+denials is scored as it was stored.
 
 .. automodule:: protea.core.denials
    :members:
@@ -845,15 +845,16 @@ not part of the public API.
   in-process execution path used when a single worker handles both KNN
   and write phases.
 - ``protea.core.operations._run_cafa_artifacts``: artifact download and
-  staging helpers for ``run_cafa_evaluation``.
+  staging helpers for ``run_cafa_evaluation``, and the writer of the
+  prediction file: a set's stored scores, as stored.
+- ``protea.core.operations._candidate_scoring``: the arithmetic that turns a
+  candidate's evidence into a score, applied by ``score_prediction_set``.
 - ``protea.core.operations._run_cafa_data_helpers``: data-loading helpers
   for the CAFA evaluation pipeline.
 - ``protea.core.operations._run_cafa_eval_driver``: driver that calls
   ``cafaeval.cafa_eval`` and collects per-namespace results.
 - ``protea.core.operations._run_cafa_helpers``: shared helper functions
   used across the ``_run_cafa_*`` modules.
-- ``protea.core.operations._run_cafa_reranker_loader``: loads and applies
-  the reranker model to CAFA prediction TSVs.
 - ``protea.core.operations._run_cafa_setup``: environment and directory
   setup for a CAFA evaluation run.
 - ``protea.core.operations._run_cafa_summary``: summarises cafaeval
@@ -1103,11 +1104,6 @@ not part of the public API.
    :show-inheritance:
 
 .. automodule:: protea.core.operations._run_cafa_helpers
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: protea.core.operations._run_cafa_reranker_loader
    :members:
    :undoc-members:
    :show-inheritance:

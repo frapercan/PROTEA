@@ -158,11 +158,6 @@ against the live feature schema.
         "payload": {
           "evaluation_set_id": "<lafa-gt-eval-set-uuid>",
           "prediction_set_id": "<new-native-prediction-set-uuid>",
-          "rerankers": {
-            "nk": {"bpo": "<nk-bpo-model>", "mfo": "<nk-mfo-model>", "cco": "<nk-cco-model>"},
-            "lk": {"bpo": "<lk-bpo-model>", "mfo": "<lk-mfo-model>", "cco": "<lk-cco-model>"},
-            "pk": {"bpo": "<pk-bpo-model>", "mfo": "<pk-mfo-model>", "cco": "<pk-cco-model>"}
-          },
           "ia_file": "<t0-IA.tsv-path>",
           "toi_file": "<lafa-groundtruth_terms_of_interest.txt-path>",
           "th_step": 0.01,
@@ -172,6 +167,10 @@ against the live feature schema.
           "leakage_role": "test"
         }
       }
+
+   The rerankers are the prediction set's own, bound in step 2, and their
+   scores are stored on its rows: the evaluator scores what a method stored
+   and takes no reranker since 2026-11-20 (:doc:`/architecture/scoring`).
 
    ``frame: "lafa"`` is what surfaces the LAFA chip and makes the row
    leaderboard-comparable on ``/benchmark``. Leaving it empty (the

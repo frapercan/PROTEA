@@ -1,11 +1,13 @@
 """A candidate set is scored once, by its method, and the evaluator reads the scores.
 
 ``score_prediction_set`` turns a transfer method's candidates into predictions
-with the same code the evaluator used to apply when it scored: the nearest row
-per term, the depth cut and its recount, the bank's denials, and the
-ScoringConfig's arithmetic. These pin, against Postgres, that the scored set's
-prediction file is byte for byte the file the evaluator writes from the
-candidates, with and without a cut and under two configurations; that the chunk
+with the code the evaluator applied when it still scored: the nearest row per
+term, the depth cut and its recount, the bank's denials, and the
+ScoringConfig's arithmetic. That the two agreed byte for byte was checked while
+both existed, here and on the development store
+(``docs/source/_data/scored-set-parity-development-store.json``). These pin,
+against Postgres, the prediction file the evaluator writes from a scored set,
+value by value, under two configurations with and without a cut; that the chunk
 size moves nothing; what the scored set records; and what is refused.
 """
 
@@ -21,7 +23,6 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from protea.core.method_seal import EXECUTION_ONLY_FIELDS, METHOD_IDENTITY_FIELDS
-from protea.core.operations import _method_score_predictions, _pred_base_cache
 from protea.core.operations import _run_cafa_artifacts as artifacts
 from protea.core.operations.predict_go_terms._receipt import run_receipt
 from protea.core.operations.score_prediction_set import (
@@ -58,8 +59,7 @@ def _noop_emit(*_args: Any, **_kwargs: Any) -> None:
 
 
 @pytest.fixture()
-def pg(postgres_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
-    monkeypatch.setattr(_pred_base_cache, "_PRED_CACHE_DIR", tmp_path / "pred_cache")
+def pg(postgres_url: str) -> Any:
     engine = create_engine(postgres_url, future=True)
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
@@ -156,39 +156,67 @@ def _score(session: Session, source: uuid.UUID, config: ScoringConfig, **over: A
     return uuid.UUID(result.result["prediction_set_id"])
 
 
-def _ctx(set_id: uuid.UUID, path: Path, cut: int | None = None) -> Any:
-    return artifacts.WritePredictionsContext(
-        pred_set_id=set_id,
-        delta_proteins=set(_PROTEINS),
-        max_distance=None,
-        path=str(path),
-        max_k_position=cut,
+def _file(session: Session, set_id: uuid.UUID, path: Path) -> list[str]:
+    """The prediction file the evaluator writes from a set, as lines."""
+    artifacts.write_predictions(
+        session,
+        artifacts.WritePredictionsContext(
+            pred_set_id=set_id, delta_proteins=set(_PROTEINS), path=str(path)
+        ),
     )
+    return path.read_text().splitlines()
+
+
+def _lines(scores: dict[tuple[str, int], str]) -> list[str]:
+    return [f"{protein}\t{_GO[term]}\t{score}" for (protein, term), score in sorted(scores.items())]
+
+
+#: What each (configuration, cut) has to come to, worked by hand from the seed.
+#: Q1's CHILD is gone in every case: the bank denies Q1 its parent. A cut at 2
+#: leaves out Q2's T4, retrieved at depth 3, and recounts the vote fraction as
+#: voters within the depth over the depth: Q1's T3 had voters at 1 and 2, Q2's
+#: T3 at 1 and 3, the others one voter each.
+_EXPECTED: dict[tuple[str, int | None], dict[tuple[str, int], str]] = {
+    ("embedding_only", None): {
+        ("Q1", _T3): "0.9000",
+        ("Q1", _T4): "0.7000",
+        ("Q2", _T3): "0.9500",
+        ("Q2", _T4): "0.5500",
+        ("Q3", _T4): "0.8500",
+    },
+    ("embedding_only", 2): {
+        ("Q1", _T3): "0.9000",
+        ("Q1", _T4): "0.7000",
+        ("Q2", _T3): "0.9500",
+        ("Q3", _T4): "0.8500",
+    },
+    ("vote_fraction", None): {
+        ("Q1", _T3): "1.0000",
+        ("Q1", _T4): "0.5000",
+        ("Q2", _T3): "1.0000",
+        ("Q2", _T4): "0.3333",
+        ("Q3", _T4): "1.0000",
+    },
+    ("vote_fraction", 2): {
+        ("Q1", _T3): "1.0000",
+        ("Q1", _T4): "0.5000",
+        ("Q2", _T3): "0.5000",
+        ("Q3", _T4): "0.5000",
+    },
+}
 
 
 @pytest.mark.integration
-class TestTheScoredSetIsTheEvaluatorsReading:
+class TestTheEvaluatorReadsTheScoredSet:
     @pytest.mark.parametrize("config_name", ["embedding_only", "vote_fraction"])
     @pytest.mark.parametrize("cut", [None, 2], ids=["whole", "cut_at_2"])
-    def test_the_prediction_file_is_the_same_byte_for_byte(
+    def test_the_prediction_file_holds_the_worked_scores(
         self, pg: Session, tmp_path: Path, config_name: str, cut: int | None
     ) -> None:
         seeded = _seed(pg)
-        config = seeded["configs"][config_name]
-        scored = _score(pg, seeded["source"], config, max_k_position=cut)
-
-        before = tmp_path / "evaluator.tsv"
-        artifacts.write_predictions(pg, _ctx(seeded["source"], before, cut), scoring_config=config)
-        after = tmp_path / "scored.tsv"
-        _method_score_predictions.write_method_predictions(pg, _ctx(scored, after))
-
-        assert before.read_text() == after.read_text()
-        lines = after.read_text().splitlines()
-        assert lines, "the comparison has to be over something"
-        # The bank denies Q1 the parent, so it denies the child.
-        assert not [line for line in lines if line.startswith(f"Q1\t{_GO[_CHILD]}\t")]
-        # The cut at 2 leaves out Q2's candidate at depth 3, and only it.
-        assert any(line.startswith(f"Q2\t{_GO[_T4]}\t") for line in lines) is (cut is None)
+        scored = _score(pg, seeded["source"], seeded["configs"][config_name], max_k_position=cut)
+        lines = _file(pg, scored, tmp_path / "scored.tsv")
+        assert lines == _lines(_EXPECTED[(config_name, cut)])
 
     def test_the_chunk_size_moves_nothing(self, pg: Session) -> None:
         seeded = _seed(pg)
