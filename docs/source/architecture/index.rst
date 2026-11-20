@@ -35,6 +35,10 @@ concern and links to the others where they intersect.
    The benchmark's ground truth, built the way LAFA builds its own windows:
    where each rule comes from, the one departure, and the known flaws.
 
+:doc:`benchmark`
+   The four windows methods are compared on, their information accretion, how
+   a method is scored on them, and the held-out test.
+
 :doc:`orchestration`
    How PROTEA relates to the rest of the working tree: the satellite
    repositories, the optional ``agent-farm`` orchestration system, and
@@ -100,6 +104,7 @@ The full ADR index lives at :doc:`/adr/index`.
    operations
    evaluation
    lafa-frame
+   benchmark
    orchestration
    auth
    export-coordinator
