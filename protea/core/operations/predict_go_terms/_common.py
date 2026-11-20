@@ -263,6 +263,14 @@ def _row_from_prediction(
     for key in _LAFA_TYPED_FEATURE_KEYS:
         row[key] = _clean_float(pred.get(key))
     row[_IA_COLUMN] = _clean_float(pred.get(_IA_PRED_KEY))
+    # The method's own score, when a reranker scored the candidates as they
+    # were predicted (with the InterPro graft on top of it, when that is on).
+    # It used to be computed here and dropped: no column took it, so a run
+    # that named a reranker stored the same rows as a run that did not. The
+    # evaluator reads method_score and nothing else as the score (closure,
+    # step 4). NULL when no reranker ran: the set holds candidates, and
+    # score_prediction_set scores them.
+    row["method_score"] = _clean_float(pred.get("reranker_score"))
     # T3.1 dual-write: mirror the prediction tuple (go_term_id, score,
     # evidence) into the ``predictions_jsonb`` blob. Gated by
     # ``PROTEA_GO_PREDICTION_JSONB_WRITE_ENABLED``; when the flag is

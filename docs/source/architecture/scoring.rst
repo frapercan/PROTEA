@@ -56,6 +56,18 @@ distance, as a neighbour transfer's candidates all do. The ``method_score``
 formula is refused, since it returns a score candidates do not have, and so is
 a set that already carries its own scores.
 
+When a reranker scores the candidates
+-------------------------------------
+
+The nearest-neighbour method can score its candidates with a reranker while it
+predicts, with one booster for every candidate or one per knowledge category.
+The reranker's score is then the method's score, stored as each row's
+``method_score``, so that set holds scores already and ``score_prediction_set``
+refuses it. The InterPro BP graft, a deploy setting
+(``serve.interpro_bp_graft``), combines InterPro's evidence with that score as
+the method predicts, and only then, and the prediction set's record says so
+(``interpro_bp_graft``).
+
 What a scored set records
 -------------------------
 

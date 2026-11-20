@@ -98,4 +98,23 @@ def run_receipt(p: PredictGOTermsPayload, job_id: UUID) -> dict[str, Any]:
     }
     if rerankers:
         receipt["rerankers"] = rerankers
+        graft = _interpro_bp_graft()
+        if graft is not None:
+            receipt["interpro_bp_graft"] = graft
     return receipt
+
+
+def _interpro_bp_graft() -> dict[str, Any] | None:
+    """The InterPro BP graft as the deploy sets it, or None when it is off.
+
+    A deploy setting (``serve.interpro_bp_graft``), not a payload field, and it
+    changes the stored set: it rescores the reranker's BP candidates and adds
+    InterPro's own. Recorded only beside a reranker, the only score it grafts
+    onto.
+    """
+    from protea.config.tuning import get_tuning
+
+    serve = get_tuning().serve
+    if not serve.interpro_bp_graft:
+        return None
+    return {"weight": serve.interpro_bp_graft_weight}

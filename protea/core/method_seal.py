@@ -152,6 +152,9 @@ _IDENTITY_META: tuple[str, ...] = (
     "expand_votes_to_ancestors",
     "faiss",
     "features",
+    # The InterPro BP graft on top of the reranker's scores: it rescores BP
+    # candidates and adds InterPro's own, so it changes the stored set.
+    "interpro_bp_graft",
     "metric",
     "rerankers",
     # How a scored set's candidates became scores: the arithmetic, the depth

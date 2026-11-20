@@ -391,9 +391,9 @@ class RerankerScorer:
         that exception into ``Job.status=failed`` with
         ``Job.error_code='SchemaShaMismatchError'`` (FARM-EXP.5).
 
-        On success ``reranker_score`` lands on every prediction dict
-        in memory (not persisted) and the method returns per-batch
-        summary stats.
+        On success ``reranker_score`` lands on every prediction dict, the
+        writer stores it as the row's ``method_score``, and the method
+        returns per-batch summary stats.
         """
         if not (p.reranker_artifact_uri and p.reranker_feature_schema_sha):
             emit(
