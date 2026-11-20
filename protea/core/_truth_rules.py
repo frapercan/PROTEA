@@ -88,6 +88,23 @@ GAIN_RULES: tuple[str, ...] = ("pivot_terms", "live_in_both_ends", "both_ends_tr
 #: The gain rules the reconciled path builds; it refuses the third.
 RECONCILED_GAIN_RULES: tuple[str, ...] = GAIN_RULES[:2]
 
+#: The terms a window is scored over, by its gain rule: the terms its truth
+#: could hold, and no others. A gain that may hold anything the pivot names is
+#: scored over the pivot's terms; a gain restricted to the terms live at both
+#: ends, and LAFA's, trimmed to them, over those, which is the set LAFA scores
+#: with and its frame trims to.
+#:
+#: The evaluator reads this and not the request, so the results of one window
+#: are measured over one set of terms (decided on 2026-11-20). Until then a
+#: request named the rule and defaulted to ``pivot_terms``: every result on the
+#: development store, the frame's included, was scored over the pivot's 47,328
+#: terms, obsolete ones too, where the frame trims to 39,028 on 211 -> 227.
+SCORED_TERMS: dict[str, str] = {
+    "pivot_terms": "pivot_terms",
+    "live_in_both_ends": "live_in_both_ends",
+    "both_ends_trimmed": "live_in_both_ends",
+}
+
 #: Which NOT annotations may take truth away, by the name a payload asks for
 #: it with.
 #:

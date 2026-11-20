@@ -82,8 +82,10 @@ the depth; the scored set is what is evaluated.
 PROTEA's evaluator, ``cafaeval-protea``, runs ``cafaeval`` with LAFA's flags
 (``-prop fill -norm cafa -no_orphans``, a threshold step of 0.01, and
 ``-known`` with PK's known terms for PK), at the window's pivot, which for this
-frame is the start's ontology. Three settings are the benchmark's and have to
-be named:
+frame is the start's ontology. Two settings are the benchmark's and have to be
+named. The terms of interest are not one of them: they are the window's, the
+terms live in both ontologies that its truth was trimmed to, and the evaluator
+takes them from it (:doc:`lafa-frame`).
 
 .. code-block:: json
 
@@ -94,15 +96,12 @@ be named:
        "evaluation_set_id": "<the window>",
        "prediction_set_id": "<the method's predictions>",
        "information_accretion_set_id": "<the table over the window's start>",
-       "toi_rule": "live_in_both_ends",
        "restrict_gt_to_predicted": false
      }
    }
 
 - ``information_accretion_set_id``: the table above, the one over the
   window's start with the regime ``lafa`` and the cohort ``swissprot``.
-- ``toi_rule``: ``live_in_both_ends``, the terms live in both ontologies,
-  which are the terms the window's truth was trimmed to.
 - ``restrict_gt_to_predicted``: ``false``. LAFA scores every target, whether
   the method predicted it or not; the evaluator's default drops the targets a
   method left out, which measures a different quantity.

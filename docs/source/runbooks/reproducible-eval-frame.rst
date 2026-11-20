@@ -76,13 +76,14 @@ cross-band contamination at runtime and in CI):
   passed as ``ia_file`` on ``run_cafa_evaluation`` (or resolved from the
   snapshot ``ia_url``). It must be the t0 IA for the band; the band
   registry refuses the uniform IC=1 fallback for a band-declared cell.
-- **TOI.** The terms-of-interest file restricting which terms count
-  toward precision and recall, passed as ``toi_file``. LAFA passes a
-  release-specific ``groundtruth_terms_of_interest.txt`` (a strict subset
-  of the full ontology and a strict superset of the GT term union). For
-  strict parity pass that exact file; otherwise PROTEA derives the TOI
-  from the pivot snapshot (a small, MFO-biased residual, documented in
-  ``docs/EVAL_LAFA_PARITY.md``).
+- **TOI.** The terms of interest restricting which terms count toward
+  precision and recall. They are the window's: the evaluator derives them
+  by the rule its gain rule names and records the rule, the count and the
+  file's sha256 on the result; a request has not named them since
+  2026-11-20 (``toi_file`` and ``toi_rule`` are refused). LAFA passes a
+  release-specific ``groundtruth_terms_of_interest.txt``; a window of
+  LAFA's frame derives the same terms, the ids live in both ontologies
+  (:doc:`/architecture/lafa-frame`).
 
 Step 1: generate the evaluation set (job-backed, cross-OBO)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -129,7 +130,6 @@ Dispatch ``run_cafa_evaluation`` against the eval set and the dense-KNN
        "evaluation_set_id": "<eval-set-uuid-from-step-1>",
        "prediction_set_id": "<dense-knn-prediction-set-uuid>",
        "ia_file": "<t0-IA.tsv-path>",
-       "toi_file": "<lafa-groundtruth_terms_of_interest.txt-path>",
        "th_step": 0.01,
        "max_terms": null,
        "band": "v227",
