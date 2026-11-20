@@ -9,7 +9,7 @@ PROTEA stack
    ``scripts/sync_stack.py``. Edit the registry and run the script; do not
    edit this block by hand.
 
-The registry lists 8 repositories: this platform, its contract package
+The registry lists 10 repositories: this platform, its contract package
 and plugins, and the tools, libraries and models around it. The platform
 repository hosts the orchestration, ORM, queue and HTTP surface.
 
@@ -53,6 +53,14 @@ repository hosts the orchestration, ORM, queue and HTTP surface.
      - Evaluator
      - ``active``
      - Standalone fork of cafaeval (CAFA-evaluator-PK) with the PK-coverage fix and a bit-exact parity guarantee against the upstream.
+   * - `differentiable-alignment <https://github.com/frapercan/differentiable-alignment>`_
+     - Library
+     - ``active``
+     - Sequence alignment on the GPU with a gradient. Batched Needleman-Wunsch and Smith-Waterman, exact or smoothed, multi-hit alignment against profiles, and Triton kernels. Used by the laboratory code.
+   * - `protein-function-prediction-semantic-model <https://github.com/frapercan/protein-function-prediction-semantic-model>`_
+     - Semantic model
+     - ``beta``
+     - The semantic model of protein function prediction. Its concepts, the components that implement or document them and the relations between them, in LinkML and SKOS; the glossary and interface labels are generated from it. Version 0 under review.
 
 .. protea-stack:end
 
