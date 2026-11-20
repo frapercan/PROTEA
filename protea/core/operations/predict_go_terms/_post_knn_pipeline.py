@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from sqlalchemy.orm import Session
 
+from protea.core import denials
 from protea.core.contracts.operation import EmitFn
 from protea.core.feature_enricher import KnnEnrichmentContext
 from protea.core.operations.predict_go_terms._common import (
@@ -94,7 +95,31 @@ def run_post_knn_pipeline(
             prediction_dicts,
             emit,
         )
-    return prediction_dicts, reranker_stats
+    return _honour_denials(session, ctx, prediction_dicts, emit), reranker_stats
+
+
+def _honour_denials(
+    session: Session,
+    ctx: _BatchExecCtx,
+    prediction_dicts: list[dict[str, Any]],
+    emit: EmitFn,
+) -> list[dict[str, Any]]:
+    """The last step: drop what the bank denies (:mod:`protea.core.denials`), and say how many.
+
+    Last, after the reranker and the graft, so that no later step can bring a
+    denied term back. The evaluator used to apply this policy to every set it
+    scored; this method now applies it when it predicts, and its receipt says so.
+    """
+    kept, removed = denials.honour_denials(
+        session, ctx.annotation_set_id, uuid.UUID(ctx.p.ontology_snapshot_id), prediction_dicts
+    )
+    emit(
+        "predict_go_terms_batch.denials",
+        None,
+        {"candidates": len(prediction_dicts), "removed": removed},
+        "info",
+    )
+    return kept
 
 
 def _interpro_bp_graft_enabled() -> bool:

@@ -144,6 +144,9 @@ _IDENTITY_META: tuple[str, ...] = (
     "aspect_separated_knn",
     "code_revision",
     "dependency_revisions",
+    # Whether and how the method honoured the bank's denials when it predicted
+    # (protea.core.denials): it changes which candidates exist.
+    "denials",
     "donor_policy",
     "exclude_self_neighbour",
     "expand_votes_to_ancestors",
@@ -252,6 +255,7 @@ _ABSENCE_MEANS: Mapping[str, str] = {
 
 _CLASSIFIED_COLUMNS = frozenset(_IDENTITY_COLUMNS) | frozenset(_EXECUTION_COLUMNS)
 _CLASSIFIED_META = frozenset(_IDENTITY_META) | frozenset(_EXECUTION_META)
+
 
 def _assert_the_lists_partition() -> None:
     """Refuse at import if a field is classified twice.
