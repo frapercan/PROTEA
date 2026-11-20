@@ -795,8 +795,9 @@ class TestListPredictionSets:
         count_query = MagicMock()
         count_query.group_by.return_value.all.return_value = list(count_pairs)
 
-        # First query() call → list_query, second → count_query.
-        session.query.side_effect = [list_query, count_query]
+        # First query() call → list_query, second → count_query, third → the
+        # scored sets' pairs, none here.
+        session.query.side_effect = [list_query, count_query, MagicMock()]
 
     def test_returns_list(self, client, session):
         ps = _make_prediction_set()

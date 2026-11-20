@@ -31,8 +31,9 @@ and for each protein, in this order:
 4. scores each row with a ``ScoringConfig``: a weighted average of evidence
    signals in [0, 1], optionally times the evidence weight and an information
    prior (:mod:`protea.core.operations._candidate_scoring`);
-5. writes one row per (protein, term) into the scored set: the score as
-   ``method_score``, the donor of the nearest row as ``ref_protein_accession``.
+5. writes the scores into the scored set: one ``prediction_score`` row per
+   protein, with its terms, ascending, and their scores. The candidates and
+   their evidence stay in the candidate set.
 
 Proteins are independent at every step, so the scores do not depend on the
 chunk size. A failed run leaves nothing behind: the worker rolls its
@@ -68,6 +69,26 @@ refuses it. The InterPro BP graft, a deploy setting
 (``serve.interpro_bp_graft``), combines InterPro's evidence with that score as
 the method predicts, and only then, and the prediction set's record says so
 (``interpro_bp_graft``).
+
+How the scores are stored
+-------------------------
+
+A scored set holds three things per (protein, term), the protein, the term and
+the score, and nothing else: they are simple transformations of evidence the
+candidate set already stores. So it does not hold ``go_prediction`` rows. On the
+development store a ``go_prediction`` row costs about 593 bytes (2026-11-20:
+24,2 million rows, 7,1 GB of table and 6,6 GB of its eight indexes), most of it
+columns a score leaves empty and indexes a scored set never uses.
+``prediction_score`` holds one row per protein with two aligned arrays, the term
+ids and the scores. Measured on the same store, the 691.226 pairs of one
+nearest-neighbour set scored with ``embedding_only`` take 13,97 MB, 20,2 bytes
+per pair, about 29 times less than that average, and a sweep over several
+configurations and every language model stays small.
+
+The scores are ``double precision``, as a method's own ``method_score`` is, so
+the prediction file the evaluator writes from either form is the same to the
+last digit. One query reads both forms (``_method_score_predictions``): a set
+stores one form or the other, and a set holding both is refused.
 
 What a scored set records
 -------------------------

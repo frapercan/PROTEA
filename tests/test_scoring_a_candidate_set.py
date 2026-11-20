@@ -31,6 +31,7 @@ from protea.core.operations.score_prediction_set import (
 )
 from protea.infrastructure.orm.base import Base
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.embedding.prediction_score import PredictionScore
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from tests.helpers.prediction_sets import make_parents
@@ -223,24 +224,38 @@ class TestTheEvaluatorReadsTheScoredSet:
         config = seeded["configs"]["vote_fraction"]
         one = _score(pg, seeded["source"], config, proteins_per_chunk=1)
         all_at_once = _score(pg, seeded["source"], config, proteins_per_chunk=5_000)
+        assert _stored(pg, one) == _stored(pg, all_at_once)
+        assert sum(len(terms) for _, terms, _ in _stored(pg, one)) == len(_CANDIDATES) - 1
 
-        def rows(set_id: uuid.UUID) -> list[tuple[Any, ...]]:
-            return [
-                tuple(r)
-                for r in pg.execute(
-                    select(
-                        GOPrediction.protein_accession,
-                        GOPrediction.go_term_id,
-                        GOPrediction.ref_protein_accession,
-                        GOPrediction.method_score,
-                    )
-                    .where(GOPrediction.prediction_set_id == set_id)
-                    .order_by(GOPrediction.protein_accession, GOPrediction.go_term_id)
-                )
-            ]
 
-        assert rows(one) == rows(all_at_once)
-        assert len(rows(one)) == len(_CANDIDATES) - 1
+def _stored(session: Session, set_id: uuid.UUID) -> list[tuple[str, list[int], list[float]]]:
+    """A scored set's rows: protein, its terms and their scores."""
+    return [
+        (row.protein_accession, list(row.go_term_ids), list(row.scores))
+        for row in session.execute(
+            select(PredictionScore)
+            .where(PredictionScore.prediction_set_id == set_id)
+            .order_by(PredictionScore.protein_accession)
+        ).scalars()
+    ]
+
+
+@pytest.mark.integration
+class TestTheScoresAreStoredCompactly:
+    def test_one_row_per_protein_with_its_terms_ascending_and_no_candidate_rows(
+        self, pg: Session
+    ) -> None:
+        seeded = _seed(pg)
+        scored = _score(pg, seeded["source"], seeded["configs"]["embedding_only"])
+        assert _stored(pg, scored) == [
+            ("Q1", [_T3, _T4], [0.9, 0.7]),
+            ("Q2", [_T3, _T4], [0.95, 0.55]),
+            ("Q3", [_T4], [0.85]),
+        ]
+        candidate_rows = pg.execute(
+            select(GOPrediction.id).where(GOPrediction.prediction_set_id == scored)
+        ).all()
+        assert candidate_rows == [], "the candidates stay in the candidate set"
 
 
 @pytest.mark.integration
@@ -269,14 +284,6 @@ class TestWhatTheScoredSetRecords:
         assert meta["denials"]["honoured"] is True
         assert meta["denied_removed"] == 1
         assert "embedding_only" in (scored.description or "")
-        donors = dict(
-            pg.execute(
-                select(GOPrediction.protein_accession, GOPrediction.ref_protein_accession)
-                .where(GOPrediction.prediction_set_id == scored.id)
-                .where(GOPrediction.go_term_id == _T3)
-            ).all()
-        )
-        assert donors == {"Q1": "D1", "Q2": "D3"}, "the donor of the nearest row"
 
     def test_every_key_it_writes_over_a_receipt_is_classified(self, pg: Session) -> None:
         receipt = run_receipt(_payload(), uuid.uuid4())
@@ -297,8 +304,17 @@ class TestWhatIsRefused:
         seeded = _seed(pg)
         config = seeded["configs"]["embedding_only"]
         scored = _score(pg, seeded["source"], config)
-        with pytest.raises(ValueError, match="scored already"):
+        with pytest.raises(ValueError, match="is a scored set; its candidates are prediction set"):
             _score(pg, scored, config)
+
+    def test_a_set_that_carries_its_own_scores(self, pg: Session) -> None:
+        seeded = _seed(pg)
+        pg.execute(
+            text("UPDATE go_prediction SET method_score = 0.5 WHERE prediction_set_id = :s"),
+            {"s": seeded["source"]},
+        )
+        with pytest.raises(ValueError, match="scored already"):
+            _score(pg, seeded["source"], seeded["configs"]["embedding_only"])
 
     def test_the_formula_that_returns_a_score_the_candidates_lack(self, pg: Session) -> None:
         seeded = _seed(pg)
