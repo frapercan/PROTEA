@@ -100,3 +100,25 @@ repos:
     github_url: https://github.com/frapercan/cafaeval-protea
     docs_url: https://cafaeval-protea.readthedocs.io/
     package_url: null
+
+  - name: differentiable-alignment
+    slug: differentiable-alignment
+    role: library
+    role_label: Library
+    status: active
+    summary: Sequence alignment on the GPU with a gradient. Batched Needleman-Wunsch and Smith-Waterman, exact or smoothed, multi-hit alignment against profiles, and Triton kernels. Used by the laboratory code.
+    summary_es: Alineamiento de secuencias en GPU con gradiente. Needleman-Wunsch y Smith-Waterman por lotes, exactos o suavizados, alineamiento de varios aciertos contra perfiles y kernels de Triton. Lo usa el código del laboratorio.
+    github_url: https://github.com/frapercan/differentiable-alignment
+    docs_url: null
+    package_url: null
+
+  - name: protein-function-prediction-semantic-model
+    slug: protein-function-prediction-semantic-model
+    role: model
+    role_label: Semantic model
+    status: beta
+    summary: The semantic model of protein function prediction. Its concepts, the components that implement or document them and the relations between them, in LinkML and SKOS; the glossary and interface labels are generated from it. Version 0 under review.
+    summary_es: El modelo semántico de la predicción de la función de proteínas. Sus conceptos, los componentes que los implementan o documentan y las relaciones entre ellos, en LinkML y SKOS; de él se generan el glosario y las etiquetas de la interfaz. Versión 0 en revisión.
+    github_url: https://github.com/frapercan/protein-function-prediction-semantic-model
+    docs_url: null
+    package_url: null
