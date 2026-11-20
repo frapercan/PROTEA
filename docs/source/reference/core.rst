@@ -427,19 +427,6 @@ against an evaluation set.
    :undoc-members:
    :show-inheritance:
 
-Metrics
--------
-
-``protea.core.metrics`` implements CAFA-style precision-recall evaluation.
-Provides functions for computing Fmax (maximum F-measure over all thresholds),
-weighted precision/recall, and coverage for a set of predictions against
-ground-truth annotations.
-
-.. automodule:: protea.core.metrics
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Evidence codes
 --------------
 

@@ -1,17 +1,18 @@
-"""Scoring configuration management and analytical endpoints.
+"""Scoring configurations, the reranker registry and the reranker's training data.
 
-Provides full CRUD for :class:`ScoringConfig` and two read-only analytical
-endpoints that apply a stored config to an existing ``PredictionSet``:
+Provides full CRUD for :class:`ScoringConfig`, the registry of reranker models,
+and the labelled export a reranker is trained on in the laboratory.
 
-``GET /scoring/prediction-sets/{id}/score.tsv``
-    Stream a TSV of scored predictions.  The score column is computed on-the-fly
-    by applying the selected ``ScoringConfig`` formula to the raw signals stored
-    in ``GOPrediction`` rows; no re-running of the KNN pipeline is required.
-
-``GET /scoring/prediction-sets/{id}/metrics``
-    Compute CAFA Fmax / AUC-PR for a (PredictionSet, ScoringConfig, category)
-    triple.  Requires two ``AnnotationSet`` IDs to build the NK/LK ground truth
-    following the CAFA4 protocol.
+Nothing here scores a set or measures one. A set's scores are made by its
+method when it predicts (``score_prediction_set`` applies a ScoringConfig to a
+candidate set and stores the result; a reranker stores its score as the method
+does) and read as stored, by the evaluator and by the CAFA export of
+``/embeddings/prediction-sets/{id}/predictions-cafa.tsv``; its numbers are the
+evaluator's. The endpoints that scored, reranked and measured on the fly
+(``score.tsv``, ``rerank.tsv``, ``score``, ``metrics`` and ``reranker-metrics``)
+were retired on 2026-11-20 with the closure's single path: each was a parallel
+door, and ``metrics`` computed a Fmax of its own, with exact term matching and
+no propagation, that no other number in the platform agreed with.
 
 Evidence weights
 ----------------
@@ -36,33 +37,22 @@ from fastapi.responses import StreamingResponse
 
 from protea.api.deps import get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
-from protea.core.evaluation import EvalContext
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.session import session_scope
 from protea.services.scoring_service import (
-    BoosterUnavailableError,
     EntityNotFoundError,
-    RerankedPairResponse,
     RerankerResponse,
     ScoringConfigCreate,
     ScoringConfigResponse,
-    SignalCoverageError,
-    compute_prediction_metrics,
-    compute_reranker_metrics_data,
     create_preset_configs_data,
     create_scoring_config_data,
     delete_scoring_config_data,
     get_scoring_config_data,
-    iter_reranked_predictions_tsv,
-    iter_scored_predictions,
     iter_training_data,
     list_scoring_configs_data,
     prepare_training_data_request,
-    score_predictions_with_reranker,
-    score_single_pair_with_reranker,
     to_reranker_response,
-    validate_scoring_request,
 )
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
@@ -132,165 +122,6 @@ def delete_scoring_config(
             delete_scoring_config_data(session, config_id)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-# Scored TSV endpoint ----------------------------------------
-
-
-@router.get("/prediction-sets/{set_id}/score.tsv")
-def download_scored_predictions(
-    set_id: uuid.UUID,
-    scoring_config_id: uuid.UUID = Query(
-        ...,
-        description="UUID of the ``ScoringConfig`` whose formula computes the score column.",
-    ),
-    min_score: float | None = Query(
-        None,
-        ge=0.0,
-        le=1.0,
-        description="Optional score threshold in [0, 1]; rows below are omitted.",
-    ),
-    accession: str | None = Query(
-        None,
-        description="Optional protein accession filter; only rows for this protein streamed.",
-    ),
-    factory=Depends(get_session_factory),
-):
-    """Stream a TSV of predictions with computed confidence scores.
-
-    The score is computed on-the-fly for every row using the selected
-    ``ScoringConfig``, including any custom evidence-weight overrides stored
-    in that config.  The session is closed before the generator starts so
-    the response is streamed without holding a DB connection open.
-
-    Query parameters
-    ----------------
-    scoring_config_id:
-        UUID of the ``ScoringConfig`` to apply.
-    min_score:
-        Optional score threshold; rows below this value are omitted.
-    accession:
-        Optional protein accession filter.
-
-    TSV columns
-    -----------
-    protein_accession, go_id, score, distance, ref_protein_accession,
-    evidence_code, qualifier, identity_nw, identity_sw, taxonomic_distance.
-    """
-    try:
-        with session_scope(factory) as session:
-            config_snap = validate_scoring_request(session, set_id, scoring_config_id)
-    except EntityNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except SignalCoverageError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    filename = f"scored_{set_id}_{scoring_config_id}.tsv"
-    return StreamingResponse(
-        iter_scored_predictions(
-            factory,
-            prediction_set_id=set_id,
-            config_snap=config_snap,
-            min_score=min_score,
-            accession=accession,
-        ),
-        media_type="text/tab-separated-values",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-# CAFA metrics endpoint ----------------------------------------
-
-
-def _eval_context_dep(
-    old_annotation_set_id: uuid.UUID = Query(
-        ...,
-        description=(
-            "UUID of the OLD ``AnnotationSet`` (the t0 baseline) used "
-            "to derive NK / LK / PK protein partitions."
-        ),
-    ),
-    new_annotation_set_id: uuid.UUID = Query(
-        ...,
-        description=(
-            "UUID of the NEW ``AnnotationSet`` (the t1 target) used as "
-            "the ground-truth delta in CAFA scoring."
-        ),
-    ),
-    ontology_snapshot_id: uuid.UUID = Query(
-        ...,
-        description=(
-            "UUID of the ``OntologySnapshot`` to use for DAG ancestor "
-            "propagation. Should be aligned with the OLD annotation "
-            "set's snapshot for valid scoring."
-        ),
-    ),
-) -> EvalContext:
-    """FastAPI dependency that bundles the (old, new, snapshot) triple."""
-    return EvalContext(
-        old_annotation_set_id=old_annotation_set_id,
-        new_annotation_set_id=new_annotation_set_id,
-        ontology_snapshot_id=ontology_snapshot_id,
-    )
-
-
-@router.get("/prediction-sets/{set_id}/metrics")
-def compute_metrics(
-    set_id: uuid.UUID,
-    scoring_config_id: uuid.UUID = Query(
-        ...,
-        description=(
-            "UUID of the ``ScoringConfig`` whose formula and evidence "
-            "weights are applied to every prediction before computing "
-            "the curve."
-        ),
-    ),
-    eval_context: EvalContext = Depends(_eval_context_dep),
-    category: str = Query(
-        "nk",
-        pattern="^(nk|lk)$",
-        description=(
-            "CAFA category to score against: ``nk`` (no-knowledge "
-            "proteins, default) or ``lk`` (limited-knowledge)."
-        ),
-    ),
-    factory=Depends(get_session_factory),
-):
-    """Compute CAFA Fmax and AUC-PR for a PredictionSet under a ScoringConfig.
-
-    Ground truth is the NK or LK delta between the old and new annotation sets
-    in ``eval_context``, following the CAFA4 protocol: only experimental
-    evidence codes, NOT-qualifier annotations excluded with full DAG propagation.
-
-    The selected ``ScoringConfig`` (including any custom ``evidence_weights``)
-    is applied to every ``GOPrediction`` row before computing the
-    precision-recall curve.
-
-    Parameters
-    ----------
-    scoring_config_id:
-        Which stored ScoringConfig formula (and evidence weights) to apply.
-    eval_context:
-        Bundled ``(old_annotation_set_id, new_annotation_set_id,
-        ontology_snapshot_id)`` carried through the metrics pipeline. The
-        FastAPI dependency exposes the three fields as discrete query
-        parameters on the wire.
-    category:
-        ``"nk"`` (no-knowledge) or ``"lk"`` (limited-knowledge) protein set.
-    """
-    try:
-        with session_scope(factory) as session:
-            return compute_prediction_metrics(
-                session,
-                prediction_set_id=set_id,
-                scoring_config_id=scoring_config_id,
-                eval_context=eval_context,
-                category=category,
-            )
-    except EntityNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except SignalCoverageError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 # Training data endpoint (re-ranker) ----------------------------------------
@@ -384,118 +215,3 @@ def delete_reranker(reranker_id: uuid.UUID, factory=Depends(get_session_factory)
         if model is None:
             raise HTTPException(status_code=404, detail="RerankerModel not found")
         session.delete(model)
-
-
-@router.get(
-    "/prediction-sets/{set_id}/rerank.tsv",
-    summary="Apply a trained re-ranker to predictions",
-    response_class=StreamingResponse,
-)
-def download_reranked_predictions(
-    set_id: uuid.UUID,
-    reranker_id: uuid.UUID = Query(..., description="UUID of the trained RerankerModel to apply"),
-    min_score: float | None = Query(
-        None, ge=0.0, le=1.0, description="Minimum re-ranker score threshold"
-    ),
-    factory=Depends(get_session_factory),
-) -> StreamingResponse:
-    """Stream predictions re-scored by a trained LightGBM model.
-
-    Each row includes the original prediction data plus a ``reranker_score``
-    column (probability 0–1, higher = more likely correct).  Rows are sorted
-    by descending score within each protein.
-    """
-    try:
-        with session_scope(factory) as session:
-            df = score_predictions_with_reranker(
-                session,
-                prediction_set_id=set_id,
-                reranker_id=reranker_id,
-            )
-    except EntityNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except BoosterUnavailableError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    filename = f"reranked_{set_id}.tsv"
-    return StreamingResponse(
-        iter_reranked_predictions_tsv(df, min_score=min_score),
-        media_type="text/tab-separated-values",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@router.get(
-    "/prediction-sets/{set_id}/score",
-    response_model=RerankedPairResponse,
-    summary="Reranked score for a single (accession, GO term) pair",
-)
-def get_reranked_pair_score(
-    set_id: uuid.UUID,
-    reranker_id: uuid.UUID = Query(..., description="UUID of the trained RerankerModel to apply"),
-    accession: str = Query(..., description="Query protein accession to look up"),
-    go_term: str = Query(..., description="GO term ID (e.g. ``GO:0003674``) to look up"),
-    factory=Depends(get_session_factory),
-) -> RerankedPairResponse:
-    """Return the fused/reranked probability for one prediction pair.
-
-    Backs the ``/score/:accession/:go`` UI page with the same number the
-    bulk ``rerank.tsv`` stream emits for the matching row. Internally
-    reuses :func:`score_predictions_with_reranker` (the exact function
-    behind ``rerank.tsv``) and selects the single row for this pair, so
-    the value is byte-for-byte identical to the bulk output. Returns 404
-    when the set, reranker, or the specific pair does not exist.
-    """
-    try:
-        with session_scope(factory) as session:
-            row = score_single_pair_with_reranker(
-                session,
-                prediction_set_id=set_id,
-                reranker_id=reranker_id,
-                accession=accession,
-                go_term=go_term,
-            )
-    except EntityNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except BoosterUnavailableError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    return RerankedPairResponse(**row)
-
-
-@router.get("/prediction-sets/{set_id}/reranker-metrics")
-def compute_reranker_metrics(
-    set_id: uuid.UUID,
-    reranker_id: uuid.UUID = Query(..., description="UUID of the trained RerankerModel"),
-    evaluation_set_id: uuid.UUID = Query(..., description="UUID of the EvaluationSet"),
-    category: str = Query(
-        "nk",
-        pattern="^(nk|lk|pk)$",
-        description=(
-            "CAFA category to score against: ``nk`` (no-knowledge, "
-            "default), ``lk`` (limited-knowledge), or ``pk`` "
-            "(partial-knowledge)."
-        ),
-    ),
-    factory=Depends(get_session_factory),
-):
-    """Compute CAFA Fmax and AUC-PR using re-ranker scores instead of ScoringConfig.
-
-    Applies the trained LightGBM model to all predictions in the PredictionSet,
-    then evaluates against the temporal ground truth of the EvaluationSet.
-
-    This closes the full re-ranker loop: train → apply → evaluate.
-    """
-    try:
-        with session_scope(factory) as session:
-            return compute_reranker_metrics_data(
-                session,
-                prediction_set_id=set_id,
-                reranker_id=reranker_id,
-                evaluation_set_id=evaluation_set_id,
-                category=category,
-            )
-    except EntityNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except BoosterUnavailableError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -90,6 +90,34 @@ the prediction file the evaluator writes from either form is the same to the
 last digit. One query reads both forms (``_method_score_predictions``): a set
 stores one form or the other, and a set holding both is refused.
 
+One door for scores
+-------------------
+
+A set's scores have one way in and one way out. In: the method that predicts
+(``score_prediction_set`` for a candidate set, a reranker as the method
+predicts, an ingested method's own scores). Out: the reader the evaluator uses
+(``_method_score_predictions``), which also serves the CAFA export
+``GET /embeddings/prediction-sets/{id}/predictions-cafa.tsv``: the same rows,
+the same order, the same four decimals, and for a window the same targets,
+read from the window's own truth.
+
+``score_prediction_set`` refuses a configuration that weights a signal the
+candidates do not carry, such as an alignment score over candidates retrieved
+without alignments, which would otherwise score every row with nothing.
+
+Retired on 2026-11-20 as parallel doors: the API's on-the-fly scoring and
+reranking streams (``score.tsv``, ``rerank.tsv``) and single-pair score, its
+metrics endpoints (``metrics``, ``reranker-metrics``) with ``protea.core.metrics``,
+which computed a Fmax of its own with exact term matching and no propagation,
+and the CAFA export's own arithmetic, ``max(0, 1 - distance)``, which no other
+part of the platform used.
+
+One door is still open, and is a known flaw: the detail page of a prediction
+set in the web interface computes a score in the browser (``computeScore``),
+a copy of the arithmetic that knows five signals and not the neighbour vote
+fraction, so under ``vote_fraction`` it shows 0 on every row. It goes when that
+page reads stored scores.
+
 What a scored set records
 -------------------------
 

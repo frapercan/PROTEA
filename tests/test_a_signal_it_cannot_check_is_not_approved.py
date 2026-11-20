@@ -13,6 +13,10 @@ It is not hypothetical. ``anc2vec_neighbor_cos`` and
 scoring config weights them today (0 of 8), so nothing has been scored wrongly
 yet, and the next config to try one would have been approved.
 
+They are mapped now (2026-11-20), with the rest of the rich signals, because
+``score_prediction_set`` asks this question before it scores; the test keeps
+the rule with a signal no map holds.
+
 The direction matters. Walking the map asks only about signals someone
 remembered to map, so an unmapped one passes by never being asked, which is the
 opposite of a check. Walking the weights asks about everything the config
@@ -51,11 +55,11 @@ class _NeverAsked:
 
 
 def test_a_weighted_signal_with_no_column_is_reported() -> None:
-    config = _Config({"anc2vec_neighbor_cos": 0.4})
+    config = _Config({"a_signal_nobody_mapped": 0.4})
     missing = compute_missing_signals(_NeverAsked(), uuid.uuid4(), config)  # type: ignore[arg-type]
 
     assert len(missing) == 1
-    assert "anc2vec_neighbor_cos" in missing[0]
+    assert "a_signal_nobody_mapped" in missing[0]
     # The message has to say what to do. "missing" alone sends a reader looking
     # for absent data when the data may be there and only the mapping is not.
     assert "_SIGNAL_TO_COLUMN" in missing[0]

@@ -74,6 +74,7 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
     FORMULA_METHOD_SCORE,
     ScoringConfig,
 )
+from protea.services._scoring_validation_helpers import compute_missing_signals
 
 __all__ = ["ScorePredictionSetOperation", "ScorePredictionSetPayload"]
 
@@ -227,6 +228,13 @@ class ScorePredictionSetOperation:
         p = ScorePredictionSetPayload.model_validate(contract_payload(payload))
         source = self._candidate_set(session, p.prediction_set_id)
         config = self._scoring_config(session, p.scoring_config_id)
+        missing = compute_missing_signals(session, source.id, config)
+        if missing:
+            raise ValueError(
+                f"scoring config {config.id} ({config.name!r}) weights signals prediction set "
+                f"{source.id} does not carry: {'; '.join(missing)}. Predict with the matching "
+                "compute_* flag on, or name a configuration over the signals it has."
+            )
         assert_depth_unit_is_available(
             session,
             source.id,

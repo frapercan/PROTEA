@@ -1029,17 +1029,6 @@ export function createPresetScoringConfigs() {
   });
 }
 
-export function getScoredTsvUrl(
-  setId: string,
-  scoringConfigId: string,
-  params?: { minScore?: number },
-): string {
-  const q = new URLSearchParams();
-  q.set("scoring_config_id", scoringConfigId);
-  if (params?.minScore !== undefined) q.set("min_score", String(params.minScore));
-  return `${baseUrl()}/scoring/prediction-sets/${setId}/score.tsv?${q.toString()}`;
-}
-
 // ---------------------------------------------------------------------------
 // Re-ranker
 // ---------------------------------------------------------------------------
@@ -1088,30 +1077,6 @@ export async function deleteReranker(id: string) {
     method: "DELETE",
   }));
   if (!res.ok) throw new Error(await res.text());
-}
-
-export function getRerankedTsvUrl(
-  setId: string,
-  rerankerId: string,
-  params?: { minScore?: number },
-): string {
-  const q = new URLSearchParams();
-  q.set("reranker_id", rerankerId);
-  if (params?.minScore !== undefined) q.set("min_score", String(params.minScore));
-  return `${baseUrl()}/scoring/prediction-sets/${setId}/rerank.tsv?${q.toString()}`;
-}
-
-export function getRerankerMetrics(
-  setId: string,
-  rerankerId: string,
-  evaluationSetId: string,
-  category: string = "nk",
-) {
-  const q = new URLSearchParams();
-  q.set("reranker_id", rerankerId);
-  q.set("evaluation_set_id", evaluationSetId);
-  q.set("category", category);
-  return http<Record<string, any>>(`/scoring/prediction-sets/${setId}/reranker-metrics?${q.toString()}`);
 }
 
 // ---------------------------------------------------------------------------

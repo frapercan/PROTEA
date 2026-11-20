@@ -126,8 +126,13 @@ def method_rows(session: Session, ctx: WritePredictionsContext) -> pa.Table:
         os.unlink(path)
 
 
-def write_method_predictions(session: Session, ctx: WritePredictionsContext) -> int:
-    """Write ``protein\\tgo_id\\tscore`` for a method's set; how many rows went out."""
+def scored_table(session: Session, ctx: WritePredictionsContext) -> pa.Table:
+    """The stored scores of ``ctx``'s proteins, ordered by protein and term, four decimals.
+
+    Columns ``protein_accession``, ``go_id`` and ``score`` (text). The one
+    rendering of a set's scores: the evaluator's prediction file and the CAFA
+    export of the API are both this table.
+    """
     rows = method_rows(session, ctx)
     missing = rows["method_score"].null_count
     if missing:
@@ -140,15 +145,32 @@ def write_method_predictions(session: Session, ctx: WritePredictionsContext) -> 
     )
     rows = rows.take(order)
     scores = np.char.mod("%.4f", rows["method_score"].to_numpy())
-    table = pa.table(
+    return pa.table(
         {
             "protein_accession": rows["protein_accession"],
             "go_id": rows["go_id"],
             "score": pa.array(scores.tolist(), type=pa.string()),
         }
     )
+
+
+def write_method_predictions(session: Session, ctx: WritePredictionsContext) -> int:
+    """Write ``protein\\tgo_id\\tscore`` for a method's set; how many rows went out."""
+    table = scored_table(session, ctx)
     _write_tsv(table, ctx.path)
     return table.num_rows
+
+
+def proteins_of(session: Session, pred_set_id: uuid.UUID) -> set[str]:
+    """Every protein a set stores a score for, in either form."""
+    rows = session.execute(
+        text(
+            "SELECT protein_accession FROM go_prediction WHERE prediction_set_id = :s "
+            "UNION SELECT protein_accession FROM prediction_score WHERE prediction_set_id = :s"
+        ),
+        {"s": pred_set_id},
+    )
+    return {row[0] for row in rows}
 
 
 def _write_tsv(table: Any, path: str) -> None:
@@ -163,4 +185,10 @@ def _write_tsv(table: Any, path: str) -> None:
     )
 
 
-__all__ = ["method_rows", "refuse_unless_scored", "write_method_predictions"]
+__all__ = [
+    "method_rows",
+    "proteins_of",
+    "refuse_unless_scored",
+    "scored_table",
+    "write_method_predictions",
+]

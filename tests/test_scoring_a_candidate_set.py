@@ -133,6 +133,7 @@ def _seed(session: Session, *, source_meta: dict[str, Any] | None = None) -> dic
             ("embedding_only", "linear", {"embedding_similarity": 1.0}),
             ("vote_fraction", "linear", {"neighbor_vote_fraction": 1.0}),
             ("method-score", "method_score", {}),
+            ("alignment_only", "linear", {"identity_nw": 0.6, "identity_sw": 0.4}),
         )
     }
     session.add_all(configs.values())
@@ -320,6 +321,16 @@ class TestWhatIsRefused:
         seeded = _seed(pg)
         with pytest.raises(ValueError, match="a candidate set has none"):
             _score(pg, seeded["source"], seeded["configs"]["method-score"])
+
+    def test_arithmetic_over_signals_the_candidates_do_not_carry(self, pg: Session) -> None:
+        """The seed computes no alignment, so an alignment score would be zero on every
+        row: refused by name, with the signals and their coverage, before anything is
+        written."""
+        seeded = _seed(pg)
+        with pytest.raises(ValueError, match=r"identity_nw \(column 'identity_nw': 0/6 rows\)"):
+            _score(pg, seeded["source"], seeded["configs"]["alignment_only"])
+        written = pg.execute(text("SELECT count(*) FROM prediction_set")).scalar_one()
+        assert written == 1, "only the candidate set"
 
     def test_a_set_that_does_not_exist(self, pg: Session) -> None:
         seeded = _seed(pg)

@@ -13,13 +13,10 @@ import { RegisterRerankerDialog } from "@/components/RegisterRerankerDialog";
 import {
   baseUrl,
   listPredictionSets,
-  listAnnotationSets,
   listRerankers,
   deleteReranker,
-  getRerankedTsvUrl,
-  getRerankerMetrics,
 } from "@/lib/api";
-import type { PredictionSet, AnnotationSet, RerankerModel } from "@/lib/api";
+import type { PredictionSet, RerankerModel } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -43,36 +40,8 @@ const listEvaluationSets = () => apiFetch<EvaluationSet[]>("/annotations/evaluat
 
 function shortId(id: string) { return id.slice(0, 8); }
 
-function predLabel(p: PredictionSet) {
-  const parts: string[] = [];
-  if (p.embedding_config_name) parts.push(p.embedding_config_name);
-  if (p.annotation_set_label) parts.push(p.annotation_set_label);
-  if (p.limit_per_entry != null) parts.push(`k=${p.limit_per_entry}`);
-  if (p.prediction_count != null) parts.push(`${formatCount(p.prediction_count)} preds`);
-  return `${parts.join(" · ")} (${shortId(p.id)}…)`;
-}
-
-function evalLabel(es: EvaluationSet, annotationSets: AnnotationSet[]) {
-  const oldSet = annotationSets.find((a) => a.id === es.old_annotation_set_id);
-  const newSet = annotationSets.find((a) => a.id === es.new_annotation_set_id);
-  const oldVer = oldSet ? `[${oldSet.source.toUpperCase()}] ${oldSet.source_version ?? "?"}` : shortId(es.old_annotation_set_id);
-  const newVer = newSet ? `[${newSet.source.toUpperCase()}] ${newSet.source_version ?? "?"}` : shortId(es.new_annotation_set_id);
-  const delta = es.stats.delta_proteins ?? "?";
-  return `${oldVer} → ${newVer} · ${delta} delta proteins (${shortId(es.id)}…)`;
-}
-
-const selectClass =
-  "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
-const btnPrimary =
-  "rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors";
 const btnDanger =
   "rounded-md bg-red-50 border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors";
-
-const CATEGORY_HINTS: Record<string, string> = {
-  nk: "No Knowledge: proteins with zero GO annotations at t0. Hardest setting, measures pure prediction ability.",
-  lk: "Limited Knowledge: proteins annotated in some GO namespaces but not all at t0. New annotations in previously empty namespaces.",
-  pk: "Partial Knowledge: proteins that already had annotations in a namespace at t0 and gained new ones at t1.",
-};
 
 // ---------------------------------------------------------------------------
 // Feature importance bar chart
@@ -366,46 +335,17 @@ function ProvenancePanel({ model, locale }: { model: RerankerModel; locale: stri
 
 function RerankerCard({
   model,
-  predictionSets,
-  evaluationSets,
-  annotationSets,
   onDelete,
   locale,
   initiallyExpanded = false,
 }: {
   model: RerankerModel;
-  predictionSets: PredictionSet[];
-  evaluationSets: EvaluationSet[];
-  annotationSets: AnnotationSet[];
   onDelete: () => void;
   locale: string;
   initiallyExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(initiallyExpanded);
-  const [metricsLoading, setMetricsLoading] = useState(false);
-  const [metrics, setMetrics] = useState<Record<string, any> | null>(null);
-  const [metricsError, setMetricsError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  // For computing metrics on a different prediction set
-  const [metricsPsId, setMetricsPsId] = useState(model.prediction_set_id ?? "");
-  const [metricsEsId, setMetricsEsId] = useState(model.evaluation_set_id ?? "");
-  const [metricsCategory, setMetricsCategory] = useState(model.category);
-
-  async function handleComputeMetrics() {
-    if (!metricsPsId || !metricsEsId) return;
-    setMetricsLoading(true);
-    setMetricsError(null);
-    setMetrics(null);
-    try {
-      const result = await getRerankerMetrics(metricsPsId, model.id, metricsEsId, metricsCategory);
-      setMetrics(result);
-    } catch (e: any) {
-      setMetricsError(e.message ?? "Failed to compute metrics");
-    } finally {
-      setMetricsLoading(false);
-    }
-  }
 
   async function handleDelete() {
     if (!confirm(`Delete reranker "${model.name}"?`)) return;
@@ -528,91 +468,12 @@ function RerankerCard({
             </details>
           )}
 
-          {/* Download reranked TSV */}
-          {model.prediction_set_id && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Download re-ranked predictions</p>
-              <a
-                href={getRerankedTsvUrl(model.prediction_set_id, model.id)}
-                download={`reranked_${shortId(model.id)}.tsv`}
-                className="inline-flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-              >
-                ↓ Download reranked TSV
-              </a>
-            </div>
-          )}
-
-          {/* Compute CAFA metrics */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Compute CAFA metrics</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
-              <div>
-                <label htmlFor={`rr-metrics-ps-${model.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Prediction set</label>
-                <select
-                  id={`rr-metrics-ps-${model.id}`}
-                  value={metricsPsId}
-                  onChange={(e) => setMetricsPsId(e.target.value)}
-                  className={selectClass}
-                >
-                  <option value="">Select...</option>
-                  {predictionSets.map((ps) => (
-                    <option key={ps.id} value={ps.id}>{predLabel(ps)}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor={`rr-metrics-es-${model.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Evaluation set</label>
-                <select
-                  id={`rr-metrics-es-${model.id}`}
-                  value={metricsEsId}
-                  onChange={(e) => setMetricsEsId(e.target.value)}
-                  className={selectClass}
-                >
-                  <option value="">Select...</option>
-                  {evaluationSets.map((es) => (
-                    <option key={es.id} value={es.id}>{evalLabel(es, annotationSets)}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor={`rr-metrics-cat-${model.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Category</label>
-                <select
-                  id={`rr-metrics-cat-${model.id}`}
-                  value={metricsCategory}
-                  onChange={(e) => setMetricsCategory(e.target.value)}
-                  className={selectClass}
-                >
-                  <option value="nk">NK (No Knowledge)</option>
-                  <option value="lk">LK (Limited Knowledge)</option>
-                  <option value="pk">PK (Partial Knowledge)</option>
-                </select>
-                <p className="text-[10px] text-slate-600 mt-1 leading-snug">{CATEGORY_HINTS[metricsCategory]}</p>
-              </div>
-            </div>
-            <button
-              onClick={handleComputeMetrics}
-              disabled={!metricsPsId || !metricsEsId || metricsLoading}
-              className={btnPrimary}
-            >
-              {metricsLoading ? "Computing... (this may take 30-60s)" : "Compute metrics"}
-            </button>
-            {metricsError && <p className="text-xs text-red-600 mt-2">{metricsError}</p>}
-            {metrics && (
-              <div className="mt-3 rounded-md border bg-slate-50 p-3">
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                  <MetricsBadge label="Fmax" value={metrics.fmax} />
-                  <MetricsBadge label="AUC-PR" value={metrics.auc_pr} />
-                  <MetricsBadge label="Threshold" value={metrics.threshold_at_fmax} />
-                  <MetricsBadge label="GT proteins" value={metrics.n_ground_truth_proteins} />
-                  <MetricsBadge label="Pred. proteins" value={metrics.n_predicted_proteins} />
-                  <MetricsBadge label="Predictions" value={metrics.n_predictions} />
-                </div>
-                {metrics.curve && metrics.curve.length > 0 && (
-                  <p className="text-[10px] text-slate-600 mt-2">{metrics.curve.length} PR curve points computed</p>
-                )}
-              </div>
-            )}
-          </div>
+          <p className="text-xs text-slate-500">
+            A reranker scores a set&apos;s candidates when the method predicts (
+            <code className="font-mono">reranker_model_id</code> of{" "}
+            <code className="font-mono">predict_go_terms</code>), and its score is stored. Its
+            numbers come from the evaluator, run on the set it scored.
+          </p>
 
           {/* Source info */}
           <div className="flex flex-wrap gap-4 text-xs text-slate-600 border-t pt-3">
@@ -643,7 +504,6 @@ export default function RerankerPage() {
   const [rerankers, setRerankers] = useState<RerankerModel[]>([]);
   const [predictionSets, setPredictionSets] = useState<PredictionSet[]>([]);
   const [evaluationSets, setEvaluationSets] = useState<EvaluationSet[]>([]);
-  const [annotationSets, setAnnotationSets] = useState<AnnotationSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Hash anchor (set by the eval/[id] shortcut card) selects which card
@@ -674,16 +534,14 @@ export default function RerankerPage() {
     setLoading(true);
     setError(null);
     try {
-      const [r, ps, es, as_] = await Promise.all([
+      const [r, ps, es] = await Promise.all([
         listRerankers(),
         listPredictionSets(),
         listEvaluationSets(),
-        listAnnotationSets(),
       ]);
       setRerankers(r);
       setPredictionSets(ps);
       setEvaluationSets(es);
-      setAnnotationSets(as_);
     } catch (e: any) {
       setError(e.message ?? "Failed to load data");
     } finally {
@@ -778,9 +636,6 @@ export default function RerankerPage() {
           <RerankerCard
             key={model.id}
             model={model}
-            predictionSets={predictionSets}
-            evaluationSets={evaluationSets}
-            annotationSets={annotationSets}
             onDelete={() => setRerankers((prev) => prev.filter((r) => r.id !== model.id))}
             locale={locale}
             initiallyExpanded={targetHashRef.current === model.id}

@@ -16,7 +16,6 @@ import {
   getGoSubgraph,
   getGoTermDistribution,
   listScoringConfigs,
-  getScoredTsvUrl,
   createScoringConfig,
   ApiError,
   Prediction,
@@ -751,11 +750,10 @@ function ProteinDetail({
   );
 }
 
-function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: string; scoringConfigId?: string; customBlocked?: boolean }) {
+function DownloadButton({ setId }: { setId: string }) {
   const [open, setOpen] = useState(false);
   const [aspect, setAspect] = useState("");
   const [maxDist, setMaxDist] = useState("");
-  const [minScore, setMinScore] = useState("");
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -767,17 +765,10 @@ function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: stri
     return `${apiBase}/embeddings/prediction-sets/${setId}/predictions.tsv${qs ? `?${qs}` : ""}`;
   }
 
-  function buildScoredUrl() {
-    return getScoredTsvUrl(setId, scoringConfigId!, minScore ? { minScore: parseFloat(minScore) } : undefined);
-  }
-
-  const isScored = !!scoringConfigId;
-
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        title={customBlocked ? "Guarda el config custom para descargar scored TSV" : undefined}
         className="flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
       >
         ↓ Download TSV
@@ -786,63 +777,37 @@ function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: stri
       {open && (
         <div className="absolute right-0 top-10 z-20 w-64 rounded-lg border bg-white p-4 shadow-lg">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">Download options</p>
+          <label className="block text-xs text-slate-600 mb-1">GO Aspect</label>
+          <select
+            value={aspect}
+            onChange={(e) => setAspect(e.target.value)}
+            className="w-full rounded border px-2 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All aspects</option>
+            <option value="F">F — Molecular Function</option>
+            <option value="P">P — Biological Process</option>
+            <option value="C">C — Cellular Component</option>
+          </select>
 
-          {!isScored && (
-            <>
-              <label className="block text-xs text-slate-600 mb-1">GO Aspect</label>
-              <select
-                value={aspect}
-                onChange={(e) => setAspect(e.target.value)}
-                className="w-full rounded border px-2 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">All aspects</option>
-                <option value="F">F — Molecular Function</option>
-                <option value="P">P — Biological Process</option>
-                <option value="C">C — Cellular Component</option>
-              </select>
-
-              <label className="block text-xs text-slate-600 mb-1">Max distance</label>
-              <input
-                type="number"
-                min="0"
-                max="2"
-                step="0.01"
-                placeholder="e.g. 0.3 (no limit)"
-                value={maxDist}
-                onChange={(e) => setMaxDist(e.target.value)}
-                className="w-full rounded border px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </>
-          )}
-
-          {customBlocked && (
-            <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1.5 mb-3">
-              Guarda el config custom para habilitar scored TSV
-            </p>
-          )}
-
-          {isScored && (
-            <>
-              <p className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1.5 mb-3">
-                Scored TSV — includes computed score column
-              </p>
-              <label className="block text-xs text-slate-600 mb-1">Min score</label>
-              <input
-                type="number"
-                min="0"
-                max="1"
-                step="0.01"
-                placeholder="e.g. 0.5 (no limit)"
-                value={minScore}
-                onChange={(e) => setMinScore(e.target.value)}
-                className="w-full rounded border px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </>
-          )}
+          <label className="block text-xs text-slate-600 mb-1">Max distance</label>
+          <input
+            type="number"
+            min="0"
+            max="2"
+            step="0.01"
+            placeholder="e.g. 0.3 (no limit)"
+            value={maxDist}
+            onChange={(e) => setMaxDist(e.target.value)}
+            className="w-full rounded border px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <p className="text-[11px] text-slate-500 mb-3">
+            The candidates with their evidence. A set&apos;s stored scores, in CAFA format, are at{" "}
+            <code className="font-mono">predictions-cafa.tsv</code>.
+          </p>
 
           <a
-            href={isScored ? buildScoredUrl() : buildRawUrl()}
-            download={isScored ? `scored_${setId.slice(0, 8)}.tsv` : `predictions_${setId.slice(0, 8)}.tsv`}
+            href={buildRawUrl()}
+            download={`predictions_${setId.slice(0, 8)}.tsv`}
             onClick={() => setOpen(false)}
             className="block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
           >
@@ -1035,13 +1000,7 @@ const tToast = useTranslations("toasts");
               <option value={CUSTOM_ID}>Custom…</option>
             </select>
           </div>
-          <DownloadButton
-            setId={setId}
-            scoringConfigId={
-              selectedConfigId && selectedConfigId !== CUSTOM_ID ? selectedConfigId : undefined
-            }
-            customBlocked={selectedConfigId === CUSTOM_ID}
-          />
+          <DownloadButton setId={setId} />
         </div>
         <div>
           {selectedConfigId && (
