@@ -141,13 +141,33 @@ def drop_denied(
         return rows, 0
     kept = [row for row in rows if (row["protein_accession"], go_id_of(row)) not in denied]
     removed = len(rows) - len(kept)
+    _report(removed)
+    return kept, removed
+
+
+def drop_denied_frame(df: Any, denied: set[tuple[str, str]]) -> tuple[Any, int]:
+    """The frame's rows the bank does not deny, and how many it did.
+
+    The frame carries ``protein_accession`` and ``go_id`` columns. The same
+    frame comes back when nothing is denied, so a caller can tell that nothing
+    was copied.
+    """
+    if df.empty or not denied:
+        return df, 0
+    keys = zip(df["protein_accession"], df["go_id"], strict=True)
+    keep = [key not in denied for key in keys]
+    removed = len(keep) - sum(keep)
+    _report(removed)
+    return (df[keep] if removed else df), removed
+
+
+def _report(removed: int) -> None:
     if removed:
         _LOG.warning(
             "dropped %d candidate(s) the bank explicitly denies about the query; "
             "a NOT annotation is curated evidence against exactly this inference",
             removed,
         )
-    return kept, removed
 
 
 def honour_denials(
@@ -203,5 +223,6 @@ __all__ = [
     "POLICY",
     "denied_pairs",
     "drop_denied",
+    "drop_denied_frame",
     "honour_denials",
 ]

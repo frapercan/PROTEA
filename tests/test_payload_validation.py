@@ -180,6 +180,7 @@ from protea.core.operations.seal_evaluation_groundtruth import (
 )
 from protea.core.operations.store_residue_codes import StoreResidueCodesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
+from protea.core.operations.score_prediction_set import ScorePredictionSetPayload
 from protea.core.operations.supersede_evaluation_sets import SupersedeEvaluationSetsPayload
 from protea.core.operations.upload_residue_shard import UploadResidueShardPayload
 from protea.core.operations.verify_window_against_reference import (
@@ -747,6 +748,14 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         RetireEvaluationSetsPayload,
         {"evaluation_set_ids": []},
         ("evaluation_set_ids",),
+    ),
+    (
+        # Scoring names its arithmetic: there is no default formula a candidate
+        # set could be scored with without anyone having chosen it.
+        "score_prediction_set",
+        ScorePredictionSetPayload,
+        {"prediction_set_id": "4244033e-bb05-4222-8472-4ac50655ea49", "scoring_config_id": ""},
+        ("scoring_config_id",),
     ),
     (
         # A mark says why, or it is not made: the note is what a reader of a

@@ -86,13 +86,7 @@ def drop_contradictions(df: Any, denied: set[tuple[str, str]]) -> tuple[Any, int
     fire on its own bookkeeping. Filtering here keeps that arithmetic intact
     and makes the removal a number the run reports about itself.
     """
-    if df.empty or not denied:
-        return df, 0
-    keys = list(zip(df["protein_accession"], df["go_id"], strict=True))
-    keep = [k not in denied for k in keys]
-    removed = len(keep) - sum(keep)
-    _report_dropped(removed)
-    return (df[keep] if removed else df), removed
+    return denials.drop_denied_frame(df, denied)
 
 
 def drop_denied_records(
@@ -111,12 +105,3 @@ def drop_denied_records(
     """
     kept, _ = denials.drop_denied(records, denied_pairs(session, ctx), lambda r: r["go_id"])
     return kept
-
-
-def _report_dropped(n: int) -> None:
-    if n:
-        _LOG.warning(
-            "dropped %d candidate(s) the bank explicitly denies about the query; "
-            "a NOT annotation is curated evidence against exactly this inference",
-            n,
-        )
