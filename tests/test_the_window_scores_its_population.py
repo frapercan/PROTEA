@@ -28,8 +28,11 @@ from protea.core import _window_population as population
 from protea.core._window_population import (
     TARGET_POPULATIONS,
     Population,
+    SameSequence,
     restricted_to,
+    same_sequence_at_both_ends,
     superset_at_start,
+    swissprot_of_corpus,
 )
 from protea.core.evaluation import EvaluationData
 from protea.core.operations import generate_evaluation_set as gen
@@ -176,6 +179,72 @@ class TestTheStartLeadsToOnePhoto:
     def test_an_empty_superset_is_refused(self) -> None:
         with pytest.raises(ValueError, match="empty superset"):
             superset_at_start(_Answers([(uuid.uuid4(), 194)], []), uuid.uuid4())  # type: ignore[arg-type]
+
+
+class _Rows:
+    """One query's rows, readable the three ways the population functions read them."""
+
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self.rows = rows
+
+    def all(self) -> list[tuple[Any, ...]]:
+        return list(self.rows)
+
+    def scalars(self) -> Any:
+        return iter(row[0] for row in self.rows)
+
+    def __iter__(self) -> Any:
+        return iter(self.rows)
+
+
+class _Queue:
+    """A session that answers each read with the next list of rows, in order."""
+
+    def __init__(self, *answers: list[tuple[Any, ...]]) -> None:
+        self.answers = list(answers)
+        self.statements: list[str] = []
+
+    def execute(self, statement: Any, _params: dict[str, Any]) -> _Rows:
+        self.statements.append(" ".join(str(statement).split()))
+        return _Rows(self.answers.pop(0))
+
+
+class TestLafasTargets:
+    START, END = uuid.uuid4(), uuid.uuid4()
+
+    def _ends(self, pairs: list[tuple[str, bool]]) -> _Queue:
+        return _Queue(
+            [(uuid.uuid4(), self.START)],
+            [(uuid.uuid4(), self.END)],
+            pairs,
+            [(self.START, "2022_03"), (self.END, "2025_03")],
+        )
+
+    def test_the_same_sequence_in_both_releases(self) -> None:
+        session = self._ends([("P1", True), ("P2", False), ("P3", True)])
+        found = same_sequence_at_both_ends(session, uuid.uuid4(), uuid.uuid4())  # type: ignore[arg-type]
+        assert found == SameSequence("2022_03", "2025_03", 3, frozenset({"P1", "P3"}))
+        assert found.described() == {
+            "population_swissprot_releases": ["2022_03", "2025_03"],
+            "population_in_both": 3,
+            "population_sequence_changed": 1,
+            "population_proteins": 2,
+        }
+        assert "b.accession = a.accession" in session.statements[2]
+
+    def test_nothing_left_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="no accession has the same sequence"):
+            same_sequence_at_both_ends(self._ends([("P1", False)]), uuid.uuid4(), uuid.uuid4())  # type: ignore[arg-type]
+
+    def test_an_end_two_photos_name_is_refused(self) -> None:
+        session = _Queue([(uuid.uuid4(), self.START), (uuid.uuid4(), self.START)])
+        with pytest.raises(ValueError, match="window's start needs exactly one"):
+            same_sequence_at_both_ends(session, uuid.uuid4(), uuid.uuid4())  # type: ignore[arg-type]
+
+    def test_a_corpus_swissprot_list_is_its_photos_release(self) -> None:
+        session = _Queue([(uuid.uuid4(), self.START)], [("P1",), ("P2",)])
+        assert swissprot_of_corpus(session, uuid.uuid4()) == frozenset({"P1", "P2"})  # type: ignore[arg-type]
+        assert "FROM swissprot_membership WHERE release_id = :release" in session.statements[1]
 
 
 def _run(payload_over: dict[str, Any], found: Population | None) -> tuple[dict[str, Any], Any]:

@@ -14,7 +14,8 @@ import importlib.util
 import pathlib
 import re
 import uuid
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -118,6 +119,90 @@ class TestTheRowsOutsideTheCohort:
         _, raw, dropped, proteins, outside = self._propagate(None)
         assert (raw, dropped, outside) == (3, 1, 0)
         assert proteins == {"P1", "P2"}
+
+
+class TestTheRowSaysWhichCohortItCounted:
+    def _shape(
+        self, cohort: frozenset[str] | None, outside: int
+    ) -> tuple[InformationAccretionSet, Any]:
+        p = ComputeInformationAccretionPayload(
+            **_ids(), cohort="every_protein" if cohort is None else "swissprot"
+        )
+        inputs = op._Inputs(
+            p,
+            {},
+            SimpleNamespace(obo_version="releases/2022-07-01"),
+            SimpleNamespace(source="goa", source_version="211"),
+            ("IDA",),
+            None,
+            cohort,
+        )
+        dag = op._Dag(["GO:0000001"], {}, {}, {"GO:0000001": {"P1"}}, {"GO:0000001": 0.0})
+        measured = op._Measured({"nonzero": 0}, 2, {"P1"}, 1, {"GO:0000001": "F"}, 0.0, outside)
+        ia_set = InformationAccretionSet()
+        ComputeInformationAccretionOperation._record_shape(
+            ia_set, inputs, dag, measured, "memory://ia.tsv", "0" * 64
+        )
+        ia_set.evidence_regime, ia_set.cohort = p.evidence_regime, p.cohort
+        return ia_set, p
+
+    def test_the_stats_name_the_cohort_and_what_it_left_out(self) -> None:
+        ia_set, p = self._shape(frozenset({"P1", "P2"}), 3)
+        assert ia_set.stats["cohort"] == "swissprot"
+        assert ia_set.stats["cohort_proteins"] == 2
+        assert ia_set.stats["rows_outside_cohort"] == 3
+        result = op._persisted_result(ia_set, p, 2, 1).result
+        assert (result["cohort"], result["annotation_count"], result["reused"]) == (
+            "swissprot",
+            2,
+            False,
+        )
+
+    def test_every_protein_has_no_list_to_count(self) -> None:
+        ia_set, _ = self._shape(None, 0)
+        assert ia_set.stats["cohort"] == "every_protein"
+        assert ia_set.stats["cohort_proteins"] is None
+
+
+class TestARunOverLafasCohort:
+    """The whole operation on a two-term ontology: one protein of the corpus is outside the cohort."""
+
+    def test_the_table_counts_the_cohort_and_says_so(self) -> None:
+        root, binding = "GO:0003674", "GO:0005488"
+        session = MagicMock()
+        session.get.side_effect = [
+            SimpleNamespace(id=uuid.uuid4(), obo_version="releases/2022-07-01"),
+            SimpleNamespace(id=uuid.uuid4(), source="goa", source_version="211"),
+        ]
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        added: list[Any] = []
+        session.add.side_effect = added.append
+        rows = [("P1", binding), ("P2", root), ("P3", binding)]
+        dag = ([root, binding], {root: "F", binding: "F"}, {binding: {root}})
+        with (
+            patch.object(ComputeInformationAccretionOperation, "_load_dag", return_value=dag),
+            patch.object(op, "corpus_rows", return_value=rows),
+            patch.object(op, "swissprot_of_corpus", return_value=frozenset({"P1", "P2"})),
+            patch.object(
+                ComputeInformationAccretionOperation,
+                "_write_artifact",
+                return_value=("key", "memory://ia.tsv", "0" * 64),
+            ),
+        ):
+            result = (
+                ComputeInformationAccretionOperation()
+                .execute(session, {**_ids(), "cohort": "swissprot"}, emit=MagicMock())
+                .result
+            )
+        (table,) = added
+        assert (result["cohort"], result["protein_count"], result["annotation_count"]) == (
+            "swissprot",
+            2,
+            2,
+        )
+        assert table.cohort == "swissprot"
+        assert table.stats["rows_outside_cohort"] == 1
+        assert "cohort swissprot" in table.description
 
 
 class TestTheCohortIsResolvedAndLookedUpBy:
