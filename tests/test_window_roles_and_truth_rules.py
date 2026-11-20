@@ -23,6 +23,7 @@ from __future__ import annotations
 import inspect
 import re
 import uuid
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -30,12 +31,14 @@ import pytest
 
 from protea.core._binding_rule import BINDING_RULES
 from protea.core._truth_rules import GAIN_RULES, NOT_CODE_RULES, TRUTH_PROFILES
+from protea.core._window_population import TARGET_POPULATIONS
 from protea.core.evaluation import compute_evaluation_data
 from protea.core.window_declarations import (
     CLOSURES,
+    LAFA_FRAME,
     NAMEABLE_CLOSURES,
+    NAMED_TARGET_POPULATIONS,
     NAMED_TRUTH_RULES,
-    BENCHMARK_FRAME,
     OCTOBER_HEADLINE_FRAME,
     SAME_SNAPSHOT_RULES,
     WINDOW_ROLES,
@@ -184,9 +187,10 @@ class TestTheClosure:
             (("T0", "T0", "T0"), "t0_graph"),
             (("T0", "T1", "T1"), "per_side"),
             (("T1", "T1", "T1"), "t1_graph"),
-            # The pivot is part of it: per side intersected with t0's universe
-            # is not the default construction.
-            (("T0", "T1", "T0"), "explicit"),
+            # The pivot is part of it: each side under its own graph and scored
+            # at t0's is LAFA's closure, not the default construction.
+            (("T0", "T1", "T0"), "per_side_t0_pivot"),
+            (("T1", "T0", "T0"), "explicit"),
             (("OTHER", "OTHER", "OTHER"), "explicit"),
             (("T0", "T0", "OTHER"), "explicit"),
         ],
@@ -218,16 +222,19 @@ class TestTheNamedRuleSet:
             binding="descendants_both_ends",
         )
 
-    def test_the_benchmark_frame_takes_cafas_binding_rule(self) -> None:
-        # 2026-11-20: the October rules with CAFA's and LAFA's binding rule.
-        assert NAMED_TRUTH_RULES["benchmark-frame"] == BENCHMARK_FRAME
-        assert BENCHMARK_FRAME == TruthRules(
-            profile="projected",
-            toi_rule="live_in_both_ends",
+    def test_the_lafa_frame_is_lafas_rules_and_scores_lafas_targets(self) -> None:
+        # 2026-11-20: the benchmark, faithful to CAFA and LAFA (protea.core.lafa_frame).
+        assert NAMED_TRUTH_RULES["lafa-frame"] == LAFA_FRAME
+        assert LAFA_FRAME == TruthRules(
+            profile="own_graph",
+            toi_rule="both_ends_trimmed",
             not_codes="experimental",
-            closure="t0_graph",
+            closure="per_side_t0_pivot",
             binding="cafa",
         )
+        assert NAMED_TARGET_POPULATIONS == {"lafa-frame": "swissprot_same_sequence"}
+        assert set(NAMED_TARGET_POPULATIONS) <= set(NAMED_TRUTH_RULES)
+        assert set(NAMED_TARGET_POPULATIONS.values()) <= set(TARGET_POPULATIONS)
 
     def test_only_a_requestable_binding_rule_can_be_named(self) -> None:
         # ``none`` is what a path applies, never what a payload asks for.
@@ -270,7 +277,12 @@ class TestOneFrameOneSetOfRules:
 
     def test_the_binding_rule_alone_is_enough(self) -> None:
         with pytest.raises(MixedTruthRulesError):
-            common_truth_rules([_window(OCTOBER_HEADLINE_FRAME), _window(BENCHMARK_FRAME)])
+            common_truth_rules(
+                [
+                    _window(OCTOBER_HEADLINE_FRAME),
+                    _window(replace(OCTOBER_HEADLINE_FRAME, binding="cafa")),
+                ]
+            )
 
     def test_a_legacy_window_is_refused_by_id(self) -> None:
         legacy = _window(None)

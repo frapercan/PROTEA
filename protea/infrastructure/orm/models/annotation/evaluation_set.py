@@ -39,11 +39,12 @@ WINDOW_ROLE_CHECK = (
 TRUTH_RULES_CHECK = (
     "truth_rules IS NULL OR ("
     "jsonb_typeof(truth_rules) = 'object' "
-    "AND COALESCE(truth_rules ->> 'profile', '') IN ('as_closed', 'projected') "
-    "AND COALESCE(truth_rules ->> 'toi_rule', '') IN ('pivot_terms', 'live_in_both_ends') "
+    "AND COALESCE(truth_rules ->> 'profile', '') IN ('as_closed', 'projected', 'own_graph') "
+    "AND COALESCE(truth_rules ->> 'toi_rule', '') IN "
+    "('pivot_terms', 'live_in_both_ends', 'both_ends_trimmed') "
     "AND COALESCE(truth_rules ->> 'not_codes', '') IN ('any', 'experimental') "
     "AND COALESCE(truth_rules ->> 'closure', '') IN "
-    "('per_side', 't0_graph', 't1_graph', 'explicit', 'direct_terms') "
+    "('per_side', 't0_graph', 't1_graph', 'per_side_t0_pivot', 'explicit', 'direct_terms') "
     "AND COALESCE(truth_rules ->> 'binding', '') IN "
     "('descendants_both_ends', 'cafa', 'none'))"
 )
@@ -64,7 +65,14 @@ BINDING_RULE_CHECK = "binding_rule IN ('descendants_both_ends', 'cafa')"
 #: The vocabulary of :data:`protea.core._window_population.TARGET_POPULATIONS`,
 #: spelled out so the model imports nothing from core; the migration that
 #: installs it carries the same text and a test compares the three.
-TARGET_POPULATION_CHECK = "target_population IN ('every_protein', 'superset_at_t0')"
+TARGET_POPULATION_CHECK = (
+    "target_population IN ('every_protein', 'superset_at_t0', 'swissprot_same_sequence')"
+)
+
+#: The profiles and gain rules a row may ask for, spelled out for the same
+#: reason; the migration that installs them carries the same text.
+TRUTH_PROFILE_CHECK = "truth_profile IN ('as_closed', 'projected', 'own_graph')"
+TOI_RULE_CHECK = "toi_rule IN ('pivot_terms', 'live_in_both_ends', 'both_ends_trimmed')"
 
 
 class EvaluationSet(Base):
@@ -160,11 +168,11 @@ class EvaluationSet(Base):
         # two windows with no profile declared would both be accepted and the
         # key would stop being one.
         CheckConstraint(
-            "truth_profile IN ('as_closed', 'projected')",
+            TRUTH_PROFILE_CHECK,
             name="ck_evaluation_set_truth_profile",
         ),
         CheckConstraint(
-            "toi_rule IN ('pivot_terms', 'live_in_both_ends')",
+            TOI_RULE_CHECK,
             name="ck_evaluation_set_toi_rule",
         ),
         CheckConstraint(

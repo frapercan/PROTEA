@@ -146,22 +146,28 @@ def binding_step(rule: str, t1_side: bool) -> BindingStep:
     raise ValueError(f"unknown binding rule {rule!r}; expected one of {BINDING_RULES}")
 
 
-def drop_cafa_binding_only_f(by_aspect: dict[str, dict[str, set[str]]], step: BindingStep) -> int:
+def drop_cafa_binding_only_f(
+    by_aspect: dict[str, dict[str, set[str]]],
+    step: BindingStep,
+    terms: frozenset[str] = CAFA_BINDING_TERMS,
+) -> int:
     """CAFA's rule: drop the F side of a protein whose propagated F set is binding only.
 
     ``by_aspect`` is ``{protein: {aspect: {go_id}}}`` AFTER propagation, which is
-    when democafa tests it, and "binding only" is a SUBSET of
-    :data:`CAFA_BINDING_TERMS`, not equality: a protein annotated directly to
-    ``GO:0005488`` alone is dropped too. A protein left with no aspect leaves
-    ``by_aspect``. Mutates in place and returns how many proteins lost their F
-    side; returns 0 and touches nothing unless the step applies it.
+    when democafa tests it, and "binding only" is a SUBSET of ``terms``, not
+    equality: a protein annotated directly to ``GO:0005488`` alone is dropped
+    too. ``terms`` is :data:`CAFA_BINDING_TERMS` unless the caller reads the set
+    from an ontology, as LAFA's frame does (:func:`protea.core.lafa_frame.binding_terms`).
+    A protein left with no aspect leaves ``by_aspect``. Mutates in place and
+    returns how many proteins lost their F side; returns 0 and touches nothing
+    unless the step applies it.
     """
     if not step.on_propagated_f:
         return 0
     dropped = 0
     for protein in list(by_aspect):
         aspects = by_aspect[protein]
-        if "F" in aspects and aspects["F"] <= CAFA_BINDING_TERMS:
+        if "F" in aspects and aspects["F"] <= terms:
             del aspects["F"]
             dropped += 1
             if not aspects:

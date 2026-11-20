@@ -40,13 +40,15 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     # ``"validation"`` and ``"test_spent"``.
     window_role: str | None = None
     # A named set of truth rules (``protea.core.window_declarations``), e.g.
-    # ``"october-headline-frame"`` or ``"benchmark-frame"``. It fills
-    # ``truth_profile``, ``toi_rule``, ``not_codes`` and ``binding_rule`` and
-    # refuses a payload that asks for others, and it
-    # fixes the closure: under the October rules both sides close under the
-    # graph the t0 corpus was loaded under, so both natives (and with them the
-    # pivot) default to that graph. A build that would apply anything else is
-    # refused before the delta is computed. None leaves every default as it was.
+    # ``"october-headline-frame"`` or ``"lafa-frame"``. It fills
+    # ``truth_profile``, ``toi_rule``, ``not_codes`` and ``binding_rule``, and the
+    # target population when it fixes one (LAFA's frame does), and refuses a
+    # payload that asks for others; and it fixes the closure: under the October
+    # rules both sides close under the graph the t0 corpus was loaded under, so
+    # both natives (and with them the pivot) default to that graph, and under
+    # LAFA's each side closes under its own graph and the pivot is t0's. A build
+    # that would apply anything else is refused before the delta is computed.
+    # None leaves every default as it was.
     truth_rule_set: str | None = None
     # How the t1 side's truth is built. ``as_closed`` (the default) is what
     # every stored window did: a term the pivot cannot name is dropped by the
@@ -164,7 +166,7 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     @model_validator(mode="before")
     @classmethod
     def _fill_from_named_rule_set(cls, data: Any) -> Any:
-        """Fill the four rule fields from ``truth_rule_set`` before they validate.
+        """Fill the rule fields (and a fixed population) from ``truth_rule_set`` before they validate.
 
         Before and not after, because after validation a field left out and a
         field sent with its default look the same, and only the first may be

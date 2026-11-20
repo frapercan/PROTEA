@@ -55,7 +55,14 @@ from protea.infrastructure.orm.models.annotation.annotation_set import Annotatio
 #: before the binding rule and the closure. On the 211 -> 227 window the two
 #: profiles differ by 646 proteins and 2,610 entries, which is the whole of
 #: the difference between PROTEA's truth and the lab's.
-TRUTH_PROFILES: tuple[str, ...] = ("as_closed", "projected")
+#:
+#: ``own_graph`` is LAFA's (:mod:`protea.core.lafa_frame`): each end named and
+#: closed under its OWN ontology, with no pivot in the build, and what that
+#: ontology cannot name dropped. Only LAFA's frame builds it.
+TRUTH_PROFILES: tuple[str, ...] = ("as_closed", "projected", "own_graph")
+
+#: The profiles the reconciled path builds; it refuses the third.
+RECONCILED_PROFILES: tuple[str, ...] = TRUTH_PROFILES[:2]
 
 #: Which terms the GAIN is allowed to contain, by the name a payload asks for
 #: it with. Same vocabulary as ``run_cafa_evaluation``'s ``toi_rule``, because
@@ -72,7 +79,14 @@ TRUTH_PROFILES: tuple[str, ...] = ("as_closed", "projected")
 #: COUNTS: a protein whose only gain is a term obsolete by t1 is not a target
 #: at all. Measured on 211 -> 227: one protein, ``Q9FNK4``, whose four gains
 #: were alive in 2022 and are obsolete in 2025.
-GAIN_RULES: tuple[str, ...] = ("pivot_terms", "live_in_both_ends")
+#:
+#: ``both_ends_trimmed`` is LAFA's: the same terms of interest, and BOTH ends
+#: trimmed to them before the classification, so a t0 term outside them does
+#: not make an aspect known. Only LAFA's frame builds it.
+GAIN_RULES: tuple[str, ...] = ("pivot_terms", "live_in_both_ends", "both_ends_trimmed")
+
+#: The gain rules the reconciled path builds; it refuses the third.
+RECONCILED_GAIN_RULES: tuple[str, ...] = GAIN_RULES[:2]
 
 #: Which NOT annotations may take truth away, by the name a payload asks for
 #: it with.
@@ -120,14 +134,16 @@ def refuse_unknown_rules(window: ReconciledWindow) -> None:
     separate two truths ends up merging them.
     """
     for name, rules in (
-        ("truth_profile", TRUTH_PROFILES),
-        ("toi_rule", GAIN_RULES),
+        ("truth_profile", RECONCILED_PROFILES),
+        ("toi_rule", RECONCILED_GAIN_RULES),
         ("not_codes", NOT_CODE_RULES),
         ("binding_rule", REQUESTABLE_BINDING_RULES),
     ):
         value = getattr(window, name)
         if value not in rules:
-            raise ValueError(f"unknown {name} {value!r}; expected one of {rules}")
+            raise ValueError(
+                f"unknown {name} {value!r} for the reconciled path; expected one of {rules}"
+            )
 
 
 class ReconciledWindow(NamedTuple):
@@ -465,6 +481,8 @@ def _keep_within_toi(
 
 __all__ = [
     "GAIN_RULES",
+    "RECONCILED_GAIN_RULES",
+    "RECONCILED_PROFILES",
     "TRUTH_PROFILES",
     "ProjectionRequest",
     "ReconciledWindow",

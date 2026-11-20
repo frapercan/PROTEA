@@ -12,7 +12,10 @@ from protea.core._artifact_identity import sha256_of_file
 from protea.core._binding_rule import REQUESTABLE_BINDING_RULES
 from protea.core._window_population import (
     TARGET_POPULATIONS,
+    Population,
+    SameSequence,
     restricted_to,
+    same_sequence_at_both_ends,
     superset_at_start,
 )
 from protea.core.code_revision import (
@@ -31,6 +34,8 @@ from protea.core.evaluation import (
     groundtruth_key_for,
     serialize_evaluation_data_to_parquet,
 )
+from protea.core.lafa_frame import PROFILE as LAFA_PROFILE
+from protea.core.lafa_frame import LafaWindow, compute_evaluation_data_lafa
 from protea.core.operations._generate_evaluation_set_payload import (
     GenerateEvaluationSetPayload,
 )
@@ -43,6 +48,7 @@ from protea.core.window_declarations import (
     closing_graphs_by_default,
     closure_applied,
     named_truth_rules,
+    pivot_by_default,
     refuse_unless_named_rules_apply,
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -89,6 +95,20 @@ def _reconciled_window(ident: _Identity) -> ReconciledWindow:
         ident.old_native,
         ident.new_native,
         ident.pivot_id,
+        ident.truth_profile,
+        ident.toi_rule,
+        ident.not_codes,
+        ident.binding_rule,
+    )
+
+
+def _lafa_window(ident: _Identity) -> LafaWindow:
+    """The identity as LAFA's frame reads it: no pivot in the build, the four rules it checks."""
+    return LafaWindow(
+        ident.old_set_id,
+        ident.new_set_id,
+        ident.old_native,
+        ident.new_native,
         ident.truth_profile,
         ident.toi_rule,
         ident.not_codes,
@@ -337,7 +357,11 @@ class GenerateEvaluationSetOperation:
             context="building the window ending at",
             emit=emit,
         )
-        mode = self._delta_mode(old_set, new_set, old_native, new_native, pivot_id)
+        # LAFA's frame is a path of its own (protea.core.lafa_frame), named by its profile.
+        if p.truth_profile == LAFA_PROFILE:
+            mode = "lafa"
+        else:
+            mode = self._delta_mode(old_set, new_set, old_native, new_native, pivot_id)
 
         ident = _Identity(
             old_set_id,
@@ -442,9 +466,10 @@ class GenerateEvaluationSetOperation:
     ) -> tuple[Any, dict[str, Any]]:
         """Run the delta under this identity and return it with its stats.
 
-        The two compute paths are one decision, taken once here: if all three
-        snapshots coincide there is nothing to reconcile, and the cheaper
-        same-snapshot path gives the same answer. Anything else needs each side
+        The compute paths are one decision, taken once in ``execute``: if all
+        three snapshots coincide there is nothing to reconcile, and the cheaper
+        same-snapshot path gives the same answer; LAFA's profile takes LAFA's
+        frame, whose own counts join the stats; anything else needs each side
         closed under its own DAG and intersected with the pivot.
         """
         emit(
@@ -472,13 +497,16 @@ class GenerateEvaluationSetOperation:
             },
             "info",
         )
+        frame_stats: dict[str, Any] = {}
         if mode == "same_snapshot":
             data = compute_evaluation_data(
                 session, ident.old_set_id, ident.new_set_id, ident.pivot_id
             )
+        elif mode == "lafa":
+            data, frame_stats = compute_evaluation_data_lafa(session, _lafa_window(ident))
         else:
             data = compute_evaluation_data_reconciled(session, _reconciled_window(ident))
-        stats = data.stats()
+        stats = {**data.stats(), **frame_stats}
         stats["mode"] = mode
         stats["pivot_ontology_snapshot_id"] = str(ident.pivot_id)
         stats["truth_profile"] = ident.truth_profile
@@ -496,23 +524,21 @@ class GenerateEvaluationSetOperation:
 
         ``every_protein`` changes nothing but the stats, which name the rule
         either way. ``superset_at_t0`` keeps the superset of the photo of the
-        window's start in every bucket and counts, by bucket, the proteins it
-        left out; the counts of the six buckets are taken again after it.
+        window's start, and ``swissprot_same_sequence`` LAFA's targets, in every
+        bucket, and both count by bucket the proteins they left out; the counts
+        of the six buckets are taken again after it.
         """
         data, stats = built
         stats = {**stats, "target_population": ident.target_population}
         if ident.target_population == "every_protein":
             return data, stats
-        population = superset_at_start(session, ident.old_set_id)
+        population: Population | SameSequence
+        if ident.target_population == "swissprot_same_sequence":
+            population = same_sequence_at_both_ends(session, ident.old_set_id, ident.new_set_id)
+        else:
+            population = superset_at_start(session, ident.old_set_id)
         kept, outside = restricted_to(data, population.accessions)
-        stats = {
-            **stats,
-            **kept.stats(),
-            **outside,
-            "population_cut": population.cut_release,
-            "population_photo_id": str(population.photo_id),
-            "population_proteins": len(population.accessions),
-        }
+        stats = {**stats, **kept.stats(), **outside, **population.described()}
         emit("generate_evaluation_set.targets_restricted", None, stats, "info")
         return kept, stats
 
@@ -676,7 +702,8 @@ class GenerateEvaluationSetOperation:
 
         Returns ``(old_set, new_set, old_native, new_native, pivot)``. Each native
         defaults to its annotation set's stored ``ontology_snapshot_id`` but can be
-        overridden explicitly (cross-OBO), and the pivot defaults to ``new_native``.
+        overridden explicitly (cross-OBO), and the pivot defaults to ``new_native``
+        except under LAFA's closure (:func:`pivot_by_default`).
 
         A named rule set moves the natives' DEFAULTS to its closure, and nothing
         else: under ``october-headline-frame`` both default to the graph the t0
@@ -705,7 +732,9 @@ class GenerateEvaluationSetOperation:
         )
         old_native = _resolve_snapshot(p.old_native_snapshot_id, old_default)
         new_native = _resolve_snapshot(p.new_native_snapshot_id, new_default)
-        pivot_id = _resolve_snapshot(p.pivot_ontology_snapshot_id, new_native)
+        pivot_id = _resolve_snapshot(
+            p.pivot_ontology_snapshot_id, pivot_by_default(closure, old_native, new_native)
+        )
         return old_set, new_set, old_native, new_native, pivot_id
 
     def _persist_groundtruth(
