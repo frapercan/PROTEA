@@ -48,6 +48,14 @@ TRUTH_RULES_CHECK = (
     "('descendants_both_ends', 'cafa', 'none'))"
 )
 
+#: A supersession is all three of its fields or none, and never points at the
+#: window itself; the migration that installs it carries the same text.
+SUPERSESSION_CHECK = (
+    "(superseded_by_id IS NULL) = (superseded_at IS NULL) "
+    "AND (superseded_by_id IS NULL) = (supersession_note IS NULL) "
+    "AND (superseded_by_id IS NULL OR superseded_by_id <> id)"
+)
+
 #: The binding rules a payload can ask for, spelled out for the same reason as
 #: the checks above; the migration that installs it carries the same text.
 BINDING_RULE_CHECK = "binding_rule IN ('descendants_both_ends', 'cafa')"
@@ -170,6 +178,10 @@ class EvaluationSet(Base):
         CheckConstraint(
             BINDING_RULE_CHECK,
             name="ck_evaluation_set_binding_rule",
+        ),
+        CheckConstraint(
+            SUPERSESSION_CHECK,
+            name="ck_evaluation_set_supersession",
         ),
     )
 
@@ -368,6 +380,20 @@ class EvaluationSet(Base):
     #: descriptor); NULL on rows written before the column, which read as
     #: "nothing says", never as a default.
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The window that superseded this one, when it was marked and why, written by
+    #: ``supersede_evaluation_sets``. NULL for a window nothing has superseded. The
+    #: row stays, and so do the results computed on it: they are records of what
+    #: was measured, and the pointer says where the measurement moved to.
+    superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "evaluation_set.id", ondelete="RESTRICT", name="fk_evaluation_set_superseded_by_id"
+        ),
+        nullable=True,
+        index=True,
+    )
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    supersession_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     old_annotation_set: Mapped[AnnotationSet] = relationship(
         "AnnotationSet", foreign_keys=[old_annotation_set_id]

@@ -148,6 +148,9 @@ from protea.core.operations.seal_evaluation_groundtruth import (
 )
 from protea.core.operations.store_residue_codes import StoreResidueCodesOperation
 from protea.core.operations.stratify_evaluation import StratifyEvaluationOperation
+from protea.core.operations.supersede_evaluation_sets import (
+    SupersedeEvaluationSetsOperation,
+)
 from protea.core.operations.upload_residue_shard import UploadResidueShardOperation
 from protea.core.operations.verify_window_against_reference import (
     VerifyWindowAgainstReferenceOperation,
@@ -205,6 +208,8 @@ _UNIVERSE: tuple[_Row, ...] = (
     (ComputeInformationAccretionOperation, _DERIVED),
     (GenerateEvaluationSetOperation, _DERIVED),
     (ExportEvaluationTargetsOperation, _DERIVED),
+    # Marks the windows a frame left behind, deleting nothing (closure, step 3).
+    (SupersedeEvaluationSetsOperation, _DERIVED),
     # The three repairs of production rows, kept for review (plan section C).
     (DeclareQuerySetProvenanceOperation, replace(_DERIVED, status="review")),
     (RetireEvaluationSetsOperation, replace(_DERIVED, status="review")),
