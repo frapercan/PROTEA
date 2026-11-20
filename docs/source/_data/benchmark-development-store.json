@@ -1,0 +1,272 @@
+{
+ "windows": [
+  {
+   "window": "160 -> 194",
+   "id": "6bdafd2d-158c-4247-87fd-8493057d5491",
+   "role": "training",
+   "ontologies": [
+    "releases/2016-10-29",
+    "releases/2019-11-02"
+   ],
+   "target_population": "swissprot_same_sequence",
+   "truth_rules": {
+    "binding": "cafa",
+    "closure": "per_side_t0_pivot",
+    "profile": "own_graph",
+    "toi_rule": "both_ends_trimmed",
+    "not_codes": "experimental"
+   },
+   "code_revision": "e55795cc3be5f376197b1e6e3f1b68926762377a",
+   "job_id": "b9416a75-5d72-40dc-bb2d-a55d4709c28e",
+   "counts": {
+    "delta_proteins": 43992,
+    "nk_proteins": 4825,
+    "lk_proteins": 5260,
+    "pk_proteins": 36921,
+    "nk_annotations": 110389,
+    "lk_annotations": 88943,
+    "pk_annotations": 433573,
+    "population_proteins": 550233,
+    "population_in_both": 551814,
+    "population_sequence_changed": 1581,
+    "population_swissprot_releases": [
+     "2016_09",
+     "2019_09"
+    ],
+    "terms_of_interest": 42257,
+    "lafa_pk_proteins_made_by_the_ontology": 25027,
+    "lafa_pk_pairs_made_by_the_ontology": 155936,
+    "lafa_workflow": "github.com/anphan0828/CAFA_forever@2ce245715aa9",
+    "lafa_package": "github.com/anphan0828/democafa_package@1102e34ec2cd"
+   },
+   "information_accretion": {
+    "id": "5629ccdc-fa1a-45a0-bfba-badccfa1f651",
+    "evidence_regime": "lafa",
+    "cohort": "swissprot",
+    "terms": 43647,
+    "proteins": 70755,
+    "rows_counted": 607656,
+    "rows_outside_cohort": 196793,
+    "ia_max": 15.62491,
+    "ia_mean": 2.461891,
+    "content_sha256": "29ceb84d304771cb8cf8ec1cd3cef58815c9012d28bf622d0db71e347844e4d4",
+    "code_revision": "efabfb1d6939791c906c788b72588e34dd890eb9"
+   },
+   "supersedes": [
+    {
+     "id": "c27532d3-028b-42fc-a3a4-9c384eda0c72",
+     "target_population": "every_protein",
+     "profile": "projected",
+     "note": "2026-11-20: the benchmark is LAFA's frame (lafa-frame: LAFA's own rules, verified identical to LAFA's code on 211 -> 227, with the author's NOT rule), over LAFA's targets; this window was built under the October rules and stays as a record."
+    },
+    {
+     "id": "3fc20813-18c2-4cc3-b691-66b8d72187ab",
+     "target_population": "superset_at_t0",
+     "profile": "projected",
+     "note": "2026-11-20: the benchmark is LAFA's frame (lafa-frame: LAFA's own rules, verified identical to LAFA's code on 211 -> 227, with the author's NOT rule), over LAFA's targets; this window was built under the October rules and stays as a record."
+    }
+   ]
+  },
+  {
+   "window": "177 -> 205",
+   "id": "f19f1c1c-ca06-4b72-bd07-9e67de5da39d",
+   "role": "training",
+   "ontologies": [
+    "releases/2018-04-02",
+    "releases/2021-10-26"
+   ],
+   "target_population": "swissprot_same_sequence",
+   "truth_rules": {
+    "binding": "cafa",
+    "closure": "per_side_t0_pivot",
+    "profile": "own_graph",
+    "toi_rule": "both_ends_trimmed",
+    "not_codes": "experimental"
+   },
+   "code_revision": "e55795cc3be5f376197b1e6e3f1b68926762377a",
+   "job_id": "359ad614-b93d-4305-9658-04b6197f2b82",
+   "counts": {
+    "delta_proteins": 39344,
+    "nk_proteins": 3623,
+    "lk_proteins": 4423,
+    "pk_proteins": 33597,
+    "nk_annotations": 79222,
+    "lk_annotations": 69086,
+    "pk_annotations": 316922,
+    "population_proteins": 555724,
+    "population_in_both": 556629,
+    "population_sequence_changed": 905,
+    "population_swissprot_releases": [
+     "2018_03",
+     "2021_03"
+    ],
+    "terms_of_interest": 42632,
+    "lafa_pk_proteins_made_by_the_ontology": 19243,
+    "lafa_pk_pairs_made_by_the_ontology": 74612,
+    "lafa_workflow": "github.com/anphan0828/CAFA_forever@2ce245715aa9",
+    "lafa_package": "github.com/anphan0828/democafa_package@1102e34ec2cd"
+   },
+   "information_accretion": {
+    "id": "d5094129-a02c-4e2d-a15d-43904ae40d46",
+    "evidence_regime": "lafa",
+    "cohort": "swissprot",
+    "terms": 44922,
+    "proteins": 75711,
+    "rows_counted": 686674,
+    "rows_outside_cohort": 201820,
+    "ia_max": 15.755122,
+    "ia_mean": 2.52799,
+    "content_sha256": "65be89cadfba70ae777d936f5418285cff65ba71d49256f7abb7d0722dce5185",
+    "code_revision": "efabfb1d6939791c906c788b72588e34dd890eb9"
+   },
+   "supersedes": [
+    {
+     "id": "fd6a5e6b-277b-4e50-97d1-aa437dad3b51",
+     "target_population": "every_protein",
+     "profile": "projected",
+     "note": "2026-11-20: the benchmark is LAFA's frame (lafa-frame: LAFA's own rules, verified identical to LAFA's code on 211 -> 227, with the author's NOT rule), over LAFA's targets; this window was built under the October rules and stays as a record."
+    },
+    {
+     "id": "c57163ac-f84c-4276-81e7-faa49cb812db",
+     "target_population": "superset_at_t0",
+     "profile": "projected",
+     "note": "2026-11-20: the benchmark is LAFA's frame (lafa-frame: LAFA's own rules, verified identical to LAFA's code on 211 -> 227, with the author's NOT rule), over LAFA's targets; this window was built under the October rules and stays as a record."
+    }
+   ]
+  },
+  {
+   "window": "194 -> 211",
+   "id": "4228a366-3dc4-4c30-b4a4-287482a59edf",
+   "role": "training",
+   "ontologies": [
+    "releases/2019-11-02",
+    "releases/2022-07-01"
+   ],
+   "target_population": "swissprot_same_sequence",
+   "truth_rules": {
+    "binding": "cafa",
+    "closure": "per_side_t0_pivot",
+    "profile": "own_graph",
+    "toi_rule": "both_ends_trimmed",
+    "not_codes": "experimental"
+   },
+   "code_revision": "e55795cc3be5f376197b1e6e3f1b68926762377a",
+   "job_id": "33406148-8ca6-4e65-9dac-e2c349d21251",
+   "counts": {
+    "delta_proteins": 37396,
+    "nk_proteins": 2512,
+    "lk_proteins": 3430,
+    "pk_proteins": 33546,
+    "nk_annotations": 68587,
+    "lk_annotations": 67559,
+    "pk_annotations": 316910,
+    "population_proteins": 560121,
+    "population_in_both": 561002,
+    "population_sequence_changed": 881,
+    "population_swissprot_releases": [
+     "2019_09",
+     "2022_03"
+    ],
+    "terms_of_interest": 42693,
+    "lafa_pk_proteins_made_by_the_ontology": 22591,
+    "lafa_pk_pairs_made_by_the_ontology": 76197,
+    "lafa_workflow": "github.com/anphan0828/CAFA_forever@2ce245715aa9",
+    "lafa_package": "github.com/anphan0828/democafa_package@1102e34ec2cd"
+   },
+   "information_accretion": {
+    "id": "dce2138a-f5ec-4fc9-b51b-541f0c7c8068",
+    "evidence_regime": "lafa",
+    "cohort": "swissprot",
+    "terms": 44650,
+    "proteins": 78760,
+    "rows_counted": 734706,
+    "rows_outside_cohort": 212191,
+    "ia_max": 15.807028,
+    "ia_mean": 2.570589,
+    "content_sha256": "e928861fb7914571733ef729eb58c4c84553c360db33bee4eff321306d671bb8",
+    "code_revision": "efabfb1d6939791c906c788b72588e34dd890eb9"
+   },
+   "supersedes": [
+    {
+     "id": "5df44284-e796-47f8-b4a9-10396d4fd349",
+     "target_population": "every_protein",
+     "profile": "projected",
+     "note": "2026-11-20: the benchmark is LAFA's frame (lafa-frame: LAFA's own rules, verified identical to LAFA's code on 211 -> 227, with the author's NOT rule), over LAFA's targets; this window was built under the October rules and stays as a record."
+    },
+    {
+     "id": "cee3fbf3-37ed-40da-a42b-8cef74d556f1",
+     "target_population": "superset_at_t0",
+     "profile": "projected",
+     "note": "2026-11-20: the benchmark is LAFA's frame (lafa-frame: LAFA's own rules, verified identical to LAFA's code on 211 -> 227, with the author's NOT rule), over LAFA's targets; this window was built under the October rules and stays as a record."
+    }
+   ]
+  },
+  {
+   "window": "211 -> 227",
+   "id": "ebf6f6ab-baec-437a-b1b9-310e1ebc1d43",
+   "role": "validation",
+   "ontologies": [
+    "releases/2022-07-01",
+    "releases/2025-07-22"
+   ],
+   "target_population": "swissprot_same_sequence",
+   "truth_rules": {
+    "binding": "cafa",
+    "closure": "per_side_t0_pivot",
+    "profile": "own_graph",
+    "toi_rule": "both_ends_trimmed",
+    "not_codes": "experimental"
+   },
+   "code_revision": "e55795cc3be5f376197b1e6e3f1b68926762377a",
+   "job_id": "b12ce9be-4c00-42ea-a56a-0ea556d5bd37",
+   "counts": {
+    "delta_proteins": 37658,
+    "nk_proteins": 2893,
+    "lk_proteins": 3436,
+    "pk_proteins": 33097,
+    "nk_annotations": 62333,
+    "lk_annotations": 52843,
+    "pk_annotations": 249593,
+    "population_proteins": 566827,
+    "population_in_both": 567886,
+    "population_sequence_changed": 1059,
+    "population_swissprot_releases": [
+     "2022_03",
+     "2025_03"
+    ],
+    "terms_of_interest": 39028,
+    "lafa_pk_proteins_made_by_the_ontology": 23332,
+    "lafa_pk_pairs_made_by_the_ontology": 89860,
+    "lafa_workflow": "github.com/anphan0828/CAFA_forever@2ce245715aa9",
+    "lafa_package": "github.com/anphan0828/democafa_package@1102e34ec2cd"
+   },
+   "information_accretion": {
+    "id": "4c77dc1e-c010-4fd3-9386-c9fc531ce65a",
+    "evidence_regime": "lafa",
+    "cohort": "swissprot",
+    "terms": 43558,
+    "proteins": 83734,
+    "rows_counted": 831306,
+    "rows_outside_cohort": 220995,
+    "ia_max": 15.835063,
+    "ia_mean": 2.702182,
+    "content_sha256": "377d248be8013e531ed038940e7097e4b206766bfa3c8ed9c013a43d94456eb9",
+    "code_revision": "efabfb1d6939791c906c788b72588e34dd890eb9"
+   },
+   "supersedes": [
+    {
+     "id": "daeb24b8-87e9-4eb4-ae2f-72731f246186",
+     "target_population": "every_protein",
+     "profile": "projected",
+     "note": "2026-11-20: the benchmark is LAFA's frame (lafa-frame: LAFA's own rules, verified identical to LAFA's code on 211 -> 227, with the author's NOT rule), over LAFA's targets; this window was built under the October rules and stays as a record."
+    },
+    {
+     "id": "4244033e-bb05-4222-8472-4ac50655ea49",
+     "target_population": "superset_at_t0",
+     "profile": "projected",
+     "note": "2026-11-20: the benchmark is LAFA's frame (lafa-frame: LAFA's own rules, verified identical to LAFA's code on 211 -> 227, with the author's NOT rule), over LAFA's targets; this window was built under the October rules and stays as a record."
+    }
+   ]
+  }
+ ]
+}
