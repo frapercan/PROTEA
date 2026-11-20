@@ -167,16 +167,40 @@ To build one, name the rule set and nothing else:
 How it is checked
 -----------------
 
-- ``tests/test_lafa_frame.py`` pins every step on ontologies small enough to
-  read, including the order of the two renamings, the binding rule after the
-  trim and the departure.
-- ``tests/test_lafa_frame_store.py`` builds a small store in Postgres and runs
-  the frame end to end through its SQL, together with LAFA's targets.
-- On the six cuts of the frame in the development store, the binding set read
-  from each ontology is exactly the three terms, and the ontology of cut 227 has
-  39,906 live terms, the number of terms in the information accretion LAFA
-  published for its window starting there.
+**Against LAFA's own code.** On the window 211 -> 227, LAFA's own code and the
+frame read the same inputs, and their truths are identical: every NK, LK and PK
+pair, PK's known terms, the targets and the terms of interest, each with a
+Jaccard index of 1.0 for the frame as LAFA publishes it. With the author's
+``NOT`` rule, the frame differs from LAFA by exactly what that rule removes. The
+record of the check holds the digest of every input, the commits on both sides
+and the comparison per category:
 
-Next, the frame's truth on an allowed window (211 -> 227) is compared with the
-output of LAFA's own code on the same files, and the result is recorded on this
-page.
+.. literalinclude:: ../_data/lafa-frame-check-211-227.json
+   :language: json
+
+The check is three scripts in ``scripts/lafa_check``, and anyone with a store
+can run it again:
+
+1. ``export_inputs.py`` writes, from the store and read only, each end's
+   ontology (from the artifact store, its digest verified), its experimental
+   rows as a GAF sorted by every column, its Swiss-Prot FASTA from the cached
+   release archive, and the frame's truth in LAFA's file format;
+2. ``run_lafa.sh`` runs LAFA's own code on those files, step by step as LAFA's
+   workflow calls it, in the environment ``lafa-environment.txt`` pins. That
+   step reads files only;
+3. ``compare_truth.py`` writes the record above.
+
+Building that environment turned up a fault of LAFA's package worth knowing:
+its ``pyproject.toml`` does not declare ``obonet``, ``networkx`` or ``tqdm``,
+which it imports, so an environment built from it alone fails at the first step
+that needs one.
+
+**In the test suite.** ``tests/test_lafa_frame.py`` pins every step on
+ontologies small enough to read, including the order of the two renamings, the
+binding rule after the trim, the departure and the gains made by the ontology;
+``tests/test_lafa_frame_store.py`` runs the frame end to end through its SQL in
+Postgres, together with LAFA's targets. On the six cuts of the frame in the
+development store, the binding set read from each ontology is exactly the three
+terms, and the ontology of cut 227 has as many live terms as the information
+accretion LAFA published for its window starting there
+(``IA_TERMS`` in ``tests/test_lafa_profile_acceptance.py``).
