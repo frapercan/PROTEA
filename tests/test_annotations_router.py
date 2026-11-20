@@ -444,6 +444,7 @@ class TestDependencyGuards:
                 )
         assert resp.status_code == 500
 
+
 # ---------------------------------------------------------------------------
 # PATCH /annotations/snapshots/{snapshot_id}/ia-url (lines 146-158)
 # ---------------------------------------------------------------------------
@@ -713,7 +714,8 @@ class TestDownloadGroundTruthNK:
 
         fake_data = _EvalData(nk={"P12345": {"GO:0003674", "GO:0008150"}})
         with patch(
-            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-NK.tsv")
         assert resp.status_code == 200
@@ -750,7 +752,8 @@ class TestDownloadGroundTruthLK:
 
         fake_data = _EvalData(lk={"Q99999": {"GO:0005575"}})
         with patch(
-            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-LK.tsv")
         assert resp.status_code == 200
@@ -779,7 +782,8 @@ class TestDownloadGroundTruthPK:
 
         fake_data = _EvalData(pk={"A00001": {"GO:0003674"}})
         with patch(
-            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-PK.tsv")
         assert resp.status_code == 200
@@ -806,7 +810,8 @@ class TestDownloadKnownTerms:
 
         fake_data = _EvalData(known={"P12345": {"GO:0003674"}, "Q99999": {"GO:0005575"}})
         with patch(
-            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/known-terms.tsv")
         assert resp.status_code == 200
@@ -912,7 +917,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         assert resp.status_code == 200
@@ -937,7 +943,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=nk")
         assert resp.status_code == 200
@@ -952,7 +959,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         assert resp.status_code == 200
@@ -975,7 +983,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         lines = resp.text.strip().split("\n")
@@ -1001,7 +1010,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=pk")
         assert resp.status_code == 200
@@ -1025,7 +1035,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=all")
         assert resp.status_code == 200
@@ -1060,6 +1071,40 @@ class TestRunCafaEvaluation:
             )
         assert resp.status_code == 200
         assert resp.json()["status"] == "queued"
+
+    def test_the_job_carries_no_scoring_config_it_was_not_given(self, client):
+        """The evaluator scores stored scores and refuses a scoring config, so the
+        route must not attach the benchmark's baseline one, as it used to."""
+        from protea.infrastructure.orm.models.job import Job
+
+        c, session = client
+        eval_id = uuid4()
+        session.get.return_value = _make_evaluation_set(eval_id=eval_id)
+        jobs: list[Job] = []
+
+        def add_side(obj):
+            if isinstance(obj, Job):
+                obj.id = uuid4()
+                jobs.append(obj)
+
+        session.add.side_effect = add_side
+        with patch("protea.api.routers.annotations.evaluation_sets.publish_job"):
+            resp = c.post(
+                f"/annotations/evaluation-sets/{eval_id}/run",
+                json={"prediction_set_id": str(uuid4())},
+            )
+        assert resp.status_code == 200
+        assert len(jobs) == 1
+        assert "scoring_config_id" not in jobs[0].payload
+
+    def test_a_retired_field_is_refused_with_where_its_work_happens(self, client):
+        c, _session = client
+        resp = c.post(
+            f"/annotations/evaluation-sets/{uuid4()}/run",
+            json={"prediction_set_id": str(uuid4()), "max_distance": 0.5},
+        )
+        assert resp.status_code == 422
+        assert "score_prediction_set" in str(resp.json()["detail"])
 
     def test_invalid_payload_returns_422(self, client):
         c, session = client
