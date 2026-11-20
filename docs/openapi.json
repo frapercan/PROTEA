@@ -3862,7 +3862,7 @@
     },
     "/v1/annotations/evaluation-sets/{eval_id}/run": {
       "post": {
-        "description": "Queue a job that runs the CAFA evaluator (NK / LK / PK) for a prediction set.\n\nBody must contain ``prediction_set_id`` (required) and optionally\n``max_distance`` (float).",
+        "description": "Queue a job that runs the CAFA evaluator (NK / LK / PK) for a prediction set.\n\nBody must contain ``prediction_set_id`` and may carry the frame and label\nfields of ``RunCafaEvaluationPayload``. The evaluator scores the set's stored\nscores, so nothing here adds a scoring configuration: it used to attach the\nbenchmark's baseline config to every run that named none, which the\nevaluator now refuses, and a set of candidates is scored first with\n``score_prediction_set``.",
         "operationId": "run_cafa_evaluation_v1_annotations_evaluation_sets__eval_id__run_post",
         "parameters": [
           {
