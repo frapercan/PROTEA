@@ -132,6 +132,15 @@ cells exactly when it is given LAFA's own truth. A window of the frame
 therefore has its pivot at the t0 ontology (the closure ``per_side_t0_pivot``),
 and is scored with the terms of interest ``live_in_both_ends``.
 
+LAFA's information accretion is a table of PROTEA's own
+``compute_information_accretion`` with the evidence regime ``lafa`` and the
+cohort ``swissprot``: the corpus's own Swiss-Prot list, the fourth axis a table
+is identified by. On cut 211 it is the table LAFA's own code computes from the
+same files, term by term:
+
+.. literalinclude:: ../_data/lafa-information-accretion-check-211.json
+   :language: json
+
 What a window of the frame declares
 -----------------------------------
 
@@ -188,7 +197,9 @@ can run it again:
 2. ``run_lafa.sh`` runs LAFA's own code on those files, step by step as LAFA's
    workflow calls it, in the environment ``lafa-environment.txt`` pins. That
    step reads files only;
-3. ``compare_truth.py`` writes the record above.
+3. ``compare_truth.py`` writes the record above, and
+   ``compare_information_accretion.py`` the one for the information accretion,
+   in the Scoring section.
 
 Building that environment turned up a fault of LAFA's package worth knowing:
 its ``pyproject.toml`` does not declare ``obonet``, ``networkx`` or ``tqdm``,
