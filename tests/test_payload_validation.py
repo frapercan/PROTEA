@@ -180,6 +180,7 @@ from protea.core.operations.seal_evaluation_groundtruth import (
 )
 from protea.core.operations.store_residue_codes import StoreResidueCodesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
+from protea.core.operations.supersede_evaluation_sets import SupersedeEvaluationSetsPayload
 from protea.core.operations.upload_residue_shard import UploadResidueShardPayload
 from protea.core.operations.verify_window_against_reference import (
     VerifyWindowAgainstReferencePayload,
@@ -746,6 +747,18 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         RetireEvaluationSetsPayload,
         {"evaluation_set_ids": []},
         ("evaluation_set_ids",),
+    ),
+    (
+        # A mark says why, or it is not made: the note is what a reader of a
+        # superseded window's results is pointed to.
+        "supersede_evaluation_sets",
+        SupersedeEvaluationSetsPayload,
+        {
+            "successor_id": "4244033e-bb05-4222-8472-4ac50655ea49",
+            "evaluation_set_ids": ["daeb24b8-0000-4000-8000-000000000000"],
+            "note": "",
+        },
+        ("note",),
     ),
     (
         # Sin modo "todas": un alcance que vive en un valor por defecto es un

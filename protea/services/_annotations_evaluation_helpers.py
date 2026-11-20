@@ -193,6 +193,10 @@ def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
         "target_population": e.target_population,
         # Which protein-binding rule was asked for: the identity's last field.
         "binding_rule": e.binding_rule,
+        # The window that replaced this one, when and why; all None while it stands.
+        "superseded_by_id": str(e.superseded_by_id) if e.superseded_by_id else None,
+        "superseded_at": e.superseded_at.isoformat() if e.superseded_at else None,
+        "supersession_note": e.supersession_note,
         "job_id": str(e.job_id) if e.job_id else None,
         "created_at": e.created_at.isoformat(),
         "stats": e.stats,
