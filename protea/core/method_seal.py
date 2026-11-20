@@ -192,6 +192,12 @@ _EXECUTION_COLUMNS: Mapping[str, str] = {
 
 #: ``meta`` keys that are NOT method identity, each with why.
 _EXECUTION_META: Mapping[str, str] = {
+    "denied_removed": (
+        "how many candidates the bank's denials removed. A consequence of the "
+        "data the method met, not a choice: two runs of the same method over "
+        "different queries remove different numbers. The choice is the "
+        "denials key, which is identity"
+    ),
     "batch_size": (
         "how many queries ride in one forward pass. The search is per query and "
         "the arithmetic does not read the batch, so the same query gets the same "

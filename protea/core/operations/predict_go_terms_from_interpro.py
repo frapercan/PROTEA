@@ -299,7 +299,8 @@ class PredictGOTermsFromInterProOperation:
             "ipr_release_floor": p.ipr_release_floor,
             "ipr_releases_seen": sorted(counters.ipr_releases),
             # This method honours the bank's denials when it predicts.
-            "denials": {"honoured": True, **denials.POLICY, "removed": counters.denied_removed},
+            "denials": {"honoured": True, **denials.POLICY},
+            "denied_removed": counters.denied_removed,
         }
         session.add(prediction_set)
 

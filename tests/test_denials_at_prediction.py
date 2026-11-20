@@ -22,7 +22,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from protea.core import denials
-from protea.core.method_seal import METHOD_IDENTITY_FIELDS
+from protea.core.method_seal import EXECUTION_ONLY_FIELDS, METHOD_IDENTITY_FIELDS
 from protea.core.operations.predict_go_terms import _post_knn_pipeline
 from protea.core.operations.predict_go_terms_from_interpro import (
     PredictGOTermsFromInterProOperation,
@@ -169,7 +169,14 @@ class TestTheInterProMirror:
         PredictGOTermsFromInterProOperation._stamp_prediction_set_meta(
             MagicMock(), prediction_set, p, counters
         )  # type: ignore[arg-type]
-        assert prediction_set.meta["denials"] == {"honoured": True, **denials.POLICY, "removed": 4}
+        assert prediction_set.meta["denials"] == {"honoured": True, **denials.POLICY}
+        assert prediction_set.meta["denied_removed"] == 4
+
+    def test_the_count_is_not_part_of_the_method(self) -> None:
+        # How many candidates were removed depends on the queries, so two runs of
+        # one method may differ in it: execution, not identity.
+        assert "denied_removed" in EXECUTION_ONLY_FIELDS
+        assert "denied_removed" not in METHOD_IDENTITY_FIELDS
 
 
 @pytest.mark.integration
