@@ -418,7 +418,10 @@ Evaluation
    copies the ``ScoringConfig`` and the depth cut from the set's record, so a
    result names how its scores were made. Rows written before 2026-11-20 keep
    the ``ScoringConfig``, ``RerankerModel`` and cut the evaluator applied
-   itself.
+   itself. Beside the categories, ``results`` holds ``artifacts`` (the keys of
+   the files the run stored) and, since 2026-11-20, ``terms_of_interest``: the
+   rule the window named, the number of terms and the sha256 of the file
+   cafaeval read. The frame seal reads that rule.
 
 Support
 -------

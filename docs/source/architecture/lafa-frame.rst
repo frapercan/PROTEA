@@ -130,7 +130,14 @@ accretion over the t0 Swiss-Prot cohort, the terms of interest, and
 its own optimised evaluator, ``cafaeval-protea``, which reproduces LAFA's nine
 cells exactly when it is given LAFA's own truth. A window of the frame
 therefore has its pivot at the t0 ontology (the closure ``per_side_t0_pivot``),
-and is scored with the terms of interest ``live_in_both_ends``.
+and is scored over the terms of interest its gain rule names: the ids live in
+both ontologies, the terms step 4 trims to (39,028 on 211 -> 227). The
+evaluator takes them from the window, never from the request; it refuses a
+window whose recorded count of them differs, and records on each result the
+rule, the count and the sha256 of the file cafaeval read. Until 2026-11-20 a
+request named the rule and defaulted to every term of the pivot, obsolete ones
+included, so a frame window evaluated without naming it was scored over 47,328
+terms.
 
 LAFA's information accretion is a table of PROTEA's own
 ``compute_information_accretion`` with the evidence regime ``lafa`` and the

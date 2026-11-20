@@ -9,7 +9,9 @@ Every field names the frame a result is measured in, or labels the result. None
 names how a method's candidates become scores: the evaluator scores what a
 method stored and nothing else (the closure's question 6, 2026-11-20), and the
 fields that used to ask it to score, rerank, cut, graft or propagate are
-refused with where that work happens now (:data:`RETIRED_FIELDS`).
+refused with where that work happens now (:data:`RETIRED_FIELDS`). None
+chooses the terms of interest either: they are the window's (decided on
+2026-11-20), and the two fields that chose them are refused the same way.
 """
 
 from __future__ import annotations
@@ -36,6 +38,12 @@ _SOFTPROP = (
     "the platform no longer propagates scores; a method that propagates its scores "
     "stores them propagated"
 )
+_WINDOW_TERMS = (
+    "the terms of interest are the window's: the evaluator scores over the terms its "
+    "gain rule names (SCORED_TERMS, protea/core/_truth_rules.py) and records the rule, "
+    "the count and the file's sha256 on the result; scoring a window over other terms "
+    "would be measuring another window"
+)
 
 #: The fields the evaluator no longer takes, each with where its work happens
 #: now. A request that carries one with a value is refused with the pointer; one
@@ -55,6 +63,8 @@ RETIRED_FIELDS: dict[str, str] = {
     "interpro_ipr2go_file": _GRAFT,
     "interpro_graft_weight": _GRAFT,
     "softprop": _SOFTPROP,
+    "toi_file": _WINDOW_TERMS,
+    "toi_rule": _WINDOW_TERMS,
 }
 
 _EMPTY: tuple[Any, ...] = (None, False, "", {}, [])
@@ -84,8 +94,8 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         if asked:
             raise ValueError(
                 "; ".join(f"{key}: {RETIRED_FIELDS[key]}" for key in asked)
-                + ". The evaluator scores what a method stored and nothing else "
-                "(docs: architecture/scoring)."
+                + ". The evaluator scores what a method stored, over the terms its window "
+                "names, and nothing else (docs: architecture/scoring)."
             )
         return {key: value for key, value in data.items() if key not in RETIRED_FIELDS}
 
@@ -177,37 +187,6 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "docs/IA_PROVENANCE_v227.md and docs/EVAL_LAFA_PARITY.md."
         ),
     )
-    toi_file: str | None = Field(
-        default=None,
-        description=(
-            "Path to an explicit terms-of-interest (TOI) file (one GO id per line) "
-            "passed to cafaeval's -toi flag. TOI restricts which terms count toward "
-            "precision/recall. When None, PROTEA derives the TOI from every GO term "
-            "in the pivot ontology snapshot. LAFA passes a release-specific "
-            "groundtruth_terms_of_interest.txt that is a subset of the full ontology, "
-            "so for strict LAFA parity pass that exact file here. See "
-            "docs/EVAL_LAFA_PARITY.md."
-        ),
-    )
-    toi_rule: str = Field(
-        default="pivot_terms",
-        description=(
-            "How PROTEA derives the terms of interest when no toi_file is "
-            "given. 'pivot_terms' (the default, and what the platform has "
-            "always sent) is every GO id under the pivot snapshot, obsolete "
-            "ones included. 'live_in_both_ends' is the ids non-obsolete in "
-            "the ontology of BOTH ends of the window, read from the two "
-            "annotation sets rather than from the native snapshot fields, "
-            "which collapse when a run asks for closure under one end's "
-            "graph. The two differ twice over: the default keeps obsolete "
-            "terms cafaeval's own parser excludes from the graphs it builds, "
-            "and it consults one snapshot, so a term obsolete by t1 is scored "
-            "as though it still existed. On the 211 -> 227 window they are "
-            "43,558 terms against 39,028, and the second is the lab's rule. "
-            "Ignored when toi_file is set, since that file IS the answer."
-        ),
-    )
-
     frame: str | None = Field(
         default=None,
         description=(
@@ -262,18 +241,6 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
         return v.strip()
-
-    @field_validator("toi_rule")
-    @classmethod
-    def _toi_rule_vocab(cls, v: str) -> str:
-        from protea.core.operations._run_cafa_setup import TOI_RULES
-
-        # Read from the rules themselves: a vocabulary restated here would let
-        # a rule be added that no payload can ask for, or asked for by a name
-        # the loader does not know.
-        if v not in TOI_RULES:
-            raise ValueError(f"toi_rule must be one of {TOI_RULES}")
-        return v
 
     @field_validator("score_reading")
     @classmethod

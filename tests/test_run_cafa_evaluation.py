@@ -97,6 +97,10 @@ def _make_eval_set(eval_set_id=None):
     es.id = uuid.UUID(eval_set_id or EVAL_SET_ID)
     es.old_annotation_set_id = OLD_ANN_SET_ID
     es.new_annotation_set_id = NEW_ANN_SET_ID
+    # The window names the terms it is scored over through its gain rule, and
+    # may record how many it has; left to the mock, both would be MagicMocks.
+    es.toi_rule = "pivot_terms"
+    es.stats = {}
     return es
 
 
@@ -254,7 +258,7 @@ class TestRunCafaEvaluationPayload:
         )
         assert p.th_step == 0.01
         assert p.max_terms is None
-        assert p.toi_file is None
+        assert "toi_file" not in RunCafaEvaluationPayload.model_fields
 
     def test_th_step_out_of_range(self):
         with pytest.raises(ValidationError):
@@ -310,6 +314,8 @@ class TestRunCafaEvaluationPayload:
             "interpro_ipr2go_file",
             "interpro_graft_weight",
             "softprop",
+            "toi_file",
+            "toi_rule",
         }
         assert all(RETIRED_FIELDS.values())
 

@@ -35,24 +35,41 @@ when that corpus was loaded and independent of any later closure choice, and
 :func:`test_the_rule_ignores_the_native_snapshot_fields` is the regression
 that keeps it that way.
 
-These test which fields are consulted and how the two sides combine, not SQL.
-The DB round trip needs Postgres (``--with-postgres``) and a live window;
-nothing here needs either, so the checks run everywhere.
+WHO CHOOSES THE RULE. Until 2026-11-20 the request did, and defaulted to
+``pivot_terms``, so every result on the development store was scored over the
+pivot's terms, LAFA's frame included, whose own rule trims to the terms live at
+both ends. Since then the window does, through its gain rule (``SCORED_TERMS``):
+the request cannot name the terms, the evaluator refuses a window that recorded
+another count of them, and the result records the rule, the count and the
+file's digest, which the frame seal reads.
+
+Most of these test which fields are consulted and how the two sides combine,
+against fakes, so they run everywhere. The seal's reading of the result is SQL,
+and is checked against Postgres (``--with-postgres``).
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
+from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
+from protea.core._truth_rules import GAIN_RULES, SCORED_TERMS
 from protea.core.operations import _run_cafa_setup as setup
 from protea.core.operations._run_cafa_setup import (
     TOI_RULES,
     _load_terms_of_interest,
     _window_end_snapshots,
+    terms_of_interest_record,
+    window_terms_of_interest,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
+from protea.infrastructure.orm.base import Base
 
 PIVOT = uuid.uuid4()
 OLD_CORPUS_SNAPSHOT = uuid.uuid4()
@@ -76,6 +93,8 @@ class _EvaluationSet:
         self.new_annotation_set_id = new
         self.old_native_snapshot_id = COLLAPSED_NATIVE
         self.new_native_snapshot_id = COLLAPSED_NATIVE
+        self.toi_rule = "live_in_both_ends"
+        self.stats: dict[str, object] = {}
 
 
 class _Query:
@@ -147,14 +166,7 @@ def live(monkeypatch: pytest.MonkeyPatch) -> dict[uuid.UUID, set[str]]:
     return table
 
 
-class TestTheDefaultRuleIsUnchanged:
-    def test_the_default_is_the_pivot_universe(self) -> None:
-        payload = RunCafaEvaluationPayload(
-            evaluation_set_id=str(uuid.uuid4()), prediction_set_id=str(uuid.uuid4())
-        )
-        assert payload.toi_rule == "pivot_terms"
-        assert TOI_RULES[0] == "pivot_terms"
-
+class TestThePivotRule:
     def test_the_pivot_rule_returns_every_term_of_the_pivot(self, session: _Session) -> None:
         got = _load_terms_of_interest(session, PIVOT)
         assert got == ["GO:0000001", "GO:0000002", "GO:0000003"]
@@ -220,24 +232,11 @@ class TestItRefusesRatherThanGuesses:
         with pytest.raises(ValueError, match="unknown toi_rule"):
             _load_terms_of_interest(session, PIVOT, None, "whatever")
 
-    def test_the_payload_refuses_an_unknown_rule(self) -> None:
-        with pytest.raises(ValueError):
-            RunCafaEvaluationPayload(
-                evaluation_set_id=str(uuid.uuid4()),
-                prediction_set_id=str(uuid.uuid4()),
-                toi_rule="whatever",
-            )
-
-    def test_the_payload_accepts_every_rule_the_loader_knows(self) -> None:
-        # Pinned to the loader's own tuple, so a rule cannot be added that no
-        # payload can ask for, nor asked for by a name the loader rejects.
-        for rule in TOI_RULES:
-            payload = RunCafaEvaluationPayload(
-                evaluation_set_id=str(uuid.uuid4()),
-                prediction_set_id=str(uuid.uuid4()),
-                toi_rule=rule,
-            )
-            assert payload.toi_rule == rule
+    def test_every_gain_rule_names_a_rule_the_loader_knows(self) -> None:
+        # Pinned to both tuples: no window can be built with a gain rule the
+        # evaluator has no terms for, nor name terms the loader rejects.
+        assert set(SCORED_TERMS) == set(GAIN_RULES)
+        assert set(SCORED_TERMS.values()) <= set(TOI_RULES)
 
     def test_the_two_end_rule_without_a_window_raises(self, session: _Session) -> None:
         with pytest.raises(ValueError, match="cannot be resolved"):
@@ -279,3 +278,139 @@ class TestTheRuleReachesTheSeal:
 
         assert "toi_rule" in _FRAME_FIELDS
         assert "AS toi_rule" in str(_ROWS)
+
+
+class TestTheWindowDecides:
+    """The rule is the window's, through its gain rule; the request has no say."""
+
+    @pytest.mark.parametrize(("gain_rule", "scored"), sorted(SCORED_TERMS.items()))
+    def test_the_gain_rule_names_the_rule(
+        self, session: _Session, window: _EvaluationSet, live: dict, gain_rule: str, scored: str
+    ) -> None:
+        window.toi_rule = gain_rule
+        rule, terms = window_terms_of_interest(session, window, PIVOT)
+        assert rule == scored
+        assert terms == _load_terms_of_interest(session, PIVOT, window, scored)
+
+    def test_lafas_frame_is_scored_over_the_terms_live_at_both_ends(
+        self, session: _Session, window: _EvaluationSet, live: dict
+    ) -> None:
+        window.toi_rule = "both_ends_trimmed"
+        assert window_terms_of_interest(session, window, PIVOT) == (
+            "live_in_both_ends",
+            ["GO:0000002", "GO:0000004"],
+        )
+
+    def test_a_window_that_recorded_another_count_is_refused(
+        self, session: _Session, window: _EvaluationSet, live: dict
+    ) -> None:
+        window.toi_rule = "both_ends_trimmed"
+        window.stats = {"terms_of_interest": 3}
+        with pytest.raises(ValueError, match="records 3 terms of interest, and its rule"):
+            window_terms_of_interest(session, window, PIVOT)
+
+    def test_a_window_that_recorded_the_same_count_is_scored(
+        self, session: _Session, window: _EvaluationSet, live: dict
+    ) -> None:
+        window.toi_rule = "both_ends_trimmed"
+        window.stats = {"terms_of_interest": 2}
+        assert window_terms_of_interest(session, window, PIVOT)[0] == "live_in_both_ends"
+
+    @pytest.mark.parametrize(
+        ("field", "value"), [("toi_rule", "pivot_terms"), ("toi_file", "/x/toi.txt")]
+    )
+    def test_the_request_cannot_name_the_terms(self, field: str, value: str) -> None:
+        with pytest.raises(ValueError, match=f"{field}: the terms of interest are the window's"):
+            RunCafaEvaluationPayload(
+                evaluation_set_id=str(uuid.uuid4()),
+                prediction_set_id=str(uuid.uuid4()),
+                **{field: value},
+            )
+
+    def test_a_request_built_before_still_runs_when_it_asks_for_nothing(self) -> None:
+        payload = RunCafaEvaluationPayload(
+            evaluation_set_id=str(uuid.uuid4()),
+            prediction_set_id=str(uuid.uuid4()),
+            toi_rule=None,
+            toi_file="",
+        )
+        assert "toi_rule" not in payload.model_dump()
+        assert "toi_file" not in payload.model_dump()
+
+
+class TestTheResultRecordsTheTerms:
+    def test_the_record_names_the_rule_the_count_and_the_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "terms_of_interest.txt"
+        path.write_text("GO:0000002\nGO:0000004\n")
+        record = terms_of_interest_record(
+            "live_in_both_ends", ["GO:0000002", "GO:0000004"], str(path)
+        )
+        assert record == {
+            "rule": "live_in_both_ends",
+            "terms": 2,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+
+
+@pytest.mark.integration
+class TestTheSealReadsTheResult:
+    """The seal's material reads the rule the result records, and the request's only before."""
+
+    @pytest.fixture()
+    def pg(self, postgres_url: str):
+        engine = create_engine(postgres_url, future=True)
+        Base.metadata.drop_all(engine)
+        Base.metadata.create_all(engine)
+        yield engine
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+    def _rule_sealed(self, engine, *, recorded: str | None, requested: str | None) -> str | None:
+        from protea.core.operations.seal_evaluation_frames import _ONE_ROW
+
+        job_id, result_id = uuid.uuid4(), uuid.uuid4()
+        payload = {} if requested is None else {"toi_rule": requested}
+        results = {} if recorded is None else {"terms_of_interest": {"rule": recorded, "terms": 2}}
+        with Session(engine, future=True) as session:
+            session.execute(text("SET session_replication_role = 'replica'"))
+            session.execute(
+                text(
+                    "INSERT INTO job (id, operation, queue_name, status, payload, meta, tags) "
+                    "VALUES (:j, 'run_cafa_evaluation', 'protea.evaluations', 'SUCCEEDED', "
+                    "CAST(:p AS jsonb), '{}'::jsonb, '{}')"
+                ),
+                {"j": job_id, "p": json.dumps(payload)},
+            )
+            session.execute(
+                text(
+                    "INSERT INTO evaluation_result (id, evaluation_set_id, prediction_set_id, job_id, "
+                    "results) VALUES (:r, :e, :s, :j, CAST(:x AS jsonb))"
+                ),
+                {
+                    "r": result_id,
+                    "e": uuid.uuid4(),
+                    "s": uuid.uuid4(),
+                    "j": job_id,
+                    "x": json.dumps(results),
+                },
+            )
+            return session.execute(_ONE_ROW, {"id": str(result_id)}).mappings().one()["toi_rule"]
+
+    def test_a_result_that_records_its_rule_is_sealed_by_it(self, pg) -> None:
+        assert (
+            self._rule_sealed(pg, recorded="live_in_both_ends", requested=None)
+            == "live_in_both_ends"
+        )
+
+    def test_the_recorded_rule_wins_over_what_the_request_said(self, pg) -> None:
+        assert (
+            self._rule_sealed(pg, recorded="live_in_both_ends", requested="pivot_terms")
+            == "live_in_both_ends"
+        )
+
+    def test_a_result_from_before_is_sealed_by_its_request(self, pg) -> None:
+        assert (
+            self._rule_sealed(pg, recorded=None, requested="live_in_both_ends")
+            == "live_in_both_ends"
+        )
+        assert self._rule_sealed(pg, recorded=None, requested=None) is None

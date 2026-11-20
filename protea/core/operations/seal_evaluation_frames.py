@@ -82,6 +82,13 @@ PositiveInt = Annotated[int, Field(gt=0)]
 #:   two rules are not a near thing: on the 211 -> 227 window ``pivot_terms``
 #:   yields 43,558 terms and ``live_in_both_ends`` 39,028.
 #:
+#: Since 2026-11-20 neither is the request's. The window's gain rule names the
+#: terms (``SCORED_TERMS``) and the evaluator records the rule it applied on
+#: the result, as ``results.terms_of_interest.rule``, which the material reads
+#: first; a result from before reads its producing request, where an absent
+#: rule meant ``pivot_terms``. ``toi_file`` is retired, and stays in the
+#: material for the results that were scored with one.
+#:
 #: ``toi_file`` is sealed as the PATH, which is weaker than the thing that
 #: matters: two different files written to one path seal alike, and one file
 #: copied to two paths seals twice. That is the same weakness ``ia_file`` has
@@ -167,7 +174,8 @@ _ROW_MATERIAL = """
            j.payload ->> 'restrict_gt_to_predicted'       AS restrict_gt_to_predicted,
            j.payload ->> 'th_step'                        AS th_step,
            j.payload ->> 'toi_file'                       AS toi_file,
-           j.payload ->> 'toi_rule'                       AS toi_rule,
+           COALESCE(r.results -> 'terms_of_interest' ->> 'rule',
+                    j.payload ->> 'toi_rule')             AS toi_rule,
            j.payload ->> 'score_reading'                  AS score_reading,
            (j.id IS NOT NULL)                             AS has_job
     FROM evaluation_result r

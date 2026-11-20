@@ -48,9 +48,10 @@ from protea.core.operations._run_cafa_setup import (  # noqa: F401
     StagedInputs,
     _emit_evaluation_setup_events,
     _EvalInputs,
-    _load_terms_of_interest,
     _PipelineCtx,
     bundle_run_context,
+    terms_of_interest_record,
+    window_terms_of_interest,
 )
 from protea.core.operations.seal_evaluation_frames import seal_one
 from protea.core.utils import contract_payload
@@ -59,6 +60,10 @@ from protea.infrastructure.orm.models.annotation.ontology_snapshot import Ontolo
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import ArtifactStore, get_artifact_store
+
+#: The keys of a result that are not settings: what was uploaded, and the terms
+#: the settings were scored over.
+_NOT_SETTINGS: tuple[str, ...] = ("artifacts", "terms_of_interest")
 
 
 def _refuse_a_cyclic_snapshot(session: Session, snapshot: Any, emit: EmitFn) -> None:
@@ -193,7 +198,7 @@ class RunCafaEvaluationOperation:
             {
                 "evaluation_result_id": str(result_id),
                 "frame_digest": frame_seal,
-                "settings_evaluated": [k for k in results.keys() if k != "artifacts"],
+                "settings_evaluated": [k for k in results if k not in _NOT_SETTINGS],
                 "artifacts_prefix": f"eval_artifacts/{result_id}/",
                 "artifacts_count": len((results.get("artifacts") or {}).get("keys") or []),
             },
@@ -235,6 +240,7 @@ class RunCafaEvaluationOperation:
         snapshot = session.get(OntologySnapshot, pivot_snapshot_id)
         if snapshot is None:
             raise ValueError(f"Pivot OntologySnapshot {pivot_snapshot_id} not found")
+        toi_rule, toi_go_ids = window_terms_of_interest(session, eval_set, pivot_snapshot_id)
         inputs = _EvalInputs(
             eval_set_id=eval_set_id,
             pred_set_id=pred_set_id,
@@ -243,8 +249,8 @@ class RunCafaEvaluationOperation:
             data=data,
             snapshot=snapshot,
             pivot_snapshot_id=pivot_snapshot_id,
-            toi_go_ids=_load_terms_of_interest(session, pivot_snapshot_id, eval_set, p.toi_rule),
-            toi_rule=p.toi_rule,
+            toi_go_ids=toi_go_ids,
+            toi_rule=toi_rule,
         )
         _emit_evaluation_setup_events(emit, inputs)
         if data.delta_proteins == 0:
@@ -312,6 +318,9 @@ class RunCafaEvaluationOperation:
                 ctx.artifact_store, ctx.result_id, artifacts_root, emit
             )
             results["artifacts"] = {"keys": uploaded_keys}
+            results["terms_of_interest"] = terms_of_interest_record(
+                ctx.inputs.toi_rule, ctx.inputs.toi_go_ids, run_data.toi_path
+            )
             return results
 
     def _stage_evaluator_inputs(
@@ -339,7 +348,7 @@ class RunCafaEvaluationOperation:
                 session, prediction_set_id=inputs.pred_set_id, data=data, emit=emit
             )
         gt_paths = _data.write_ground_truth_files(artifacts_root, data)
-        toi_path = self._resolve_toi_file(artifacts_root, p, inputs.toi_go_ids, emit)
+        toi_path = self._write_terms_of_interest(artifacts_root, inputs.toi_go_ids, emit)
 
         delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
         emit(
@@ -366,21 +375,8 @@ class RunCafaEvaluationOperation:
         )
 
     @staticmethod
-    def _resolve_toi_file(
-        artifacts_root: Path,
-        p: RunCafaEvaluationPayload,
-        toi_go_ids: list[str],
-        emit: EmitFn,
-    ) -> str:
-        """Resolve the cafaeval terms-of-interest path.
-
-        When ``p.toi_file`` is set, use that exact file (the LAFA-parity
-        path: score against LAFA's release-specific TOI). Otherwise write
-        the pivot-snapshot term universe. See docs/EVAL_LAFA_PARITY.md.
-        """
-        if p.toi_file:
-            emit("run_cafa_evaluation.toi_external", None, {"path": p.toi_file}, "info")
-            return p.toi_file
+    def _write_terms_of_interest(artifacts_root: Path, toi_go_ids: list[str], emit: EmitFn) -> str:
+        """Write the window's terms of interest where cafaeval and the artifacts read them."""
         toi_path = os.path.join(str(artifacts_root), "terms_of_interest.txt")
         _data.write_terms_of_interest(toi_path, toi_go_ids, emit=emit)
         return toi_path

@@ -514,8 +514,8 @@ PROTEA were previously misaligned and the current state after the fix
      - Must point at the same IA artefact as LAFA used for the band
    * - ``toi``
      - ``groundtruth_terms_of_interest.txt``
-     - payload ``toi_file``, else snapshot terms
-     - Residual up to 0.004 on MFO without the exact file; pass it for strict parity
+     - the window's terms, by its gain rule (a request has not named them since 2026-11-20)
+     - LAFA's frame derives LAFA's own terms (:doc:`lafa-frame`); the residual up to 0.004 on MFO was the pivot's terms
    * - ``prop``
      - ``fill``
      - ``fill``
@@ -531,9 +531,9 @@ PROTEA were previously misaligned and the current state after the fix
 
 **How to run a LAFA-comparable evaluation.** In the ``run_cafa_evaluation``
 payload, leave ``th_step`` and ``max_terms`` at their defaults (``0.01`` and
-``None``), pass ``ia_file`` pointing at the same IA artefact LAFA used for
-the band, and pass ``toi_file`` pointing at LAFA's release
-``groundtruth_terms_of_interest.txt`` for strict MFO parity.
+``None``) and name the IA table LAFA's frame uses; the terms of interest are
+the window's, and a window of LAFA's frame derives LAFA's own
+(:doc:`lafa-frame`).
 
 **Persisted metrics.** ``run_cafa_evaluation`` persists, per aspect, the
 IA-weighted ``f_micro_w`` (headline), ``fmax_w``, ``f_micro``, and the
