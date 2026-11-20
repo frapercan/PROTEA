@@ -46,7 +46,7 @@ test.describe("score on-ramp", () => {
       page.getByText(/single-pair probability is not exposed by a JSON endpoint/i),
     ).toBeVisible();
     // And it names the real bulk contract rather than a fabricated value.
-    await expect(page.getByText(/\/rerank\.tsv/i).first()).toBeVisible();
+    await expect(page.getByText(/\/predictions-cafa\.tsv/i).first()).toBeVisible();
   });
 
   test("links back to the argument", async ({ page }) => {

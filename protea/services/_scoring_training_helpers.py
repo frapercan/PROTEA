@@ -48,6 +48,11 @@ TRAINING_TSV_COLUMNS: tuple[str, ...] = (
 )
 
 
+def _format_optional(value: Any) -> str:
+    """Render ``None`` as the empty string; otherwise stringify."""
+    return "" if value is None else str(value)
+
+
 def format_training_row(
     pred: Any,
     go_id: str,
@@ -57,12 +62,8 @@ def format_training_row(
     """Render one labeled training-data TSV row (no trailing newline).
 
     Column order matches :data:`TRAINING_TSV_COLUMNS`. ``label`` is
-    binary (0 / 1). Uses lazy import of ``_format_optional`` from
-    ``_scoring_streaming_helpers`` (where it canonically lives) to
-    avoid a circular dep with the re-exporting module.
+    binary (0 / 1).
     """
-    from protea.services._scoring_streaming_helpers import _format_optional
-
     return "\t".join(
         [
             pred.protein_accession,

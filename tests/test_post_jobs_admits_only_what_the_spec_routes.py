@@ -119,7 +119,7 @@ def test_a_message_stage_or_a_write_never_gets_a_job_row(operation: str) -> None
     [
         ("insert_proteins", queues.EVALUATIONS, queues.JOBS),
         ("run_cafa_evaluation", queues.JOBS, queues.EVALUATIONS),
-        # What scripts/run_experiments.py posted before this change.
+        # What the experiment battery script (retired 2026-11-20) posted before this change.
         ("predict_go_terms", queues.JOBS, queues.PREDICTIONS),
         ("compute_embeddings", "protea.embedding", queues.EMBEDDINGS),
         ("run_lab_method", queues.JOBS, queues.METHODS),

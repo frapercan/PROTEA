@@ -39,8 +39,8 @@ Symptoms
         "reranker_model_id": "<uuid>"
       }
 
-- The scoring router endpoints (``GET /scoring/prediction-sets/{id}/score.tsv``,
-  ``…/reranker-metrics``) return scores without reranker contribution or
+- The scoring router's streaming and metrics endpoints of the time (``score.tsv`` and
+  ``reranker-metrics``, retired on 2026-11-20) returned scores without reranker contribution or
   return 422 with a ``schema_mismatch`` detail.
 
 - Reranker metrics are absent from an ``EvaluationResult`` that you

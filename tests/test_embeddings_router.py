@@ -1128,53 +1128,68 @@ class TestGoTermDistribution:
 
 
 class TestDownloadPredictionsCafa:
-    def _get_cafa(self, client, session, set_id, rows, **params):
-        """Wire mocks for the CAFA download endpoint.
+    """The CAFA export streams a set's stored scores, as the evaluator writes them.
 
-        ``rows`` should be a list of (protein_accession, go_id, distance) tuples,
-        matching the subquery-based query output.
-        """
-        ps = _make_prediction_set(set_id)
-        session.get.return_value = ps
+    The reader itself is tested against Postgres (test_scored_set_storage.py,
+    test_method_score_predictions.py); here its three entry points are doubles
+    and the endpoint's own decisions are what is pinned.
+    """
 
-        q = MagicMock()
-        q.join.return_value = q
-        q.filter.return_value = q
-        q.group_by.return_value = q
-        q.subquery.return_value = q
-        q.c = q  # subquery column access
-        q.order_by.return_value = q
-        q.yield_per.return_value = iter(rows)
-        session.query.return_value = q
+    _HELPERS = "protea.services._embeddings_cafa_helpers"
 
-        return client.get(
-            f"/embeddings/prediction-sets/{set_id}/predictions-cafa.tsv",
-            params=params,
+    @staticmethod
+    def _table(rows):
+        import pyarrow as pa
+
+        return pa.table(
+            {
+                "protein_accession": [r[0] for r in rows],
+                "go_id": [r[1] for r in rows],
+                "score": [r[2] for r in rows],
+            }
         )
 
-    def test_returns_cafa_format(self, client, session):
-        set_id = uuid4()
-        # New format: (accession, go_id, distance) tuples
-        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.3)])
+    def _get_cafa(self, client, session, set_id, rows, *, refuse=None, **params):
+        session.get.return_value = _make_prediction_set(set_id)
+        seen: dict[str, object] = {}
+
+        def table(_session, ctx):
+            seen["proteins"] = set(ctx.delta_proteins)
+            return self._table(rows)
+
+        def refuse_unless_scored(_session, _set_id):
+            if refuse is not None:
+                raise refuse
+
+        with (
+            patch(f"{self._HELPERS}.refuse_unless_scored", side_effect=refuse_unless_scored),
+            patch(f"{self._HELPERS}.proteins_of", return_value={r[0] for r in rows}),
+            patch(f"{self._HELPERS}.scored_table", side_effect=table),
+        ):
+            resp = client.get(
+                f"/embeddings/prediction-sets/{set_id}/predictions-cafa.tsv", params=params
+            )
+        return resp, seen
+
+    def test_it_streams_the_stored_scores_as_written(self, client, session):
+        rows = [("P12345", "GO:0003824", "0.8123"), ("P12345", "GO:0005737", "0.5000")]
+        resp, _ = self._get_cafa(client, session, uuid4(), rows)
         assert resp.status_code == 200
         assert "tab-separated" in resp.headers["content-type"]
-        lines = resp.text.splitlines()
-        assert len(lines) == 1
-        parts = lines[0].split("\t")
-        assert parts[0] == "P12345"
-        assert parts[1] == "GO:0003824"
-        # score = max(0, 1 - 0.3) = 0.7
-        assert float(parts[2]) == pytest.approx(0.7, abs=1e-3)
+        assert resp.text == "P12345\tGO:0003824\t0.8123\nP12345\tGO:0005737\t0.5000\n"
 
-    def test_cafa_deduplicates_go_terms(self, client, session):
-        """Deduplication now happens at DB level via GROUP BY + MIN(distance).
-        The query returns already-unique rows, so a single row is expected."""
-        set_id = uuid4()
-        # DB-level dedup means only the best (min distance) row is returned
-        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.2)])
-        assert resp.status_code == 200
-        lines = resp.text.splitlines()
-        assert len(lines) == 1
+    def test_a_set_of_candidates_is_refused_with_the_step_that_scores_it(self, client, session):
+        from protea.core.scoring import MethodScoreMissing
+
+        refusal = MethodScoreMissing("stores candidates without scores: score_prediction_set")
+        resp, _ = self._get_cafa(client, session, uuid4(), [], refuse=refusal)
+        assert resp.status_code == 409
+        assert "score_prediction_set" in resp.json()["detail"]
+
+    def test_a_cut_is_refused_because_it_is_the_scoring_steps(self, client, session):
+        resp, _ = self._get_cafa(client, session, uuid4(), [], max_distance=0.5)
+        assert resp.status_code == 422
+        assert "score_prediction_set" in resp.json()["detail"]
 
     def test_cafa_not_found_returns_404(self, client, session):
         session.get.return_value = None
@@ -1186,32 +1201,32 @@ class TestDownloadPredictionsCafa:
         assert resp.status_code == 404
 
     def test_cafa_content_disposition(self, client, session):
-        set_id = uuid4()
-        resp = self._get_cafa(client, session, set_id, [])
+        resp, _ = self._get_cafa(client, session, uuid4(), [])
         disposition = resp.headers.get("content-disposition", "")
         assert "attachment" in disposition
         assert "cafa" in disposition
 
-    def test_cafa_filter_by_aspect(self, client, session):
-        set_id = uuid4()
-        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.1)], aspect="F")
+    def test_an_aspect_keeps_only_its_terms(self, client, session):
+        session.execute.return_value = iter([("GO:0003824",)])
+        rows = [("P12345", "GO:0003824", "0.8123"), ("P12345", "GO:0005737", "0.5000")]
+        resp, _ = self._get_cafa(client, session, uuid4(), rows, aspect="F")
         assert resp.status_code == 200
+        assert resp.text == "P12345\tGO:0003824\t0.8123\n"
 
-    def test_cafa_filter_by_max_distance(self, client, session):
-        set_id = uuid4()
-        resp = self._get_cafa(
-            client, session, set_id, [("P12345", "GO:0003824", 0.05)], max_distance=0.5
+    def test_a_window_exports_its_targets_from_its_own_truth(self, client, session):
+        from protea.core.evaluation import EvaluationData
+
+        data = EvaluationData(
+            nk={"N1": {"GO:1"}}, lk={"L1": {"GO:2"}}, pk={"P1": {"GO:3"}}, known={}, pk_known={}
         )
+        with patch(
+            "protea.core.evaluation.load_evaluation_data_for_set", return_value=(data, uuid4())
+        ):
+            resp, seen = self._get_cafa(
+                client, session, uuid4(), [("P1", "GO:3", "0.5000")], eval_id=str(uuid4())
+            )
         assert resp.status_code == 200
-
-    def test_cafa_score_clamps_at_zero(self, client, session):
-        """When distance > 1.0 the score should be 0.0, not negative."""
-        set_id = uuid4()
-        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 2.5)])
-        lines = resp.text.splitlines()
-        assert len(lines) == 1
-        score = float(lines[0].split("\t")[2])
-        assert score == 0.0
+        assert seen["proteins"] == {"N1", "L1", "P1"}, "PK targets too, as the evaluator reads them"
 
 
 # ---------------------------------------------------------------------------

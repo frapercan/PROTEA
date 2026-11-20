@@ -198,10 +198,13 @@ Key endpoints:
   ``DELETE /scoring/rerankers/{id}``: read/delete operations for
   registered re-ranker models. Creation lives at
   ``POST /reranker-models/import``.
-- ``GET /scoring/prediction-sets/{id}/rerank.tsv``: applies a trained
-  re-ranker to a prediction set, streaming re-scored predictions.
-- ``GET /scoring/prediction-sets/{id}/reranker-metrics``: computes CAFA-style
-  Fmax and AUC-PR using re-ranker probability scores.
+
+Nothing under ``/scoring`` scores a set or measures one. A reranker runs when
+the method predicts and its score is stored; a ScoringConfig is applied by
+``score_prediction_set``; the numbers are the evaluator's. The endpoints that
+scored, reranked and measured on the fly (``score.tsv``, ``rerank.tsv``,
+``score``, ``metrics``, ``reranker-metrics``) were retired on 2026-11-20
+(:doc:`/architecture/scoring`).
 
 .. automodule:: protea.api.routers.scoring
    :members:
@@ -791,7 +794,7 @@ Endpoints summary
      - Stream all predictions as TSV (filtered by accession / aspect / distance).
    * - ``GET``
      - ``/embeddings/prediction-sets/{id}/predictions-cafa.tsv``
-     - Download predictions in CAFA submission format.
+     - Download a set's stored scores in CAFA format, as the evaluator writes them.
    * - ``DELETE``
      - ``/embeddings/prediction-sets/{id}``
      - Delete a prediction set.
@@ -815,12 +818,6 @@ Endpoints summary
      - ``/scoring/configs/{id}``
      - Delete a scoring configuration.
    * - ``GET``
-     - ``/scoring/prediction-sets/{id}/score.tsv``
-     - Stream scored predictions as TSV.
-   * - ``GET``
-     - ``/scoring/prediction-sets/{id}/metrics``
-     - Compute CAFA-style metrics for scored predictions.
-   * - ``GET``
      - ``/scoring/prediction-sets/{id}/training-data.tsv``
      - Export labeled training data for the re-ranker.
    * - ``GET``
@@ -832,12 +829,6 @@ Endpoints summary
    * - ``DELETE``
      - ``/scoring/rerankers/{id}``
      - Delete a trained re-ranker model.
-   * - ``GET``
-     - ``/scoring/prediction-sets/{id}/rerank.tsv``
-     - Apply a re-ranker to a prediction set and stream re-scored TSV.
-   * - ``GET``
-     - ``/scoring/prediction-sets/{id}/reranker-metrics``
-     - Compute CAFA Fmax and AUC-PR using re-ranker scores.
 
    * -
      - **Query Sets**
