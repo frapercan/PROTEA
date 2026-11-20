@@ -31,6 +31,7 @@ import tempfile
 import time
 import uuid
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -38,6 +39,7 @@ from pydantic import field_validator
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from protea.core._window_population import swissprot_of_corpus
 from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.ia import (
@@ -46,7 +48,7 @@ from protea.core.ia import (
     ia_over_components,
     strongly_connected_components,
 )
-from protea.core.ia_regimes import DEFAULT_REGIME, EVIDENCE_REGIMES, resolve_regime
+from protea.core.ia_regimes import DEFAULT_REGIME, EVIDENCE_REGIMES, IA_COHORTS, resolve_regime
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.information_accretion_set import (
@@ -68,7 +70,10 @@ class ComputeInformationAccretionPayload(ProteaPayload, frozen=True):
     #: Regime name from ``protea.core.ia_regimes``. Defaults to the
     #: board-comparable one; ``"all"`` has to be asked for by name.
     evidence_regime: str = DEFAULT_REGIME
-    #: Recompute and replace an existing table for the same three axes.
+    #: Which proteins of the corpus count (``protea.core.ia_regimes.IA_COHORTS``).
+    #: ``swissprot`` is LAFA's cohort, the corpus's own Swiss-Prot list.
+    cohort: str = IA_COHORTS[0]
+    #: Recompute and replace an existing table for the same four axes.
     force: bool = False
     #: Maximum share of corpus annotations whose GO id is absent from the target
     #: snapshot. Measured 0.000 percent on v226; a non-trivial drop means the
@@ -89,6 +94,13 @@ class ComputeInformationAccretionPayload(ProteaPayload, frozen=True):
             raise ValueError(f"must be one of {sorted(EVIDENCE_REGIMES)}")
         return v
 
+    @field_validator("cohort")
+    @classmethod
+    def cohort_in_vocab(cls, value: str) -> str:
+        if value not in IA_COHORTS:
+            raise ValueError(f"unknown cohort {value!r}; expected one of {IA_COHORTS}")
+        return value
+
 
 class InformationAccretionGateError(RuntimeError):
     """A structural invariant of the computed table did not hold."""
@@ -103,6 +115,8 @@ class _Inputs(NamedTuple):
     corpus: Any
     evidence_codes: tuple[str, ...] | None
     existing: Any
+    #: The accessions the cohort keeps; None for every protein.
+    cohort: frozenset[str] | None = None
 
 
 class _Measured(NamedTuple):
@@ -118,6 +132,71 @@ class _Measured(NamedTuple):
     propagated_pairs: int
     aspect_of: dict[str, str | None]
     started: float
+    #: Rows of the corpus whose protein is outside the cohort: not counted, not dropped.
+    outside_cohort: int = 0
+
+
+def corpus_rows(
+    session: Session, annotation_set_id: str, evidence_codes: tuple[str, ...] | None
+) -> Iterable[tuple[str, str]]:
+    """The corpus rows an IA table counts: its accession and GO id, the regime's codes, no NOT row.
+
+    The NOT rows are excluded HERE, in the base string, so both branches below
+    carry it: a filter appended next to the optional evidence clause would
+    silently apply only when a regime was asked for.
+
+    Without it a row saying the protein does NOT have the term counts as a
+    carrier OF that term. The direction of the damage is the bad one: IA is
+    -log2 of the frequency, so inflating a term's frequency LOWERS the weight of
+    exactly the terms somebody took the trouble to refute.
+
+    ``not like '%NOT%'`` and not ``!= 'NOT'`` because the column is a RELATION
+    since GAF 2.2 (release 202 of this series): the real values are
+    `NOT|enables`, `enables`, `involved_in`. Five other queries under
+    protea/core spell it this same way; this one was the only one without.
+    """
+    sql = (
+        "select pga.protein_accession, gt.go_id "
+        "from protein_go_annotation pga "
+        "join go_term gt on gt.id = pga.go_term_id "
+        "where pga.annotation_set_id = :a "
+        "and (pga.qualifier is null or pga.qualifier not like '%NOT%')"
+    )
+    params: dict[str, Any] = {"a": annotation_set_id}
+    if evidence_codes is not None:
+        sql += " and pga.evidence_code in :ev"
+        params["ev"] = list(evidence_codes)
+        stmt = text(sql).bindparams(bindparam("ev", expanding=True))
+    else:
+        stmt = text(sql)
+    return session.execute(stmt, params).yield_per(100_000)
+
+
+def _persisted_result(
+    ia_set: InformationAccretionSet,
+    p: ComputeInformationAccretionPayload,
+    raw: int,
+    terms: int,
+) -> OperationResult:
+    """What a run that wrote its table returns: the row's identity and shape."""
+    return OperationResult(
+        result={
+            "information_accretion_set_id": str(ia_set.id),
+            "artifact_uri": ia_set.artifact_uri,
+            "content_sha256": ia_set.content_sha256,
+            "term_count": ia_set.term_count,
+            "nonzero_count": ia_set.nonzero_count,
+            "annotation_count": raw,
+            "protein_count": ia_set.protein_count,
+            "ia_max": ia_set.ia_max,
+            "ia_mean": ia_set.ia_mean,
+            "evidence_regime": p.evidence_regime,
+            "cohort": p.cohort,
+            "reused": False,
+        },
+        progress_current=terms,
+        progress_total=terms,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -137,14 +216,15 @@ class _Dag:
     ia: dict[str, float]
 
 
-
 def _describe(ia_set: InformationAccretionSet, inp: Any) -> None:
     """Stamp what the table is and the code that computed it (the sets gate)."""
     ia_set.description = (
         f"Information accretion over {inp.corpus.source} {inp.corpus.source_version} "
-        f"on {inp.snapshot.obo_version}, evidence regime {inp.p.evidence_regime}."
+        f"on {inp.snapshot.obo_version}, evidence regime {inp.p.evidence_regime}, "
+        f"cohort {inp.p.cohort}."
     )
     ia_set.code_revision = code_revision()
+
 
 class ComputeInformationAccretionOperation:
     name = "compute_information_accretion"
@@ -183,46 +263,27 @@ class ComputeInformationAccretionOperation:
         return terms, aspect_of, dict(parents)
 
     # -------------------------------------------------------------- corpus
+    @staticmethod
     def _propagate(
-        self,
-        session: Session,
-        annotation_set_id: str,
-        evidence_codes: tuple[str, ...] | None,
+        rows: Iterable[tuple[str, str]],
         ancestors: dict[str, frozenset[str]],
         emit: EmitFn,
-    ) -> tuple[dict[str, set[str]], int, int, set[str]]:
-        # The NOT rows are excluded HERE, in the base string, so both branches
-        # below carry it: a filter appended next to the optional evidence clause
-        # would silently apply only when a regime was asked for.
-        #
-        # Without it a row saying the protein does NOT have the term counts as a
-        # carrier OF that term. The direction of the damage is the bad one: IA is
-        # -log2 of the frequency, so inflating a term's frequency LOWERS the
-        # weight of exactly the terms somebody took the trouble to refute.
-        #
-        # ``not like '%NOT%'`` and not ``!= 'NOT'`` because the column is a
-        # RELATION since GAF 2.2 (release 202 of this series): the real values
-        # are `NOT|enables`, `enables`, `involved_in`. Five other queries under
-        # protea/core spell it this same way; this one was the only one without.
-        sql = (
-            "select pga.protein_accession, gt.go_id "
-            "from protein_go_annotation pga "
-            "join go_term gt on gt.id = pga.go_term_id "
-            "where pga.annotation_set_id = :a "
-            "and (pga.qualifier is null or pga.qualifier not like '%NOT%')"
-        )
-        params: dict[str, Any] = {"a": annotation_set_id}
-        if evidence_codes is not None:
-            sql += " and pga.evidence_code in :ev"
-            params["ev"] = list(evidence_codes)
-            stmt = text(sql).bindparams(bindparam("ev", expanding=True))
-        else:
-            stmt = text(sql)
+        cohort: frozenset[str] | None = None,
+    ) -> tuple[dict[str, set[str]], int, int, set[str], int]:
+        """Count each row's protein under the term and its ancestors.
 
+        ``rows`` are :func:`corpus_rows`. A row of a protein outside the cohort
+        is not part of this corpus at all: it is counted apart, before ``raw``,
+        because counting it as dropped would trip the drop-rate gate on a
+        choice rather than on a defect.
+        """
         proteins_per_term: dict[str, set[str]] = defaultdict(set)
         proteins: set[str] = set()
-        raw = dropped = 0
-        for accession, go_id in session.execute(stmt, params).yield_per(100_000):
+        raw = dropped = outside = 0
+        for accession, go_id in rows:
+            if cohort is not None and accession not in cohort:
+                outside += 1
+                continue
             raw += 1
             closure = ancestors.get(go_id)
             if closure is None:
@@ -239,7 +300,7 @@ class ComputeInformationAccretionOperation:
                     {"raw": raw, "dropped": dropped},
                     "info",
                 )
-        return dict(proteins_per_term), raw, dropped, proteins
+        return dict(proteins_per_term), raw, dropped, proteins, outside
 
     # --------------------------------------------------------------- gates
     def _gate(
@@ -383,7 +444,7 @@ class ComputeInformationAccretionOperation:
     def _resolve(
         session: Session, p: ComputeInformationAccretionPayload, payload: dict[str, Any]
     ) -> _Inputs:
-        """Resolve the three axes IA is identified by, plus any existing table.
+        """Resolve the four axes IA is identified by, plus any existing table.
 
         Missing snapshot or corpus raises here rather than later: a table
         computed against a half-resolved identity would be indistinguishable
@@ -402,10 +463,12 @@ class ComputeInformationAccretionOperation:
                 ontology_snapshot_id=snapshot.id,
                 annotation_set_id=corpus.id,
                 evidence_regime=p.evidence_regime,
+                cohort=p.cohort,
             )
             .one_or_none()
         )
-        return _Inputs(p, payload, snapshot, corpus, evidence_codes, existing)
+        cohort = swissprot_of_corpus(session, corpus.id) if p.cohort == "swissprot" else None
+        return _Inputs(p, payload, snapshot, corpus, evidence_codes, existing, cohort)
 
     @staticmethod
     def _reuse_result(existing: Any, emit: EmitFn) -> OperationResult:
@@ -418,8 +481,10 @@ class ComputeInformationAccretionOperation:
         emit(
             "compute_information_accretion.reused",
             "table already exists for these three axes",
-            {"information_accretion_set_id": str(existing.id),
-             "artifact_uri": existing.artifact_uri},
+            {
+                "information_accretion_set_id": str(existing.id),
+                "artifact_uri": existing.artifact_uri,
+            },
             "info",
         )
         return OperationResult(
@@ -463,6 +528,9 @@ class ComputeInformationAccretionOperation:
             "corpus_source_version": inp.corpus.source_version,
             "terms_with_proteins": len(dag.proteins_per_term),
             "aspects": sorted({a for a in measured.aspect_of.values() if a}),
+            "cohort": inp.p.cohort,
+            "cohort_proteins": None if inp.cohort is None else len(inp.cohort),
+            "rows_outside_cohort": measured.outside_cohort,
             "elapsed_s": round(time.time() - measured.started, 1),
         }
 
@@ -489,9 +557,8 @@ class ComputeInformationAccretionOperation:
         ia_set.ontology_snapshot_id = inp.snapshot.id
         ia_set.annotation_set_id = inp.corpus.id
         ia_set.evidence_regime = p.evidence_regime
-        ia_set.evidence_codes = (
-            list(inp.evidence_codes) if inp.evidence_codes else None
-        )
+        ia_set.cohort = p.cohort
+        ia_set.evidence_codes = list(inp.evidence_codes) if inp.evidence_codes else None
         ia_set.job_id = job_id_from_payload(inp.payload)
         _describe(ia_set, inp)
 
@@ -505,28 +572,17 @@ class ComputeInformationAccretionOperation:
         emit(
             "compute_information_accretion.persisted",
             None,
-            {"information_accretion_set_id": str(ia_set.id),
-             "artifact_uri": uri, "key": key, "content_sha256": digest,
-             "ia_max": ia_set.ia_max, "ia_mean": ia_set.ia_mean},
-            "info",
-        )
-        return OperationResult(
-            result={
+            {
                 "information_accretion_set_id": str(ia_set.id),
                 "artifact_uri": uri,
+                "key": key,
                 "content_sha256": digest,
-                "term_count": ia_set.term_count,
-                "nonzero_count": ia_set.nonzero_count,
-                "annotation_count": raw,
-                "protein_count": ia_set.protein_count,
                 "ia_max": ia_set.ia_max,
                 "ia_mean": ia_set.ia_mean,
-                "evidence_regime": p.evidence_regime,
-                "reused": False,
             },
-            progress_current=len(terms),
-            progress_total=len(terms),
+            "info",
         )
+        return _persisted_result(ia_set, p, raw, len(terms))
 
     @staticmethod
     def _write_artifact(ia: dict[str, float], ia_set_id: uuid.UUID) -> tuple[str, str, str]:
@@ -549,7 +605,7 @@ class ComputeInformationAccretionOperation:
         return key, uri, digest
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
-        """One line naming the three axes IA is identified by.
+        """One line naming the four axes IA is identified by.
 
         The regime is first because it is the axis most often left implicit:
         the same snapshot and corpus give ia_max 18.956 over all evidence and
@@ -560,7 +616,7 @@ class ComputeInformationAccretionOperation:
         regime = p.get("evidence_regime") or DEFAULT_REGIME
         snapshot = str(p.get("ontology_snapshot_id") or "")[:8]
         corpus = str(p.get("annotation_set_id") or "")[:8]
-        bits = [f"regime={regime}"]
+        bits = [f"regime={regime}", f"cohort={p.get('cohort') or IA_COHORTS[0]}"]
         if snapshot:
             bits.append(f"snapshot={snapshot}")
         if corpus:
@@ -578,9 +634,7 @@ class ComputeInformationAccretionOperation:
         inp = self._resolve(session, p, payload)
         if inp.existing is not None and not p.force:
             return self._reuse_result(inp.existing, emit)
-        snapshot, corpus, evidence_codes = (
-            inp.snapshot, inp.corpus, inp.evidence_codes
-        )
+        snapshot, corpus, evidence_codes = (inp.snapshot, inp.corpus, inp.evidence_codes)
 
         emit(
             "compute_information_accretion.started",
@@ -601,20 +655,23 @@ class ComputeInformationAccretionOperation:
         emit(
             "compute_information_accretion.dag_loaded",
             None,
-            {"terms": len(terms),
-             "tpr_edges": sum(len(v) for v in parents.values())},
+            {"terms": len(terms), "tpr_edges": sum(len(v) for v in parents.values())},
             "info",
         )
 
-        proteins_per_term, raw, dropped, proteins = self._propagate(
-            session, str(corpus.id), evidence_codes, ancestors, emit
+        proteins_per_term, raw, dropped, proteins, outside = self._propagate(
+            corpus_rows(session, str(corpus.id), evidence_codes), ancestors, emit, inp.cohort
         )
         propagated_pairs = sum(len(v) for v in proteins_per_term.values())
         emit(
             "compute_information_accretion.propagated",
             None,
-            {"raw": raw, "dropped": dropped, "proteins": len(proteins),
-             "propagated_pairs": propagated_pairs},
+            {
+                "raw": raw,
+                "dropped": dropped,
+                "proteins": len(proteins),
+                "propagated_pairs": propagated_pairs,
+            },
             "info",
         )
 
@@ -624,5 +681,7 @@ class ComputeInformationAccretionOperation:
         gate_stats = self._gate(dag, raw, dropped, p.max_drop_rate_pct)
         emit("compute_information_accretion.gates_passed", None, gate_stats, "info")
 
-        measured = _Measured(gate_stats, raw, proteins, propagated_pairs, aspect_of, started)
+        measured = _Measured(
+            gate_stats, raw, proteins, propagated_pairs, aspect_of, started, outside
+        )
         return self._persist(session, inp, dag, measured, emit)

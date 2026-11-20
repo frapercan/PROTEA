@@ -25,7 +25,11 @@ import pytest
 from sqlalchemy.orm import Session
 
 from protea.core._lafa_frame_data import load_end_ontology
-from protea.core._window_population import SameSequence, same_sequence_at_both_ends
+from protea.core._window_population import (
+    SameSequence,
+    same_sequence_at_both_ends,
+    swissprot_of_corpus,
+)
 from protea.core.lafa_frame import LafaWindow, compute_evaluation_data_lafa
 from protea.core.operations._cut_photo_channel_table import (
     channel_table_digest,
@@ -235,3 +239,11 @@ def test_an_ontology_without_its_aliases_is_refused(pg: Session) -> None:  # noq
     pg.commit()
     with pytest.raises(ValueError, match="load_ontology_aliases"):
         load_end_ontology(pg, window.old_native)
+
+
+@pytest.mark.integration
+def test_the_swissprot_list_of_a_corpus_is_its_photos_release(pg: Session) -> None:  # noqa: F811
+    window = _window(pg)
+    assert swissprot_of_corpus(pg, window.old_set_id) == frozenset({"P1", "P2", "P3", "P4"})
+    with pytest.raises(ValueError, match="the corpus needs exactly one"):
+        swissprot_of_corpus(pg, uuid.uuid4())
