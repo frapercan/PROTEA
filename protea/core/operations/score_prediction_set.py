@@ -16,8 +16,11 @@ WHAT IT DOES, per protein, in the evaluator's own order:
 3. drops what the bank denies (``protea.core.denials``), the bank being the
    candidate set's annotation set and the ontology its own;
 4. scores each row with the ``ScoringConfig`` (``_candidate_scoring``);
-5. writes one row per (protein, term) into a new prediction set, the score as
-   ``method_score`` and the donor of the nearest row as ``ref_protein_accession``.
+5. writes the scores into a new prediction set: one ``prediction_score`` row per
+   protein, with its terms, ascending, and their scores. The scored set holds no
+   ``go_prediction`` rows; the candidates and their evidence stay in the
+   candidate set, and the scores take about 29 times less space than as rows
+   (``protea.infrastructure.orm.models.embedding.prediction_score``).
 
 Proteins are independent at every step, so the set is scored in chunks of
 proteins and the result does not depend on the chunk size.
@@ -65,7 +68,7 @@ from protea.core.operations._depth_unit_guard import (
     assert_one_depth_unit,
 )
 from protea.core.utils import contract_payload
-from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.embedding.prediction_score import PredictionScore
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     FORMULA_METHOD_SCORE,
@@ -75,11 +78,11 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
 __all__ = ["ScorePredictionSetOperation", "ScorePredictionSetPayload"]
 
 #: The row's own columns the scored set needs beside the scorer's.
-_ROW_COLS: tuple[str, ...] = ("go_term_id", "ref_protein_accession")
+_ROW_COLS: tuple[str, ...] = ("go_term_id",)
 _FRAME_COLS: tuple[str, ...] = (*BASE_SCORE_COLS, *_ROW_COLS)
 
-#: Rows per INSERT statement.
-_INSERT_ROWS = 10_000
+#: Proteins per INSERT statement.
+_INSERT_PROTEINS = 2_000
 
 #: The candidate set's columns the scored set keeps: they name what was
 #: predicted, for whom and from what, which scoring does not change.
@@ -174,7 +177,7 @@ class _Run:
 class _Totals:
     proteins: int = 0
     candidates_read: int = 0
-    rows_written: int = 0
+    scores_written: int = 0
     denied_removed: int = 0
     chunks: list[int] = field(default_factory=list)
 
@@ -262,7 +265,7 @@ class ScorePredictionSetOperation:
             "scored_from": str(source.id),
             "proteins": totals.proteins,
             "candidates_read": totals.candidates_read,
-            "rows_written": totals.rows_written,
+            "scores_written": totals.scores_written,
             "denied_removed": totals.denied_removed,
         }
         emit("score_prediction_set.done", None, result, "info")
@@ -274,14 +277,20 @@ class ScorePredictionSetOperation:
         source = session.get(PredictionSet, uuid.UUID(set_id))
         if source is None:
             raise ValueError(f"prediction set {set_id} not found")
-        has_rows, has_scores = session.execute(
+        has_rows, has_scores, is_scored = session.execute(
             text(
                 "SELECT EXISTS (SELECT 1 FROM go_prediction WHERE prediction_set_id = :s), "
                 "EXISTS (SELECT 1 FROM go_prediction "
-                "        WHERE prediction_set_id = :s AND method_score IS NOT NULL)"
+                "        WHERE prediction_set_id = :s AND method_score IS NOT NULL), "
+                "EXISTS (SELECT 1 FROM prediction_score WHERE prediction_set_id = :s)"
             ),
             {"s": source.id},
         ).one()
+        if is_scored:
+            raise ValueError(
+                f"prediction set {set_id} is a scored set; its candidates are prediction set "
+                f"{(source.meta or {}).get('scored_from')}, which is the one to score"
+            )
         if not has_rows:
             raise ValueError(f"prediction set {set_id} holds no candidates to score")
         if has_scores:
@@ -378,27 +387,23 @@ class ScorePredictionSetOperation:
         totals.denied_removed += removed
         totals.chunks.append(len(proteins))
         if not frame.empty:
-            totals.rows_written += _write_rows(session, run.scored_id, frame, run.config)
+            totals.scores_written += _write_scores(session, run.scored_id, frame, run.config)
 
 
-def _write_rows(session: Session, scored_id: uuid.UUID, frame: Any, config: ScoringConfig) -> int:
-    """One row per (protein, term): the score, and the donor of the nearest row."""
+def _write_scores(session: Session, scored_id: uuid.UUID, frame: Any, config: ScoringConfig) -> int:
+    """One ``prediction_score`` row per protein: its terms, ascending, and their scores."""
+    scored = frame.assign(_score=vectorized_scores(frame, config))[
+        ["protein_accession", "go_term_id", "_score"]
+    ].sort_values(["protein_accession", "go_term_id"], kind="mergesort")
     rows = [
         {
             "prediction_set_id": scored_id,
             "protein_accession": protein,
-            "go_term_id": int(term_id),
-            "ref_protein_accession": donor,
-            "method_score": float(score),
+            "go_term_ids": [int(term) for term in group["go_term_id"].tolist()],
+            "scores": [float(score) for score in group["_score"].tolist()],
         }
-        for protein, term_id, donor, score in zip(
-            frame["protein_accession"].tolist(),
-            frame["go_term_id"].tolist(),
-            frame["ref_protein_accession"].tolist(),
-            vectorized_scores(frame, config).tolist(),
-            strict=True,
-        )
+        for protein, group in scored.groupby("protein_accession", sort=True)
     ]
-    for start in range(0, len(rows), _INSERT_ROWS):
-        session.execute(insert(GOPrediction.__table__), rows[start : start + _INSERT_ROWS])
-    return len(rows)
+    for start in range(0, len(rows), _INSERT_PROTEINS):
+        session.execute(insert(PredictionScore.__table__), rows[start : start + _INSERT_PROTEINS])
+    return len(scored)

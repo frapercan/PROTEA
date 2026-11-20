@@ -237,6 +237,15 @@ Predictions
    the two; every set written before the method tables has a configuration and
    no method.
 
+**PredictionScore**
+   The scores of a scored set (``score_prediction_set``): one row per protein,
+   with its GO term ids, ascending, and their scores as two aligned arrays
+   (``ck_prediction_score_aligned``; a protein with nothing scored has no row).
+   A scored set holds no ``GOPrediction`` rows: the candidates and their
+   evidence stay in the candidate set it was scored from, and the scores take
+   20 bytes per pair, about 29 times less than the average ``GOPrediction``
+   row (:doc:`/architecture/scoring`).
+
 **GOPrediction**
    One row per (query protein, GO term, reference protein) triple. The alignment and
    taxonomy columns are ``NULL`` unless ``compute_alignments=true`` and/or

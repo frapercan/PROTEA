@@ -27,6 +27,7 @@ from protea.infrastructure.orm.models.annotation.annotation_set import Annotatio
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.embedding.prediction_score import PredictionScore
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.method.method import Method
 
@@ -98,9 +99,7 @@ _PREDICT_ENTITY_MAP: tuple[tuple[str, str, type], ...] = (
 )
 
 
-def validate_predict_request(
-    session: Session, body: dict[str, Any]
-) -> dict[str, uuid.UUID]:
+def validate_predict_request(session: Session, body: dict[str, Any]) -> dict[str, uuid.UUID]:
     """Parse + validate the three required UUID fields of a predict request.
 
     Returns a dict mapping field name to its parsed :class:`uuid.UUID`.
@@ -156,9 +155,7 @@ def config_to_dict(c: EmbeddingConfig, embedding_count: int | None = None) -> di
         "family": c.family,
         "kind": c.kind,
         "derived_from_embedding_config_id": (
-            str(c.derived_from_embedding_config_id)
-            if c.derived_from_embedding_config_id
-            else None
+            str(c.derived_from_embedding_config_id) if c.derived_from_embedding_config_id else None
         ),
         # The cut, read by the leakage guard. Serialised because a field that
         # decides whether a configuration may be scored at all should be
@@ -248,6 +245,12 @@ def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
         .group_by(GOPrediction.prediction_set_id)
         .all()
     }
+    # A scored set holds its pairs as arrays, one row per protein.
+    for set_id, pairs in session.query(
+        PredictionScore.prediction_set_id,
+        func.sum(func.cardinality(PredictionScore.go_term_ids)),
+    ).group_by(PredictionScore.prediction_set_id):
+        counts[set_id] = counts.get(set_id, 0) + int(pairs or 0)
     return [
         {
             "id": str(ps.id),
@@ -295,6 +298,18 @@ def get_prediction_set_data(
         .group_by(GOPrediction.protein_accession)
         .all()
     )
+    # A scored set holds its pairs as arrays, one row per protein.
+    scored = (
+        session.query(
+            PredictionScore.protein_accession,
+            func.cardinality(PredictionScore.go_term_ids),
+        )
+        .filter(PredictionScore.prediction_set_id == prediction_set_id)
+        .all()
+    )
+    if scored:
+        per_protein = [*per_protein, *scored]
+        prediction_count = (prediction_count or 0) + sum(int(n) for _, n in scored)
 
     return {
         "id": str(ps.id),

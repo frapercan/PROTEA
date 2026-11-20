@@ -111,7 +111,8 @@ class TestTheListing:
         ) = rows
         counts = MagicMock()
         counts.group_by.return_value.all.return_value = []
-        session.query.side_effect = [listing, counts]
+        scored = MagicMock()  # the scored sets' pairs, none here
+        session.query.side_effect = [listing, counts, scored]
         return embeddings_service.list_prediction_sets_data(session)
 
     @staticmethod

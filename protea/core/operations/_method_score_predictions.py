@@ -1,15 +1,20 @@
 """A method's stored scores into cafaeval's prediction file, straight from Postgres (ADR-D60).
 
 The evaluator scores what a method stored and nothing else (the closure's
-question 6, 2026-11-20): one row per (protein, term) whose ``method_score`` is
-the method's score. A transfer method's candidates become such rows through
-``score_prediction_set``, or through a reranker applied when it predicts; a
-method run elsewhere is ingested with its scores. Nothing here scores, cuts,
-reranks or filters, and the bank's denials are the method's to honour.
+question 6, 2026-11-20). A set stores its scores in one of two forms, and one
+query reads both:
 
-This path asks for the three columns that matter, streamed with COPY into a
-temporary file and read in one pass, orders the rows by protein and term, and
-writes the four-decimal file cafaeval reads (``'%.4f' % score``).
+- a method's own rows, one ``go_prediction`` row per (protein, term) whose
+  ``method_score`` is the method's score: a method run elsewhere and ingested,
+  the own-annotations baseline, or the nearest-neighbour method when a reranker
+  scored its candidates as it predicted;
+- a scored set, one ``prediction_score`` row per protein with its terms and
+  their scores, written by ``score_prediction_set`` from a candidate set.
+
+Nothing here scores, cuts, reranks or filters, and the bank's denials are the
+method's to honour. The rows are streamed with COPY into a temporary file and
+read in one pass, ordered by protein and term, and written as the four-decimal
+file cafaeval reads (``'%.4f' % score``).
 """
 
 from __future__ import annotations
@@ -36,10 +41,21 @@ if TYPE_CHECKING:
 
 _LOG = logging.getLogger(__name__)
 
+#: The stored scores of the window's targets, in whichever form the set holds
+#: them. A set holds one form only (``refuse_unless_scored``), so the union
+#: never counts a pair twice.
 _ROWS = (
-    "COPY (SELECT p.protein_accession, t.go_id, p.method_score "
+    "COPY ("
+    "SELECT p.protein_accession, t.go_id, p.method_score "
     "FROM go_prediction p JOIN go_term t ON t.id = p.go_term_id "
-    "WHERE p.prediction_set_id = %s AND p.protein_accession = ANY(%s)) TO STDOUT"
+    "WHERE p.prediction_set_id = %s AND p.protein_accession = ANY(%s) "
+    "UNION ALL "
+    "SELECT s.protein_accession, t.go_id, u.score "
+    "FROM prediction_score s "
+    "CROSS JOIN LATERAL unnest(s.go_term_ids, s.scores) AS u(go_term_id, score) "
+    "JOIN go_term t ON t.id = u.go_term_id "
+    "WHERE s.prediction_set_id = %s AND s.protein_accession = ANY(%s)"
+    ") TO STDOUT"
 )
 _COLUMNS = ("protein_accession", "go_id", "method_score")
 _TYPES = {"protein_accession": pa.string(), "go_id": pa.string(), "method_score": pa.float64()}
@@ -54,20 +70,30 @@ _SCORE_IT = (
 
 
 def refuse_unless_scored(session: Session, pred_set_id: uuid.UUID) -> None:
-    """Refuse, before anything is staged, a set without a score on every row.
+    """Refuse, before anything is staged, a set that does not store a score per pair.
 
-    Two existence probes on the set's rows: whether it holds any, and whether
-    any of them lacks a score. A set of candidates is the common case, and the
-    refusal names the step that scores it.
+    Three existence probes: whether the set holds rows, whether any of them
+    lacks a score, and whether it holds a scored set's rows. A set of
+    candidates is the common case, and the refusal names the step that scores
+    it. A set holding both forms is refused too: the union would count its
+    pairs twice.
     """
-    has_rows, unscored = session.execute(
+    has_rows, unscored, scored = session.execute(
         text(
             "SELECT EXISTS (SELECT 1 FROM go_prediction WHERE prediction_set_id = :s), "
             "EXISTS (SELECT 1 FROM go_prediction "
-            "        WHERE prediction_set_id = :s AND method_score IS NULL)"
+            "        WHERE prediction_set_id = :s AND method_score IS NULL), "
+            "EXISTS (SELECT 1 FROM prediction_score WHERE prediction_set_id = :s)"
         ),
         {"s": pred_set_id},
     ).one()
+    if scored and has_rows:
+        raise MethodScoreMissing(
+            f"prediction set {pred_set_id} stores scores in both forms, as rows and as a "
+            "scored set's arrays; one set stores one form"
+        )
+    if scored:
+        return
     if not has_rows:
         raise MethodScoreMissing(f"prediction set {pred_set_id} holds no predictions to score")
     if unscored:
@@ -83,7 +109,8 @@ def method_rows(session: Session, ctx: WritePredictionsContext) -> pa.Table:
     with tempfile.NamedTemporaryFile("wb", suffix=".tsv", delete=False) as handle:
         path = handle.name
         with raw.cursor() as cur:
-            with cur.copy(_ROWS, (ctx.pred_set_id, sorted(ctx.delta_proteins))) as copy:
+            proteins = sorted(ctx.delta_proteins)
+            with cur.copy(_ROWS, (ctx.pred_set_id, proteins, ctx.pred_set_id, proteins)) as copy:
                 for block in copy:
                     handle.write(block)
     try:
