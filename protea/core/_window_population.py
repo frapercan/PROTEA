@@ -134,9 +134,24 @@ def _swissprot_release_of(session: Session, annotation_set_id: uuid.UUID, end: s
     if len(photos) != 1:
         raise ValueError(
             f"{len(photos)} cut photos have annotation set {annotation_set_id} as their corpus; "
-            f"the window's {end} needs exactly one to find its Swiss-Prot release"
+            f"the {end} needs exactly one to find its Swiss-Prot release"
         )
     return photos[0][1]
+
+
+def swissprot_of_corpus(session: Session, annotation_set_id: uuid.UUID) -> frozenset[str]:
+    """The Swiss-Prot list of the release paired with the photo whose corpus this is.
+
+    The cohort LAFA computes information accretion over. Refused when the corpus
+    is no single photo's, as for the window ends.
+    """
+    release = _swissprot_release_of(session, annotation_set_id, "corpus")
+    return frozenset(
+        session.execute(
+            text("SELECT accession FROM swissprot_membership WHERE release_id = :release"),
+            {"release": release},
+        ).scalars()
+    )
 
 
 def same_sequence_at_both_ends(
@@ -148,8 +163,8 @@ def same_sequence_at_both_ends(
     release for each accession of the start's. Refused when either end has no
     single photo, and when nothing is left.
     """
-    start = _swissprot_release_of(session, old_annotation_set_id, "start")
-    end = _swissprot_release_of(session, new_annotation_set_id, "end")
+    start = _swissprot_release_of(session, old_annotation_set_id, "window's start")
+    end = _swissprot_release_of(session, new_annotation_set_id, "window's end")
     pairs = session.execute(
         text(
             """
