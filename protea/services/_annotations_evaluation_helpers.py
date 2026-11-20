@@ -189,8 +189,10 @@ def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
         "truth_profile": e.truth_profile,
         "toi_rule": e.toi_rule,
         "not_codes": e.not_codes,
-        # Which proteins the window may score: the identity's last field.
+        # Which proteins the window may score.
         "target_population": e.target_population,
+        # Which protein-binding rule was asked for: the identity's last field.
+        "binding_rule": e.binding_rule,
         "job_id": str(e.job_id) if e.job_id else None,
         "created_at": e.created_at.isoformat(),
         "stats": e.stats,

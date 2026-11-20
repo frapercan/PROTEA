@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from protea.core import evaluation
+from protea.core._binding_rule import DESCENDANTS_STEP
 from protea.core.operations import run_own_annotations as op
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -58,7 +59,10 @@ def test_the_side_reconciles_the_rows_it_is_handed(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(evaluation, "_load_parents_by_go_id", lambda s, i: PARENTS)
     monkeypatch.setattr(evaluation, "_drop_binding_only", lambda s, i, raw: 0)
     side = SimpleNamespace(
-        native_snapshot_id=uuid.uuid4(), annotation_set_id=uuid.uuid4(), frame=None
+        native_snapshot_id=uuid.uuid4(),
+        annotation_set_id=uuid.uuid4(),
+        frame=None,
+        binding=DESCENDANTS_STEP,
     )
     out, _ = evaluation._reconcile_experimental_side(
         None,  # type: ignore[arg-type]

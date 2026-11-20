@@ -43,6 +43,7 @@ from typing import Any, NamedTuple
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core import _binding_rule
 from protea.core._binding_rule import PROTEIN_BINDING, drop_binding_only_mfo
 from protea.core._evaluation_graph import (
     _bfs_closure,
@@ -510,10 +511,9 @@ def _reconcile_experimental_side(
             # snapshot is not where the landings come from.
             remapped = apply_remap(raw, side.frame.remap, side.frame.live, spare=project.graph.live)
         projection = project_direct_annotations(raw, project.graph, project.target)
-    # The return was discarded here. It is the number of proteins whose ENTIRE
-    # F side the binding rule empties, which is some 26,000 a window: computed
-    # on every build and recorded by nothing.
-    binding_dropped = _drop_binding_only(session, side.native_snapshot_id, raw)
+    binding_dropped = 0
+    if side.binding.on_direct_terms:
+        binding_dropped = _drop_binding_only(session, side.native_snapshot_id, raw)
 
     out: dict[str, dict[str, set[str]]] = {}
     for protein, go_ids in raw.items():
@@ -528,6 +528,7 @@ def _reconcile_experimental_side(
                 ns_map[aspect].add(go_id)
         if ns_map:
             out[protein] = {ns: terms for ns, terms in ns_map.items()}
+    binding_dropped += _binding_rule.drop_cafa_binding_only_f(out, side.binding)
     return out, (projection, remapped, binding_dropped)
 
 

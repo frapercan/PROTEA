@@ -32,9 +32,10 @@ WINDOW_ROLE_CHECK = (
     "('valid', 'test', 'training', 'validation', 'test_spent')"
 )
 
-#: The four keys of ``truth_rules`` and the values each may take: the
-#: vocabularies of :mod:`protea.core._truth_rules` and the closures of
-#: :mod:`protea.core.window_declarations`, checked against both by the same test.
+#: The five keys of ``truth_rules`` and the values each may take: the
+#: vocabularies of :mod:`protea.core._truth_rules`, the closures of
+#: :mod:`protea.core.window_declarations` and the binding rules of
+#: :mod:`protea.core._binding_rule`, checked against all three by the same test.
 TRUTH_RULES_CHECK = (
     "truth_rules IS NULL OR ("
     "jsonb_typeof(truth_rules) = 'object' "
@@ -42,8 +43,14 @@ TRUTH_RULES_CHECK = (
     "AND COALESCE(truth_rules ->> 'toi_rule', '') IN ('pivot_terms', 'live_in_both_ends') "
     "AND COALESCE(truth_rules ->> 'not_codes', '') IN ('any', 'experimental') "
     "AND COALESCE(truth_rules ->> 'closure', '') IN "
-    "('per_side', 't0_graph', 't1_graph', 'explicit', 'direct_terms'))"
+    "('per_side', 't0_graph', 't1_graph', 'explicit', 'direct_terms') "
+    "AND COALESCE(truth_rules ->> 'binding', '') IN "
+    "('descendants_both_ends', 'cafa', 'none'))"
 )
+
+#: The binding rules a payload can ask for, spelled out for the same reason as
+#: the checks above; the migration that installs it carries the same text.
+BINDING_RULE_CHECK = "binding_rule IN ('descendants_both_ends', 'cafa')"
 
 
 #: The vocabulary of :data:`protea.core._window_population.TARGET_POPULATIONS`,
@@ -76,8 +83,8 @@ class EvaluationSet(Base):
     ``"training"``, ``"validation"`` and ``"test_spent"``; see
     :mod:`protea.core.window_declarations` for what each one allows.
 
-    ``truth_rules`` is what the build APPLIED, as a JSON object with four
-    keys (``profile``, ``toi_rule``, ``not_codes``, ``closure``), and it is
+    ``truth_rules`` is what the build APPLIED, as a JSON object with five
+    keys (``profile``, ``toi_rule``, ``not_codes``, ``closure``, ``binding``), and it is
     the field a frame compares across cuts. NULL on every row built before it
     existed, which reads as legacy: nothing says, never "the defaults".
 
@@ -121,6 +128,7 @@ class EvaluationSet(Base):
             "toi_rule",
             "not_codes",
             "target_population",
+            "binding_rule",
             name="uq_evaluation_set_identity",
         ),
         # ADR D40: keep the protocol-window vocabulary closed at the DB
@@ -158,6 +166,10 @@ class EvaluationSet(Base):
         CheckConstraint(
             TARGET_POPULATION_CHECK,
             name="ck_evaluation_set_target_population",
+        ),
+        CheckConstraint(
+            BINDING_RULE_CHECK,
+            name="ck_evaluation_set_binding_rule",
         ),
     )
 
@@ -306,6 +318,15 @@ class EvaluationSet(Base):
     #: targets. The proteins it left out are counted by bucket in ``stats``.
     target_population: Mapped[str] = mapped_column(
         String(24), nullable=False, server_default="every_protein"
+    )
+    #: Which protein-binding rule builds the F side
+    #: (:mod:`protea.core._binding_rule`). ``descendants_both_ends`` is what every
+    #: row written before this column was built with: PROTEA's own rule, on
+    #: direct annotations at both ends. ``cafa`` is CAFA's and LAFA's, at t1 after
+    #: propagation, which the author chose for the benchmark on 2026-11-20. In the
+    #: identity because it changes the F side of the delta.
+    binding_rule: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="descendants_both_ends"
     )
     #: WHICH CODE BUILT THIS ROW, from :func:`protea.core.code_revision`.
     #:
