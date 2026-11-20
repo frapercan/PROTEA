@@ -18,12 +18,10 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
-from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 
 
 def evaluation_result_to_dict(r: EvaluationResult) -> dict[str, Any]:
@@ -99,35 +97,6 @@ def get_eval_result_with_keys(
         raise EntityNotFoundError("EvaluationResult", result_id)
     keys: list[str] = (result.results or {}).get("artifacts", {}).get("keys") or []
     return result, keys
-
-
-def apply_baseline_scoring_default(
-    session: Session,
-    body: dict[str, Any],
-    baseline_scoring_name: str | None,
-) -> dict[str, Any]:
-    """Auto-attach the baseline ``scoring_config_id`` to a CAFA evaluation
-    payload when no scoring + reranker selection is provided.
-
-    Without this, eval_result rows with both ``scoring_config_id`` and
-    ``reranker_model_id`` NULL are filtered out of the benchmark matrix
-    (``_stage_of()`` excludes them). When the caller supplies any of
-    ``scoring_config_id`` / ``reranker_model_id`` / ``rerankers``, or
-    when no baseline name is configured, the body is returned unchanged.
-    """
-    if (
-        body.get("scoring_config_id")
-        or body.get("reranker_model_id")
-        or body.get("rerankers")
-        or not baseline_scoring_name
-    ):
-        return body
-    baseline = session.execute(
-        select(ScoringConfig).where(ScoringConfig.name == baseline_scoring_name)
-    ).scalar_one_or_none()
-    if baseline is None:
-        return body
-    return {**body, "scoring_config_id": str(baseline.id)}
 
 
 def assert_evaluation_set_exists(session: Session, eval_id: uuid.UUID) -> None:
