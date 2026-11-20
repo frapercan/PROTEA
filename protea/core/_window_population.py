@@ -166,12 +166,13 @@ def same_sequence_at_both_ends(
         raise ValueError(
             f"no accession has the same sequence in Swiss-Prot releases {start} and {end}"
         )
-    names = dict(
-        session.execute(
+    names: dict[uuid.UUID, str] = {
+        release_id: release
+        for release_id, release in session.execute(
             text("SELECT id, release FROM swissprot_release WHERE id IN (:start, :end)"),
             {"start": start, "end": end},
-        ).all()
-    )
+        )
+    }
     return SameSequence(names[start], names[end], len(pairs), accessions)
 
 

@@ -48,14 +48,15 @@ def load_end_ontology(session: Session, snapshot_id: uuid.UUID) -> EndOntology:
     Refused when the snapshot has no live term or no alias rows: without
     ``load_ontology_aliases`` step 2 would drop every renamed id in silence.
     """
-    live = dict(
-        session.execute(
+    live: dict[str, str] = {
+        go_id: aspect
+        for go_id, aspect in session.execute(
             text(
                 "SELECT go_id, aspect FROM go_term WHERE ontology_snapshot_id = :s AND NOT is_obsolete"
             ),
             {"s": snapshot_id},
-        ).all()
-    )
+        )
+    }
     if not live:
         raise ValueError(f"ontology snapshot {snapshot_id} has no live term")
     parents: dict[str, set[str]] = defaultdict(set)
