@@ -1370,6 +1370,10 @@ class TestExecuteBatchHappyPath:
         assert result.result["predictions"] == 0
 
 
+#: The post-kNN pipeline's last step, replaced where a test is about the steps before it.
+_HONOUR_DENIALS = "protea.core.operations.predict_go_terms._post_knn_pipeline._honour_denials"
+
+
 class TestRunPostKnnPipeline:
     def test_v6_then_expansion_then_reranker_invoked_in_order(self) -> None:
         op = PredictGOTermsBatchOperation()
@@ -1404,6 +1408,8 @@ class TestRunPostKnnPipeline:
                 "apply_if_aligned",
                 return_value={"applied": True, "rows": 2},
             ) as rerank,
+            # The last step, the bank's denials, has its own tests.
+            patch(_HONOUR_DENIALS, side_effect=lambda _s, _c, rows, _e: rows),
         ):
             preds, stats = op._run_post_knn_pipeline(MagicMock(), ctx, knn, {}, _noop_emit)
         v6.assert_called_once()
@@ -1433,7 +1439,8 @@ class TestRunPostKnnPipeline:
                 query_embeddings=np.array([[0.1]], dtype=np.float32),
             ),
         )
-        preds, stats = op._run_post_knn_pipeline(MagicMock(), ctx, knn, {}, _noop_emit)
+        with patch(_HONOUR_DENIALS, side_effect=lambda _s, _c, rows, _e: rows):
+            preds, stats = op._run_post_knn_pipeline(MagicMock(), ctx, knn, {}, _noop_emit)
         assert preds == [{"go_term_id": 1}]
         assert stats is None
 

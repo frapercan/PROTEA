@@ -144,6 +144,9 @@ _IDENTITY_META: tuple[str, ...] = (
     "aspect_separated_knn",
     "code_revision",
     "dependency_revisions",
+    # Whether and how the method honoured the bank's denials when it predicted
+    # (protea.core.denials): it changes which candidates exist.
+    "denials",
     "donor_policy",
     "exclude_self_neighbour",
     "expand_votes_to_ancestors",
@@ -189,6 +192,12 @@ _EXECUTION_COLUMNS: Mapping[str, str] = {
 
 #: ``meta`` keys that are NOT method identity, each with why.
 _EXECUTION_META: Mapping[str, str] = {
+    "denied_removed": (
+        "how many candidates the bank's denials removed. A consequence of the "
+        "data the method met, not a choice: two runs of the same method over "
+        "different queries remove different numbers. The choice is the "
+        "denials key, which is identity"
+    ),
     "batch_size": (
         "how many queries ride in one forward pass. The search is per query and "
         "the arithmetic does not read the batch, so the same query gets the same "
@@ -252,6 +261,7 @@ _ABSENCE_MEANS: Mapping[str, str] = {
 
 _CLASSIFIED_COLUMNS = frozenset(_IDENTITY_COLUMNS) | frozenset(_EXECUTION_COLUMNS)
 _CLASSIFIED_META = frozenset(_IDENTITY_META) | frozenset(_EXECUTION_META)
+
 
 def _assert_the_lists_partition() -> None:
     """Refuse at import if a field is classified twice.

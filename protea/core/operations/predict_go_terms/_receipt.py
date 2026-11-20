@@ -26,6 +26,7 @@ from uuid import UUID
 
 from protea_contracts import PredictGOTermsPayload
 
+from protea.core import denials
 from protea.core.code_revision import code_revision, dependency_revisions
 
 #: Payload flags that turn on an extra feature block during prediction.
@@ -75,6 +76,9 @@ def run_receipt(p: PredictGOTermsPayload, job_id: UUID) -> dict[str, Any]:
         "aspect_separated_knn": p.aspect_separated_knn,
         "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
         "batch_size": p.batch_size,
+        # Recorded on every receipt: this method honours the bank's denials when
+        # it predicts, so the evaluator does not have to (protea.core.denials).
+        "denials": {"honoured": True, **denials.POLICY},
         "features": [f for f in _FEATURE_FLAGS if getattr(p, f, False)],
     }
     if p.search_backend == "faiss":

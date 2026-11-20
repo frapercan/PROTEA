@@ -299,6 +299,23 @@ nearest Voronoi cells, reducing query time from :math:`O(N)` to approximately
    :undoc-members:
    :show-inheritance:
 
+Denials
+-------
+
+``protea.core.denials`` is the policy by which a transfer method honours what
+the bank explicitly denies: a protein's NOT annotations in the annotation set
+the prediction transfers from, followed down ``is_a`` and ``part_of`` of the
+prediction set's ontology. PROTEA's k-nearest-neighbour transfer and its
+InterPro mirror apply it when they predict, as their last step before writing,
+and record it: in the receipt's ``denials`` field, and for the mirror also in
+the prediction set's ``meta``. Until the evaluator is reduced to scoring what a
+method stored, it applies the same policy to every set it scores, so a set
+written before its method honoured denials is scored as before.
+
+.. automodule:: protea.core.denials
+   :members:
+   :show-inheritance:
+
 Feature engineering
 -------------------
 
