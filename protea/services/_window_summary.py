@@ -94,9 +94,9 @@ def read_verdict(row: dict[str, Any], frame: Frame | None) -> tuple[str | None, 
         return training_cut_verdict(fitted=True, training_release=cut, frame=frame), cut
     if row.get("backend") is None:
         return None, None
-    cut = release_ordinal(row.get("config_release"))
+    declared = release_ordinal(row.get("config_release"))
     fitted = row["backend"] in FITTED_BACKENDS
-    return training_cut_verdict(fitted=fitted, training_release=cut, frame=frame), cut
+    return training_cut_verdict(fitted=fitted, training_release=declared, frame=frame), declared
 
 
 def _cells(results: dict[str, Any]) -> dict[str, dict[str, Any]]:
