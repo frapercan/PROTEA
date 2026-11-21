@@ -1160,6 +1160,7 @@
     "openReranker": "Reranker-Modell öffnen",
     "proteinExamples": "Proteinbeispiele (Vorhersagesatz)",
     "cellLegend": "Jede Zelle: das IA-gewichtete Mikro-F (f_micro_w), darunter die IA-gewichtete Abdeckung an der berichteten Schwelle (LAFAs cov_w) und die Größe der Zelle in der gewichteten Variante. Ergebnisse vor dem 21.11.2026 erfassen die letzten beiden nicht.",
+    "resultsTitle": "Ergebnisse ({count})",
     "provenanceLabel": "Herkunft",
     "resultMetrics": {
       "nk": "NK",
@@ -2084,6 +2085,7 @@
       "done": "Habe ihn gespeichert",
       "copy": "Kopieren",
       "copied": "Kopiert",
+      "keyLabel": "Schlussel",
       "nameLabel": "Name",
       "namePlaceholder": "lab-runner-2026-05",
       "nameHelp": "Freier Text, mit dem du den Schlussel in Audit-Logs wiedererkennst.",

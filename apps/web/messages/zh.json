@@ -1160,6 +1160,7 @@
     "openReranker": "打开重排模型",
     "proteinExamples": "蛋白示例（预测集）",
     "cellLegend": "每个单元格：IA 加权微平均 F（f_micro_w），下方是报告阈值处的 IA 加权覆盖率（LAFA 的 cov_w）以及该单元格在加权变体中的规模。2026-11-21 之前的结果不记录后两项。",
+    "resultsTitle": "结果（{count}）",
     "provenanceLabel": "来源",
     "resultMetrics": {
       "nk": "NK",
@@ -2084,6 +2085,7 @@
       "done": "已保存",
       "copy": "复制",
       "copied": "已复制",
+      "keyLabel": "密钥",
       "nameLabel": "名称",
       "namePlaceholder": "lab-runner-2026-05",
       "nameHelp": "自由填写的标签，便于在审计日志中识别该密钥。",

@@ -1159,6 +1159,7 @@
     "openReranker": "Open reranker model",
     "proteinExamples": "Protein examples (prediction set)",
     "cellLegend": "Each cell: the IA-weighted micro F (f_micro_w), with the IA-weighted coverage at the reported threshold (LAFA's cov_w) and the cell's size in the weighted variant below it. Results made before 2026-11-21 do not record the last two.",
+    "resultsTitle": "Results ({count})",
     "provenanceLabel": "provenance",
     "resultMetrics": {
       "nk": "NK",
@@ -2095,6 +2096,7 @@
       "done": "I've saved it",
       "copy": "Copy",
       "copied": "Copied",
+      "keyLabel": "Key",
       "nameLabel": "Name",
       "namePlaceholder": "lab-runner-2026-05",
       "nameHelp": "Free-form label that helps you identify the key in audit logs.",

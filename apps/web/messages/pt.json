@@ -1160,6 +1160,7 @@
     "openReranker": "Abrir o modelo de reordenação",
     "proteinExamples": "Exemplos de proteínas (conjunto de previsões)",
     "cellLegend": "Cada célula: o F micro ponderado por IA (f_micro_w) e, por baixo, a cobertura ponderada no limiar reportado (o cov_w do LAFA) e o tamanho da célula na variante ponderada. Os resultados anteriores a 21-11-2026 não registam estes dois.",
+    "resultsTitle": "Resultados ({count})",
     "provenanceLabel": "procedência",
     "resultMetrics": {
       "nk": "NK",
@@ -2084,6 +2085,7 @@
       "done": "Ja guardei",
       "copy": "Copiar",
       "copied": "Copiado",
+      "keyLabel": "Chave",
       "nameLabel": "Nome",
       "namePlaceholder": "lab-runner-2026-05",
       "nameHelp": "Rotulo livre que ajuda a identificar a chave em registros de auditoria.",
