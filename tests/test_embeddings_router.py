@@ -793,7 +793,8 @@ class TestListPredictionSets:
            .order_by(...).limit(...).all()``, for the metadata 5-tuples. The
            producer is outer-joined, so a legacy set carries None as its method.
         2. ``query(GOPrediction.prediction_set_id, count(GOPrediction.id))
-           .group_by(...).all()`` — for the per-set counts.
+           .filter(...).group_by(...)``, iterated, for the listed sets that have
+           no stored summary; a counted set reads its rows from its summary.
 
         ``rows`` feeds the first call; ``count_pairs`` feeds the second.
         Both share ``session.query``, so we route them through ``side_effect``
@@ -803,7 +804,9 @@ class TestListPredictionSets:
         list_query.outerjoin.return_value.outerjoin.return_value.join.return_value.join.return_value.order_by.return_value.limit.return_value.all.return_value = rows
 
         count_query = MagicMock()
-        count_query.group_by.return_value.all.return_value = list(count_pairs)
+        count_query.filter.return_value.group_by.return_value.__iter__.return_value = iter(
+            list(count_pairs)
+        )
 
         # First query() call → list_query, second → count_query, third → the
         # scored sets' pairs, none here.
@@ -811,6 +814,7 @@ class TestListPredictionSets:
 
     def test_returns_list(self, client, session):
         ps = _make_prediction_set()
+        ps.summary = None  # not counted yet: the listing counts it
         ec = _make_config()
         ann = MagicMock()
         ann.source = "goa"
@@ -834,6 +838,22 @@ class TestListPredictionSets:
         assert data[0]["annotation_set_label"] == "goa 2024-01"
         assert data[0]["ontology_snapshot_version"] == "2024-01-01"
         assert data[0]["prediction_count"] == 100
+
+    def test_a_counted_set_reads_its_count_from_its_summary(self, client, session):
+        ps = _make_prediction_set()
+        ps.summary = {**ps.summary, "rows": 1_821_687}
+        ann = MagicMock()
+        ann.source = "goa"
+        ann.source_version = "211"
+        snap = MagicMock()
+        snap.obo_version = "releases/2022-07-01"
+
+        self._wire_list_query(session, rows=[(ps, _make_config(), None, ann, snap)])
+
+        resp = client.get("/embeddings/prediction-sets")
+        assert resp.json()[0]["prediction_count"] == 1_821_687
+        # Only the listing's own query ran: nothing was counted.
+        assert session.query.call_count == 1
 
     def test_annotation_set_without_version(self, client, session):
         ps = _make_prediction_set()
