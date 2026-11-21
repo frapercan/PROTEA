@@ -4014,15 +4014,15 @@ pandas = ">=2.0"
 protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", rev = "dd335182a6624a82e3285df9d04a7ace3402effd"}
 
 [package.extras]
-esm = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@2cb6b479e5a2f2009915412b0e888676e4f9b199", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
+esm = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@5fec3f59453714fb18d31d3bd43a502ad244c5d7", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
 mil = ["torch (>=2.0,<3.0)"]
-t5 = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@2cb6b479e5a2f2009915412b0e888676e4f9b199", "sentencepiece (>=0.2)", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
+t5 = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@5fec3f59453714fb18d31d3bd43a502ad244c5d7", "sentencepiece (>=0.2)", "torch (>=2.0,<3.0)", "transformers (>=4.40)"]
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-method.git"
-reference = "75ba91a3c0172dcb34b131e30c1adb3814a1b9bf"
-resolved_reference = "75ba91a3c0172dcb34b131e30c1adb3814a1b9bf"
+reference = "68853e35a059c8de0e895e9f25f519d7fe0d2136"
+resolved_reference = "68853e35a059c8de0e895e9f25f519d7fe0d2136"
 
 [[package]]
 name = "protea-reranker-lab"
@@ -7011,4 +7011,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "ec228d48c607ccbff15d8ad0467a4f992a03e6e52ce60bd6400686a1fe8d4412"
+content-hash = "c27020c34f39e562e10c9fdd421d4d023326870a88c7971f87b6b54e30e1562a"

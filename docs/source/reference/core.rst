@@ -274,12 +274,21 @@ KNN search
 during GO term prediction. The single public entry point is ``search_knn()``,
 which dispatches to one of two backends based on the ``backend`` parameter.
 
-The **numpy** backend computes exact cosine or L2 distances via matrix
-multiplication. It requires no additional dependencies and is the default.
-For cosine distance, query and reference matrices are L2-normalised and the
-distance is computed as :math:`D = 1 - \cos(\theta) \in [0, 2]`. This is
-:math:`O(NQ)` and is appropriate for reference sets up to approximately
-100 000 proteins when embeddings fit in RAM as float16.
+The **numpy** backend is the exact one, and the default. For cosine distance,
+query and reference matrices are L2-normalised and the distance is
+:math:`D = 1 - \cos(\theta) \in [0, 2]`. Every distance that decides a
+neighbour is accumulated in float64, so the k-th neighbour does not depend on
+the order a machine reduces in, and equal distances are ordered by position in
+the bank. It searches in two passes (protea-method, ``_exact_two_pass``). A
+float32 pass, on a CUDA card when one is visible, keeps for each query every
+reference within :math:`t + 2\varepsilon`, where :math:`t` is its k-th float32
+distance and :math:`\varepsilon` bounds the gap between a float32 and a float64
+distance. The float64 pass then decides among those alone. The neighbours,
+their order and their distances are the single float64 pass's: on the
+development store, a batch of 1,024 queries against the 1.45 million references
+of one cut stored byte-identical predictions with the single pass, the two
+passes on the CPU and the two passes on the card, and searched in 131 to 154,
+53 to 63 and 26 to 31 seconds.
 
 The **faiss** backend wraps the FAISS library and supports three index
 types: ``Flat`` (exact), ``IVFFlat`` (approximate, Voronoi partitioning),

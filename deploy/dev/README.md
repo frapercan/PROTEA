@@ -70,9 +70,13 @@ production uses, told the dev ports through `PROTEA_WAIT_ENDPOINTS`.
 - The GPU is hidden from dev workers: the worker template sets
   `CUDA_VISIBLE_DEVICES` to an empty value. The production GPU worker shares
   the single card, and two models on one 12 GB card is an out-of-memory for
-  whichever loads second. Do not enable `protea.embeddings.batch`,
-  `protea.methods` or the residue-encoding queues for dev until the author
-  decides who owns the card. Hidden is not refused: with no card in sight
+  whichever loads second. The one exception, decided by the author on
+  2026-11-21, is the predictions batch queue (`gpu.conf` beside its memory
+  drop-in): the first pass of the exact neighbour search runs on the card,
+  takes it only when it needs less than half of the free memory, releases it
+  before returning, and otherwise runs on the CPU with the same neighbours. Do
+  not enable `protea.embeddings.batch`, `protea.methods` or the
+  residue-encoding queues for dev until the author decides who owns the card. Hidden is not refused: with no card in sight
   `compute_embeddings` runs on the processors with only a warning event.
   And `protea.methods` launches containers that request the device
   directly, so the empty variable does not cover it.
@@ -100,7 +104,12 @@ production uses, told the dev ports through `PROTEA_WAIT_ENDPOINTS`.
    (`deploy/dev/protea-dev-clock-gate.sh` and
    `deploy/systemd/protea-wait-infra.sh`), so its revision must contain both.
 3. A venv at `~/protea-dev/venv` with the clone's locked dependencies. The
-   units call it directly and never through `poetry run`.
+   units call it directly and never through `poetry run`. On a node with an
+   NVIDIA card, `deploy/dev/install-cuda-torch.sh` then replaces the locked
+   CPU build of torch and torchvision with the CUDA build of the same
+   versions, so the neighbour search's first pass can use the card. The lock
+   keeps the CPU build for CI and for nodes without a card; the neighbours
+   are the same on either.
 4. Rootless podman 5.x (Quadlet), and lingering enabled for the user, so that
    user units run without a login session.
 
@@ -352,7 +361,8 @@ every dev worker and of the API:
   yet: dev runs on one machine, from a clone checked out at the dev revision.
   It joins them with the cluster pilots, together with a dev declaration in
   agent-farm.
-- A unit for the GPU queues, after the decision on the card.
+- The other GPU queues (embeddings, methods, residue encodings), after the
+  decision on the card. The predictions batch queue sees it since 2026-11-21.
 - CPU priority for production. `CPUWeight=50` on `protea-dev.slice` only
   weighs against the other children of `protea.slice`, and it has none.
   `protea.slice` itself competes with `app.slice`, where the production
