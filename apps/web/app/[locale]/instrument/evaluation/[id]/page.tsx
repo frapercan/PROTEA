@@ -16,6 +16,7 @@ import {
   type ArtifactsRecord,
   type FileSource,
 } from "@/lib/cellSource";
+import { edgeMark, headlineMaximum, maximumNote, type Maximum } from "@/lib/headlineMaximum";
 import { PRIMARY_METRIC, metricTooltip, metricValue } from "@/lib/metrics";
 
 type NsMetrics = {
@@ -48,6 +49,12 @@ type NsMetrics = {
   smin?: number;
   coverage: number;
   n_proteins?: number;
+  /**
+   * Per F variant, the threshold its curve peaks at and whether that is an edge
+   * of the grid (ADR-D55). The cell's `tau` belongs to the unweighted fmax; the
+   * headline's own threshold is `maxima.f_micro_w.tau`.
+   */
+  maxima?: Record<string, Maximum | undefined>;
 };
 
 type SettingResults = Record<string, NsMetrics>;
@@ -70,6 +77,8 @@ function cellCompanions(cell: NsMetrics): string {
 /** Every figure the cell holds, each named for what it is and the file it was read from. */
 function cellTooltip(cell: NsMetrics, sources: CategorySources): string {
   const parts = [metricTooltip(PRIMARY_METRIC)];
+  const maximum = headlineMaximum(cell);
+  if (maximum) parts.push(maximumNote(maximum));
   const cov = metricValue(cell, "coverage_w_at_tau");
   if (cov !== null) parts.push(`coverage at the reported threshold (cov_w) = ${cov.toFixed(3)}`);
   const largest = metricValue(cell, "coverage_w");
@@ -238,6 +247,20 @@ export default function EvaluationDetailPage() {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
   }, [results]);
+  // Whether any headline on the page sits at an edge of the threshold grid, so
+  // the legend explains the mark only where there is one to explain.
+  const anyEdge = useMemo(
+    () =>
+      results.some((r) =>
+        CATEGORIES.some((cat) =>
+          NAMESPACES.some((ns) => {
+            const cell = r.results?.[cat]?.[ns];
+            return cell ? edgeMark(headlineMaximum(cell)) !== "" : false;
+          }),
+        ),
+      ),
+    [results],
+  );
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6">
@@ -365,7 +388,10 @@ export default function EvaluationDetailPage() {
               </h2>
             </header>
             {sortedResults.length > 0 ? (
-              <p className="border-b px-4 py-2 text-xs text-slate-600">{t("cellLegend")}</p>
+              <p className="border-b px-4 py-2 text-xs text-slate-600">
+                {t("cellLegend")}
+                {anyEdge ? ` ${t("edgeLegend")}` : null}
+              </p>
             ) : null}
             {sortedResults.length === 0 ? (
               <div className="px-4 py-10 text-center text-sm text-slate-600">
@@ -488,7 +514,14 @@ export default function EvaluationDetailPage() {
                                         zero, so a cell scored without an IA says so instead of
                                         borrowing the unweighted figure and reading as the
                                         headline. */}
-                                      <span>{metricValue(cell, PRIMARY_METRIC)?.toFixed(3) ?? "no IA"}</span>
+                                      <span>
+                                        {metricValue(cell, PRIMARY_METRIC)?.toFixed(3) ?? "no IA"}
+                                        {/* A maximum at an edge of the threshold grid is an edge,
+                                          not a maximum: marked here, said in full in the tooltip. */}
+                                        <span className="text-amber-700">
+                                          {edgeMark(headlineMaximum(cell))}
+                                        </span>
+                                      </span>
                                       <span className="text-[10px] text-slate-500">
                                         {cellCompanions(cell)}
                                       </span>

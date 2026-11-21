@@ -1160,6 +1160,7 @@
     "openReranker": "打开重排模型",
     "proteinExamples": "蛋白示例（预测集）",
     "cellLegend": "每个单元格：IA 加权微平均 F（f_micro_w），下方是报告阈值处的 IA 加权覆盖率（LAFA 的 cov_w）以及该单元格在加权变体中的规模。2026-11-21 之前的结果不记录后两项。",
+    "edgeLegend": "数值旁的 ▴：其曲线在仍保留预测的最高阈值处达到峰值，因此该数值是阈值网格的边缘而非最大值，不据此作出判断（ADR-D55）。▾：在最低阈值处同理。",
     "resultsTitle": "结果（{count}）",
     "provenanceLabel": "来源",
     "sourcesLabel": "文件",

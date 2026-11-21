@@ -1160,6 +1160,7 @@
     "openReranker": "Abrir o modelo de reordenação",
     "proteinExamples": "Exemplos de proteínas (conjunto de previsões)",
     "cellLegend": "Cada célula: o F micro ponderado por IA (f_micro_w) e, por baixo, a cobertura ponderada no limiar reportado (o cov_w do LAFA) e o tamanho da célula na variante ponderada. Os resultados anteriores a 21-11-2026 não registam estes dois.",
+    "edgeLegend": "Um ▴ junto a um valor: a sua curva atinge o máximo no limiar mais alto que manteve alguma previsão, pelo que o valor é uma borda da grelha e não um máximo, e dele não se lê nenhum veredicto (ADR-D55). ▾: o mesmo no limiar mais baixo.",
     "resultsTitle": "Resultados ({count})",
     "provenanceLabel": "procedência",
     "sourcesLabel": "ficheiros",
