@@ -87,7 +87,7 @@ export default function DetailView({ view }: { view: PanelView }) {
                     <td className="px-3 py-1.5">{colour ? <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colour }} /> : null}</td>
                     <td className="px-3 py-1.5 font-mono text-xs">{r.id.slice(0, 8)}</td>
                     <td className="px-3 py-1.5">
-                      {isNeighbour(r) ? modelName(r.arm.model) : r.arm.method}
+                      {isNeighbour(r) ? modelName(r.arm.model) : armLabel(r)}
                       {r === ref ? ` (${t("referenceShort")})` : ""}
                     </td>
                     <td className="px-3 py-1.5">{r.arm.scoring ?? "—"}</td>
