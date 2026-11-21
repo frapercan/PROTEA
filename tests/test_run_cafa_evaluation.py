@@ -212,6 +212,7 @@ def _dfs_best_fixture(*, with_weighted: bool = False):
                     "pr_micro_w": 0.33,
                     "rc_micro_w": 0.20,
                     "cov_max": 0.94,
+                    "cov_w": 0.90,
                 },
                 {
                     "ns": "molecular_function",
@@ -219,6 +220,7 @@ def _dfs_best_fixture(*, with_weighted: bool = False):
                     "pr_micro_w": 0.50,
                     "rc_micro_w": 0.41,
                     "cov_max": 0.87,
+                    "cov_w": 0.85,
                 },
                 {
                     "ns": "cellular_component",
@@ -226,6 +228,7 @@ def _dfs_best_fixture(*, with_weighted: bool = False):
                     "pr_micro_w": 0.55,
                     "rc_micro_w": 0.46,
                     "cov_max": 0.91,
+                    "cov_w": 0.89,
                 },
             ]
         )
@@ -588,6 +591,17 @@ class TestParseResults:
         mfo = result["MFO"]
         assert mfo["precision_w"] == 0.50
         assert mfo["recall_w"] == 0.41
+
+    def test_the_weighted_coverage_at_the_reported_threshold_is_lafas(self):
+        # Two coverages travel with f_micro_w, as with the unweighted pair
+        # coverage / coverage_at_tau: cov_max, the largest over every
+        # threshold, and cov_w, the one at the threshold f_micro_w was
+        # reported at, which is the coverage LAFA prints beside it.
+        dfs_best = _dfs_best_fixture(with_weighted=True)
+        result = self.op._parse_results(dfs_best)
+        assert (result["BPO"]["coverage_w_at_tau"], result["BPO"]["coverage_w"]) == (0.90, 0.94)
+        assert result["MFO"]["coverage_w_at_tau"] == 0.85
+        assert result["CCO"]["coverage_w_at_tau"] == 0.89
 
     def test_parse_weighted_handles_missing_namespace_in_extra_frame(self):
         dfs_best = _dfs_best_fixture(with_weighted=True)

@@ -202,6 +202,13 @@ def parse_results(dfs_best: dict) -> dict[str, Any]:
 # metric) also carries the weighted micro precision / recall / coverage;
 # persisting those per aspect (not only the unweighted pr/rc) is what makes
 # the blob LAFA-comparable. See docs/EVAL_LAFA_PARITY.md and FIX-METRIC-IA.
+#
+# Two coverages, as in the unweighted pair ``coverage`` / ``coverage_at_tau``.
+# ``coverage_w`` is cafaeval's ``cov_max``, the largest coverage over every
+# threshold. ``coverage_w_at_tau`` is ``cov_w``, the coverage at the threshold
+# ``f_micro_w`` was reported at, which is the coverage LAFA prints beside it.
+# Until 2026-11-21 only the first was persisted, under a name that read as the
+# second: on 211 -> 227, PK biological process, 0.444 against LAFA's 0.441.
 _EXTRA_METRIC_SPECS: tuple[tuple[str, dict[str, str]], ...] = (
     ("f_w", {"f_w": "fmax_w"}),
     ("f_micro", {"f_micro": "f_micro"}),
@@ -212,6 +219,7 @@ _EXTRA_METRIC_SPECS: tuple[tuple[str, dict[str, str]], ...] = (
             "pr_micro_w": "precision_w",
             "rc_micro_w": "recall_w",
             "cov_max": "coverage_w",
+            "cov_w": "coverage_w_at_tau",
         },
     ),
 )

@@ -43,6 +43,7 @@ def _entry(cat: str, asp: str, entry: dict[str, Any]) -> dict[str, Any]:
         "precision": entry["precision"],
         "recall": entry["recall"],
         "coverage_w": entry.get("coverage_w"),
+        "coverage_w_at_tau": entry.get("coverage_w_at_tau"),
         "coverage": entry["coverage"],
         "embedding_config_id": entry["embedding_config_id"],
         "k": entry["k"],
