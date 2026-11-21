@@ -12,7 +12,7 @@
 // `number | null`. With the type corrected, `tsc` reports
 // "TS18047: 'pred.distance' is possibly 'null'" on the old line, so the next
 // one of these cannot be written silently. These tests cover what the type
-// cannot: that the row still renders, and that the score stays a number.
+// cannot: that the row still renders, in an order that does not change.
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -32,11 +32,8 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import {
-  PredictionTable,
-  computeScore,
-} from "@/app/[locale]/instrument/functional-annotation/[id]/page";
-import type { Prediction, ScoringConfig } from "@/lib/api";
+import { PredictionTable } from "@/app/[locale]/instrument/functional-annotation/[id]/page";
+import type { Prediction } from "@/lib/api";
 
 function pred(over: Partial<Prediction> = {}): Prediction {
   return {
@@ -61,26 +58,17 @@ function pred(over: Partial<Prediction> = {}): Prediction {
   } as Prediction;
 }
 
-const CONFIG: ScoringConfig = {
-  id: "c1",
-  name: "test",
-  formula: "weighted_mean",
-  weights: { embedding_similarity: 1.0, identity_nw: 1.0 },
-  evidence_weights: null,
-  created_at: "2026-10-28T00:00:00Z",
-};
-
 describe("a prediction set written by an ingested method", () => {
   it("renders its rows instead of throwing on toFixed", () => {
     render(
-      <PredictionTable preds={[pred()]} knownByGoId={new Map()} scoringConfig={undefined} />,
+      <PredictionTable preds={[pred()]} knownByGoId={new Map()} />,
     );
     expect(screen.getAllByText("GO:0003674").length).toBeGreaterThan(0);
   });
 
   it("shows an em dash where the distance would go", () => {
     render(
-      <PredictionTable preds={[pred()]} knownByGoId={new Map()} scoringConfig={undefined} />,
+      <PredictionTable preds={[pred()]} knownByGoId={new Map()} />,
     );
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
@@ -92,33 +80,9 @@ describe("a prediction set written by an ingested method", () => {
       <PredictionTable
         preds={[pred({ go_id: "GO:0009" }), pred({ go_id: "GO:0003" })]}
         knownByGoId={new Map()}
-        scoringConfig={undefined}
       />,
     );
     const html = document.body.innerHTML;
     expect(html.indexOf("GO:0003")).toBeLessThan(html.indexOf("GO:0009"));
-  });
-});
-
-describe("the score of a candidate with no distance", () => {
-  it("is a number and not NaN", () => {
-    // embedding_similarity was `1 - null / 2`, which is NaN, and NaN
-    // propagated through the weighted sum: every row scored NaN and the
-    // colour helper compared NaN against its thresholds.
-    const score = computeScore(pred({ identity_nw: 0.5 }), CONFIG);
-    expect(Number.isNaN(score)).toBe(false);
-  });
-
-  it("renormalises over the signals that exist", () => {
-    // With embedding_similarity absent and identity_nw at 0.5, the only
-    // signal with a value carries the whole weight.
-    expect(computeScore(pred({ identity_nw: 0.5 }), CONFIG)).toBeCloseTo(0.5, 6);
-  });
-
-  it("still uses the distance when there is one", () => {
-    // The guard must not disable the signal for retrieval arms, which are
-    // every other set in the registry.
-    const score = computeScore(pred({ distance: 0.5, identity_nw: 0.5 }), CONFIG);
-    expect(score).toBeCloseTo((1 - 0.5 / 2 + 0.5) / 2, 6);
   });
 });

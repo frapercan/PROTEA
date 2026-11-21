@@ -112,11 +112,13 @@ which computed a Fmax of its own with exact term matching and no propagation,
 and the CAFA export's own arithmetic, ``max(0, 1 - distance)``, which no other
 part of the platform used.
 
-One door is still open, and is a known flaw: the detail page of a prediction
-set in the web interface computes a score in the browser (``computeScore``),
-a copy of the arithmetic that knows five signals and not the neighbour vote
-fraction, so under ``vote_fraction`` it shows 0 on every row. It goes when that
-page reads stored scores.
+Retired on 2026-11-21, the last of them: the detail page of a prediction set
+computed a score in the browser (``computeScore``), a copy of the arithmetic
+that knew five signals and not the neighbour vote fraction, so under
+``vote_fraction`` it showed 0 on every row. A scored set's page shows the
+scores it stored, and a candidate set's page lists the scored sets made from
+it, with their configurations; neither computes a score. Configurations are
+made on the scoring page and applied by ``score_prediction_set``.
 
 What a scored set records
 -------------------------

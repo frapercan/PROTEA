@@ -1,9 +1,9 @@
 // A scored set's rows carry the score it stored, and the table shows that one.
 //
-// The stored score is the one the evaluator reads. A score recomputed in the
-// browser from a configuration's weights is a different number under the same
-// column, so when a row carries a stored score the table shows it and orders by
-// it, whatever configuration is selected.
+// The stored score is the one the evaluator reads. The page used to recompute a
+// score in the browser from a configuration's weights, a different number under
+// the same column; a candidate set is now scored only by its job
+// (score_prediction_set), so its rows carry no score and the table shows none.
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -24,7 +24,7 @@ vi.mock("next/link", () => ({
 }));
 
 import { PredictionTable } from "@/app/[locale]/instrument/functional-annotation/[id]/page";
-import type { Prediction, ScoringConfig } from "@/lib/api";
+import type { Prediction } from "@/lib/api";
 
 function pred(over: Partial<Prediction> = {}): Prediction {
   return {
@@ -49,27 +49,11 @@ function pred(over: Partial<Prediction> = {}): Prediction {
   } as Prediction;
 }
 
-const CONFIG: ScoringConfig = {
-  id: "c1",
-  name: "embedding only",
-  formula: "linear",
-  weights: { embedding_similarity: 1.0 },
-  evidence_weights: null,
-  created_at: "2026-11-21T00:00:00Z",
-};
-
 describe("a scored set", () => {
-  it("shows the score it stored rather than one computed in the browser", () => {
-    render(
-      <PredictionTable
-        preds={[pred({ score: 0.123 })]}
-        knownByGoId={new Map()}
-        scoringConfig={CONFIG}
-      />,
-    );
+  it("shows the score it stored", () => {
+    render(<PredictionTable preds={[pred({ score: 0.123 })]} knownByGoId={new Map()} />);
     expect(screen.getAllByText("0.123").length).toBeGreaterThan(0);
-    // The browser would compute 1 - 0.2 / 2 = 0.900 from the same row.
-    expect(screen.queryAllByText("0.900")).toHaveLength(0);
+    expect(screen.getAllByText("Score").length).toBeGreaterThan(0);
   });
 
   it("orders its rows by the stored score, highest first", () => {
@@ -77,9 +61,23 @@ describe("a scored set", () => {
       <PredictionTable
         preds={[pred({ go_id: "GO:0000001", score: 0.2 }), pred({ go_id: "GO:0000002", score: 0.8 })]}
         knownByGoId={new Map()}
-        scoringConfig={undefined}
       />,
     );
+    const html = document.body.innerHTML;
+    expect(html.indexOf("GO:0000002")).toBeLessThan(html.indexOf("GO:0000001"));
+  });
+});
+
+describe("a candidate set", () => {
+  it("shows no score, since it is scored by its job and never in the browser", () => {
+    render(
+      <PredictionTable
+        preds={[pred({ go_id: "GO:0000001", distance: 0.4 }), pred({ go_id: "GO:0000002", distance: 0.1 })]}
+        knownByGoId={new Map()}
+      />,
+    );
+    expect(screen.queryAllByText("Score")).toHaveLength(0);
+    // Nearest donor first.
     const html = document.body.innerHTML;
     expect(html.indexOf("GO:0000002")).toBeLessThan(html.indexOf("GO:0000001"));
   });

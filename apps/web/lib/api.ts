@@ -340,6 +340,18 @@ export type PredictionSet = {
   scored_from?: string | null;
   /** The configuration a scored set read; null on a candidate set. */
   scoring_config_id?: string | null;
+  /** That configuration's name, when its id resolves. */
+  scoring_config_name?: string | null;
+  /** A candidate set's scored sets, newest first; empty on a scored set. */
+  scored_sets?: ScoredSetSummary[];
+};
+
+/** One scored set made from a candidate set by score_prediction_set. */
+export type ScoredSetSummary = {
+  id: string;
+  scoring_config_id: string | null;
+  scoring_config_name: string | null;
+  created_at: string;
 };
 
 export type AnnotationSet = {
