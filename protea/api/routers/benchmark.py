@@ -642,6 +642,7 @@ def _cell_payload(
         "precision": _round(cell.get("precision")),
         "recall": _round(cell.get("recall")),
         "coverage_w": _round(cell.get("coverage_w")),
+        "coverage_w_at_tau": _round(cell.get("coverage_w_at_tau")),
         "coverage": _round(cell.get("coverage")),
         "n_proteins": cell.get("n_proteins"),
         "evaluation_result_id": str(er.id),

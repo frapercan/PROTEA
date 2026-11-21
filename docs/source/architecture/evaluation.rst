@@ -581,7 +581,12 @@ an unpredicted one as a failure, with coverage beside the number.
 
 **Persisted metrics.** ``run_cafa_evaluation`` persists, per aspect, the
 IA-weighted ``f_micro_w`` (headline), ``fmax_w``, ``f_micro``, and the
-weighted micro ``precision_w`` / ``recall_w`` / ``coverage_w``. The ``_w``
+weighted micro ``precision_w`` / ``recall_w`` / ``coverage_w_at_tau``. The
+last is the coverage at the threshold ``f_micro_w`` was reported at, cafaeval's
+``cov_w`` and the coverage LAFA prints beside it. ``coverage_w`` is the largest
+coverage over every threshold, cafaeval's ``cov_max``, as ``coverage`` is for
+the unweighted ``coverage_at_tau``; results made before 2026-11-21 carry only
+``coverage_w``. The ``_w``
 keys appear only when a real IA file was supplied; under the uniform IC=1
 fallback they are omitted. The ``/v1/benchmark/matrix`` endpoint ranks every
 cell by ``f_micro_w`` (falling back to ``fmax`` for legacy IC=1 rows, flagged

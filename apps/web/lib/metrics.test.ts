@@ -28,6 +28,7 @@ describe("the vocabulary covers what an evaluation stores", () => {
     "recall_w",
     "coverage",
     "coverage_w",
+    "coverage_w_at_tau",
   ];
 
   it.each(STORED)("%s has a spec", (key) => {
