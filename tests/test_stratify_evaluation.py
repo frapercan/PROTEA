@@ -17,6 +17,7 @@ producer's rather than this file's.
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pandas as pd
@@ -360,6 +361,58 @@ class TestTheOperationEndToEnd:
         frame = pd.read_parquet(root / "NK" / "strata.parquet")
         assert len(frame) == 1
         assert frame.reportable.tolist() == [False]
+
+    def test_each_cell_carries_the_masses_its_ratios_are_divided_from(self, tmp_path) -> None:
+        """Ratios do not add; masses do. A cell's tp, pred and n_gt are the sums
+        over its proteins at the reported threshold, so any coarser pool of this
+        table is exact by addition."""
+        root = self._artifacts(
+            tmp_path,
+            [
+                _row("Q1", "molecular_function", tp=1.0, pred=2.0, n_gt=4.0),
+                _row("Q2", "molecular_function", tp=3.0, pred=5.0, n_gt=6.0),
+            ],
+        )
+        StratifyEvaluationOperation().execute(
+            self._session(),
+            self._payload(root, axes=["aspect"], min_population=1),
+            emit=lambda *a, **k: None,
+        )
+        frame = pd.read_parquet(root / "NK" / "strata.parquet")
+        assert frame[["tp", "pred", "n_gt"]].values.tolist() == [[4.0, 7.0, 10.0]]
+        assert frame.precision.tolist() == [pytest.approx(4.0 / 7.0)]
+
+    def test_the_profiles_pool_every_placed_protein_by_band(self, tmp_path) -> None:
+        """Per aspect: all of it, then one pool per homology band and per length
+        band, each [proteins, tp, pred, n_gt, f_micro], with no floor: the
+        protein count travels beside the number."""
+        root = self._artifacts(
+            tmp_path,
+            [
+                _row("Q1", "molecular_function", tp=1.0, pred=2.0, n_gt=4.0),
+                _row("Q2", "molecular_function", tp=3.0, pred=5.0, n_gt=6.0),
+            ],
+        )
+        out = StratifyEvaluationOperation().execute(
+            self._session(),
+            self._payload(root, axes=["aspect", "length", "homology"], min_population=99),
+            emit=lambda *a, **k: None,
+        )
+        f = out.result["settings"]["NK"]["profiles"]["F"]
+        assert f["placed"][:4] == [2, 4.0, 7.0, 10.0]
+        assert set(f["homology"]) == {"30-60", "<=30"}
+        assert f["homology"]["30-60"][:4] == [1, 1.0, 2.0, 4.0]
+        assert f["length"]["<=512"][:4] == [2, 4.0, 7.0, 10.0]
+        assert f["homology"]["<=30"][4] == pytest.approx(2 * (3 / 5) * (3 / 6) / (3 / 5 + 3 / 6))
+
+    def test_a_local_run_records_nothing_on_a_result(self, tmp_path) -> None:
+        """No result id, no row to write on: the fake session refuses any other query."""
+        root = self._artifacts(tmp_path, [_row("Q1", "molecular_function")])
+        StratifyEvaluationOperation().execute(
+            self._session(),
+            self._payload(root, axes=["homology"], min_population=1),
+            emit=lambda *a, **k: None,
+        )
 
     def test_the_pooled_score_is_micro(self, tmp_path) -> None:
         """Two proteins in one cell: sums then divides, not the mean of F."""
@@ -730,3 +783,47 @@ class TestASettingThatPooledNothingIsNotSuccess:
             emit=lambda *a, **k: None,
         )
         assert out.result["settings"]["NK"]["cells"] == 1
+
+
+class TestTheProfilesAreKeptOnTheResult:
+    """The window panel reads every result in one query, so the profiles ride on it."""
+
+    def test_they_go_under_results_strata_with_the_job_that_pooled_them(self) -> None:
+        from protea.core.operations.stratify_evaluation import record_profiles
+
+        class _Recorder:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict]] = []
+
+            def execute(self, statement, params=None):
+                self.calls.append((str(statement), params or {}))
+
+        rid, job = str(uuid.uuid4()), uuid.uuid4()
+        payload = StratifyEvaluationPayload.model_validate(
+            {
+                "prediction_set_id": str(uuid.uuid4()),
+                "evaluation_result_id": rid,
+                "variant": "weighted",
+                "axes": ["category", "aspect", "length", "homology"],
+                "min_population": 30,
+            }
+        )
+        summary = {
+            "settings": {"NK": {"cells": 3, "profiles": {"F": {"placed": [1, 1.0, 1.0, 1.0, 1.0]}}}}
+        }
+        session = _Recorder()
+        record_profiles(session, payload, job, summary)  # type: ignore[arg-type]
+
+        ((sql, params),) = session.calls
+        assert sql.startswith(
+            "UPDATE evaluation_result SET results = results || jsonb_build_object('strata'"
+        )
+        assert params["r"] == rid
+        record = json.loads(params["record"])
+        assert record == {
+            "job_id": str(job),
+            "variant": "weighted",
+            "axes": ["category", "aspect", "length", "homology"],
+            "min_population": 30,
+            "profiles": {"NK": {"F": {"placed": [1, 1.0, 1.0, 1.0, 1.0]}}},
+        }

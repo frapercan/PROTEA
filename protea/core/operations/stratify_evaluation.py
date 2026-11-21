@@ -42,6 +42,7 @@ weighted name.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import uuid
 from collections.abc import Sequence
@@ -74,7 +75,7 @@ from protea.core.strata import (
     Stratum,
     stratum_for,
 )
-from protea.core.utils import contract_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.core.window_placement import TargetPlacement, placement_of_window
 
 #: cafaeval reports the long namespace; the strata vocabulary speaks CAFA codes.
@@ -470,6 +471,113 @@ def _resolve_source(
     return root, store, tmp
 
 
+#: The axes a reader takes one at a time: the window panel's profiles
+#: (``/annotations/evaluation-sets/{id}/summary``) are pooled along each.
+PROFILE_AXES = ("homology", "length")
+
+
+def profiles(placed_rows: list[dict[str, Any]], p: StratifyEvaluationPayload) -> dict[str, Any]:
+    """Per aspect, every placed protein pooled, and one pool per band of each profile axis.
+
+    Pooled from the rows and not from the crossed cells, though the two agree: a
+    pool is the micro sum of its proteins, so it is exact whatever the crossing,
+    and the population floor does not apply to it here. A pool is
+    ``[proteins, tp, pred, n_gt, f_micro]`` under the payload's variant, and a
+    reader decides what it shows by the protein count beside it.
+    """
+    columns = VARIANT_COLUMNS[p.variant]
+
+    def aspect_of(row: dict[str, Any]) -> str:
+        aspect = row["_stratum"].aspect
+        return str(getattr(aspect, "value", aspect))
+
+    def pack(cell: Any) -> list[float]:
+        return [cell.n_proteins, cell.tp_w, cell.pred_w, cell.n_gt_w, cell.f_micro_w]
+
+    out: dict[str, Any] = {
+        aspect: {"placed": pack(cell)}
+        for aspect, cell in micro_cells(placed_rows, aspect_of, columns).items()
+    }
+    for axis in PROFILE_AXES:
+        if axis not in p.axes:
+            continue
+
+        def key(row: dict[str, Any], axis: str = axis) -> tuple[str, str]:
+            band = getattr(row["_stratum"], axis)
+            return aspect_of(row), str(getattr(band, "value", band))
+
+        for (aspect, band), cell in micro_cells(placed_rows, key, columns).items():
+            out[aspect].setdefault(axis, {})[band] = pack(cell)
+    return out
+
+
+def record_profiles(
+    session: Session, p: StratifyEvaluationPayload, job_id: Any, summary: dict[str, Any]
+) -> None:
+    """Keep the profiles on the result they describe, under ``results["strata"]``.
+
+    A window's panel reads every result of the window in one query; reading a
+    parquet per result to draw it would take a store round trip each. The key
+    sits beside the cells the evaluator wrote, as ``results["reading"]`` does,
+    and names the job that pooled it, so a reader can tell which stratification
+    it is.
+    """
+    record = {
+        "job_id": None if job_id is None else str(job_id),
+        "variant": p.variant,
+        "axes": list(p.axes),
+        "min_population": p.min_population,
+        "profiles": {setting: w["profiles"] for setting, w in summary["settings"].items()},
+    }
+    session.execute(
+        text(
+            "UPDATE evaluation_result "
+            "SET results = results || jsonb_build_object('strata', CAST(:record AS jsonb)) "
+            "WHERE id = CAST(:r AS uuid)"
+        ),
+        {"record": json.dumps(record), "r": p.evaluation_result_id},
+    )
+
+
+def _cell_row(key: tuple, c: Any, p: StratifyEvaluationPayload) -> dict[str, Any]:
+    """One row of ``strata.parquet``: the stratum's coordinates, its masses and its ratios."""
+    return {
+        # ``.value``, not ``str()``. Category and Aspect are plain
+        # Enums, so str() yields "Aspect.MOLECULAR_FUNCTION" and the
+        # column stops matching the vocabulary every other table
+        # uses. The bands are StrEnum and agree either way.
+        **{
+            axis: getattr(value, "value", str(value))
+            for axis, value in zip(p.axes, key, strict=True)
+        },
+        "n_proteins": c.n_proteins,
+        # Neutral names with ``variant`` beside them, which is the
+        # same vocabulary the evaluation_result row publishes
+        # (``f_micro``, ``precision``, ``recall``). The previous
+        # names ended in ``_w`` whatever had been pooled, so an
+        # evaluation run without an information-accretion set --
+        # which is every evaluation stored on this deployment --
+        # would have had its unweighted sums published as
+        # ``f_micro_w``. Nothing read these columns yet: no
+        # strata.parquet had ever been written.
+        "variant": p.variant,
+        # The masses the ratios are divided from, at the cell's
+        # threshold: pools of these sum exactly, so the cell, a
+        # profile on one axis or any coarser crossing is read from
+        # this table by addition. Ratios do not add.
+        "tp": c.tp_w,
+        "pred": c.pred_w,
+        "n_gt": c.n_gt_w,
+        "precision": c.precision_w,
+        "recall": c.recall_w,
+        "f_micro": c.f_micro_w,
+        # Withheld cells are WRITTEN and flagged, never dropped: a
+        # table that prints only what survived looks identical to a
+        # table that covered everything.
+        "reportable": c.n_proteins >= p.min_population,
+    }
+
+
 class StratifyEvaluationOperation(Operation):
     """Pool a finished evaluation into per-stratum cells."""
 
@@ -539,6 +647,8 @@ class StratifyEvaluationOperation(Operation):
             )
         if tmp is not None:
             tmp.cleanup()
+        if p.evaluation_result_id:
+            record_profiles(session, p, job_id_from_payload(payload), summary)
         return OperationResult(result=summary)
 
     def _stratify_setting(self, work: _SettingWork, emit: EmitFn) -> dict[str, Any] | None:
@@ -582,6 +692,7 @@ class StratifyEvaluationOperation(Operation):
             VARIANT_COLUMNS[p.variant],
         )
         written = self._write(setting_dir, cells, p, emit, len(rows), len(placed))
+        written["profiles"] = profiles(placed_rows, p)
         if work.store is not None and p.evaluation_result_id:
             key = eval_artifact_key(
                 uuid.UUID(p.evaluation_result_id), f"{setting}/strata.parquet"
@@ -604,39 +715,7 @@ class StratifyEvaluationOperation(Operation):
         populations = {k: c.n_proteins for k, c in cells.items()}
         reportable = [k for k, n in populations.items() if n >= p.min_population]
         withheld = [k for k, n in populations.items() if n < p.min_population]
-        frame = pd.DataFrame(
-            [
-                {
-                    # ``.value``, not ``str()``. Category and Aspect are plain
-                    # Enums, so str() yields "Aspect.MOLECULAR_FUNCTION" and the
-                    # column stops matching the vocabulary every other table
-                    # uses. The bands are StrEnum and agree either way.
-                    **{
-                        axis: getattr(value, "value", str(value))
-                        for axis, value in zip(p.axes, key, strict=True)
-                    },
-                    "n_proteins": c.n_proteins,
-                    # Neutral names with ``variant`` beside them, which is the
-                    # same vocabulary the evaluation_result row publishes
-                    # (``f_micro``, ``precision``, ``recall``). The previous
-                    # names ended in ``_w`` whatever had been pooled, so an
-                    # evaluation run without an information-accretion set --
-                    # which is every evaluation stored on this deployment --
-                    # would have had its unweighted sums published as
-                    # ``f_micro_w``. Nothing read these columns yet: no
-                    # strata.parquet had ever been written.
-                    "variant": p.variant,
-                    "precision": c.precision_w,
-                    "recall": c.recall_w,
-                    "f_micro": c.f_micro_w,
-                    # Withheld cells are WRITTEN and flagged, never dropped: a
-                    # table that prints only what survived looks identical to a
-                    # table that covered everything.
-                    "reportable": populations[key] >= p.min_population,
-                }
-                for key, c in cells.items()
-            ]
-        )
+        frame = pd.DataFrame([_cell_row(key, c, p) for key, c in cells.items()])
         setting = setting_dir.name
         setting_dir.mkdir(parents=True, exist_ok=True)
         out = setting_dir / "strata.parquet"
