@@ -159,9 +159,11 @@ def test_the_slice_is_the_dev_ceiling():
 
 def test_the_training_and_evaluation_workers_have_room_and_no_swap():
     """A count map or a whole window's evaluation fails at once rather than crawl in swap."""
-    for queue in ("protea.training", "protea.evaluations"):
+    # The evaluations worker went from 8G to 16G on 2026-11-21: one evaluation of a
+    # partial-knowledge window peaked at 9.1 GB and the worker was killed at 8G.
+    for queue, cap in (("protea.training", "8G"), ("protea.evaluations", "16G")):
         keys = _keys(SYSTEMD / f"protea-dev-worker@{queue}.service.d" / "memory.conf")
-        assert keys["MemoryMax"] == ["8G"], queue
+        assert keys["MemoryMax"] == [cap], queue
         assert keys["MemorySwapMax"] == ["0"], queue
 
 
