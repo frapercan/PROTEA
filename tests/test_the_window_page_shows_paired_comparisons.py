@@ -97,11 +97,21 @@ def test_the_window_shows_the_latest_whole_panel_comparison_of_each_pair(pg: Ses
     pair = {"evaluation_result_id": a, "baseline_evaluation_result_id": b}
     _job(pg, pair, _result(0.010), minute=0)
     latest = _job(pg, pair, _result(0.012), minute=5)
-    _job(pg, {**pair, "restrict_to_stratum": {"homology": ">90"}}, _result(0.5), minute=9)
+    banded = _job(pg, {**pair, "restrict_to_stratum": {"homology": ">90"}}, _result(0.5), minute=9)
     _job(pg, {"evaluation_result_id": foreign, "baseline_evaluation_result_id": b}, _result(0.9), 1)
     pg.commit()
 
     shown = list_paired_comparisons_data(pg, window)
 
     assert [(c["job_id"], c["panels"]["PK:BPO"]["delta"]) for c in shown] == [(str(latest), 0.012)]
+    assert shown[0]["restrict_to_stratum"] is None
     assert list_paired_comparisons_data(pg, other) == []
+
+    # A band asks for the comparisons restricted to it, and only those: the later
+    # restricted job never stood in for the whole panel above, nor for another band.
+    (on_band,) = list_paired_comparisons_data(pg, window, {"homology": ">90"})
+    assert on_band["job_id"] == str(banded)
+    assert on_band["restrict_to_stratum"] == {"homology": ">90"}
+    assert list_paired_comparisons_data(pg, window, {"homology": "60-90"}) == []
+    with pytest.raises(ValueError, match="not one of"):
+        list_paired_comparisons_data(pg, window, {"homology": "close"})

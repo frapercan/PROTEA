@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -165,20 +165,35 @@ def list_evaluation_results(
 )
 def list_paired_comparisons(
     eval_id: UUID,
+    axis: str | None = Query(
+        None, description="With band: the stratum axis the comparisons were restricted to"
+    ),
+    band: str | None = Query(None, description="With axis: the band of that axis, e.g. >90"),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
-    """The latest whole-panel ``compare_paired_panels`` of each pair of the window's results.
+    """The latest ``compare_paired_panels`` of each pair of the window's results.
 
-    Each one names its job, the result under test and the baseline, the method
-    axis it declared, its operating point and resampling, and per panel the
-    difference, its interval, the interval's method, the verdict and the number
-    of paired proteins. Returns ``404`` if the evaluation set is missing.
+    Over the whole panel, or, given ``axis`` and ``band`` together, restricted to
+    that stratum. Each one names its job, the result under test and the baseline,
+    the stratum, the method axis it declared, its operating point and resampling,
+    and per panel the difference, its interval, the interval's method, the
+    verdict, the number of paired proteins, the effect of interest and the
+    smallest detectable effect. Returns ``422`` for half a stratum or one outside
+    the closed vocabularies, ``404`` if the evaluation set is missing.
     """
+    if (axis is None) != (band is None):
+        raise HTTPException(
+            status_code=422,
+            detail="a stratum needs both its axis and its band; give neither for the whole panel",
+        )
+    stratum = {axis: band} if axis is not None and band is not None else None
     try:
         with session_scope(factory) as session:
-            return list_paired_comparisons_data(session, eval_id)
+            return list_paired_comparisons_data(session, eval_id, stratum)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get(

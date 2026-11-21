@@ -1370,6 +1370,32 @@ class TestListPairedComparisons:
         resp = c.get(f"/annotations/evaluation-sets/{uuid4()}/paired-comparisons")
         assert resp.status_code == 404
 
+    def test_half_a_stratum_is_refused(self, client):
+        c, _ = client
+        resp = c.get(f"/annotations/evaluation-sets/{uuid4()}/paired-comparisons?axis=homology")
+        assert resp.status_code == 422
+
+    def test_a_band_outside_the_vocabulary_is_refused(self, client):
+        c, _ = client
+        resp = c.get(
+            f"/annotations/evaluation-sets/{uuid4()}/paired-comparisons?axis=homology&band=close"
+        )
+        assert resp.status_code == 422
+        assert "not one of" in resp.json()["detail"]
+
+    def test_a_band_reaches_the_listing_as_asked(self, client):
+        c, session = client
+        eval_id, a = uuid4(), uuid4()
+        session.get.return_value = _make_evaluation_set(eval_id=eval_id)
+        session.query.return_value.filter.return_value.__iter__.return_value = iter([(a,)])
+        session.execute.return_value.mappings.return_value = []
+        resp = c.get(
+            f"/annotations/evaluation-sets/{eval_id}/paired-comparisons?axis=homology&band=%3E90"
+        )
+        assert resp.status_code == 200
+        params = session.execute.call_args.args[1]
+        assert params["stratum"] == '{"homology": ">90"}'
+
 
 # ---------------------------------------------------------------------------
 # GET .../results (lines 800-809)

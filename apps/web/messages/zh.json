@@ -2556,7 +2556,6 @@
       "notCompared": "尚未比较",
       "loadingPaired": "正在读取比较...",
       "pairedUnavailable": "无法读取比较",
-      "bandNotCompared": "仅在整个单元格上比较；按区间尚未比较",
       "settledHigher": "更高，已确定",
       "settledLower": "更低，已确定",
       "unsettled": "未确定",

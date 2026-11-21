@@ -2555,7 +2555,6 @@
       "notCompared": "not compared yet",
       "loadingPaired": "reading the comparisons...",
       "pairedUnavailable": "the comparisons could not be read",
-      "bandNotCompared": "compared on the whole cell only; per band, not yet",
       "settledHigher": "higher, settled",
       "settledLower": "lower, settled",
       "unsettled": "not settled",

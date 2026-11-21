@@ -2,8 +2,9 @@
 
 // When the best result improved, on the whole cell or on one band of identity.
 
+import { useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { deltaText, panelNote, verdictTone } from "@/lib/pairedComparison";
+import { deltaText, panelNote, verdictTone, type PairedComparison } from "@/lib/pairedComparison";
 import { BAND_KEY, HOMOLOGY_BANDS, MIN_PROTEINS, armLabel, bandOf, cellF, championSteps, stepComparison, type SummaryResult } from "@/lib/windowPanel";
 import { Figure, INK, Legend, SERIES, extent, fmt, pressable, signed, ticks, useTooltip } from "./chart";
 import type { PanelView } from "./WindowPanel";
@@ -12,25 +13,24 @@ type Value = (r: SummaryResult) => number | null;
 
 const TONE = { higher: "text-emerald-700", lower: "text-rose-700", unresolved: "text-slate-500" } as const;
 
-/** Whether a step's pair was compared, and how it came out on the cell. */
+/** Whether a step's pair was compared, and how it came out on the cell (or on the band shown). */
 function PairedCell({
-  view,
+  comparisons,
+  cell,
   item,
   before,
-  band,
 }: {
-  view: PanelView;
+  comparisons: PairedComparison[] | null | "failed";
+  cell: string;
   item: SummaryResult;
   before: SummaryResult | undefined;
-  band: boolean;
 }) {
   const t = useTranslations("windowPanel");
   const quiet = (text: string) => <span className="text-slate-500">{text}</span>;
   if (!before) return quiet("—");
-  if (band) return quiet(t("trajectory.bandNotCompared"));
-  if (view.comparisons === "failed") return quiet(t("trajectory.pairedUnavailable"));
-  if (view.comparisons == null) return quiet(t("trajectory.loadingPaired"));
-  const found = stepComparison(view.comparisons, item.id, before.id, view.state.cell);
+  if (comparisons === "failed") return quiet(t("trajectory.pairedUnavailable"));
+  if (comparisons == null) return quiet(t("trajectory.loadingPaired"));
+  const found = stepComparison(comparisons, item.id, before.id, cell);
   if (!found) return quiet(t("trajectory.notCompared"));
   const tone = verdictTone(found.panel);
   const { status, effect_of_interest: effect } = found.panel;
@@ -130,6 +130,13 @@ export default function TrajectoryView({ view }: { view: PanelView }) {
   const { state, commit, shown, reference: ref } = view;
   const tip = useTooltip();
   const measure = state.measure === "five" || (HOMOLOGY_BANDS as readonly string[]).includes(state.measure) ? state.measure : "all";
+  const onBand = measure !== "all" && measure !== "five";
+  const { loadBand } = view;
+  useEffect(() => {
+    if (onBand) loadBand(measure);
+  }, [onBand, measure, loadBand]);
+  const listed = onBand ? view.bandComparisons[measure] : undefined;
+  const stepComparisons = onBand ? (listed === undefined || listed === "loading" ? null : listed) : view.comparisons;
   const arms = shown.filter((r) => r !== ref);
   const legend = (
     <Legend
@@ -214,7 +221,7 @@ export default function TrajectoryView({ view }: { view: PanelView }) {
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmt(s.now)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{signed(s.now - (refValue ?? 0))}</td>
                     <td className="px-3 py-1.5 text-xs">
-                      <PairedCell view={view} item={s.item} before={k > 0 ? steps[k - 1].item : ref} band={measure !== "all"} />
+                      <PairedCell comparisons={stepComparisons} cell={state.cell} item={s.item} before={k > 0 ? steps[k - 1].item : ref} />
                     </td>
                   </tr>
                 ))}
