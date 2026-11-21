@@ -194,6 +194,11 @@ _EXECUTION_COLUMNS: Mapping[str, str] = {
         "_IDENTITY_META compares; the column is not compared, so the sets written "
         "before it existed compare as they did"
     ),
+    "summary": (
+        "counts of the set's own rows (rows, proteins, totals per aspect, most "
+        "frequent terms), kept so its pages stop counting them on every visit. It "
+        "follows from the predictions and names nothing about how they were made"
+    ),
 }
 
 #: ``meta`` keys that are NOT method identity, each with why.

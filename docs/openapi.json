@@ -6772,7 +6772,7 @@
         ]
       },
       "get": {
-        "description": "Retrieve a prediction set with total prediction count and per-protein GO term counts.",
+        "description": "Retrieve a prediction set with its prediction and protein counts.\n\nThe counts are the set's summary, counted on its first read and kept.\n``per_protein_counts`` is ``None`` unless ``per_protein`` asks for it.",
         "operationId": "get_prediction_set_v1_embeddings_prediction_sets__set_id__get",
         "parameters": [
           {
@@ -6783,6 +6783,18 @@
               "format": "uuid",
               "title": "Set Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Also return every protein's number of terms (``per_protein_counts``).",
+            "in": "query",
+            "name": "per_protein",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also return every protein's number of terms (``per_protein_counts``).",
+              "title": "Per Protein",
+              "type": "boolean"
             }
           }
         ],

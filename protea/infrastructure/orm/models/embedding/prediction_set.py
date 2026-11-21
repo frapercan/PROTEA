@@ -112,6 +112,11 @@ class PredictionSet(Base):
         nullable=True,
     )
     producer_git_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: What the set's pages read of it, counted once because a set does not
+    #: change after it is written: ``rows``, ``proteins``, ``aspect_totals``,
+    #: ``top_terms`` and ``computed_at``. NULL until the first read or
+    #: ``summarize_prediction_sets``; the proteins are in ``prediction_set_protein``.
+    summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     embedding_config: Mapped[EmbeddingConfig | None] = relationship("EmbeddingConfig")
     method: Mapped[Method | None] = relationship("Method")

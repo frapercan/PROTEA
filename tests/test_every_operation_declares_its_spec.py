@@ -107,6 +107,7 @@ TODAY: dict[str, str] = {
     "retire_evaluation_sets": queues.JOBS,
     "supersede_evaluation_sets": queues.JOBS,
     "score_prediction_set": queues.JOBS,
+    "summarize_prediction_sets": queues.JOBS,
     "seal_evaluation_groundtruth": queues.JOBS,
     "register_ingested_method": queues.JOBS,
     "analyze_annotation_evolution": queues.JOBS,
@@ -136,6 +137,7 @@ ROUTED_BY_THE_PLAN: frozenset[str] = frozenset(
         "retire_evaluation_sets",
         "supersede_evaluation_sets",
         "score_prediction_set",
+        "summarize_prediction_sets",
         "seal_evaluation_groundtruth",
         "register_ingested_method",
         "analyze_annotation_evolution",
@@ -288,7 +290,7 @@ def _constant(module: str, name: str) -> str:
 def test_every_registered_operation_declares_a_spec() -> None:
     registry = build_operation_registry()
     assert set(registry.specs()) == set(registry._ops)
-    assert len(CATALOG) == len(registry._ops) == 68
+    assert len(CATALOG) == len(registry._ops) == 69
 
 
 def test_each_spec_routes_where_the_code_routes_today(specs: dict[str, OperationSpec]) -> None:

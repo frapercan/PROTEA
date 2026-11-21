@@ -39,6 +39,12 @@ from protea.services._embeddings_validation_helpers import (  # noqa: E402,F401
     VALID_LAYER_AGG,
     VALID_POOLING,
 )
+from protea.services._prediction_set_summary import (
+    TOP_TERMS,
+    go_term_distribution,
+    per_protein_counts,
+    summary_of,
+)
 
 
 class EmbeddingsServiceError(Exception):
@@ -278,8 +284,16 @@ def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
 def get_prediction_set_data(
     session: Session,
     prediction_set_id: uuid.UUID,
+    *,
+    per_protein: bool = False,
 ) -> dict[str, Any]:
-    """Retrieve a prediction set with total + per-protein GO term counts.
+    """Retrieve a prediction set with its counts, read from its summary.
+
+    The counts are the set's summary (``_prediction_set_summary``), counted on
+    the first read and kept: a set does not change after it is written.
+    ``per_protein_counts`` (every protein's number of terms, some 37,000 entries
+    on a window's set) is returned only when asked for; the set's page reads the
+    total and pages through the proteins instead.
 
     Raises :class:`EntityNotFoundError` when the UUID does not resolve.
     """
@@ -287,30 +301,7 @@ def get_prediction_set_data(
     if ps is None:
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
 
-    prediction_count = (
-        session.query(func.count(GOPrediction.id))
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-        .scalar()
-    )
-
-    per_protein = (
-        session.query(GOPrediction.protein_accession, func.count(GOPrediction.id))
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-        .group_by(GOPrediction.protein_accession)
-        .all()
-    )
-    # A scored set holds its pairs as arrays, one row per protein.
-    scored = (
-        session.query(
-            PredictionScore.protein_accession,
-            func.cardinality(PredictionScore.go_term_ids),
-        )
-        .filter(PredictionScore.prediction_set_id == prediction_set_id)
-        .all()
-    )
-    if scored:
-        per_protein = [*per_protein, *scored]
-        prediction_count = (prediction_count or 0) + sum(int(n) for _, n in scored)
+    summary = summary_of(session, ps.id, ps.summary)
     config_id = (ps.meta or {}).get("scoring_config_id")
 
     return {
@@ -323,8 +314,9 @@ def get_prediction_set_data(
         "limit_per_entry": ps.limit_per_entry,
         "distance_threshold": ps.distance_threshold,
         "created_at": ps.created_at.isoformat(),
-        "prediction_count": prediction_count or 0,
-        "per_protein_counts": {acc: cnt for acc, cnt in per_protein},
+        "prediction_count": summary["rows"],
+        "protein_count": summary["proteins"],
+        "per_protein_counts": per_protein_counts(session, ps.id) if per_protein else None,
         # A scored set names the candidate set it scored and the configuration
         # it read; both None on a candidate set.
         "scored_from": (ps.meta or {}).get("scored_from"),
@@ -466,8 +458,11 @@ def get_go_term_distribution_data(
     not resolve. Body lives in
     :func:`_embeddings_admin_helpers.compute_go_term_distribution`.
     """
-    if session.get(PredictionSet, prediction_set_id) is None:
+    ps = session.get(PredictionSet, prediction_set_id)
+    if ps is None:
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
+    if limit <= TOP_TERMS:
+        return go_term_distribution(summary_of(session, ps.id, ps.summary), limit)
     return compute_go_term_distribution(
         session,
         prediction_set_id=prediction_set_id,
