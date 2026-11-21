@@ -5,12 +5,14 @@
 // One summary (GET /annotations/evaluation-sets/{id}/summary) feeds five views:
 // the cells of every arm against a reference, the depth of the neighbours read,
 // the trajectory of the best result, the strata by identity and length, and the
-// detail table. The state lives in the address (``usePanelState``), so a view
+// detail table. The window's paired comparisons (GET .../paired-comparisons) say
+// whether each new best in the trajectory settled its step. The state lives in the address (``usePanelState``), so a view
 // is shared by its link and the back button undoes the last navigation.
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { baseUrl } from "@/lib/api";
+import type { PairedComparison } from "@/lib/pairedComparison";
 import { listOf, toggled, toggledFocus, usePanelState, type PanelPatch, type PanelState } from "@/lib/panelState";
 import {
   DEPTHS,
@@ -42,6 +44,8 @@ export type PanelView = {
   focusColour: (r: SummaryResult) => string | null;
   toggleFocus: (r: SummaryResult) => void;
   open: (r: SummaryResult, cell: string) => void;
+  /** The window's paired comparisons: null while they are read, ``"failed"`` if they could not be. */
+  comparisons: PairedComparison[] | null | "failed";
   locale: string;
 };
 
@@ -64,6 +68,7 @@ export default function WindowPanel({ evaluationSetId }: { evaluationSetId: stri
   const locale = useLocale();
   const [state, commit] = usePanelState();
   const [summary, setSummary] = useState<WindowSummary | null>(null);
+  const [comparisons, setComparisons] = useState<PairedComparison[] | null | "failed">(null);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -76,6 +81,13 @@ export default function WindowPanel({ evaluationSetId }: { evaluationSetId: stri
       })
       .then((s) => !cancelled && setSummary(s))
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)));
+    fetch(`${baseUrl()}/annotations/evaluation-sets/${evaluationSetId}/paired-comparisons`, { cache: "no-store" })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<PairedComparison[]>;
+      })
+      .then((c) => !cancelled && setComparisons(c))
+      .catch(() => !cancelled && setComparisons("failed"));
     return () => {
       cancelled = true;
     };
@@ -120,9 +132,10 @@ export default function WindowPanel({ evaluationSetId }: { evaluationSetId: stri
       focusColour,
       toggleFocus,
       open,
+      comparisons,
       locale,
     };
-  }, [summary, state, commit, locale]);
+  }, [summary, comparisons, state, commit, locale]);
 
   if (error) {
     return <p className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{t("error", { message: error })}</p>;

@@ -2552,8 +2552,14 @@
       "before": "Antes",
       "now": "Agora",
       "overReference": "sobre a referência",
-      "paired": "Comparação emparelhada",
-      "pending": "pendente"
+      "paired": "Comparação emparelhada (este menos o anterior)",
+      "notCompared": "ainda não comparado",
+      "loadingPaired": "a ler as comparações...",
+      "pairedUnavailable": "não foi possível ler as comparações",
+      "bandNotCompared": "comparado só na célula inteira; por banda, ainda não",
+      "settledHigher": "maior, resolvido",
+      "settledLower": "menor, resolvido",
+      "unsettled": "não resolvido"
     },
     "strata": {
       "question": "Onde ganha cada braço?",

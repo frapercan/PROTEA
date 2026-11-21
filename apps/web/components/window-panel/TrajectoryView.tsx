@@ -3,11 +3,43 @@
 // When the best result improved, on the whole cell or on one band of identity.
 
 import { useTranslations } from "next-intl";
-import { BAND_KEY, HOMOLOGY_BANDS, MIN_PROTEINS, armLabel, bandOf, cellF, championSteps, type SummaryResult } from "@/lib/windowPanel";
+import { deltaText, panelNote, verdictTone } from "@/lib/pairedComparison";
+import { BAND_KEY, HOMOLOGY_BANDS, MIN_PROTEINS, armLabel, bandOf, cellF, championSteps, stepComparison, type SummaryResult } from "@/lib/windowPanel";
 import { Figure, INK, Legend, SERIES, extent, fmt, pressable, signed, ticks, useTooltip } from "./chart";
 import type { PanelView } from "./WindowPanel";
 
 type Value = (r: SummaryResult) => number | null;
+
+const TONE = { higher: "text-emerald-700", lower: "text-rose-700", unresolved: "text-slate-500" } as const;
+
+/** Whether a step's pair was compared, and how it came out on the cell. */
+function PairedCell({
+  view,
+  item,
+  before,
+  band,
+}: {
+  view: PanelView;
+  item: SummaryResult;
+  before: SummaryResult | undefined;
+  band: boolean;
+}) {
+  const t = useTranslations("windowPanel");
+  const quiet = (text: string) => <span className="text-slate-500">{text}</span>;
+  if (!before) return quiet("—");
+  if (band) return quiet(t("trajectory.bandNotCompared"));
+  if (view.comparisons === "failed") return quiet(t("trajectory.pairedUnavailable"));
+  if (view.comparisons == null) return quiet(t("trajectory.loadingPaired"));
+  const found = stepComparison(view.comparisons, item.id, before.id, view.state.cell);
+  if (!found) return quiet(t("trajectory.notCompared"));
+  const tone = verdictTone(found.panel);
+  const word = tone === "higher" ? t("trajectory.settledHigher") : tone === "lower" ? t("trajectory.settledLower") : t("trajectory.unsettled");
+  return (
+    <span className={`tabular-nums ${TONE[tone]}`} title={panelNote(found.panel, found.comparison)}>
+      {deltaText(found.panel)} · {word}
+    </span>
+  );
+}
 
 function Trajectory({
   view,
@@ -165,13 +197,15 @@ export default function TrajectoryView({ view }: { view: PanelView }) {
                 </tr>
               </thead>
               <tbody>
-                {steps.map((s) => (
+                {steps.map((s, k) => (
                   <tr key={s.item.id} className="cursor-pointer border-t hover:bg-blue-50" onClick={() => view.toggleFocus(s.item)}>
                     <td className="px-3 py-1.5">{armLabel(s.item)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmt(s.before)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmt(s.now)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{signed(s.now - (refValue ?? 0))}</td>
-                    <td className="px-3 py-1.5 text-xs text-slate-500">{t("trajectory.pending")}</td>
+                    <td className="px-3 py-1.5 text-xs">
+                      <PairedCell view={view} item={s.item} before={k > 0 ? steps[k - 1].item : ref} band={measure !== "all"} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

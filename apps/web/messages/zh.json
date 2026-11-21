@@ -2552,8 +2552,14 @@
       "before": "之前",
       "now": "现在",
       "overReference": "高于参照",
-      "paired": "配对比较",
-      "pending": "待定"
+      "paired": "配对比较（此项减去前一项）",
+      "notCompared": "尚未比较",
+      "loadingPaired": "正在读取比较...",
+      "pairedUnavailable": "无法读取比较",
+      "bandNotCompared": "仅在整个单元格上比较；按区间尚未比较",
+      "settledHigher": "更高，已确定",
+      "settledLower": "更低，已确定",
+      "unsettled": "未确定"
     },
     "strata": {
       "question": "每个分支在哪里胜出？",

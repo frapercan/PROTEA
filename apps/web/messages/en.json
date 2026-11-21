@@ -2551,8 +2551,14 @@
       "before": "Before",
       "now": "Now",
       "overReference": "over the reference",
-      "paired": "Paired comparison",
-      "pending": "pending"
+      "paired": "Paired comparison (this minus the one before)",
+      "notCompared": "not compared yet",
+      "loadingPaired": "reading the comparisons...",
+      "pairedUnavailable": "the comparisons could not be read",
+      "bandNotCompared": "compared on the whole cell only; per band, not yet",
+      "settledHigher": "higher, settled",
+      "settledLower": "lower, settled",
+      "unsettled": "not settled"
     },
     "strata": {
       "question": "Where does each arm win?",
