@@ -421,7 +421,9 @@ Evaluation
    itself. Beside the categories, ``results`` holds ``artifacts`` (the keys of
    the files the run stored) and, since 2026-11-20, ``terms_of_interest``: the
    rule the window named, the number of terms and the sha256 of the file
-   cafaeval read. The frame seal reads that rule.
+   cafaeval read. Since 2026-11-21 it also holds ``population``: the rule
+   (``all_targets``) and how many targets each category held. The frame seal
+   reads both rules.
 
 Support
 -------

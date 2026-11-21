@@ -316,6 +316,7 @@ class TestRunCafaEvaluationPayload:
             "softprop",
             "toi_file",
             "toi_rule",
+            "restrict_gt_to_predicted",
         }
         assert all(RETIRED_FIELDS.values())
 
@@ -1331,6 +1332,53 @@ class TestExecuteHappyPath:
 
         assert call_order[0] == "commit"
         assert "cafa_eval" in call_order
+
+    @patch("protea.core.operations.run_cafa_evaluation.get_artifact_store")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_the_whole_window_is_scored_and_the_result_says_so(self, mock_compute, mock_get_store):
+        """Every target reaches cafaeval, predicted or not, and the result records the rule."""
+        data = _make_eval_data(pk={"P3": {"GO:0000003"}})
+        mock_compute.return_value = (data, uuid.uuid4())
+        mock_get_store.return_value = MagicMock()
+
+        session = MagicMock()
+        session.get.side_effect = _gets(
+            eval_set=_make_eval_set(), pred_set=_make_pred_set(), snapshot=_make_snapshot()
+        )
+        query = MagicMock()
+        session.query.return_value = query
+        query.join.return_value = query
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.yield_per.return_value = []
+
+        from protea.core.operations import _run_cafa_data_helpers as data_helpers
+
+        written = []
+        real_writer = data_helpers.write_ground_truth_files
+
+        def _capture(root, data):
+            written.append(data)
+            return real_writer(root, data)
+
+        with (
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
+            patch("cafaeval.evaluation.cafa_eval", return_value=(None, _dfs_best_fixture())),
+            patch.object(data_helpers, "write_ground_truth_files", side_effect=_capture),
+        ):
+            result = self.op.execute(
+                session,
+                {"evaluation_set_id": EVAL_SET_ID, "prediction_set_id": PRED_SET_ID},
+                emit=self.emit,
+            )
+
+        # The mocked set predicts nothing, and no target is dropped for it.
+        assert written == [data]
+        results = result.result["results"]
+        assert results["population"] == {
+            "rule": "all_targets",
+            "targets": {"NK": 1, "LK": 1, "PK": 1},
+        }
 
     @patch("protea.core.operations.run_cafa_evaluation.get_artifact_store")
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")

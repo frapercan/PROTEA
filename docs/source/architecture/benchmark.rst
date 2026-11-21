@@ -82,10 +82,13 @@ the depth; the scored set is what is evaluated.
 PROTEA's evaluator, ``cafaeval-protea``, runs ``cafaeval`` with LAFA's flags
 (``-prop fill -norm cafa -no_orphans``, a threshold step of 0.01, and
 ``-known`` with PK's known terms for PK), at the window's pivot, which for this
-frame is the start's ontology. Two settings are the benchmark's and have to be
-named. The terms of interest are not one of them: they are the window's, the
-terms live in both ontologies that its truth was trimmed to, and the evaluator
-takes them from it (:doc:`lafa-frame`).
+frame is the start's ontology. One setting is the benchmark's and has to be
+named: the information accretion table, the one over the window's start with
+the regime ``lafa`` and the cohort ``swissprot``. The terms of interest and the
+population are not settings: they are the window's, and the evaluator takes
+them from it (:doc:`lafa-frame`). The terms are those live in both ontologies,
+which the window's truth was trimmed to; the population is every target, an
+unpredicted one counted as a failure, as LAFA scores.
 
 .. code-block:: json
 
@@ -95,16 +98,9 @@ takes them from it (:doc:`lafa-frame`).
      "payload": {
        "evaluation_set_id": "<the window>",
        "prediction_set_id": "<the method's predictions>",
-       "information_accretion_set_id": "<the table over the window's start>",
-       "restrict_gt_to_predicted": false
+       "information_accretion_set_id": "<the table over the window's start>"
      }
    }
-
-- ``information_accretion_set_id``: the table above, the one over the
-  window's start with the regime ``lafa`` and the cohort ``swissprot``.
-- ``restrict_gt_to_predicted``: ``false``. LAFA scores every target, whether
-  the method predicted it or not; the evaluator's default drops the targets a
-  method left out, which measures a different quantity.
 
 What it replaces
 ----------------
