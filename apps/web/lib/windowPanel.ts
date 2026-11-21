@@ -92,6 +92,21 @@ export function modelName(model: string | null): string {
   return name;
 }
 
+/**
+ * A method as people name it. The short name is an identifier (code, variant,
+ * cut: ``own-annotations-nonexp-lafa-211``); the panel shows what it is: "own
+ * annotations", "count map: themes". The cut is the window's start and the
+ * frame is the window's, so neither says anything a row of one window needs.
+ */
+export function methodName(method: string | null): string {
+  if (!method) return "";
+  const bare = method.replace(/-\d+$/, "").replace(/-lafa$/, "");
+  if (bare.startsWith("own-annotations")) return "own annotations";
+  const map = /^count-map-(themes|families)(?:-(permissive|strict))?-/.exec(bare);
+  if (map) return `count map: ${map[1]}${map[2] ? ` (${map[2]})` : ""}`;
+  return bare;
+}
+
 export const SCORING_SHORT: Record<string, string> = {
   embedding_only: "emb",
   vote_fraction: "vote",
@@ -105,7 +120,7 @@ export function isNeighbour(r: SummaryResult): boolean {
 
 /** The arm in full: "ESM-2 650M · embedding_only · k=1", or the method's name. */
 export function armLabel(r: SummaryResult): string {
-  if (!isNeighbour(r)) return r.arm.method ?? r.prediction_set_id.slice(0, 8);
+  if (!isNeighbour(r)) return methodName(r.arm.method) || r.prediction_set_id.slice(0, 8);
   const parts = [modelName(r.arm.model), r.arm.scoring ?? "candidates"];
   if (r.arm.depth != null) parts.push(`k=${r.arm.depth}`);
   return parts.join(" · ");
@@ -113,7 +128,7 @@ export function armLabel(r: SummaryResult): string {
 
 /** The arm in a few characters, for rows and cells: "650M emb k=1". */
 export function armShort(r: SummaryResult): string {
-  if (!isNeighbour(r)) return r.arm.method ?? r.prediction_set_id.slice(0, 8);
+  if (!isNeighbour(r)) return methodName(r.arm.method) || r.prediction_set_id.slice(0, 8);
   const model = modelName(r.arm.model).replace(/^ESM-2 /, "");
   const scoring = r.arm.scoring ? (SCORING_SHORT[r.arm.scoring] ?? r.arm.scoring) : "cand";
   return `${model} ${scoring}${r.arm.depth != null ? ` k=${r.arm.depth}` : ""}`;

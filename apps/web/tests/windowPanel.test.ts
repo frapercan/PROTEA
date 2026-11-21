@@ -58,7 +58,13 @@ describe("the names people read", () => {
   it("labels a neighbour arm by its factors and a method by its name", () => {
     expect(armLabel(result("a", { depth: 1 }))).toBe("ESM-2 650M · embedding_only · k=1");
     expect(armShort(result("a", { depth: 1, scoring: "vote_fraction" }))).toBe("650M vote k=1");
-    expect(armLabel(own)).toBe("own-annotations-nonexp-lafa-211");
+    expect(armLabel(own)).toBe("own annotations");
+    expect(armShort(result("m", { model: null, scoring: null, depth: null, method: "count-map-families-strict-lexico-93k-lafa-211" }))).toBe(
+      "count map: families (strict)",
+    );
+    expect(armLabel(result("t", { model: null, scoring: null, depth: null, method: "count-map-themes-lexico-93k-211" }))).toBe(
+      "count map: themes",
+    );
   });
 });
 

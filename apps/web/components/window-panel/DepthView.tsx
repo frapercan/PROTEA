@@ -74,7 +74,7 @@ function DepthChart({
   tip: ReturnType<typeof useTooltip>;
 }) {
   const ref = view.reference;
-  const m = { l: 42, r: 10, t: compact ? 20 : 12, b: 26 };
+  const m = { l: 42, r: compact ? 12 : 24, t: compact ? 20 : 12, b: 26 };
   const values = series.flatMap((s) => s.points.map((p) => cellF(p, cell) ?? 0));
   const refValue = cellF(ref, cell);
   const [lo, hi] = extent(refValue != null ? [...values, refValue] : values, 0.02, 0.01);
@@ -261,7 +261,7 @@ export default function DepthView({ view }: { view: PanelView }) {
               return (
                 <g key={a.id}>
                   <text x={0} y={y + 4} fontSize={12} fill="#0c0a09">
-                    {isNeighbour(a) ? `${modelName(a.arm.model)} · ${SCORING_SHORT[a.arm.scoring ?? ""] ?? a.arm.scoring}` : (a.arm.method ?? "")}
+                    {isNeighbour(a) ? `${modelName(a.arm.model)} · ${SCORING_SHORT[a.arm.scoring ?? ""] ?? a.arm.scoring}` : armLabel(a)}
                   </text>
                   <line x1={X(raw)} x2={X(pct)} y1={y} y2={y} stroke={colour} strokeWidth={2} />
                   <circle cx={X(raw)} cy={y} r={5} fill={INK.surface} stroke={cellEdge(a, state.cell) ? INK.edge : colour} strokeWidth={2} />
