@@ -2451,6 +2451,13 @@
     }
   },
   "windowPanel": {
+    "leakNote": "{count, plural, one {# brazo de los mostrados no puede} other {# brazos de los mostrados no pueden}} leerse en esta ventana: {count, plural, one {se ajustó} other {se ajustaron}} después de su t0 ({t0}) o sin corte registrado, así que sus cifras pueden medir la memoria de la respuesta. La pestaña de detalle {count, plural, one {lo marca} other {los marca}}.",
+    "leak": {
+      "not_fitted": "sí, preentrenado",
+      "clean": "sí, corte {cut}",
+      "contaminated": "no: corte {cut}, posterior a t0",
+      "undeclared": "no se sabe: sin corte registrado"
+    },
     "title": "Panel de la ventana",
     "loading": "Leyendo los resultados de la ventana…",
     "error": "No se pudo leer el resumen de la ventana ({message}).",
@@ -2605,6 +2612,7 @@
       "vsReference": "frente a ref.",
       "edge": "Borde",
       "edgeShort": "borde",
+      "leak": "Puede leerse",
       "cells": "9 celdas",
       "time": "Hora",
       "set": "Conjunto",

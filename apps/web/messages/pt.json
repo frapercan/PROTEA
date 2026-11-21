@@ -2452,6 +2452,13 @@
     }
   },
   "windowPanel": {
+    "leakNote": "{count, plural, one {# braço mostrado não pode} other {# braços mostrados não podem}} ser lidos nesta janela: ajustados depois do seu t0 ({t0}) ou sem corte registado, pelo que os seus números podem medir a memória da resposta. O separador de detalhe {count, plural, one {marca-o} other {marca-os}}.",
+    "leak": {
+      "not_fitted": "sim, pré-treinado",
+      "clean": "sim, corte {cut}",
+      "contaminated": "não: corte {cut}, posterior a t0",
+      "undeclared": "desconhecido: sem corte registado"
+    },
     "title": "Painel da janela",
     "loading": "A ler os resultados da janela…",
     "error": "Não foi possível ler o resumo da janela ({message}).",
@@ -2606,6 +2613,7 @@
       "vsReference": "face à ref.",
       "edge": "Borda",
       "edgeShort": "borda",
+      "leak": "Pode ser lido",
       "cells": "9 células",
       "time": "Hora",
       "set": "Conjunto",

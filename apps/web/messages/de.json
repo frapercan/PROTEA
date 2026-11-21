@@ -2452,6 +2452,13 @@
     }
   },
   "windowPanel": {
+    "leakNote": "{count, plural, one {# gezeigter Arm darf} other {# gezeigte Arme dürfen}} in diesem Fenster nicht gelesen werden: nach seinem t0 ({t0}) oder ohne erfassten Schnitt angepasst, sodass die Zahlen das Gedächtnis der Antwort messen können. Der Detail-Reiter markiert {count, plural, one {ihn} other {sie}}.",
+    "leak": {
+      "not_fitted": "ja, vortrainiert",
+      "clean": "ja, Schnitt {cut}",
+      "contaminated": "nein: Schnitt {cut}, nach t0",
+      "undeclared": "unbekannt: kein Schnitt erfasst"
+    },
     "title": "Fensterpanel",
     "loading": "Die Ergebnisse des Fensters werden gelesen…",
     "error": "Die Zusammenfassung des Fensters konnte nicht gelesen werden ({message}).",
@@ -2606,6 +2613,7 @@
       "vsReference": "ggü. Ref.",
       "edge": "Rand",
       "edgeShort": "Rand",
+      "leak": "Lesbar",
       "cells": "9 Zellen",
       "time": "Zeit",
       "set": "Menge",

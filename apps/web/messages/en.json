@@ -2451,6 +2451,13 @@
     }
   },
   "windowPanel": {
+    "leakNote": "{count, plural, one {# arm on show} other {# arms on show}} may not be read on this window: fitted after its t0 ({t0}) or without a recorded cut, so {count, plural, one {its numbers} other {their numbers}} may measure memory of the answer. The detail tab marks {count, plural, one {it} other {them}}.",
+    "leak": {
+      "not_fitted": "yes, pretrained",
+      "clean": "yes, cut {cut}",
+      "contaminated": "no: cut {cut}, after t0",
+      "undeclared": "unknown: no cut recorded"
+    },
     "title": "Window panel",
     "loading": "Reading the window's results…",
     "error": "The window's summary could not be read ({message}).",
@@ -2605,6 +2612,7 @@
       "vsReference": "vs ref.",
       "edge": "Edge",
       "edgeShort": "edge",
+      "leak": "May be read",
       "cells": "9 cells",
       "time": "Time",
       "set": "Set",

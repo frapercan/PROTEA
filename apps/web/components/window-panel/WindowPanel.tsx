@@ -23,6 +23,7 @@ import {
   SETTINGS,
   armLabel,
   modelsOf,
+  mayNotBeRead,
   referenceOf,
   visibleResults,
   type SummaryResult,
@@ -189,8 +190,15 @@ export default function WindowPanel({ evaluationSetId }: { evaluationSetId: stri
     );
   };
 
+  const unreadable = view.shown.filter(mayNotBeRead).length;
+
   return (
     <section className="mb-6 grid min-w-0 gap-3" aria-label={t("title")}>
+      {unreadable ? (
+        <p role="note" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
+          {t("leakNote", { count: unreadable, t0: summary.window_releases?.[0] ?? "t0" })}
+        </p>
+      ) : null}
       <div className="sticky top-0 z-10 grid gap-2 border-b bg-stone-50/95 py-2.5 backdrop-blur">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           <div className="flex items-center gap-2">
