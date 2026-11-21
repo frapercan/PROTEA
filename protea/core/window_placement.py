@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -164,6 +164,52 @@ def place(
     return placed
 
 
+class TargetPlacement(NamedTuple):
+    """What a reader of the strata takes from a target's placement."""
+
+    residues: int
+    #: A percentage, or ``None`` when no truth member is close enough to be hit.
+    identity: float | None
+
+
+class WindowNotPlacedError(LookupError):
+    """A window whose targets have not been placed yet."""
+
+
+#: The placement of one window, by target accession. One indexed join: the
+#: declaration by its unique window, its rows by their primary key.
+_PLACEMENT_OF_WINDOW = """
+SELECT t.accession, t.residues, t.closest_identity
+FROM window_placement p
+JOIN window_placement_target t ON t.placement_id = p.id
+WHERE p.evaluation_set_id = CAST(:window AS uuid)
+"""
+
+
+def placement_of_window(session: Any, evaluation_set_id: str) -> dict[str, TargetPlacement]:
+    """The window's placement by target accession, refusing a window with none.
+
+    Every reader of the length and homology axes comes through here, so two
+    readers of one window cannot place a protein in two bands.
+    """
+    from sqlalchemy import text
+
+    rows = session.execute(text(_PLACEMENT_OF_WINDOW), {"window": str(evaluation_set_id)})
+    placement = {
+        str(accession): TargetPlacement(
+            int(residues), None if identity is None else float(identity)
+        )
+        for accession, residues, identity in rows
+    }
+    if not placement:
+        raise WindowNotPlacedError(
+            f"window {evaluation_set_id} has no placement, so its targets have no length "
+            "or homology band. Run place_window_targets on it: the bands are read once per "
+            "window and are the same for every method evaluated on it."
+        )
+    return placement
+
+
 def needs_a_hit(
     targets: Mapping[str, str], truth_accessions: Mapping[str, frozenset[str]]
 ) -> set[str]:
@@ -180,8 +226,11 @@ __all__ = [
     "RULE",
     "Hit",
     "Placement",
+    "TargetPlacement",
+    "WindowNotPlacedError",
     "best_truth_hits",
     "identity_percent",
     "needs_a_hit",
     "place",
+    "placement_of_window",
 ]

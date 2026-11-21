@@ -86,7 +86,8 @@ class TestProjection:
             category=Category.NO_KNOWLEDGE,
             aspect=Aspect.MOLECULAR_FUNCTION,
             residues=300,
-            neighbourhood=Neighbourhood(
+            identity=45.0,
+            retrieval=Neighbourhood(
                 best_identity=45.0, donor_is_experimental=True, taxonomic_relation="close"
             ),
         )
@@ -111,8 +112,16 @@ class TestTheVocabularyCoversWhatThePipelineEmits:
     """
 
     EMITTED = (
-        "same", "close", "intermediate", "distant", "root-only",
-        "ancestor", "descendant", "child", "parent", "unrelated",
+        "same",
+        "close",
+        "intermediate",
+        "distant",
+        "root-only",
+        "ancestor",
+        "descendant",
+        "child",
+        "parent",
+        "unrelated",
     )
 
     @pytest.mark.parametrize("relation", EMITTED)
@@ -141,7 +150,8 @@ class TestTheStratumRefusesContradictions:
                 category=Category.NO_KNOWLEDGE,
                 aspect=Aspect.MOLECULAR_FUNCTION,
                 residues=100,
-                neighbourhood=Neighbourhood(best_identity=None, donor_is_experimental=True),
+                identity=None,
+                retrieval=Neighbourhood(best_identity=None, donor_is_experimental=True),
             )
 
     def test_no_donor_places_the_protein_in_the_none_bands(self) -> None:
@@ -149,7 +159,8 @@ class TestTheStratumRefusesContradictions:
             category=Category.NO_KNOWLEDGE,
             aspect=Aspect.MOLECULAR_FUNCTION,
             residues=100,
-            neighbourhood=Neighbourhood(best_identity=None, donor_is_experimental=None),
+            identity=None,
+            retrieval=Neighbourhood(best_identity=None, donor_is_experimental=None),
         )
         assert s.homology is HomologyBand.NONE
         assert s.donor_evidence is DonorEvidence.NONE
@@ -162,22 +173,37 @@ class TestIdentityIsAPercentage:
     population under the lowest band, so the mistake is silent."""
 
     def test_a_fraction_would_land_everything_in_twilight(self) -> None:
-        assert HomologyBand.TWILIGHT is stratum_for(
-            category=Category.NO_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION, residues=100,
-            neighbourhood=Neighbourhood(best_identity=0.95, donor_is_experimental=True),
-        ).homology
+        assert (
+            HomologyBand.TWILIGHT
+            is stratum_for(
+                category=Category.NO_KNOWLEDGE,
+                aspect=Aspect.MOLECULAR_FUNCTION,
+                residues=100,
+                identity=0.95,
+                retrieval=Neighbourhood(best_identity=0.95, donor_is_experimental=True),
+            ).homology
+        )
 
     def test_the_percentage_lands_where_it_should(self) -> None:
-        assert HomologyBand.NEAR_IDENTICAL is stratum_for(
-            category=Category.NO_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION, residues=100,
-            neighbourhood=Neighbourhood(best_identity=95.0, donor_is_experimental=True),
-        ).homology
+        assert (
+            HomologyBand.NEAR_IDENTICAL
+            is stratum_for(
+                category=Category.NO_KNOWLEDGE,
+                aspect=Aspect.MOLECULAR_FUNCTION,
+                residues=100,
+                identity=95.0,
+                retrieval=Neighbourhood(best_identity=95.0, donor_is_experimental=True),
+            ).homology
+        )
 
     def test_out_of_range_is_refused(self) -> None:
         with pytest.raises(ValueError, match="not a percentage"):
             stratum_for(
-                category=Category.NO_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION, residues=100,
-                neighbourhood=Neighbourhood(best_identity=140.0, donor_is_experimental=True),
+                category=Category.NO_KNOWLEDGE,
+                aspect=Aspect.MOLECULAR_FUNCTION,
+                residues=100,
+                identity=140.0,
+                retrieval=Neighbourhood(best_identity=140.0, donor_is_experimental=True),
             )
 
 
@@ -216,28 +242,48 @@ class TestOneDonorDefinesTheStratum:
 
 
 class _FakeResult:
-    def __init__(self, rows): self._rows = rows
-    def mappings(self): return self._rows
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self._rows
 
 
 class _FakeSession:
-    def __init__(self, rows): self._rows = rows
-    def execute(self, *_a, **_k): return _FakeResult(self._rows)
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, *_a, **_k):
+        return _FakeResult(self._rows)
 
 
 class TestTheRowsBecomeNeighbourhoods:
     def test_an_experimental_donor_is_marked_experimental(self) -> None:
-        rows = [{"acc": "Q1", "best_identity": 72.5, "evidence_code": "IDA",
-                 "taxonomic_relation": "close", "nearest_any": 0.1,
-                 "nearest_experimental": 0.1}]
+        rows = [
+            {
+                "acc": "Q1",
+                "best_identity": 72.5,
+                "evidence_code": "IDA",
+                "taxonomic_relation": "close",
+                "nearest_any": 0.1,
+                "nearest_experimental": 0.1,
+            }
+        ]
         n = neighbourhoods_for(_FakeSession(rows), "pset")["Q1"]
         assert n.donor_is_experimental is True
         assert n.best_identity == pytest.approx(72.5)
 
     def test_a_computational_donor_is_not(self) -> None:
-        rows = [{"acc": "Q1", "best_identity": 72.5, "evidence_code": "IEA",
-                 "taxonomic_relation": "close", "nearest_any": 0.1,
-                 "nearest_experimental": None}]
+        rows = [
+            {
+                "acc": "Q1",
+                "best_identity": 72.5,
+                "evidence_code": "IEA",
+                "taxonomic_relation": "close",
+                "nearest_any": 0.1,
+                "nearest_experimental": None,
+            }
+        ]
         n = neighbourhoods_for(_FakeSession(rows), "pset")["Q1"]
         assert n.donor_is_experimental is False
         assert n.nearest_experimental is None
@@ -254,9 +300,16 @@ class TestTheRowsBecomeNeighbourhoods:
         aligned" is a third state, and folding it into either of the other two
         would move a published cell.
         """
-        rows = [{"acc": "Q1", "best_identity": None, "evidence_code": "IEA",
-                 "taxonomic_relation": "close", "nearest_any": 0.2,
-                 "nearest_experimental": None}]
+        rows = [
+            {
+                "acc": "Q1",
+                "best_identity": None,
+                "evidence_code": "IEA",
+                "taxonomic_relation": "close",
+                "nearest_any": 0.2,
+                "nearest_experimental": None,
+            }
+        ]
         assert neighbourhoods_for(_FakeSession(rows), "pset") == {}
 
     def test_a_query_with_no_non_self_donor_is_absent_not_defaulted(self) -> None:

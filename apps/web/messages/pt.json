@@ -329,7 +329,7 @@
     "tau": "tau",
     "tauHint": "O limiar de decisão que a execução reportou para este aspeto. Todas as pontuações da tabela são tiradas nele.",
     "unplacedWhy": "{count} do painel nao levam banda: {noLength} nao tem comprimento registado e {offScale} levam uma identidade que nao e uma percentagem. Ficam na tabela com as bandas vazias em vez de serem removidas, porque fazem parte da populacao que o painel conta.",
-    "withoutDonorWhy": "{count} do painel levam a sua banda de comprimento mas nao tem nenhum dador alinhado, por isso os quatro eixos do dador ficam sem ler. Estao contadas entre as colocadas: nao recuperar um dador custa esses quatro eixos e nenhum mais.",
+    "withoutDonorWhy": "{count} do painel levam as suas bandas de comprimento e homologia mas nao tem nenhum dador alinhado, por isso os tres eixos do dador ficam sem ler. Estao contadas entre as colocadas: nao recuperar um dador custa esses tres eixos e nenhum mais.",
     "sortLabel": "ordem",
     "sort": {
       "f_asc": "piores primeiro",
