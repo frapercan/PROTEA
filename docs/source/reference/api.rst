@@ -721,6 +721,10 @@ Endpoints summary
    * - ``GET``
      - ``/annotations/evaluation-sets/{id}/results/{rid}/artifacts.zip``
      - Download all cafaeval artifacts as a zip.
+   * - ``GET``
+     - ``/annotations/evaluation-sets/{id}/results/{rid}/artifacts/{path}``
+     - Download one file the result recorded, with the sha256 it recorded for it in
+       ``X-Recorded-SHA256``.
    * - ``DELETE``
      - ``/annotations/evaluation-sets/{id}/results/{rid}``
      - Delete an evaluation result.

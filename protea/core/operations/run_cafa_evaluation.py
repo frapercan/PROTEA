@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from protea.core._artifact_identity import sha256_of_file
 from protea.core._evaluation_leakage import refuse_uncertifiable_encoding
 from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.evaluation import load_evaluation_data_for_set
@@ -39,6 +40,7 @@ from protea.core.operations._run_cafa_helpers import (  # noqa: F401
     ResultRow,
     _patch_query_known_features,
     _record_from_pred,
+    artifacts_record,
     build_result_row,
     eval_artifact_key,
 )
@@ -315,10 +317,10 @@ class RunCafaEvaluationOperation:
             # update job.status after execute().
             session.commit()
             results = evaluate_all_settings(ctx=run_data, emit=emit)
-            uploaded_keys = self._upload_artifacts(
+            uploaded = self._upload_artifacts(
                 ctx.artifact_store, ctx.result_id, artifacts_root, emit
             )
-            results["artifacts"] = {"keys": uploaded_keys}
+            results["artifacts"] = artifacts_record(uploaded)
             results["terms_of_interest"] = terms_of_interest_record(
                 ctx.inputs.toi_rule, ctx.inputs.toi_go_ids, run_data.toi_path
             )
@@ -436,24 +438,27 @@ class RunCafaEvaluationOperation:
         result_id: uuid.UUID,
         artifacts_root: Path,
         emit: EmitFn,
-    ) -> list[str]:
-        """Walk ``artifacts_root``, upload every file under the
-        ``eval_artifacts/{result_id}/`` prefix, return the list of keys."""
-        uploaded_keys: list[str] = []
+    ) -> dict[str, str]:
+        """Upload every file under ``artifacts_root`` to the result's prefix.
+
+        Returns each key with the sha256 of the file uploaded under it, read
+        from the file before the upload, so the record names the bytes written.
+        """
+        uploaded: dict[str, str] = {}
         for path in sorted(artifacts_root.rglob("*")):
             if not path.is_file():
                 continue
             relpath = path.relative_to(artifacts_root).as_posix()
             key = eval_artifact_key(result_id, relpath)
+            uploaded[key] = sha256_of_file(path)
             artifact_store.put(key, path)
-            uploaded_keys.append(key)
         emit(
             "run_cafa_evaluation.artifacts_uploaded",
             None,
-            {"count": len(uploaded_keys), "prefix": f"eval_artifacts/{result_id}/"},
+            {"count": len(uploaded), "prefix": f"eval_artifacts/{result_id}/"},
             "info",
         )
-        return uploaded_keys
+        return uploaded
 
     # Backwards-compat shims: tests patch and call these names. The bodies
     # live in ``_run_cafa_artifacts``; these instance methods delegate so

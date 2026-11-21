@@ -290,6 +290,7 @@ from protea.services._annotations_evaluation_helpers import (  # noqa: E402,F401
     delete_evaluation_set_collect_keys,
     evaluation_result_to_dict,
     evaluation_set_to_dict,
+    get_eval_result_artifact,
     get_eval_result_with_keys,
     get_evaluation_set_data,
     list_evaluation_results_data,
@@ -307,6 +308,7 @@ from protea.services._annotations_method_helpers import (  # noqa: E402,F401
 # iter_evaluation_artifacts_zip + render_evaluation_metrics_tsv live in
 # _annotations_streaming_helpers (no domain-exception coupling).
 from protea.services._annotations_streaming_helpers import (  # noqa: E402,F401
+    iter_evaluation_artifact,
     iter_evaluation_artifacts_zip,
     render_evaluation_metrics_tsv,
 )
@@ -324,9 +326,12 @@ __all__ = [
     "get_snapshot_data",
     "delete_eval_result_collect_keys",
     "evaluation_result_to_dict",
+    "get_eval_result_artifact",
     "get_eval_result_with_keys",
     "get_go_subgraph_data",
     "iter_delta_proteins_fasta",
+    "iter_evaluation_artifact",
+    "iter_evaluation_artifacts_zip",
     "iter_groundtruth_tsv",
     "list_evaluation_results_data",
     "render_evaluation_metrics_tsv",

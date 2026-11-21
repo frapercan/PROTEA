@@ -129,6 +129,33 @@ def get_eval_result_with_keys(
     return result, keys
 
 
+def get_eval_result_artifact(
+    session: Session,
+    eval_id: uuid.UUID,
+    result_id: uuid.UUID,
+    relpath: str,
+) -> tuple[str, str | None]:
+    """The store key of one file a result recorded, and the sha256 it recorded.
+
+    ``relpath`` is the file's path under the result, as the evaluator wrote it
+    (``PK/evaluation_best_f_micro_w.tsv``). Only a recorded file resolves, so no
+    path a caller types can reach another key of the store. The digest is
+    ``None`` for a result written before results recorded digests (2026-11-21).
+
+    Raises :class:`EntityNotFoundError` when the result does not belong to
+    ``eval_id`` or recorded no file at ``relpath``.
+    """
+    from protea.core.operations._run_cafa_helpers import eval_artifact_key
+    from protea.services.annotations_service import EntityNotFoundError
+
+    result, keys = get_eval_result_with_keys(session, eval_id, result_id)
+    key = eval_artifact_key(result_id, relpath)
+    if key not in keys:
+        raise EntityNotFoundError("EvaluationArtifact", result_id)
+    digests: dict[str, str] = (result.results or {}).get("artifacts", {}).get("sha256") or {}
+    return key, digests.get(key)
+
+
 def assert_evaluation_set_exists(session: Session, eval_id: uuid.UUID) -> None:
     """Raise :class:`EntityNotFoundError` when the ``EvaluationSet`` UUID
     does not resolve. Cheap preflight for endpoints that dispatch

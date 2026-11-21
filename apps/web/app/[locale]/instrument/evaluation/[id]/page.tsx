@@ -8,6 +8,14 @@ import { baseUrl } from "@/lib/api";
 import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import StrataPanel from "@/components/StrataPanel";
 import { RunReceipt } from "@/components/RunReceipt";
+import {
+  GRID_FILE,
+  HEADLINE_FILE,
+  describeSource,
+  fileSource,
+  type ArtifactsRecord,
+  type FileSource,
+} from "@/lib/cellSource";
 import { PRIMARY_METRIC, metricTooltip, metricValue } from "@/lib/metrics";
 
 type NsMetrics = {
@@ -59,8 +67,8 @@ function cellCompanions(cell: NsMetrics): string {
   return parts.join(" · ");
 }
 
-/** Every figure the cell holds, each named for what it is. */
-function cellTooltip(cell: NsMetrics): string {
+/** Every figure the cell holds, each named for what it is and the file it was read from. */
+function cellTooltip(cell: NsMetrics, sources: CategorySources): string {
   const parts = [metricTooltip(PRIMARY_METRIC)];
   const cov = metricValue(cell, "coverage_w_at_tau");
   if (cov !== null) parts.push(`coverage at the reported threshold (cov_w) = ${cov.toFixed(3)}`);
@@ -69,7 +77,48 @@ function cellTooltip(cell: NsMetrics): string {
   if (cell.n_targets_w != null) parts.push(`cell size, weighted = ${cell.n_targets_w}`);
   if (cell.n_targets != null) parts.push(`cell size, unweighted = ${cell.n_targets}`);
   parts.push(`fmax = ${cell.fmax.toFixed(4)} (unweighted, not LAFA-comparable)`);
+  if (sources.headline) parts.push(`f_micro_w and cov_w read from ${describeSource(sources.headline)}`);
+  if (sources.grid) parts.push(`cell size read from ${describeSource(sources.grid)}`);
   return parts.join(" · ");
+}
+
+/** The two files a category's cells are read from, when the result wrote them. */
+type CategorySources = { headline: FileSource | null; grid: FileSource | null };
+
+function categorySources(r: EvaluationResult, cat: Category): CategorySources {
+  const record = r.results?.artifacts;
+  const source = (file: string) =>
+    fileSource(baseUrl(), r.evaluation_set_id, r.id, record, `${cat}/${file}`);
+  return { headline: source(HEADLINE_FILE), grid: source(GRID_FILE) };
+}
+
+/** The headline file of each category, as links that name the digest. */
+function CellFiles({ r, label, hint }: { r: EvaluationResult; label: string; hint: string }) {
+  const heads = CATEGORIES.flatMap((cat) => {
+    const { headline } = categorySources(r, cat);
+    return headline ? [{ cat, headline }] : [];
+  });
+  if (heads.length === 0) return null;
+  return (
+    <>
+      <span
+        className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400"
+        title={hint}
+      >
+        {label}
+      </span>
+      {heads.map(({ cat, headline }) => (
+        <a
+          key={cat}
+          href={headline.href}
+          className="font-mono text-[10px] text-blue-600 hover:underline"
+          title={describeSource(headline)}
+        >
+          {cat} {headline.sha256 ? headline.sha256.slice(0, 8) : "no digest"}
+        </a>
+      ))}
+    </>
+  );
 }
 
 type EvaluationResult = {
@@ -91,7 +140,12 @@ type EvaluationResult = {
   temporal_window: string | null;
   arms_enabled: Record<string, boolean> | null;
   leakage_role: string | null;
-  results: Record<string, SettingResults>;
+  results: ResultsRecord;
+};
+
+/** A result's record: one entry per category, and the files it wrote. */
+type ResultsRecord = Partial<Record<Category, SettingResults>> & {
+  artifacts?: ArtifactsRecord;
 };
 
 type EvaluationSet = {
@@ -123,6 +177,7 @@ function shortId(id: string): string {
 }
 
 const CATEGORIES = ["NK", "LK", "PK"] as const;
+type Category = (typeof CATEGORIES)[number];
 const NAMESPACES = ["BPO", "MFO", "CCO"] as const;
 
 export default function EvaluationDetailPage() {
@@ -415,14 +470,15 @@ export default function EvaluationDetailPage() {
                               "—"
                             )}
                           </td>
-                          {CATEGORIES.flatMap((cat) =>
-                            NAMESPACES.map((ns) => {
+                          {CATEGORIES.flatMap((cat) => {
+                            const sources = categorySources(r, cat);
+                            return NAMESPACES.map((ns) => {
                               const cell = r.results?.[cat]?.[ns];
                               return (
                                 <td
                                   key={`${r.id}-${cat}-${ns}`}
                                   className="px-2 py-2 text-right font-mono tabular-nums"
-                                  title={cell ? cellTooltip(cell) : "no data"}
+                                  title={cell ? cellTooltip(cell, sources) : "no data"}
                                 >
                                   {cell === undefined ? (
                                     "—"
@@ -440,8 +496,8 @@ export default function EvaluationDetailPage() {
                                   )}
                                 </td>
                               );
-                            }),
-                          )}
+                            });
+                          })}
                         </tr>
                         {/* Provenance sub-row: frame / window / arms / leakage
                           badges for this result. Always rendered (with an
@@ -469,6 +525,9 @@ export default function EvaluationDetailPage() {
                                   leakage_role: r.leakage_role,
                                 }}
                               />
+                              {/* The file each category's cells are read from, served by
+                                itself, with the sha256 the result recorded for it. */}
+                              <CellFiles r={r} label={t("sourcesLabel")} hint={t("sourcesHint")} />
                               <button
                                 type="button"
                                 onClick={() =>

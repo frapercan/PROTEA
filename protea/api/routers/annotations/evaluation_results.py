@@ -1,8 +1,8 @@
-"""Evaluation-result endpoints: list / metrics TSV / artifacts ZIP / delete."""
+"""Evaluation-result endpoints: list / metrics TSV / artifacts ZIP / one artifact / delete."""
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import UUID
 
@@ -17,13 +17,22 @@ from protea.infrastructure.session import session_scope
 from protea.services.annotations_service import (
     EntityNotFoundError,
     delete_eval_result_collect_keys,
+    get_eval_result_artifact,
     get_eval_result_with_keys,
+    iter_evaluation_artifact,
     iter_evaluation_artifacts_zip,
     list_evaluation_results_data,
     render_evaluation_metrics_tsv,
 )
 
 router = APIRouter()
+
+#: How each kind of file an evaluation writes is served; anything else is bytes.
+_ARTIFACT_MEDIA_TYPES = {
+    ".tsv": "text/tab-separated-values",
+    ".txt": "text/plain",
+    ".parquet": "application/vnd.apache.parquet",
+}
 
 
 @router.get(
@@ -81,6 +90,48 @@ def download_evaluation_artifacts(
         iter_evaluation_artifacts_zip(keys, result_id),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="artifacts_{result_id}.zip"'},
+    )
+
+
+@router.get(
+    "/evaluation-sets/{eval_id}/results/{result_id}/artifacts/{relpath:path}",
+    summary="Download one file an evaluation result wrote",
+)
+def download_evaluation_artifact(
+    eval_id: UUID,
+    result_id: UUID,
+    relpath: str,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> StreamingResponse:
+    """Stream one file the result recorded, by its path under the result.
+
+    ``relpath`` is the path the evaluator wrote, such as
+    ``PK/evaluation_best_f_micro_w.tsv``, the file a cell's ``f_micro_w`` and
+    ``cov_w`` are read from. When the result recorded the file's sha256, the
+    ``X-Recorded-SHA256`` header carries it: the sha256 of the body is that
+    value, or the stored bytes are not the ones the figures were read from.
+    Returns ``404`` when the result does not belong to ``eval_id`` or recorded
+    no file at ``relpath``.
+    """
+    try:
+        with session_scope(factory) as session:
+            key, digest = get_eval_result_artifact(session, eval_id, result_id, relpath)
+    except EntityNotFoundError as exc:
+        detail = (
+            f"result {result_id} recorded no file {relpath!r}"
+            if exc.entity == "EvaluationArtifact"
+            else str(exc)
+        )
+        raise HTTPException(status_code=404, detail=detail) from exc
+
+    name = PurePosixPath(relpath)
+    headers = {"Content-Disposition": f'attachment; filename="{name.name}"'}
+    if digest is not None:
+        headers["X-Recorded-SHA256"] = digest
+    return StreamingResponse(
+        iter_evaluation_artifact(key),
+        media_type=_ARTIFACT_MEDIA_TYPES.get(name.suffix, "application/octet-stream"),
+        headers=headers,
     )
 
 
