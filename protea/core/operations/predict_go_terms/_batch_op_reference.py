@@ -28,6 +28,7 @@ from protea.core.disk_cache import (
     pool_fingerprint,
 )
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
+from protea.core.operations.predict_go_terms._bank_shards import fill_from_shards
 from protea.core.operations.predict_go_terms._common import (
     _REF_CACHE,
     _UNIFIED_REF_KEY,
@@ -428,7 +429,7 @@ class _ReferenceMixin:
         When the cache files are fresh (mtime within
         ``ref_cache_freshness_seconds``), the COUNT(*)-over-JOIN is skipped
         so the fast path requires zero DB round-trips. ``source`` is
-        ``"disk_cache"`` on hit and ``"database"`` on miss.
+        ``"disk_cache"`` on hit, else where the vectors came from (``_stream_pool``).
 
         ``transfer`` names the route the bank took across the driver, or is
         ``None`` when a cache answered and nothing crossed. See
@@ -457,8 +458,7 @@ class _ReferenceMixin:
 
         def _db_loader() -> tuple[list[str], np.ndarray]:
             nonlocal source, transfer
-            source = "database"
-            accs, embs, transfer = self._stream_reference_pool(accession_q)
+            accs, embs, source, transfer = self._stream_pool(session, request, accession_q)
             return accs, embs
 
         fresh = freshness_sec > 0 and _is_cache_fresh(
@@ -477,6 +477,21 @@ class _ReferenceMixin:
             freshness_seconds=freshness_sec,
         )
         return accessions, embeddings, source, transfer
+
+    def _stream_pool(
+        self, session: Session, request: _PoolRequest, accession_q: Any
+    ) -> tuple[list[str], Any, str, str | None]:
+        """A pool the disk cache lacks: ``(accessions, vectors, source, transfer)``.
+
+        From the node's bank shards when they are the ones the store recorded
+        (:mod:`._bank_shards`, source ``"bank_shards"``), else streamed from the
+        store (source ``"database"``), as every run did before.
+        """
+        from_shards = fill_from_shards(session, accession_q, request.embedding_config_id)
+        if from_shards is not None:
+            return from_shards[0], from_shards[1], "bank_shards", "shards"
+        accessions, vectors, transfer = self._stream_reference_pool(accession_q)
+        return accessions, vectors, "database", transfer
 
     def _reference_pool_query(self, session: Session, request: _PoolRequest) -> Any:
         """Return the accession-only query for the reference pool.
