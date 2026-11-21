@@ -323,6 +323,10 @@ def get_prediction_set_data(
         "created_at": ps.created_at.isoformat(),
         "prediction_count": prediction_count or 0,
         "per_protein_counts": {acc: cnt for acc, cnt in per_protein},
+        # A scored set names the candidate set it scored and the configuration
+        # it read; both None on a candidate set.
+        "scored_from": (ps.meta or {}).get("scored_from"),
+        "scoring_config_id": (ps.meta or {}).get("scoring_config_id"),
     }
 
 

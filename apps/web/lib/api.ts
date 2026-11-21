@@ -336,6 +336,10 @@ export type PredictionSet = {
   distance_threshold?: number | null;
   created_at: string;
   prediction_count?: number;
+  /** A scored set's candidate set, which holds its rows; null on a candidate set. */
+  scored_from?: string | null;
+  /** The configuration a scored set read; null on a candidate set. */
+  scoring_config_id?: string | null;
 };
 
 export type AnnotationSet = {
@@ -847,6 +851,11 @@ export type Prediction = {
   neighbor_distance_std: number | null;
   /** A method's own score (ADR-D60): null for a retrieval arm, read under the method_score formula. */
   method_score: number | null;
+  /**
+   * The score a scored set stored for this candidate, the one the evaluator
+   * reads. Null on a candidate set, which holds candidates and no scores.
+   */
+  score?: number | null;
   /**
    * The row's explanation, when the method's spec says it explains. A count map
    * (ADR-D65) writes `{unit, k, n, strength, base_rate}` for a row a lexicon unit
