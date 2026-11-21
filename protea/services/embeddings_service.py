@@ -29,6 +29,7 @@ from protea.infrastructure.orm.models.embedding.embedding_config import Embeddin
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_score import PredictionScore
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.orm.models.method.method import Method
 
 # VALID_* sets canonically defined in _embeddings_validation_helpers; re-exported
@@ -310,6 +311,7 @@ def get_prediction_set_data(
     if scored:
         per_protein = [*per_protein, *scored]
         prediction_count = (prediction_count or 0) + sum(int(n) for _, n in scored)
+    config_id = (ps.meta or {}).get("scoring_config_id")
 
     return {
         "id": str(ps.id),
@@ -326,8 +328,54 @@ def get_prediction_set_data(
         # A scored set names the candidate set it scored and the configuration
         # it read; both None on a candidate set.
         "scored_from": (ps.meta or {}).get("scored_from"),
-        "scoring_config_id": (ps.meta or {}).get("scoring_config_id"),
+        "scoring_config_id": config_id,
+        "scoring_config_name": _scoring_config_names(session, [config_id]).get(config_id or ""),
+        # A candidate set is scored by score_prediction_set, one set per scoring.
+        "scored_sets": scored_sets_of(session, ps.id),
     }
+
+
+def scored_sets_of(session: Session, candidate_set_id: uuid.UUID) -> list[dict[str, Any]]:
+    """The scored sets made from a candidate set, newest first, with their configuration.
+
+    Empty for a scored set, since nothing is scored from one. The configuration is
+    named when its id resolves; a set whose record names none keeps the id it has.
+    """
+    rows = (
+        session.query(PredictionSet.id, PredictionSet.meta, PredictionSet.created_at)
+        .filter(PredictionSet.meta["scored_from"].astext == str(candidate_set_id))
+        .order_by(PredictionSet.created_at.desc())
+        .all()
+    )
+    names = _scoring_config_names(
+        session, [(meta or {}).get("scoring_config_id") for _, meta, _ in rows]
+    )
+    return [
+        {
+            "id": str(set_id),
+            "scoring_config_id": (meta or {}).get("scoring_config_id"),
+            "scoring_config_name": names.get((meta or {}).get("scoring_config_id") or ""),
+            "created_at": created_at.isoformat(),
+        }
+        for set_id, meta, created_at in rows
+    ]
+
+
+def _scoring_config_names(session: Session, config_ids: list[str | None]) -> dict[str, str]:
+    """The name of each scoring configuration id that resolves; the rest are left out."""
+    known = {uuid.UUID(c) for c in config_ids if c and _is_uuid(c)}
+    if not known:
+        return {}
+    query = session.query(ScoringConfig.id, ScoringConfig.name)
+    return {str(i): n for i, n in query.filter(ScoringConfig.id.in_(known))}
+
+
+def _is_uuid(text: str) -> bool:
+    try:
+        uuid.UUID(text)
+    except ValueError:
+        return False
+    return True
 
 
 # prepare_cafa_export + iter_predictions_cafa_tsv live in

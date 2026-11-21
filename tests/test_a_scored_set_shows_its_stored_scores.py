@@ -100,6 +100,39 @@ class TestTheRowsOfAScoredSet:
                 == []
             )
 
+    def test_a_candidate_set_lists_its_scored_sets_newest_first(self, sets) -> None:
+        engine, candidates, scored = sets
+        config = uuid.uuid4()
+        with Session(engine, future=True) as session:
+            session.execute(
+                text(
+                    "INSERT INTO scoring_config (id, name, formula, weights) "
+                    "VALUES (:i, 'embedding_only', 'linear', '{}'::jsonb)"
+                ),
+                {"i": config},
+            )
+            row = session.execute(
+                text(
+                    "SELECT embedding_config_id, annotation_set_id, ontology_snapshot_id "
+                    "FROM prediction_set WHERE id = :p"
+                ),
+                {"p": candidates},
+            ).one()
+            parents = {"embedding": row[0], "annotation": row[1], "snapshot": row[2]}
+            later = make_prediction_set(
+                session,
+                parents,
+                {"scored_from": str(candidates), "scoring_config_id": str(config)},
+            )
+            session.commit()
+            listed = get_prediction_set_data(session, candidates)["scored_sets"]
+            of_later = get_prediction_set_data(session, later)
+        assert [s["id"] for s in listed] == [str(later), str(scored)]
+        assert [s["scoring_config_name"] for s in listed] == ["embedding_only", None]
+        assert listed[1]["scoring_config_id"] == "cfg-1"
+        assert of_later["scored_sets"] == []
+        assert of_later["scoring_config_name"] == "embedding_only"
+
     def test_the_detail_names_the_candidate_set_and_the_configuration(self, sets) -> None:
         engine, candidates, scored = sets
         with Session(engine, future=True) as session:
