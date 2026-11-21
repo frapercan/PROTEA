@@ -18,13 +18,16 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 
 
-def evaluation_result_to_dict(r: EvaluationResult) -> dict[str, Any]:
+def evaluation_result_to_dict(
+    r: EvaluationResult, code_revision: str | None = None
+) -> dict[str, Any]:
     """Serialise an :class:`EvaluationResult` to its API dict shape.
 
     ``frame_digest`` IS SERVED, AND IT IS THE ONLY FIELD HERE THAT SAYS WHETHER
@@ -46,6 +49,9 @@ def evaluation_result_to_dict(r: EvaluationResult) -> dict[str, Any]:
         "reranker_model_id": str(r.reranker_model_id) if r.reranker_model_id else None,
         "reranker_config": r.reranker_config,
         "job_id": str(r.job_id) if r.job_id else None,
+        # The revision of the code that evaluated, as its job recorded it when it
+        # started; None for a result with no job or a job that recorded none.
+        "code_revision": code_revision,
         "created_at": r.created_at.isoformat(),
         # F-METHOD-EVAL-SURFACE provenance (read-through; ``None`` on legacy
         # rows so the UI shows an "unknown" empty state).
@@ -77,7 +83,31 @@ def list_evaluation_results_data(
         .order_by(EvaluationResult.created_at.desc())
         .all()
     )
-    return [evaluation_result_to_dict(r) for r in rows]
+    revisions = job_revisions(session, [r.job_id for r in rows if r.job_id])
+    return [
+        evaluation_result_to_dict(r, revisions.get(str(r.job_id)) if r.job_id else None)
+        for r in rows
+    ]
+
+
+#: The revision each job recorded when it started, read by the (job_id, event)
+#: index. A job retried after a crash starts again; its latest start wins.
+_JOB_REVISIONS = text(
+    """
+    SELECT job_id::text AS job_id, fields ->> 'code_revision' AS code_revision
+    FROM job_event
+    WHERE job_id = ANY(CAST(:jobs AS uuid[])) AND event = 'job.started'
+    ORDER BY ts
+    """
+)
+
+
+def job_revisions(session: Session, job_ids: list[uuid.UUID]) -> dict[str, str]:
+    """job id -> the code revision its job recorded when it started."""
+    if not job_ids:
+        return {}
+    rows = session.execute(_JOB_REVISIONS, {"jobs": [str(j) for j in job_ids]}).mappings()
+    return {r["job_id"]: r["code_revision"] for r in rows if r["code_revision"]}
 
 
 def get_eval_result_with_keys(
