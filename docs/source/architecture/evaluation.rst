@@ -310,6 +310,35 @@ the pivot's OBO and the IA table the run was given:
      -toi terms_of_interest.txt -prop fill -norm cafa -no_orphans -th_step 0.01 \
      -known pk_known_terms.tsv -out_dir results/PK
 
+Where each target sits: the window's placement
+----------------------------------------------
+
+Results are reported per stratum (:mod:`protea.core.strata`), and two of the
+axes describe a target's sequence rather than a method: its length, and its
+identity to the closest protein whose function had been measured when the
+window opened. ``place_window_targets`` reads both once per window and stores
+them (``window_placement`` declares the placement, ``window_placement_target``
+holds one row per target), so two methods evaluated on one window place every
+protein in the same band.
+
+- **Length** is the length of the target's sequence in the full photo of the
+  opening cut (ADR-D59).
+- **Identity** is to the closest OTHER protein of that photo with a truth row
+  (the thirteen LAFA codes). An identical sequence under another accession
+  places the target at 100, through the membership table (ADR-D61, decision
+  3). Otherwise the best hit of the cut's homology table among the truth
+  members' sequences decides: highest bit score, then identity, e-value and
+  md5. With neither, the target is in the ``none`` band, a population and not
+  a missing value.
+- The bit score ranks first because it grows with the length of the alignment.
+  The highest identity alone would let a short local alignment at 100 % place
+  a protein among the near-identical ones.
+- Identity is MMseqs2's ``fident`` as it was printed, three decimals, so the
+  percentage is rounded to one decimal. Stored as float32, 0.300 reads
+  0.30000001, which would otherwise cross the edge of the twilight band.
+- No threshold is applied, neither by the homology table (ADR-D61, decision 4)
+  nor here.
+
 Data model
 ----------
 

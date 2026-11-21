@@ -70,6 +70,7 @@ EXPECTED: dict[str, str] = {
     "dataset": "the frozen re-ranker dump the laboratory pulls to train",
     "cut_photo": "the corpus at a cut: Swiss-Prot, live tiers and annotated UniRef50 neighbours",
     "homology_table": "the homology of a cut: its superset searched against its photo (MMseqs2)",
+    "window_placement": "each target of a window on the length and identity axes, read at its start",
     "embedding_bank": "one configuration's vectors of every member sequence of a set of photos",
     "lexicon_bank": "one lexicon's cut and theme mass of every member sequence of a set of photos",
     "segment_families": "the families of one cut's lexicon segments, linked by MMseqs2",

@@ -500,6 +500,20 @@ differ, are legacy, or cannot be compared across cuts.
    :members:
    :show-inheritance:
 
+Window placement
+----------------
+
+``protea.core.window_placement`` is the rule ``place_window_targets`` applies to
+place each target of a window on the two sequence axes of the strata, as it
+stood when the window opened: its length, and its identity to the closest other
+protein of the opening cut's photo with a truth row. The operation stores the
+result once per window (``window_placement`` and ``window_placement_target``),
+so every method evaluated on the window is stratified on the same placement.
+
+.. automodule:: protea.core.window_placement
+   :members:
+   :show-inheritance:
+
 Provenance
 ----------
 
