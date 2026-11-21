@@ -131,6 +131,7 @@ from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsPayload,
 )
 from protea.core.operations.load_homology_table import LoadHomologyTablePayload
+from protea.core.operations.place_window_targets import PlaceWindowTargetsPayload
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingPayload,
 )
@@ -381,6 +382,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         LoadHomologyTablePayload,
         {"table_dir": "/srv/homology/211", "manifest_sha256": "not-a-digest"},
         ("manifest_sha256",),
+    ),
+    # A window placement names its window by id, and nothing else.
+    (
+        "place_window_targets",
+        PlaceWindowTargetsPayload,
+        {"evaluation_set_id": "not-a-window"},
+        ("evaluation_set_id",),
     ),
     # An embedding bank too, and the configuration it is the bank of (ADR-D62).
     (

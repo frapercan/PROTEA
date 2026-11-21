@@ -76,6 +76,9 @@ TODAY: dict[str, str] = {
     "export_transitions_dataset": queues.TRAINING,
     "load_cut_photo": queues.JOBS,
     "load_homology_table": queues.JOBS,
+    # Its own pull request: it streams a cut's 2.5 GB of hits, which the evaluations
+    # worker's 8G holds and the general queue's 2G does not.
+    "place_window_targets": queues.EVALUATIONS,
     "load_embedding_bank": queues.JOBS,
     "declare_member_taxa": queues.JOBS,
     "load_lexicon_bank": queues.JOBS,
@@ -285,7 +288,7 @@ def _constant(module: str, name: str) -> str:
 def test_every_registered_operation_declares_a_spec() -> None:
     registry = build_operation_registry()
     assert set(registry.specs()) == set(registry._ops)
-    assert len(CATALOG) == len(registry._ops) == 67
+    assert len(CATALOG) == len(registry._ops) == 68
 
 
 def test_each_spec_routes_where_the_code_routes_today(specs: dict[str, OperationSpec]) -> None:

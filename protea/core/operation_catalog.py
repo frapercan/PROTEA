@@ -112,6 +112,7 @@ from protea.core.operations.measure_embedding_magnitude import (
     MeasureEmbeddingMagnitudeOperation,
 )
 from protea.core.operations.ping import PingOperation
+from protea.core.operations.place_window_targets import PlaceWindowTargetsOperation
 from protea.core.operations.predict_go_terms import (
     PredictGOTermsBatchOperation,
     PredictGOTermsOperation,
@@ -421,6 +422,7 @@ _METHOD: tuple[_Row, ...] = (
 #: Evaluation: one evaluator for every family (ADR-D60, decision 5).
 _EVALUATION: tuple[_Row, ...] = (
     (RunCafaEvaluationOperation, _EVALUATED),
+    (PlaceWindowTargetsOperation, _EVALUATED),
     (StratifyEvaluationOperation, _EVALUATED),
     (ComparePairedPanelsOperation, _EVALUATED),
     (SealEvaluationFramesOperation, _EVALUATED),
