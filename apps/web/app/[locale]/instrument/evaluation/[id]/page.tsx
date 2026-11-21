@@ -19,7 +19,17 @@ type NsMetrics = {
   f_micro?: number;
   precision?: number;
   recall?: number;
+  /** The largest IA-weighted coverage over every threshold (cafaeval's cov_max). */
   coverage_w?: number;
+  /**
+   * The IA-weighted coverage at the threshold f_micro_w was reported at: LAFA's
+   * cov_w, the coverage printed beside the headline. Absent on results made
+   * before 2026-11-21.
+   */
+  coverage_w_at_tau?: number;
+  /** The cell's size, unweighted and weighted: the denominators of its coverage. */
+  n_targets?: number;
+  n_targets_w?: number;
   /**
    * Unweighted, kept for history and NOT LAFA-comparable -- the
    * EvaluationResult model says exactly that in its own docstring. This page
@@ -33,6 +43,34 @@ type NsMetrics = {
 };
 
 type SettingResults = Record<string, NsMetrics>;
+
+/**
+ * The two numbers LAFA prints beside the headline: its coverage at the reported
+ * threshold and the cell's size, both in the weighted variant. A non-breaking
+ * space keeps a cell from an older result, which records neither, the same height.
+ */
+function cellCompanions(cell: NsMetrics): string {
+  const cov = metricValue(cell, "coverage_w_at_tau");
+  const n = cell.n_targets_w ?? null;
+  if (cov === null && n === null) return "\u00a0";
+  const parts = [];
+  if (cov !== null) parts.push(`cov ${cov.toFixed(3)}`);
+  if (n !== null) parts.push(`n ${n.toLocaleString("en-US")}`);
+  return parts.join(" · ");
+}
+
+/** Every figure the cell holds, each named for what it is. */
+function cellTooltip(cell: NsMetrics): string {
+  const parts = [metricTooltip(PRIMARY_METRIC)];
+  const cov = metricValue(cell, "coverage_w_at_tau");
+  if (cov !== null) parts.push(`coverage at the reported threshold (cov_w) = ${cov.toFixed(3)}`);
+  const largest = metricValue(cell, "coverage_w");
+  if (largest !== null) parts.push(`largest coverage over thresholds = ${largest.toFixed(3)}`);
+  if (cell.n_targets_w != null) parts.push(`cell size, weighted = ${cell.n_targets_w}`);
+  if (cell.n_targets != null) parts.push(`cell size, unweighted = ${cell.n_targets}`);
+  parts.push(`fmax = ${cell.fmax.toFixed(4)} (unweighted, not LAFA-comparable)`);
+  return parts.join(" · ");
+}
 
 type EvaluationResult = {
   id: string;
@@ -269,6 +307,9 @@ export default function EvaluationDetailPage() {
                 })}
               </h2>
             </header>
+            {sortedResults.length > 0 ? (
+              <p className="border-b px-4 py-2 text-xs text-slate-600">{t("cellLegend")}</p>
+            ) : null}
             {sortedResults.length === 0 ? (
               <div className="px-4 py-10 text-center text-sm text-slate-600">
                 {t("noResults", {
@@ -355,18 +396,22 @@ export default function EvaluationDetailPage() {
                                 <td
                                   key={`${r.id}-${cat}-${ns}`}
                                   className="px-2 py-2 text-right font-mono tabular-nums"
-                                  title={
-                                    cell
-                                      ? `${metricTooltip(PRIMARY_METRIC)} · fmax=${cell.fmax.toFixed(4)} (unweighted) · coverage=${cell.coverage.toFixed(3)}`
-                                      : "no data"
-                                  }
+                                  title={cell ? cellTooltip(cell) : "no data"}
                                 >
-                                  {cell === undefined
-                                    ? "—"
-                                    : // metricValue returns null for an absent key rather than zero, so
-                                      // a cell scored without an IA says so instead of borrowing the
-                                      // unweighted figure and reading as the headline.
-                                      (metricValue(cell, PRIMARY_METRIC)?.toFixed(3) ?? "no IA")}
+                                  {cell === undefined ? (
+                                    "—"
+                                  ) : (
+                                    <div className="flex flex-col items-end leading-tight">
+                                      {/* metricValue returns null for an absent key rather than
+                                        zero, so a cell scored without an IA says so instead of
+                                        borrowing the unweighted figure and reading as the
+                                        headline. */}
+                                      <span>{metricValue(cell, PRIMARY_METRIC)?.toFixed(3) ?? "no IA"}</span>
+                                      <span className="text-[10px] text-slate-500">
+                                        {cellCompanions(cell)}
+                                      </span>
+                                    </div>
+                                  )}
                                 </td>
                               );
                             }),

@@ -1159,6 +1159,7 @@
     "openPredictionSet": "Abrir o conjunto de previsões",
     "openReranker": "Abrir o modelo de reordenação",
     "proteinExamples": "Exemplos de proteínas (conjunto de previsões)",
+    "cellLegend": "Cada célula: o F micro ponderado por IA (f_micro_w) e, por baixo, a cobertura ponderada no limiar reportado (o cov_w do LAFA) e o tamanho da célula na variante ponderada. Os resultados anteriores a 21-11-2026 não registam estes dois.",
     "provenanceLabel": "procedência",
     "resultMetrics": {
       "nk": "NK",
