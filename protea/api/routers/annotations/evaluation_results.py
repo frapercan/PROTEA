@@ -24,6 +24,7 @@ from protea.services.annotations_service import (
     list_evaluation_results_data,
     list_paired_comparisons_data,
     render_evaluation_metrics_tsv,
+    window_summary_data,
 )
 
 router = APIRouter()
@@ -176,6 +177,30 @@ def list_paired_comparisons(
     try:
         with session_scope(factory) as session:
             return list_paired_comparisons_data(session, eval_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/evaluation-sets/{eval_id}/summary",
+    summary="A window's results as its panel reads them",
+)
+def window_summary(
+    eval_id: UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> dict[str, Any]:
+    """Each result of the window with its arm's factors, its nine cells and its profiles.
+
+    The arm is its model, scoring and method, how many neighbours it read, whether
+    a target's own sequence could vote and how its scores were read. A cell is its
+    f_micro_w, the threshold it peaks at, whether that threshold is the grid's
+    edge and its targets. The profiles are the ones the stratification left on the
+    result, ``None`` until it has run. One query for the whole window. Returns
+    ``404`` if the evaluation set is missing.
+    """
+    try:
+        with session_scope(factory) as session:
+            return window_summary_data(session, eval_id)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
