@@ -8,6 +8,7 @@ import { baseUrl } from "@/lib/api";
 import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import StrataPanel from "@/components/StrataPanel";
 import PairedComparisons from "@/components/PairedComparisons";
+import WindowPanel from "@/components/window-panel/WindowPanel";
 import { RunReceipt } from "@/components/RunReceipt";
 import {
   GRID_FILE,
@@ -386,6 +387,8 @@ export default function EvaluationDetailPage() {
                 </section>
               );
             })()}
+
+          <WindowPanel evaluationSetId={params.id} />
 
           <section className="rounded-lg border bg-white shadow-sm">
             <header className="border-b px-4 py-3">
