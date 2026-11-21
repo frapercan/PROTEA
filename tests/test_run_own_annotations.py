@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from protea.core import evaluation
 from protea.core._binding_rule import DESCENDANTS_STEP
+from protea.core._lafa_frame_data import EndOntology
 from protea.core.operations import run_own_annotations as op
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -72,6 +73,55 @@ def test_the_side_reconciles_the_rows_it_is_handed(monkeypatch: pytest.MonkeyPat
         raw={"P1": {"GO:0000003"}},
     )
     assert out == {"P1": {"P": {"GO:0000002", "GO:0000003"}}}
+
+
+def test_a_lafa_window_states_the_terms_as_its_frame_states_t0(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Named and closed under t0's own ontology, a NOT term of t0 taken out before the closure."""
+    t0 = EndOntology(
+        live={"GO:0008150": "P", "GO:0000002": "P", "GO:0000003": "P", "GO:0000005": "P"},
+        parents={
+            "GO:0000003": frozenset({"GO:0000002"}),
+            "GO:0000005": frozenset({"GO:0000002"}),
+            "GO:0000002": frozenset({"GO:0008150"}),
+        },
+        alt_ids={"GO:0000013": "GO:0000003"},
+        replaced_by={},
+    )
+    asked: dict[str, object] = {}
+
+    def end_rows(_session: object, set_id: object, experimental_only: bool) -> tuple:
+        asked["set"], asked["experimental_only"] = set_id, experimental_only
+        return {}, {"P1": {"GO:0000005"}, "ELSEWHERE": {"GO:0000003"}}
+
+    monkeypatch.setattr(op, "load_end_ontology", lambda _session, _snapshot: t0)
+    monkeypatch.setattr(op, "load_end_rows", end_rows)
+    eset = SimpleNamespace(old_annotation_set_id=uuid.uuid4(), not_codes="experimental")
+    direct = {"P1": {"GO:0000013": {"IEA"}, "GO:0000005": {"IBA"}}}
+
+    stated = op.lafa_positives(None, eset, uuid.uuid4(), direct)  # type: ignore[arg-type]
+
+    # The alt id is named as its primary and closed upwards; the NOT term left first.
+    assert stated == {"P1": {"P": {"GO:0000003", "GO:0000002", "GO:0008150"}}}
+    assert asked == {"set": eset.old_annotation_set_id, "experimental_only": True}
+
+
+def test_the_method_of_a_lafa_window_is_another_method() -> None:
+    photo = SimpleNamespace(
+        id=uuid.uuid4(),
+        cut_release=211,
+        ontology_snapshot_id=uuid.uuid4(),
+        manifest_sha256="a" * 64,
+    )
+    reconciled = op.method_spec(photo)  # type: ignore[arg-type]
+    assert op.method_spec(photo, "as_closed").method_id == reconciled.method_id  # type: ignore[arg-type]
+    lafa = op.method_spec(photo, "own_graph")  # type: ignore[arg-type]
+    assert lafa.method_id != reconciled.method_id
+    assert (lafa.recipe["state"], reconciled.recipe["state"]) == (
+        op.LAFA_STATE,
+        op.RECONCILED_STATE,
+    )
 
 
 def _window_with_rows(pg: Session) -> EvaluationSet:  # noqa: F811

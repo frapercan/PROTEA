@@ -13,7 +13,12 @@ the explainable-units family. For the window named by ``evaluation_set_id``
    experimental side (``protea.core._cut_state.cut_state`` with ``raw``: the
    remap, the binding rule, the closure under t0's graph, the pivot's universe
    and aspects), minus the target's NOT terms at t0 and their descendants, and
-   without the three roots.
+   without the three roots. On a window of LAFA's frame, which that path does
+   not build, they are stated as the frame states an end
+   (:func:`protea.core.lafa_frame.end_truth`): named and closed under t0's own
+   ontology, each NOT term of t0 and everything under it taken out of the
+   direct terms first. Only t0's NOT rows count, by the window's ``not_codes``:
+   the method reads nothing later than t0.
 4. Every term scores 1, as democafa's baseline does: the method has no
    parameter. Its explanation names the evidence codes of the direct
    annotations whose closure holds the term.
@@ -33,9 +38,11 @@ from pydantic import field_validator
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from protea.core import lafa_frame
 from protea.core._cut_state import cut_state, window_of
 from protea.core._evaluation_graph import _bfs_closure, _load_parents_by_go_id
 from protea.core._evaluation_groundtruth import load_evaluation_data_for_set
+from protea.core._lafa_frame_data import load_end_ontology, load_end_rows
 from protea.core.contracts.method import Family, InstanceCut, MethodSpec, Pin
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.count_map.inputs import ROOTS
@@ -57,6 +64,15 @@ from protea.infrastructure.orm.models.embedding.prediction_set import Prediction
 #: Codes that are not knowledge about the protein: no biological data available.
 NOT_KNOWLEDGE = ("ND",)
 CODE = "own-annotations-nonexp"
+
+#: How a run states the targets' terms, by the window's truth profile. The words
+#: are part of the method's recipe, so the method of a LAFA window is another
+#: method, and the one of every other window keeps the id it always had.
+RECONCILED_STATE = "reconciled as the evaluator reconciles t0, minus t0's NOT terms, roots out"
+LAFA_STATE = (
+    "named and closed under t0's own ontology as LAFA's frame states an end, each NOT term "
+    "of t0 and everything under it taken out first, roots out"
+)
 
 
 class RunOwnAnnotationsPayload(ProteaPayload, frozen=True):
@@ -120,8 +136,9 @@ def prediction_rows(
                 yield protein, ids[go_id], 1.0, {"own": True, "aspect": aspect, "codes": why}
 
 
-def method_spec(photo: CutPhoto) -> MethodSpec:
+def method_spec(photo: CutPhoto, truth_profile: str | None = None) -> MethodSpec:
     """The method a run is: the rule, at the photo's cut, pinned to the photo it reads."""
+    state = LAFA_STATE if truth_profile == lafa_frame.PROFILE else RECONCILED_STATE
     return MethodSpec(
         family=Family.EXPLAINABLE_UNITS,
         code=CODE,
@@ -129,7 +146,7 @@ def method_spec(photo: CutPhoto) -> MethodSpec:
         recipe={
             "source": "the target's own annotations at t0 (democafa goa_nonexp)",
             "evidence": "every code but the thirteen of the truth and ND, not NOT-qualified",
-            "state": "reconciled as the evaluator reconciles t0, minus t0's NOT terms, roots out",
+            "state": state,
             "score": 1.0,
         },
         pins=(Pin("photo", photo.manifest_sha256, (f"cut_photo:{photo.id}",)),),
@@ -158,13 +175,39 @@ def read_targets(
     truth, _ = load_evaluation_data_for_set(session, eset)
     targets = sorted(set(truth.nk) | set(truth.lk) | set(truth.pk))
     direct = own_rows(session, eset.old_annotation_set_id, targets)
-    state = cut_state(session, window_of(eset), raw={p: set(terms) for p, terms in direct.items()})
     old = session.get(AnnotationSet, eset.old_annotation_set_id)
+    if eset.truth_profile == lafa_frame.PROFILE:
+        positives, negatives = lafa_positives(session, eset, old.ontology_snapshot_id, direct), {}
+    else:
+        raw = {p: set(terms) for p, terms in direct.items()}
+        state = cut_state(session, window_of(eset), raw=raw)
+        positives, negatives = state.positives, state.negatives
     parents = _load_parents_by_go_id(session, old.ontology_snapshot_id)
     codes = {p: term_codes(terms, parents) for p, terms in direct.items()}
     ids = term_ids(session, eset.pivot_snapshot_id)
-    rows = list(prediction_rows(state.positives, state.negatives, codes, ids))
+    rows = list(prediction_rows(positives, negatives, codes, ids))
     return targets, rows
+
+
+def lafa_positives(
+    session: Session,
+    eset: EvaluationSet,
+    t0_snapshot_id: uuid.UUID,
+    direct: Mapping[str, Mapping[str, set[str]]],
+) -> dict[str, dict[str, set[str]]]:
+    """The targets' own terms as LAFA's frame states t0, from t0's rows alone.
+
+    Named and closed under t0's own ontology, each NOT term of t0 and everything
+    under it taken out of the direct terms before the closure. The NOT rows are
+    t0's, by the window's ``not_codes``; t1's are later than the method may read.
+    """
+    t0 = load_end_ontology(session, t0_snapshot_id)
+    _, not_rows = load_end_rows(
+        session, eset.old_annotation_set_id, eset.not_codes == "experimental"
+    )
+    negations = {p: not_rows[p] for p in direct if p in not_rows}
+    positives = {p: set(terms) for p, terms in direct.items()}
+    return lafa_frame.end_truth(t0, positives, negations, Counter(), "t0")
 
 
 class RunOwnAnnotationsOperation:
@@ -185,7 +228,7 @@ class RunOwnAnnotationsOperation:
     ) -> OperationResult:
         p = RunOwnAnnotationsPayload.model_validate(contract_payload(payload))
         eset, photo = resolve(session, p.evaluation_set_id)
-        method = ensure_method(session, method_spec(photo))
+        method = ensure_method(session, method_spec(photo, eset.truth_profile))
         done = session.execute(
             select(PredictionSet).where(
                 PredictionSet.method_id == method.id,
