@@ -506,6 +506,27 @@ def _namespace_rows(
     return rows
 
 
+def cell_populations(artifact: GridArtifact) -> dict[str, dict[str, int]]:
+    """Each namespace's scored population in each variant, counted from the grid's rows.
+
+    ``n_targets`` is the unweighted population, every row of the namespace: the
+    proteins with ground truth among its terms of interest. ``n_targets_w`` is the
+    weighted one, the rows with positive weighted ground truth
+    (:func:`~protea.core.operations._paired_panels_artifact.in_variant_population`),
+    present only when the file carries the weighted variant. They are the
+    denominators cafaeval normalised each variant's cell and its coverage by, and
+    they are counted from the same rows every reader of the grid reads, so the
+    record and the file cannot disagree about a cell's size.
+    """
+    out: dict[str, dict[str, int]] = {}
+    for row in artifact.rows:
+        cell = out.setdefault(str(row["namespace"]), {"n_targets": 0})
+        cell["n_targets"] += 1
+        if "weighted" in artifact.variants:
+            cell["n_targets_w"] = cell.get("n_targets_w", 0) + int(float(row["n_gt_w"]) > 0.0)
+    return out
+
+
 def _grid_widths(records: dict[tuple[str, str], dict[str, Any]]) -> int:
     """The one threshold count every record must share."""
     widths = {int(np.asarray(rec["tp_at_tau"]).shape[1]) for rec in records.values()}

@@ -586,7 +586,13 @@ last is the coverage at the threshold ``f_micro_w`` was reported at, cafaeval's
 ``cov_w`` and the coverage LAFA prints beside it. ``coverage_w`` is the largest
 coverage over every threshold, cafaeval's ``cov_max``, as ``coverage`` is for
 the unweighted ``coverage_at_tau``; results made before 2026-11-21 carry only
-``coverage_w``. The ``_w``
+``coverage_w``. Each cell also records its size in each variant, ``n_targets``
+and ``n_targets_w``: the proteins with ground truth among its terms of
+interest, and those with positive weighted ground truth. They are the
+denominators of the cell and of its coverage, counted from the rows of the
+per-protein grid, so the record and the file agree. ``n_proteins`` is
+cafaeval's ``n``, the proteins with a prediction at the reported threshold, and
+it moves with the threshold. The ``_w``
 keys appear only when a real IA file was supplied; under the uniform IC=1
 fallback they are omitted. The ``/v1/benchmark/matrix`` endpoint ranks every
 cell by ``f_micro_w`` (falling back to ``fmax`` for legacy IC=1 rows, flagged

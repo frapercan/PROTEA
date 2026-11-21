@@ -319,12 +319,30 @@ def _grid_frame(ctx: CafaEvalRunContext, setting: str) -> Any:
     )
 
 
+def _record_cell_populations(result: dict[str, Any], grid: Any) -> None:
+    """Put each cell's population in each variant beside its metrics, in place.
+
+    ``n_proteins`` is cafaeval's ``n``, the proteins with a prediction at the
+    reported threshold, so it moves with the threshold. These do not: they are
+    the cell's size, the denominator of its coverage (``cell_populations``).
+    Recorded only for the namespaces the result reports, from the grid that was
+    written, so a cell with no grid carries no population rather than a guessed one.
+    """
+    from protea.core.operations._run_cafa_grid_artifact import cell_populations
+    from protea.core.operations._run_cafa_helpers import _NS_LABELS
+
+    for namespace, counts in cell_populations(grid).items():
+        label = _NS_LABELS.get(namespace)
+        if label is not None and label in result:
+            result[label].update(counts)
+
+
 def _persist_per_protein_grid(
     ctx: CafaEvalRunContext,
     setting: str,
     sink: Any,
     emit: EmitFn,
-) -> None:
+) -> Any:
     """Write the whole-threshold-curve artefact BESIDE the single-tau one.
 
     A new file, never a widened old one. ``stratify_evaluation`` reads
@@ -359,6 +377,7 @@ def _persist_per_protein_grid(
             _grid_frame(ctx, setting).stamp(artifact.variants),
         )
         _emit_grid_written(setting, artifact, out, emit)
+        return artifact
     except Exception as exc:
         emit(
             "run_cafa_evaluation.per_protein_grid_failed",
@@ -370,6 +389,7 @@ def _persist_per_protein_grid(
             },
             "error",
         )
+        return None
 
 
 def _run_cafaeval_for_setting(
@@ -404,7 +424,9 @@ def _run_cafaeval_for_setting(
             )
         _persist_setting_artifacts(ctx, setting, df, dfs_best)
         _persist_per_protein(ctx, setting, sink, result, emit)
-        _persist_per_protein_grid(ctx, setting, sink, emit)
+        grid = _persist_per_protein_grid(ctx, setting, sink, emit)
+        if grid is not None:
+            _record_cell_populations(result, grid)
         emit(
             "run_cafa_evaluation.setting_done",
             None,
