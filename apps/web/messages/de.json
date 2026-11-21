@@ -2085,6 +2085,7 @@
       "done": "Habe ihn gespeichert",
       "copy": "Kopieren",
       "copied": "Kopiert",
+      "keyLabel": "Schlussel",
       "nameLabel": "Name",
       "namePlaceholder": "lab-runner-2026-05",
       "nameHelp": "Freier Text, mit dem du den Schlussel in Audit-Logs wiedererkennst.",

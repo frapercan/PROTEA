@@ -2084,6 +2084,7 @@
       "done": "Ya la guarde",
       "copy": "Copiar",
       "copied": "Copiada",
+      "keyLabel": "Clave",
       "nameLabel": "Nombre",
       "namePlaceholder": "lab-runner-2026-05",
       "nameHelp": "Etiqueta libre que te ayuda a identificar la clave en los registros de auditoria.",

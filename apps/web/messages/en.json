@@ -2096,6 +2096,7 @@
       "done": "I've saved it",
       "copy": "Copy",
       "copied": "Copied",
+      "keyLabel": "Key",
       "nameLabel": "Name",
       "namePlaceholder": "lab-runner-2026-05",
       "nameHelp": "Free-form label that helps you identify the key in audit logs.",

@@ -2085,6 +2085,7 @@
       "done": "已保存",
       "copy": "复制",
       "copied": "已复制",
+      "keyLabel": "密钥",
       "nameLabel": "名称",
       "namePlaceholder": "lab-runner-2026-05",
       "nameHelp": "自由填写的标签，便于在审计日志中识别该密钥。",
