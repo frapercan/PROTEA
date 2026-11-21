@@ -232,32 +232,36 @@ def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
 
     Returns a list of dicts each carrying the embedding-config name,
     annotation-set label, ontology version, plus the per-set
-    ``prediction_count``. The per-set count comes from a single
-    ``GROUP BY`` over GOPrediction (one index-only scan) rather than a
-    correlated subquery; for ~10⁷-row tables Postgres' planner falls
-    into a per-row index probe with the correlated form (~30s per
-    outer row). The grouped form returns all 100 counts at once.
+    ``prediction_count``. A set counted once (``prediction_set.summary``,
+    #1279) gives its count from there; only the listed sets not counted yet
+    are counted, by one ``GROUP BY`` restricted to them. The listing used to
+    group every row of ``go_prediction``, every set's and not only the 100
+    listed: 7.7 s on dev with 110 sets, measured 2026-11-21.
 
     A set produced by a method carries ``method_id`` and ``method_code``;
     one with no embedding configuration carries None in both configuration
     fields rather than being left out (:func:`_prediction_sets_query`).
     """
     rows = _prediction_sets_query(session).all()
-    counts = {
-        set_id: cnt
-        for set_id, cnt in session.query(
-            GOPrediction.prediction_set_id,
-            func.count(GOPrediction.id),
-        )
-        .group_by(GOPrediction.prediction_set_id)
-        .all()
-    }
-    # A scored set holds its pairs as arrays, one row per protein.
-    for set_id, pairs in session.query(
-        PredictionScore.prediction_set_id,
-        func.sum(func.cardinality(PredictionScore.go_term_ids)),
-    ).group_by(PredictionScore.prediction_set_id):
-        counts[set_id] = counts.get(set_id, 0) + int(pairs or 0)
+    counts = {ps.id: int(ps.summary["rows"]) for ps, *_ in rows if ps.summary}
+    pending = [ps.id for ps, *_ in rows if not ps.summary]
+    if pending:
+        for set_id, cnt in (
+            session.query(GOPrediction.prediction_set_id, func.count(GOPrediction.id))
+            .filter(GOPrediction.prediction_set_id.in_(pending))
+            .group_by(GOPrediction.prediction_set_id)
+        ):
+            counts[set_id] = int(cnt)
+        # A scored set holds its pairs as arrays, one row per protein.
+        for set_id, pairs in (
+            session.query(
+                PredictionScore.prediction_set_id,
+                func.sum(func.cardinality(PredictionScore.go_term_ids)),
+            )
+            .filter(PredictionScore.prediction_set_id.in_(pending))
+            .group_by(PredictionScore.prediction_set_id)
+        ):
+            counts[set_id] = counts.get(set_id, 0) + int(pairs or 0)
     return [
         {
             "id": str(ps.id),
