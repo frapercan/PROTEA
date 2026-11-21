@@ -317,6 +317,7 @@ from protea.services._annotations_streaming_helpers import (  # noqa: E402,F401
     iter_evaluation_artifacts_zip,
     render_evaluation_metrics_tsv,
 )
+from protea.services._window_summary import window_summary_data  # noqa: E402,F401
 
 __all__ = [
     "AnnotationSetReferencedError",
@@ -340,6 +341,7 @@ __all__ = [
     "iter_groundtruth_tsv",
     "list_evaluation_results_data",
     "list_paired_comparisons_data",
+    "window_summary_data",
     "render_evaluation_metrics_tsv",
     "list_annotation_sets_data",
     "list_evaluation_sets_data",

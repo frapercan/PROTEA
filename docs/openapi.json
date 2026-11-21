@@ -3992,6 +3992,57 @@
         ]
       }
     },
+    "/v1/annotations/evaluation-sets/{eval_id}/summary": {
+      "get": {
+        "description": "Each result of the window with its arm's factors, its nine cells and its profiles.\n\nThe arm is its model, scoring and method, how many neighbours it read, whether\na target's own sequence could vote and how its scores were read. A cell is its\nf_micro_w, the threshold it peaks at, whether that threshold is the grid's\nedge and its targets. The profiles are the ones the stratification left on the\nresult, ``None`` until it has run. One query for the whole window. Returns\n``404`` if the evaluation set is missing.",
+        "operationId": "window_summary_v1_annotations_evaluation_sets__eval_id__summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Window Summary V1 Annotations Evaluation Sets  Eval Id  Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "A window's results as its panel reads them",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
     "/v1/annotations/information-accretion-sets": {
       "get": {
         "description": "The IA tables on record, newest first.\n\nThe two filters are what makes \"the IA of cut r\" a lookup instead of a scan,\nwhich matters because a rolling frame asks that question once per cut.\n\nTables computed on a release past the board's mark are NOT listed. They are\nnot hidden to be tidy: these routes answer to whoever holds a key, and an IA\ntable is as much a fact about its release as the ground truth is.",
