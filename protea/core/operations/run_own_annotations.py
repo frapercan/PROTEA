@@ -64,6 +64,9 @@ from protea.infrastructure.orm.models.embedding.prediction_set import Prediction
 #: Codes that are not knowledge about the protein: no biological data available.
 NOT_KNOWLEDGE = ("ND",)
 CODE = "own-annotations-nonexp"
+#: The same rule on a window of LAFA's frame is a variant at the same cut, and a
+#: variant needs a code of its own (``method_short_name``).
+LAFA_CODE = "own-annotations-nonexp-lafa"
 
 #: How a run states the targets' terms, by the window's truth profile. The words
 #: are part of the method's recipe, so the method of a LAFA window is another
@@ -138,15 +141,15 @@ def prediction_rows(
 
 def method_spec(photo: CutPhoto, truth_profile: str | None = None) -> MethodSpec:
     """The method a run is: the rule, at the photo's cut, pinned to the photo it reads."""
-    state = LAFA_STATE if truth_profile == lafa_frame.PROFILE else RECONCILED_STATE
+    lafa = truth_profile == lafa_frame.PROFILE
     return MethodSpec(
         family=Family.EXPLAINABLE_UNITS,
-        code=CODE,
+        code=LAFA_CODE if lafa else CODE,
         instance=InstanceCut(photo.cut_release, photo.ontology_snapshot_id),
         recipe={
             "source": "the target's own annotations at t0 (democafa goa_nonexp)",
             "evidence": "every code but the thirteen of the truth and ND, not NOT-qualified",
-            "state": state,
+            "state": LAFA_STATE if lafa else RECONCILED_STATE,
             "score": 1.0,
         },
         pins=(Pin("photo", photo.manifest_sha256, (f"cut_photo:{photo.id}",)),),

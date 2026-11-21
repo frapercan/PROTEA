@@ -23,6 +23,7 @@ from protea.infrastructure.orm.models.annotation.evaluation_set import Evaluatio
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.orm.models.method.method import method_short_name
 from protea.infrastructure.orm.models.method.prediction_explanation import PredictionExplanation
 from protea.infrastructure.orm.models.protein.protein import Protein
 from tests.helpers.windows import make_window
@@ -118,6 +119,9 @@ def test_the_method_of_a_lafa_window_is_another_method() -> None:
     assert op.method_spec(photo, "as_closed").method_id == reconciled.method_id  # type: ignore[arg-type]
     lafa = op.method_spec(photo, "own_graph")  # type: ignore[arg-type]
     assert lafa.method_id != reconciled.method_id
+    # A variant at the same cut needs a short name of its own, which the store keeps unique.
+    assert method_short_name(lafa) == "own-annotations-nonexp-lafa-211"
+    assert method_short_name(reconciled) == "own-annotations-nonexp-211"
     assert (lafa.recipe["state"], reconciled.recipe["state"]) == (
         op.LAFA_STATE,
         op.RECONCILED_STATE,
