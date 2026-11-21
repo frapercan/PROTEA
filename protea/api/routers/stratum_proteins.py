@@ -63,6 +63,7 @@ from __future__ import annotations
 import io
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
@@ -88,7 +89,7 @@ from protea.core.operations._run_cafa_strata import VARIANT_COLUMNS as _VARIANT_
 # thing to keep in sync, and the failure it would produce is silent: a panel
 # opened under one map and pooled under another disagrees about which proteins
 # it holds without either side raising.
-from protea.core.operations.stratify_evaluation import _ASPECT_FOR_NAMESPACE, BEST_F_FILENAME
+from protea.core.operations.stratify_evaluation import _ASPECT_FOR_NAMESPACE, BEST_TABLE_FOR_VARIANT
 from protea.core.strata import UNREAD_NEIGHBOURHOOD, stratum_for
 from protea.core.window_placement import (
     TargetPlacement,
@@ -317,8 +318,8 @@ def _validated_cell(at: _Where, sort: str) -> _Cell:
     return _Cell(at.setting.upper(), _namespace_for(at.aspect))
 
 
-def _panel_keys(store: Any, result_id: uuid.UUID, setting: str) -> tuple[str, str]:
-    """The grid and the best-F table, both present, or a 404 saying which is not.
+def _panel_keys(store: Any, result_id: uuid.UUID, setting: str) -> tuple[str, dict[str, str]]:
+    """The grid and the best tables per variant, or a 404 saying which is not there.
 
     Existence is checked before the cache and not inside the producer. A
     missing artefact is a 404 and has to stay one: raised inside the producer
@@ -329,7 +330,9 @@ def _panel_keys(store: Any, result_id: uuid.UUID, setting: str) -> tuple[str, st
     in this setting, which is an absence. A grid with no best-F table means the
     sweep is there and nothing says which column of it the panel published,
     which is a damaged result: every column is a defensible number and only one
-    of them is the one already reported.
+    of them is the one already reported. The unweighted table stands for all of
+    them here because cafaeval writes it on every run; the grid's variant picks
+    the one that is read (:data:`BEST_TABLE_FOR_VARIANT`).
     """
     grid = eval_artifact_key(result_id, f"{setting}/{GRID_FILENAME}")
     if not store.exists(grid):
@@ -340,19 +343,36 @@ def _panel_keys(store: Any, result_id: uuid.UUID, setting: str) -> tuple[str, st
                 "run scored no proteins in this setting, so its panels cannot be opened"
             ),
         )
-    best_f = eval_artifact_key(result_id, f"{setting}/{BEST_F_FILENAME}")
-    if not store.exists(best_f):
+    best = {
+        v: eval_artifact_key(result_id, f"{setting}/{t}") for v, t in BEST_TABLE_FOR_VARIANT.items()
+    }
+    if not store.exists(best["unweighted"]):
         raise HTTPException(
             status_code=404,
             detail=(
                 f"evaluation result {result_id} has a {setting}/{GRID_FILENAME} and no "
-                f"{setting}/{BEST_F_FILENAME}, so the grid holds the whole sweep and "
+                f"{setting}/{BEST_TABLE_FOR_VARIANT['unweighted']}, so the grid holds a sweep and "
                 "nothing says which threshold the panel published. Refusing rather than "
                 "picking one: every column is a defensible number and only one of them "
                 "is the one already reported"
             ),
         )
-    return grid, best_f
+    return grid, best
+
+
+def _best_table_reader(store: Any, keys: dict[str, str], where: str) -> Callable[[str], str]:
+    """The text of a variant's best table, or a 409 when the store lacks it."""
+
+    def read(variant: str) -> str:
+        if not store.exists(keys[variant]):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{where}: no {keys[variant]}, the table whose threshold a "
+                f"{variant} panel publishes; refusing to read another measure's",
+            )
+        return store.get(keys[variant]).decode()
+
+    return read
 
 
 class _Footer(NamedTuple):
@@ -397,7 +417,7 @@ def _grid_footer(table: Any, *, result_id: str, setting: str) -> _Footer:
 def _tau_column(footer: _Footer, best_f: str, namespace: str, *, where: str) -> tuple[float, int]:
     """The threshold this namespace published, and the column that holds it.
 
-    Read from cafaeval's own best-F table and not chosen here. A page of
+    Read from cafaeval's best table of the variant's micro F, not chosen here. A page of
     proteins shown at a threshold other than its panel's would be a different
     measurement wearing the same label, and nothing downstream could tell.
     """
@@ -434,7 +454,7 @@ class _NamespaceNotScored(Exception):
 
 def _sliced_at_the_published_tau(
     grid: Any,
-    best_f: str,
+    best_table: Callable[[str], str],
     namespace: str,
     *,
     result_id: str,
@@ -448,7 +468,8 @@ def _sliced_at_the_published_tau(
     here, which is the same arithmetic over the same columns at the same tau
     that produces the panel's own cell -- so a row cannot disagree with the
     cell it is inside, which is a stronger property than reading a stored
-    ratio from a second file.
+    ratio from a second file. ``best_table`` is asked after the footer is read,
+    because the grid's variant decides whose maximum the slice is at.
     """
     import pandas as pd
     import pyarrow.parquet as pq
@@ -456,9 +477,8 @@ def _sliced_at_the_published_tau(
     table = pq.read_table(grid)
     footer = _grid_footer(table, result_id=result_id, setting=setting)
     try:
-        tau, position = _tau_column(
-            footer, best_f, namespace, where=f"evaluation result {result_id}, setting {setting}"
-        )
+        where = f"evaluation result {result_id}, setting {setting}"
+        tau, position = _tau_column(footer, best_table(footer.variant), namespace, where=where)
     except _NamespaceNotScored:
         return pd.DataFrame(columns=["protein_accession", "namespace", "tau"])
     tp_col, pred_col, gt_col = _VARIANT_COLUMNS[footer.variant]
@@ -731,13 +751,13 @@ def stratum_proteins(
             session, _ARM, evaluation_result_id, setting, namespace)
     prediction_set_id = arm["prediction_set_id"]
 
-    key, best_f_key = _panel_keys(store, evaluation_result_id, setting)
+    key, best_keys = _panel_keys(store, evaluation_result_id, setting)
 
     def produce() -> _Placed:
 
         frame = _sliced_at_the_published_tau(
             io.BytesIO(store.get(key)),
-            store.get(best_f_key).decode(),
+            _best_table_reader(store, best_keys, f"evaluation result {evaluation_result_id}"),
             namespace,
             result_id=str(evaluation_result_id),
             setting=setting,

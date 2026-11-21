@@ -366,14 +366,37 @@ def _best_f(tau: float = _REPORTED, ns: str = "biological_process") -> str:
     return f"filename\tns\ttau\tf\npredictions.tsv\t{ns}\t{tau}\t0.5\n"
 
 
-def _slice(grid: bytes, best_f: str, ns: str = "biological_process"):
+def _slice(grid: bytes, best, ns: str = "biological_process"):
+    """Slice a grid; ``best`` is one table for any variant, or a variant -> table map."""
     import io as _io
 
     from protea.api.routers.stratum_proteins import _sliced_at_the_published_tau
 
-    return _sliced_at_the_published_tau(
-        _io.BytesIO(grid), best_f, ns, result_id="r", setting="NK"
-    )
+    table = best if callable(best) else (lambda _variant: best)
+    return _sliced_at_the_published_tau(_io.BytesIO(grid), table, ns, result_id="r", setting="NK")
+
+
+def test_each_variant_is_read_at_its_own_micro_maximum():
+    """The threshold comes from the best table of the grid variant's micro F.
+
+    cafaeval's protein-centric table peaks elsewhere: on 211->227 it said tau
+    0.31 where the cell's ``f_micro_w`` peaks at 0.57, and a page cut there
+    summed to 0.390 inside a cell that publishes 0.4405. Here the two variants'
+    tables name different thresholds, so asking for the wrong one shows up as
+    the wrong tau.
+    """
+    tables = {"weighted": _best_f(tau=0.75), "unweighted": _best_f(tau=0.5)}
+    asked: list[str] = []
+
+    def best(variant: str) -> str:
+        asked.append(variant)
+        return tables[variant]
+
+    weighted = _slice(_grid_bytes([_grid_row("P1", variant="weighted")], variant="weighted"), best)
+    unweighted = _slice(_grid_bytes([_grid_row("P1")]), best)
+    assert asked == ["weighted", "unweighted"]
+    assert weighted["tau"].tolist() == [0.75]
+    assert unweighted["tau"].tolist() == [0.5]
 
 
 def test_the_slice_is_at_the_threshold_the_panel_published():
@@ -517,7 +540,7 @@ def test_the_endpoint_asks_for_the_grid_and_the_best_f_table():
 
     source = inspect.getsource(module._panel_keys)
     assert "GRID_FILENAME" in source
-    assert "BEST_F_FILENAME" in source
+    assert "BEST_TABLE_FOR_VARIANT" in source
     # The legacy name survives in the module docstring, which explains why the
     # endpoint moved; what must not survive is a key built from it.
     assert "per_protein.parquet" not in source
