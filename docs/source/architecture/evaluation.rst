@@ -608,7 +608,12 @@ interior maximum. A figure at an edge is not a maximum and no verdict is read
 from it (ADR-D55, section 6); the window page marks it beside the figure and
 says so in its tooltip. The cell's own ``tau`` is the threshold of the
 unweighted ``fmax``, not of the headline: on 211 -> 227, LK's cellular component
-reads 0.97 there and 0.99 for ``f_micro_w``.
+reads 0.97 there and 0.99 for ``f_micro_w``. How the scores were read before
+the grid (``results.reading``): ``score_reading``, ``raw`` (LAFA's reading) or
+``percentile_rank`` (ADR-D55's comparison reading), and the grid's ``th_step``.
+Two results of one scored set can differ in these alone, and the window page
+names each result's reading; a result written before 2026-11-21 takes it from
+the payload of the job that evaluated it.
 
 **The files behind each figure.** A result records every file the run wrote:
 ``results.artifacts.keys`` lists their keys in the artifact store, and since

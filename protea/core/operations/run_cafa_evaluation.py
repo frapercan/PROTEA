@@ -325,6 +325,10 @@ class RunCafaEvaluationOperation:
                 ctx.inputs.toi_rule, ctx.inputs.toi_go_ids, run_data.toi_path
             )
             results["population"] = population_record(ctx.inputs.data)
+            # How the scores were read before cafaeval thresholded them (ADR-D55,
+            # section 6) and on which grid: two results of one scored set can
+            # differ in these alone, and the record has to say which is which.
+            results["reading"] = {"score_reading": p.score_reading, "th_step": p.th_step}
             return results
 
     def _stage_evaluator_inputs(
