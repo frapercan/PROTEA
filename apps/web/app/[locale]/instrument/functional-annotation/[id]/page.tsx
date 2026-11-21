@@ -27,6 +27,11 @@ const GoGraph = dynamic(() => import("@/components/GoGraph"), { ssr: false });
 
 type Tab = "proteins" | "distribution";
 
+/** What the page says while a set's counts are read: they are counted on every
+ *  visit, which on a set of about two million candidates takes up to 20 s. */
+const LOADING_NOTE =
+  "Loading\u2026 This set's counts are computed on every visit: on a set of a few million candidates it takes up to 20 s.";
+
 const ASPECT_LABELS: Record<string, string> = {
   F: "Molecular Function",
   P: "Biological Process",
@@ -620,6 +625,9 @@ const tToast = useTranslations("toasts");
   const [setScoringConfigName, setSetScoringConfigName] = useState<string | null>(null);
   // A candidate set: the scored sets made from it, one per scoring job.
   const [scoredSets, setScoredSets] = useState<ScoredSetSummary[]>([]);
+  // Until the set's record arrives, the page says it is loading rather than
+  // stating anything about the set: on a large set the record takes seconds.
+  const [setLoaded, setSetLoaded] = useState(false);
   // A failure loading the prediction set means this whole page has no
   // subject to render. A missing id resolves to the not-found boundary;
   // any other failure is re-thrown to the route error boundary. Both
@@ -636,7 +644,9 @@ const tToast = useTranslations("toasts");
   const [proteinOffset, setProteinOffset] = useState(0);
   const [proteinSearch, setProteinSearch] = useState("");
   const [proteinSearchInput, setProteinSearchInput] = useState("");
-  const [loadingProteins, setLoadingProteins] = useState(false);
+  // True from the first render: the first page of proteins is being counted, and
+  // "0 proteins" before it arrives would read as a fact about the set.
+  const [loadingProteins, setLoadingProteins] = useState(true);
 
   // Inline detail
   const [selectedAccession, setSelectedAccession] = useState<string | null>(null);
@@ -663,6 +673,7 @@ const tToast = useTranslations("toasts");
         setSetScoringConfigId(ps.scoring_config_id ?? null);
         setSetScoringConfigName(ps.scoring_config_name ?? null);
         setScoredSets(ps.scored_sets ?? []);
+        setSetLoaded(true);
       })
       .catch((e: unknown) => {
         // A missing id is a 404: hand it to not-found, not the generic
@@ -758,7 +769,11 @@ const tToast = useTranslations("toasts");
             <p className="text-xs text-slate-600 mt-0.5">k = {limitPerEntry}</p>
           )}
         </div>
-        {scoredFrom ? (
+        {!setLoaded ? (
+          <p className="text-xs text-slate-600" data-testid="set-loading-notice">
+            {LOADING_NOTE}
+          </p>
+        ) : scoredFrom ? (
           <div className="flex flex-wrap items-center gap-2">
             {/* A scored set's scores are stored, and they are the ones the
               evaluator reads, so nothing is recomputed here. */}
@@ -869,7 +884,9 @@ const tToast = useTranslations("toasts");
                 </button>
               )}
             </form>
-            <span className="text-sm text-slate-600">{formatCount(proteinTotal)} proteins</span>
+            <span className="text-sm text-slate-600">
+              {loadingProteins ? "Counting proteins\u2026" : `${formatCount(proteinTotal)} proteins`}
+            </span>
           </div>
 
           {/* Mobile card list */}
@@ -1018,7 +1035,7 @@ const tToast = useTranslations("toasts");
       {/* ── GO Distribution ── */}
       {activeTab === "distribution" && (
         <div>
-          {loadingDist && <p className="text-sm text-slate-600">Loading…</p>}
+          {loadingDist && <p className="text-sm text-slate-600">{LOADING_NOTE}</p>}
 
           {distribution && (
             <div className="space-y-6">
