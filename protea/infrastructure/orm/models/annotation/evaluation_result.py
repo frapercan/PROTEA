@@ -34,7 +34,8 @@ class EvaluationResult(Base):
                     "f_micro": 0.43, "fmax_w": 0.30,
                     "f_micro_w": 0.26, "precision_w": 0.33,
                     "recall_w": 0.22, "coverage_w": 0.95,
-                    "coverage_w_at_tau": 0.93},
+                    "coverage_w_at_tau": 0.93, "n_targets": 107,
+                    "n_targets_w": 105},
             "MFO": {...},
             "CCO": {...}
           },
@@ -47,7 +48,10 @@ class EvaluationResult(Base):
     micro precision / recall / coverage (``precision_w`` / ``recall_w`` /
     ``coverage_w_at_tau``, the coverage at the reported threshold, which is
     LAFA's ``cov_w``; ``coverage_w`` is the largest coverage over every
-    threshold, cafaeval's ``cov_max``). The plain ``fmax`` / ``precision`` / ``recall`` are the
+    threshold, cafaeval's ``cov_max``). ``n_targets`` / ``n_targets_w`` are the
+    cell's size in each variant, the denominators of its coverage, while
+    ``n_proteins`` is cafaeval's ``n``, the proteins with a prediction at the
+    reported threshold. The plain ``fmax`` / ``precision`` / ``recall`` are the
     unweighted equivalents kept for history; they are not LAFA-comparable
     (see docs/EVAL_LAFA_PARITY.md). The ``_w`` keys are populated only when a
     real IA file was supplied to cafaeval; with the uniform IC=1 fallback
