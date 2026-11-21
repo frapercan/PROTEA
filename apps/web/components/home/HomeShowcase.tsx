@@ -124,7 +124,7 @@ function formatParamCount(n: number | null): string {
 // ("/proteins", "/benchmark", ...), so map the moved ones onto their
 // instrument path before the locale is applied.
 const INSTRUMENT_ROUTES = new Set([
-  "benchmark", "datasets", "embeddings", "evaluation", "functional-annotation",
+  "datasets", "embeddings", "evaluation", "functional-annotation",
   "jobs", "proteins", "query-sets", "reranker", "scoring", "annotations",
   "stack", "farm",
 ]);
@@ -255,10 +255,10 @@ export async function HomeShowcase() {
             <div className="flex items-center gap-3 shrink-0">
               <ShareBestLinkButton evaluationResultId={best.evaluation_result_id} />
               <Link
-                href={`/${locale}/instrument/benchmark`}
+                href={`/${locale}/instrument/evaluation`}
                 className="text-[13px] font-medium text-blue-600 hover:text-blue-800 transition-colors inline-flex items-center gap-1"
               >
-                {t("viewBenchmark")}
+                {t("viewWindows")}
                 <span aria-hidden>→</span>
               </Link>
             </div>

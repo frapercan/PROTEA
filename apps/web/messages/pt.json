@@ -12,7 +12,6 @@
     "functionalAnnotation": "Busca KNN",
     "scoring": "Scoring",
     "evaluation": "Avaliação CAFA",
-    "benchmark": "Benchmark",
     "graph": "Grafo de experimentação",
     "stratum": "Dentro de um painel",
     "reranker": "Re-Ranker",
@@ -46,7 +45,7 @@
     "farmCost": "Custo",
     "pipelineHint": "Da sequência ao termo GO",
     "dataHint": "Proteoma de referência, ground truth, query sets",
-    "resultsHint": "Matriz de benchmark e avaliação CAFA",
+    "resultsHint": "Janelas, os seus painéis e avaliação CAFA",
     "operationsHint": "Filas, manutenção, saúde do stack",
     "groupAnnotate": "Anotar",
     "groupAnnotateLabel": "Executar o pipeline nas suas sequências",
@@ -89,7 +88,7 @@
     "bestResults": "Melhores Resultados",
     "bestOverall": "Melhor resultado geral",
     "avgFmaxAcrossCells": "Fmax médio sobre 9 células",
-    "viewBenchmark": "Ver benchmark completo",
+    "viewWindows": "Ver todas as janelas",
     "pipelineStageBaseline": "baseline",
     "pipelineStageAlignmentWeighted": "ponderado por alinhamento",
     "pipelineStageReranker": "re-ranker",
@@ -270,20 +269,6 @@
         "A pair with no voting neighbour has no score. The empty states on this page are the honest answer, never a fabricated value."
       ]
     }
-  },
-  "benchmark": {
-    "loadingTitle": "Carregando benchmark…",
-    "title": "Matriz do benchmark",
-    "awaitingTitle": "Construído, aguardando dados",
-    "awaitingBody": "O benchmark está construído e funcionando. Ele compara modelos de linguagem de proteínas nas nove células de avaliação, três regimes de conhecimento cruzados com os três ramos da Gene Ontology, sobre uma divisão temporal sem vazamento. Ainda não tem nada para plotar porque o corpus de anotações contra o qual ele pontua está sendo reconstruído.",
-    "awaitingDetail": "Em {asOf} a campanha já leu {read, number} das {releases, number} versões do GOA da série, {gigabytes, number} GB no total.",
-    "awaitingJobs": "Acompanhar a fila de trabalhos",
-    "awaitingGraph": "Ver o instrumento",
-    "loadingHint": "Resolvendo embeddings e matriz.",
-    "loadingStepMatrix": "Matriz",
-    "loadingStepEmbeddings": "Embeddings",
-    "loadingRowsPreview": "Pré-visualização de linhas",
-    "backToHome": "Voltar ao início"
   },
   "stratum": {
     "title": "Dentro de um painel",
@@ -1080,7 +1065,7 @@
         "title": "Ainda não há anotações executadas",
         "body": "Cada execução produz um PredictionSet com scores GO por proteína, baixável como TSV ou exportável para cafaeval. Assim que você iniciar a primeira na aba anterior, ela aparece aqui.",
         "ctaPrimary": "Ir para Executar Anotação",
-        "ctaSecondary": "Você também pode ver exemplos em /benchmark"
+        "ctaSecondary": "Também pode comparar os braços de cada janela no seu painel, em Avaliação."
       },
       "tableHeaders": {
         "id": "ID",
@@ -1134,10 +1119,13 @@
       "scoring": "Scoring:",
       "artifactsDownload": "↓ Artefatos (.zip)",
       "resultDelete": "Excluir",
-      "deleteResultConfirm": "Excluir este resultado de avaliação?"
+      "deleteResultConfirm": "Excluir este resultado de avaliação?",
+      "openPanel": "Abrir o painel da janela"
     },
     "evaluationSetsSection": {
-      "heading": "Conjuntos de avaliação"
+      "heading": "Conjuntos de avaliação",
+      "superseded": "Janelas superadas ({count})",
+      "supersededBy": "substituída por"
     },
     "generateSection": {
       "heading": "Novo conjunto de avaliação",

@@ -12,7 +12,6 @@
     "functionalAnnotation": "KNN 检索",
     "scoring": "评分",
     "evaluation": "CAFA 评估",
-    "benchmark": "基准",
     "graph": "实验图",
     "stratum": "面板内部",
     "reranker": "重排序器",
@@ -46,7 +45,7 @@
     "farmCost": "费用",
     "pipelineHint": "从序列到 GO 术语",
     "dataHint": "参考蛋白质组、ground truth、查询集",
-    "resultsHint": "基准矩阵与 CAFA 评估",
+    "resultsHint": "窗口、其面板与 CAFA 评估",
     "operationsHint": "队列、维护、栈状态",
     "groupAnnotate": "注释",
     "groupAnnotateLabel": "在你的序列上运行流水线",
@@ -89,7 +88,7 @@
     "bestResults": "最佳结果",
     "bestOverall": "全局最佳",
     "avgFmaxAcrossCells": "9 个单元的平均 Fmax",
-    "viewBenchmark": "查看完整基准",
+    "viewWindows": "查看全部窗口",
     "pipelineStageBaseline": "baseline",
     "pipelineStageAlignmentWeighted": "对齐加权",
     "pipelineStageReranker": "重排序器",
@@ -270,20 +269,6 @@
         "A pair with no voting neighbour has no score. The empty states on this page are the honest answer, never a fabricated value."
       ]
     }
-  },
-  "benchmark": {
-    "loadingTitle": "正在加载基准…",
-    "title": "基准测试矩阵",
-    "awaitingTitle": "已构建，等待数据",
-    "awaitingBody": "该基准测试已构建并在运行。它在九个评估单元上比较蛋白质语言模型，即三种知识层级与 Gene Ontology 三个分支的交叉，并基于无泄漏的时间划分。它目前还没有可绘制的内容，因为其评分所依据的注释语料库正在重建。",
-    "awaitingDetail": "截至 {asOf}，本轮运行已读取该系列 {releases, number} 个 GOA 版本中的 {read, number} 个，共 {gigabytes, number} GB。",
-    "awaitingJobs": "查看任务队列",
-    "awaitingGraph": "查看仪器",
-    "loadingHint": "正在解析嵌入向量和矩阵。",
-    "loadingStepMatrix": "矩阵",
-    "loadingStepEmbeddings": "嵌入向量",
-    "loadingRowsPreview": "行预览",
-    "backToHome": "返回首页"
   },
   "stratum": {
     "title": "面板内部",
@@ -1080,7 +1065,7 @@
         "title": "尚未运行任何注释",
         "body": "每次运行都会生成一个 PredictionSet，包含每个蛋白的 GO 评分，可下载为 TSV 或导出到 cafaeval。在上一个标签页启动首次运行后，结果将显示在此处。",
         "ctaPrimary": "前往运行注释",
-        "ctaSecondary": "也可在 /benchmark 查看基准示例"
+        "ctaSecondary": "也可以在“评估”中，于每个窗口的面板里比较各分支。"
       },
       "tableHeaders": {
         "id": "ID",
@@ -1134,10 +1119,13 @@
       "scoring": "评分：",
       "artifactsDownload": "↓ 产物（.zip）",
       "resultDelete": "删除",
-      "deleteResultConfirm": "删除此评估结果？"
+      "deleteResultConfirm": "删除此评估结果？",
+      "openPanel": "打开该窗口的面板"
     },
     "evaluationSetsSection": {
-      "heading": "评估集"
+      "heading": "评估集",
+      "superseded": "已被取代的窗口（{count}）",
+      "supersededBy": "取代它的窗口："
     },
     "generateSection": {
       "heading": "新建评估集",

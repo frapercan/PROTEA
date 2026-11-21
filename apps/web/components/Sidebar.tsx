@@ -361,9 +361,8 @@ export function Sidebar({
       items: [
         { href: "/instrument/explorations", label: t("explorations"), hint: "One hypothesis each: its frozen rules, its receipt, its report and its review", icon: FlaskConical },
         { href: "/instrument/graph", label: t("graph"), hint: "Every decision as a node, with the strength of the evidence behind it", icon: Workflow , needsData: true },
-        { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 , needsData: true },
         { href: "/instrument/stratum", label: t("stratum"), hint: "One cell opened into its proteins, banded by length and by donor identity", icon: Rows3 , needsData: true },
-        { href: "/instrument/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge , needsData: true },
+        { href: "/instrument/evaluation", label: t("evaluation"), hint: "Each window and its panel: the arms in its nine cells, by depth, over time and by strata", icon: Gauge , needsData: true },
       ],
     },
     {

@@ -12,7 +12,6 @@
     "functionalAnnotation": "KNN Search",
     "scoring": "Scoring",
     "evaluation": "CAFA Evaluation",
-    "benchmark": "Benchmark",
     "graph": "Experiment graph",
     "stratum": "Inside a panel",
     "reranker": "Re-ranker",
@@ -46,7 +45,7 @@
     "farmCost": "Cost",
     "pipelineHint": "From sequence to GO term",
     "dataHint": "Reference proteome, ground truth, query sets",
-    "resultsHint": "Benchmark matrix and CAFA evaluation",
+    "resultsHint": "Windows, their panels and CAFA evaluation",
     "operationsHint": "Queues, maintenance, stack health",
     "groupAnnotate": "Annotate",
     "groupAnnotateLabel": "Run the pipeline on your sequences",
@@ -88,7 +87,7 @@
     "bestResults": "Best Results",
     "bestOverall": "Best Overall",
     "avgFmaxAcrossCells": "mean Fmax across 9 cells",
-    "viewBenchmark": "View full benchmark",
+    "viewWindows": "See every window",
     "pipelineStageBaseline": "baseline",
     "pipelineStageAlignmentWeighted": "alignment-weighted",
     "pipelineStageReranker": "re-ranker",
@@ -269,20 +268,6 @@
         "A pair with no voting neighbour has no score. The empty states on this page are the honest answer, never a fabricated value."
       ]
     }
-  },
-  "benchmark": {
-    "loadingTitle": "Loading benchmark…",
-    "title": "Benchmark matrix",
-    "awaitingTitle": "Built, waiting on data",
-    "awaitingBody": "The benchmark is built and running. It compares protein language models across the nine evaluation cells, three knowledge regimes crossed with the three branches of the Gene Ontology, on a leakage-free temporal split. It has nothing to plot yet because the annotation corpus it scores against is being rebuilt.",
-    "awaitingDetail": "As of {asOf} the campaign has read {read, number} of the series' {releases, number} GOA releases, {gigabytes, number} GB in all.",
-    "awaitingJobs": "Watch the job queue",
-    "awaitingGraph": "See the instrument",
-    "loadingHint": "Resolving embeddings and matrix.",
-    "loadingStepMatrix": "Matrix",
-    "loadingStepEmbeddings": "Embeddings",
-    "loadingRowsPreview": "Rows preview",
-    "backToHome": "Back to home"
   },
   "stratum": {
     "title": "Inside a panel",
@@ -1079,7 +1064,7 @@
         "title": "No annotations run yet",
         "body": "Each run produces a PredictionSet with per-protein GO scores, downloadable as TSV or exportable to cafaeval. Once you launch the first one from the previous tab, it shows up here.",
         "ctaPrimary": "Go to Run Annotation",
-        "ctaSecondary": "You can also see benchmark examples in /benchmark"
+        "ctaSecondary": "You can also compare the arms of each window in its panel, under Evaluation."
       },
       "tableHeaders": {
         "id": "ID",
@@ -1133,10 +1118,13 @@
       "scoring": "Scoring:",
       "artifactsDownload": "↓ Artifacts (.zip)",
       "resultDelete": "Delete",
-      "deleteResultConfirm": "Delete this evaluation result?"
+      "deleteResultConfirm": "Delete this evaluation result?",
+      "openPanel": "Open the window's panel"
     },
     "evaluationSetsSection": {
-      "heading": "Evaluation Sets"
+      "heading": "Evaluation Sets",
+      "superseded": "Superseded windows ({count})",
+      "supersededBy": "superseded by"
     },
     "generateSection": {
       "heading": "New Evaluation Set",
