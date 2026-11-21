@@ -305,6 +305,11 @@ from protea.services._annotations_method_helpers import (  # noqa: E402,F401
     iter_delta_proteins_fasta,
 )
 
+# The paired comparisons of a window's results, read from their jobs.
+from protea.services._annotations_paired_helpers import (  # noqa: E402,F401
+    list_paired_comparisons_data,
+)
+
 # iter_evaluation_artifacts_zip + render_evaluation_metrics_tsv live in
 # _annotations_streaming_helpers (no domain-exception coupling).
 from protea.services._annotations_streaming_helpers import (  # noqa: E402,F401
@@ -334,6 +339,7 @@ __all__ = [
     "iter_evaluation_artifacts_zip",
     "iter_groundtruth_tsv",
     "list_evaluation_results_data",
+    "list_paired_comparisons_data",
     "render_evaluation_metrics_tsv",
     "list_annotation_sets_data",
     "list_evaluation_sets_data",

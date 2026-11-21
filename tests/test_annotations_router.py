@@ -1335,6 +1335,43 @@ class TestDownloadOneEvaluationArtifact:
 
 
 # ---------------------------------------------------------------------------
+# GET .../paired-comparisons
+# ---------------------------------------------------------------------------
+
+
+class TestListPairedComparisons:
+    def test_it_lists_the_windows_comparisons(self, client):
+        from datetime import UTC, datetime
+
+        c, session = client
+        eval_id, a, b = uuid4(), uuid4(), uuid4()
+        session.get.return_value = _make_evaluation_set(eval_id=eval_id)
+        session.query.return_value.filter.return_value.__iter__.return_value = iter([(a,), (b,)])
+        session.execute.return_value.mappings.return_value = [
+            {
+                "job_id": "j1",
+                "evaluation_result_id": str(a),
+                "baseline_evaluation_result_id": str(b),
+                "finished_at": datetime(2026, 11, 21, tzinfo=UTC),
+                "result": {"method_axis": [], "panels": {"NK:BPO": {"delta": 0.01, "x": 1}}},
+            }
+        ]
+
+        resp = c.get(f"/annotations/evaluation-sets/{eval_id}/paired-comparisons")
+        assert resp.status_code == 200
+        (shown,) = resp.json()
+        assert shown["job_id"] == "j1" and shown["method_axis"] == []
+        assert shown["panels"]["NK:BPO"]["delta"] == 0.01
+        assert "x" not in shown["panels"]["NK:BPO"]
+
+    def test_a_missing_window_is_not_found(self, client):
+        c, session = client
+        session.get.return_value = None
+        resp = c.get(f"/annotations/evaluation-sets/{uuid4()}/paired-comparisons")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # GET .../results (lines 800-809)
 # ---------------------------------------------------------------------------
 

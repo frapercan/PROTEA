@@ -29,6 +29,7 @@ def evaluation_result_to_dict(
     r: EvaluationResult,
     code_revision: str | None = None,
     score_reading: str | None = None,
+    arm: dict[str, str | None] | None = None,
 ) -> dict[str, Any]:
     """Serialise an :class:`EvaluationResult` to its API dict shape.
 
@@ -58,6 +59,9 @@ def evaluation_result_to_dict(
         # the result's own record, else the job's payload, else None.
         "score_reading": ((r.results or {}).get("reading") or {}).get("score_reading")
         or score_reading,
+        # What the evaluated set is, in a reader's words: its model, the scoring
+        # it read and its method, each None where the set has none.
+        "arm": arm,
         "created_at": r.created_at.isoformat(),
         # F-METHOD-EVAL-SURFACE provenance (read-through; ``None`` on legacy
         # rows so the UI shows an "unknown" empty state).
@@ -92,11 +96,13 @@ def list_evaluation_results_data(
     jobs = [r.job_id for r in rows if r.job_id]
     revisions = job_revisions(session, jobs)
     readings = job_readings(session, jobs)
+    arms = prediction_set_arms(session, [r.prediction_set_id for r in rows])
     return [
         evaluation_result_to_dict(
             r,
             revisions.get(str(r.job_id)) if r.job_id else None,
             readings.get(str(r.job_id)) if r.job_id else None,
+            arms.get(str(r.prediction_set_id)),
         )
         for r in rows
     ]
@@ -140,6 +146,40 @@ def job_readings(session: Session, job_ids: list[uuid.UUID]) -> dict[str, str]:
         return {}
     rows = session.execute(_JOB_READINGS, {"jobs": [str(j) for j in job_ids]}).mappings()
     return {r["job_id"]: r["score_reading"] for r in rows}
+
+
+#: Each prediction set's model, scoring and method. A scored set carries its
+#: candidate set's configuration and method, and names its scoring in ``meta``.
+_ARMS = text(
+    """
+    SELECT ps.id::text AS prediction_set_id,
+           ec.model_name AS model,
+           sc.name AS scoring,
+           m.short_name AS method
+    FROM prediction_set ps
+    LEFT JOIN embedding_config ec ON ec.id = ps.embedding_config_id
+    LEFT JOIN scoring_config sc ON sc.id::text = ps.meta ->> 'scoring_config_id'
+    LEFT JOIN method m ON m.id = ps.method_id
+    WHERE ps.id = ANY(CAST(:sets AS uuid[]))
+    """
+)
+
+
+def prediction_set_arms(
+    session: Session, set_ids: list[uuid.UUID]
+) -> dict[str, dict[str, str | None]]:
+    """prediction set id -> its model, scoring and method, each None where it has none."""
+    if not set_ids:
+        return {}
+    rows = session.execute(_ARMS, {"sets": [str(s) for s in set_ids]}).mappings()
+    return {
+        r["prediction_set_id"]: {
+            "model": r["model"],
+            "scoring": r["scoring"],
+            "method": r["method"],
+        }
+        for r in rows
+    }
 
 
 def get_eval_result_with_keys(

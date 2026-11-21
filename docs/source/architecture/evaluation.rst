@@ -627,6 +627,18 @@ header, so whoever downloads it can check that the bytes are the ones the
 figures were read from. The window page names the file and the digest behind
 each cell. Results made before 2026-11-21 record the keys only.
 
+**Paired comparisons on the window page.** ``compare_paired_panels`` writes no
+row of its own; its job is its record. ``GET
+/annotations/evaluation-sets/{id}/paired-comparisons`` reads, from those jobs,
+the latest whole-panel comparison of each pair of the window's results: the
+method axis it declared, its operating point and resampling, and per panel the
+difference of ``f_micro_w`` (the arm under test minus the baseline), its
+interval and the interval's method, the verdict and the number of paired
+proteins. The window page shows them against a baseline the reader picks, and
+marks a cell where either side's headline peaks at an edge of the threshold
+grid. Each result in the list also names its arm: the model of its set, the
+scoring it read and its method.
+
 **Obsolete metrics.** Unweighted ``fmax`` / ``f_micro`` (equal weight on all
 GO terms) are superseded by IA-weighted ``f_micro_w``; they are kept for
 history but are not LAFA-comparable. Numbers from the v226 evaluation window
