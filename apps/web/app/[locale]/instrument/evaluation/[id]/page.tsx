@@ -80,6 +80,8 @@ type EvaluationResult = {
   reranker_model_id: string | null;
   reranker_config: Record<string, Record<string, string>> | null;
   job_id: string | null;
+  /** The code revision the evaluating job recorded when it started. */
+  code_revision: string | null;
   created_at: string;
   // Method-surface provenance (slice F-METHOD-EVAL-SURFACE). Optional:
   // null on rows written before the columns existed; the badge strip then
@@ -349,7 +351,31 @@ export default function EvaluationDetailPage() {
                             className="px-3 py-2 font-mono text-xs"
                             title={r.id}
                           >
-                            {shortId(r.id)}
+                            {/* Where the row's numbers came from: the result,
+                              the job that computed them and the code it ran. */}
+                            <div className="flex flex-col gap-0.5">
+                              <span>{shortId(r.id)}</span>
+                              {r.job_id ? (
+                                <Link
+                                  href={`/${params.locale}/instrument/jobs/${r.job_id}`}
+                                  className="text-[10px] text-blue-600 hover:underline"
+                                  title={r.job_id}
+                                >
+                                  job {shortId(r.job_id)}
+                                </Link>
+                              ) : null}
+                              {r.code_revision ? (
+                                <a
+                                  href={`https://github.com/frapercan/PROTEA/commit/${r.code_revision}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[10px] text-slate-500 hover:underline"
+                                  title={r.code_revision}
+                                >
+                                  {r.code_revision.slice(0, 7)}
+                                </a>
+                              ) : null}
+                            </div>
                           </td>
                           {/* Forward link to the prediction set so reviewers can
                             jump straight to the proteins+candidate-GO rows
