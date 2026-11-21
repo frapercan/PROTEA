@@ -75,7 +75,9 @@ def _sources(families: object | None = None, scope: str | None = None) -> op.Sou
     lexicon = SimpleNamespace(id=uuid.uuid4(), sha256="a" * 64, name="lexico-test")
     bank = SimpleNamespace(id=uuid.uuid4(), manifest_sha256="c" * 64)
     photo = SimpleNamespace(cut_release=211, ontology_snapshot_id=uuid.uuid4())
-    return op.Sources(SimpleNamespace(), photo, bank, lexicon, families, scope)  # type: ignore[arg-type]
+    # A reconciled window: the specs these tests pin are the ones such a window has always had.
+    window = SimpleNamespace(truth_profile="as_closed")
+    return op.Sources(window, photo, bank, lexicon, families, scope)  # type: ignore[arg-type]
 
 
 WEIGHTS = SimpleNamespace(id=uuid.uuid4(), sha256="d" * 64)

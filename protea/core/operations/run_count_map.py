@@ -7,8 +7,9 @@ For the window named by ``evaluation_set_id`` (t0 -> t1):
    which must cover that photo. The units are the lexicon's themes, or the
    families of one scope of the segment families named, which must be that
    photo's under that bank.
-2. Every protein's state at t0 (``protea.core._cut_state``): the window's own
-   rules, with t0's NOT terms alone.
+2. Every protein's state at t0 (``protea.core._cut_state.window_state``): the
+   window's own rules, with t0's NOT terms alone; a window of LAFA's frame states
+   it as that frame states an end, under t0's own ontology.
 3. The donors are the photo's truth members and the targets the proteins the
    window's truth scores, both by their sequence md5 in the photo. A target the
    photo gives no sequence is read from the prior alone, and counted.
@@ -39,7 +40,8 @@ from pydantic import PositiveInt, field_validator, model_validator
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from protea.core._cut_state import CutState, cut_state, window_of
+from protea.core import lafa_frame
+from protea.core._cut_state import CutState, window_state
 from protea.core._evaluation_groundtruth import load_evaluation_data_for_set
 from protea.core.contracts.method import Family, InstanceCut, MethodSpec, Pin
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
@@ -69,6 +71,14 @@ from protea.infrastructure.orm.models.embedding.segment_families import SegmentF
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
 from protea.services import model_weights_service as weights_service
+
+#: How a run states every protein at t0, by the window's frame. The words are
+#: part of the method's recipe (``protea.core._cut_state.window_state``).
+RECONCILED_STATE = "the window's rules at t0, with t0's NOT terms only"
+LAFA_STATE = (
+    "named and closed under t0's own ontology as LAFA's frame states an end, each NOT term "
+    "of t0 and everything under it taken out first"
+)
 
 
 class CountMapRefused(SourceGuardError):
@@ -176,7 +186,7 @@ class Gathered:
 
 def gather(session: Session, store: Any, src: Sources) -> Gathered:
     """Every input of the fit and the reading, read at t0."""
-    state = cut_state(session, window_of(src.eset))
+    state = window_state(session, src.eset)
     donor_md5 = member_md5s(session, src.photo.id)
     truth, _ = load_evaluation_data_for_set(session, src.eset)
     targets = sorted(set(truth.nk) | set(truth.lk) | set(truth.pk))
@@ -264,6 +274,17 @@ def register_map(
     return weights_service.register_by_reference(session, store, info, key, sha)
 
 
+def map_code(src: Sources, p: RunCountMapPayload) -> str:
+    """The map's code, which names its method and its weights alike.
+
+    A window of LAFA's frame states t0 its own way, so the same map over it is a
+    variant at the same cut, and a variant needs a code of its own
+    (``method_short_name``); every other window keeps the code it had.
+    """
+    lafa = src.eset.truth_profile == lafa_frame.PROFILE
+    return f"count-map-{p.label}-{src.lexicon.name}" + ("-lafa" if lafa else "")
+
+
 def method_spec(src: Sources, weights: ModelWeights, p: RunCountMapPayload) -> MethodSpec:
     """The method a run is: the recipe, at the photo's cut, pinned to its files.
 
@@ -283,16 +304,17 @@ def method_spec(src: Sources, weights: ModelWeights, p: RunCountMapPayload) -> M
                 (f"segment_families:{src.families.id}",),
             ),
         )
+    lafa = src.eset.truth_profile == lafa_frame.PROFILE
     return MethodSpec(
         family=Family.EXPLAINABLE_UNITS,
-        code=f"count-map-{p.label}-{src.lexicon.name}",
+        code=map_code(src, p),
         instance=InstanceCut(src.photo.cut_release, src.photo.ontology_snapshot_id),
         recipe={
             "source": "count map (ADR-D65)",
             "units": p.units,
             **scoped,
             "donors": "the photo's truth members",
-            "state": "the window's rules at t0, with t0's NOT terms only",
+            "state": LAFA_STATE if lafa else RECONCILED_STATE,
             "exclusion": "the donors that share the target's sequence md5",
             "strength": "per aspect, the leave-group-out bits of the donors: 29 points on log m in [1e-3, 1e4], then 30 golden steps",
             "reading": "the best unit per term, floored at the base rate, NOT terms at t0 and their descendants out, roots out",
@@ -367,7 +389,7 @@ class RunCountMapOperation:
             "info",
         )
         results = fit_all(data, p.top, emit)
-        name = f"count-map-{p.label}-{src.lexicon.name}-{src.photo.cut_release}"
+        name = f"{map_code(src, p)}-{src.photo.cut_release}"
         weights = register_map(session, store, src, results, name)
         method = ensure_method(session, method_spec(src, weights, p))
         done = session.execute(

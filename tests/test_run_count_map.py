@@ -166,3 +166,35 @@ def test_the_same_method_over_the_same_window_is_a_no_op(
         ).scalar_one()
         == 1
     )
+
+
+def test_the_map_over_a_lafa_window_is_another_method_with_a_code_of_its_own() -> None:
+    """A window of LAFA's frame states t0 its own way: a variant at the same cut.
+
+    The reconciled map keeps its code and its recipe, so its method keeps its id;
+    the LAFA one gets ``-lafa`` in its code, which names its method and its
+    weights alike (the store keeps short names unique).
+    """
+    photo = SimpleNamespace(
+        id=uuid.uuid4(),
+        cut_release=211,
+        ontology_snapshot_id=uuid.uuid4(),
+        manifest_sha256="b" * 64,
+    )
+    bank = SimpleNamespace(id=uuid.uuid4(), manifest_sha256="c" * 64)
+    lexicon = SimpleNamespace(id=uuid.uuid4(), name="lexico-test", sha256="a" * 64)
+    weights = SimpleNamespace(id=uuid.uuid4(), sha256="d" * 64)
+    p = op.RunCountMapPayload(
+        evaluation_set_id=str(uuid.uuid4()), lexicon_bank_id=str(uuid.uuid4()), top=5
+    )
+
+    def sources(profile: str) -> op.Sources:
+        return op.Sources(SimpleNamespace(truth_profile=profile), photo, bank, lexicon)  # type: ignore[arg-type]
+
+    reconciled = op.method_spec(sources("as_closed"), weights, p)  # type: ignore[arg-type]
+    lafa = op.method_spec(sources("own_graph"), weights, p)  # type: ignore[arg-type]
+    assert op.map_code(sources("as_closed"), p) == "count-map-themes-lexico-test"
+    assert op.map_code(sources("own_graph"), p) == "count-map-themes-lexico-test-lafa"
+    assert reconciled.recipe["state"] == "the window's rules at t0, with t0's NOT terms only"
+    assert lafa.recipe["state"] == op.LAFA_STATE
+    assert lafa.method_id != reconciled.method_id

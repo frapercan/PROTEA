@@ -23,6 +23,7 @@ from protea.core.lafa_frame import (
     LafaInputs,
     LafaWindow,
     binding_terms,
+    end_state,
     end_truth,
     lafa_truth,
     named,
@@ -320,3 +321,34 @@ class TestTheWindowMustAskForLafasRules:
     def test_any_other_rule_is_refused(self, field: str, value: str) -> None:
         with pytest.raises(ValueError, match="LAFA's frame applies"):
             refuse_unless_lafa(self._window(**{field: value}))
+
+
+class TestAnEndAsAState:
+    """end_state: what a method that fits or reads at one end needs, the truth and the denials."""
+
+    def test_its_truth_is_the_one_end_truth_builds(self) -> None:
+        positives = {"P1": {PROTEIN_KINASE, IDENTICAL_PROTEIN_BINDING}, "P2": {NUCLEUS}}
+        negations = {"P1": {KINASE}}
+        truth, _ = end_state(T0, positives, negations, Counter(), "t0")
+        assert truth == _truth(T0, positives, negations)
+
+    def test_a_protein_is_denied_each_not_term_as_the_end_names_it_and_everything_under_it(
+        self,
+    ) -> None:
+        _, denied = end_state(
+            T0,
+            {"P1": {IDENTICAL_PROTEIN_BINDING}},
+            # GO:0000001 is replaced by the kinase at t0; an id t0 cannot name denies nothing.
+            {"P1": {KINASE}, "P2": {"GO:0000001"}, "P3": {"GO:0999999"}},
+            Counter(),
+            "t0",
+        )
+        assert denied == {"P1": {KINASE, PROTEIN_KINASE}, "P2": {KINASE, PROTEIN_KINASE}}
+
+    def test_the_renamings_are_counted_once(self) -> None:
+        positives, negations = {"P1": {KINASE}}, {"P1": {"GO:0000001"}}
+        as_truth: Counter[str] = Counter()
+        as_state: Counter[str] = Counter()
+        end_truth(T0, positives, negations, as_truth, "t0")
+        end_state(T0, positives, negations, as_state, "t0")
+        assert as_state == as_truth

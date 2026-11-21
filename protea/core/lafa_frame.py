@@ -201,6 +201,38 @@ def end_truth(
     )
 
 
+def end_state(
+    ontology: EndOntology,
+    positives: Mapping[str, Iterable[str]],
+    negations: Mapping[str, Iterable[str]],
+    counts: Counter[str],
+    end: str,
+) -> tuple[ByAspect, dict[str, set[str]]]:
+    """One end as a state: its truth, as :func:`end_truth` builds it, and what each protein is denied.
+
+    The denied terms are the ones the negation takes out: each ``NOT`` id of the
+    protein named under this end's ontology, and every term under it. A truth
+    needs only the first half; a state that a method fits on or reads needs
+    both, so it never gives a protein a term the end says it does not have.
+    """
+    walks = _Walks(ontology)
+    truth = _propagated(
+        ontology, walks, _direct_terms(ontology, walks, positives, negations, counts, end)
+    )
+    denied: dict[str, set[str]] = {}
+    for protein, go_ids in negations.items():
+        # Named again with a counter of its own: _direct_terms has already
+        # counted the renamings of every protein that holds a positive term.
+        terms = {
+            term
+            for go_id in named(ontology, go_ids, Counter(), f"{end}_not")
+            for term in walks.descendants(go_id)
+        }
+        if terms:
+            denied[protein] = terms
+    return truth, denied
+
+
 def _made_by_the_ontology(
     pk: Mapping[str, set[str]],
     direct_t0: Mapping[str, set[str]],

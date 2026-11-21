@@ -15,11 +15,14 @@ evaluator's own functions, called on one side.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 
+from protea.core import lafa_frame
 from protea.core._evaluation_graph import _load_children_by_go_id, _load_pivot_term_universe
+from protea.core._lafa_frame_data import load_end_ontology, load_end_rows
 from protea.core._truth_rules import (
     ReconciledWindow,
     _projection_request,
@@ -90,4 +93,30 @@ def cut_state(
     return CutState(_apply_negatives(positives, negatives), negatives, pivot_aspect)
 
 
-__all__ = ["CutState", "cut_state", "window_of"]
+def lafa_cut_state(session: Session, eset: EvaluationSet) -> CutState:
+    """The t0 side of a window of LAFA's frame, as that frame states an end, with t0's NOT terms only.
+
+    The frame has no pivot: each end is read under its own ontology
+    (:mod:`protea.core.lafa_frame`). t0's experimental rows are named under t0's
+    ontology, each NOT term of t0 and everything under it is taken out of the
+    direct terms, and what is left is closed upwards. Only t0's NOT rows count,
+    by the window's ``not_codes``: the window's own truth unions the NOT rows of
+    both ends, and one written at t1 is information from after the cut. The
+    aspects are t0's.
+    """
+    t0 = load_end_ontology(session, eset.old_native_snapshot_id)
+    rows, not_rows = load_end_rows(
+        session, eset.old_annotation_set_id, eset.not_codes == "experimental"
+    )
+    positives, negatives = lafa_frame.end_state(t0, rows, not_rows, Counter(), "t0")
+    return CutState(positives, negatives, dict(t0.live))
+
+
+def window_state(session: Session, eset: EvaluationSet) -> CutState:
+    """The state of every protein at a window's start, as the window's own frame states it."""
+    if eset.truth_profile == lafa_frame.PROFILE:
+        return lafa_cut_state(session, eset)
+    return cut_state(session, window_of(eset))
+
+
+__all__ = ["CutState", "cut_state", "lafa_cut_state", "window_of", "window_state"]
