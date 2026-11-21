@@ -175,6 +175,7 @@ EOF
 {
   printf 'HF_HOME=%s\n' "$HOME/protea-dev/cache/huggingface"
   printf 'PROTEA_REF_CACHE_DIR=%s\n' "$HOME/protea-dev/cache/ref_cache"
+  printf 'PROTEA_EMBEDDING_BANK_DIR=%s\n' "$HOME/protea-dev/cache/banco"
   printf 'PROTEA_PRED_CACHE_DIR=%s\n' "$HOME/protea-dev/cache/pred_cache"
   printf 'PROTEA_ALIGN_CACHE_DIR=%s\n' "$HOME/protea-dev/cache/align_cache"
   printf 'PROTEA_PCA_ARTIFACTS_DIR=%s\n' "$HOME/protea-dev/cache/pca"
@@ -201,6 +202,10 @@ What each line is for:
 - `HF_HOME` and `HF_HUB_OFFLINE=1`: models come from the dev cache, never
   from a download at run time.
 - The cache variables keep every cache under `~/protea-dev/cache`.
+- `PROTEA_EMBEDDING_BANK_DIR` names the folder `load_embedding_bank` loaded the
+  embedding bank from, so a reference pool reads its vectors from its shards (each
+  checked against the manifest the store recorded) instead of streaming them
+  from Postgres: about 2 minutes per bank instead of 7 to 9.
 - `PROTEA_TAXONOMY_DB_PATH`: the declared taxonomy file. While it does not
   exist, a taxonomy feature refuses instead of downloading today's NCBI
   taxonomy into `~/.etetoolkit`, the file production on this machine reads.
