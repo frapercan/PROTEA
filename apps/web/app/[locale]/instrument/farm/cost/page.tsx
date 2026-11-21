@@ -17,7 +17,7 @@
 // needs (60d) and slice it down for the smaller charts.
 //
 // Charts are hand-rolled SVG (no chart lib in the bundle) to match the
-// rest of the dashboard (BenchmarkHeatmap, SliceDag use the same style).
+// rest of the dashboard (SliceDag and the window panel use the same style).
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";

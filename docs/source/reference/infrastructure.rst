@@ -83,17 +83,6 @@ for every request, query, and queue publish.
    :undoc-members:
    :show-inheritance:
 
-.. rubric:: Benchmark configuration
-
-``protea.infrastructure.benchmark_config`` loads the
-``protea/config/benchmark.yaml`` file that drives the ``/benchmark``
-router. It maps scoring-config display names, GO categories, and the
-baseline tag used in the Fmax comparison grid.
-
-.. automodule:: protea.infrastructure.benchmark_config
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 ORM models
 ----------

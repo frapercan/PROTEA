@@ -89,6 +89,20 @@ class TestEachArmSaysWhetherItMayBeRead:
         assert summary_row(at_t0, FRAME)["arm"]["leak"] == "clean"
         assert summary_row(silent, FRAME)["arm"]["leak"] == "undeclared"
 
+    def test_an_arm_naming_no_producer_derives_nothing(self) -> None:
+        orphan = _row(model=None, embedding_config_id=None, backend=None)
+        assert summary_row(orphan, FRAME)["arm"]["leak"] is None
+
+    def test_it_is_the_rule_the_dispatch_guard_refuses_on(self) -> None:
+        # Two implementations of one rule drift the first time the boundary is
+        # argued about again; the benchmark matrix that showed it before (its
+        # badge, retired with it) called the same function.
+        import inspect
+
+        from protea.services import _window_summary
+
+        assert "training_cut_verdict(" in inspect.getsource(_window_summary.read_verdict)
+
     def test_a_window_whose_ends_are_not_releases_derives_nothing(self) -> None:
         arm = summary_row(_method(211), None)["arm"]
         assert (arm["leak"], arm["training_release"]) == (None, None)

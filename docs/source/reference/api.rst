@@ -292,22 +292,6 @@ new thumbs-up with an optional comment (max 500 characters).
    :undoc-members:
    :show-inheritance:
 
-Benchmark router
-----------------
-
-The ``/benchmark`` router powers the per-PLM comparison grid in the UI.
-Where ``/showcase`` collapses every model into a few buckets and reports
-the maximum, this router preserves *which* embedding produced each number
-and *which* scoring config was used, exposing one stage per distinct
-``ScoringConfig.name`` plus an implicit ``"reranker"`` stage for evaluations
-that used a re-ranker. Stage labels, GO categories, and the baseline tag are
-read from ``protea/config/benchmark.yaml``; no hardcoded constants.
-
-.. automodule:: protea.api.routers.benchmark
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Datasets router
 ---------------
 
@@ -900,16 +884,6 @@ Endpoints summary
    * - ``POST``
      - ``/support``
      - Submit a thumbs-up with optional comment.
-
-   * -
-     - **Benchmark**
-     -
-   * - ``GET``
-     - ``/benchmark/embeddings``
-     - List embedding configs with persisted display metadata.
-   * - ``GET``
-     - ``/benchmark/matrix``
-     - Per-embedding / per-stage Fmax matrix across all evaluation results.
 
    * -
      - **Datasets**

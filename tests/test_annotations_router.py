@@ -56,7 +56,6 @@ def _make_app(session_factory, amqp_url="amqp://guest:guest@localhost", artifact
     app.state.session_factory = session_factory
     app.state.amqp_url = amqp_url
     app.state.artifacts_dir = artifacts_dir or Path("/tmp/protea-test-artifacts")
-    app.state.benchmark_config = MagicMock()
     app.include_router(router)
     return app
 
