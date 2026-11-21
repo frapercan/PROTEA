@@ -22,6 +22,7 @@ from protea.services.annotations_service import (
     iter_evaluation_artifact,
     iter_evaluation_artifacts_zip,
     list_evaluation_results_data,
+    list_paired_comparisons_data,
     render_evaluation_metrics_tsv,
 )
 
@@ -153,6 +154,28 @@ def list_evaluation_results(
     try:
         with session_scope(factory) as session:
             return list_evaluation_results_data(session, eval_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/evaluation-sets/{eval_id}/paired-comparisons",
+    summary="List the paired comparisons of an evaluation set's results",
+)
+def list_paired_comparisons(
+    eval_id: UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> list[dict[str, Any]]:
+    """The latest whole-panel ``compare_paired_panels`` of each pair of the window's results.
+
+    Each one names its job, the result under test and the baseline, the method
+    axis it declared, its operating point and resampling, and per panel the
+    difference, its interval, the interval's method, the verdict and the number
+    of paired proteins. Returns ``404`` if the evaluation set is missing.
+    """
+    try:
+        with session_scope(factory) as session:
+            return list_paired_comparisons_data(session, eval_id)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

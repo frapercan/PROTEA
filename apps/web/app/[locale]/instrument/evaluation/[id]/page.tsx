@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { baseUrl } from "@/lib/api";
 import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import StrataPanel from "@/components/StrataPanel";
+import PairedComparisons from "@/components/PairedComparisons";
 import { RunReceipt } from "@/components/RunReceipt";
 import {
   GRID_FILE,
@@ -18,6 +19,7 @@ import {
 } from "@/lib/cellSource";
 import { edgeMark, headlineMaximum, maximumNote, type Maximum } from "@/lib/headlineMaximum";
 import { PRIMARY_METRIC, metricTooltip, metricValue } from "@/lib/metrics";
+import { armLabel, type Arm } from "@/lib/pairedComparison";
 
 type NsMetrics = {
   /**
@@ -145,6 +147,8 @@ type EvaluationResult = {
    * LAFA's reading, or ``percentile_rank``, the comparison reading.
    */
   score_reading: string | null;
+  /** What the evaluated set is: its model, the scoring it read and its method. */
+  arm?: Arm | null;
   created_at: string;
   // Method-surface provenance (slice F-METHOD-EVAL-SURFACE). Optional:
   // null on rows written before the columns existed; the badge strip then
@@ -475,6 +479,9 @@ export default function EvaluationDetailPage() {
                             >
                               {shortId(r.prediction_set_id)}
                             </Link>
+                            {armLabel(r.arm) ? (
+                              <div className="text-[10px] text-slate-500">{armLabel(r.arm)}</div>
+                            ) : null}
                           </td>
                           <td className="px-3 py-2 font-mono text-xs">
                             {r.scoring_config_id
@@ -631,6 +638,12 @@ export default function EvaluationDetailPage() {
               </table>
             )}
           </section>
+          {/* Each arm against a baseline, per cell, with a paired interval. */}
+          <PairedComparisons
+            evaluationSetId={params.id}
+            results={sortedResults}
+            locale={params.locale}
+          />
         </>
       )}
     </main>

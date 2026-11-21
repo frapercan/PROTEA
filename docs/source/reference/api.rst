@@ -716,6 +716,10 @@ Endpoints summary
      - ``/annotations/evaluation-sets/{id}/results``
      - List evaluation results for an evaluation set.
    * - ``GET``
+     - ``/annotations/evaluation-sets/{id}/paired-comparisons``
+     - The latest whole-panel paired comparison of each pair of the window's results,
+       read from the jobs that ran them.
+   * - ``GET``
      - ``/annotations/evaluation-sets/{id}/results/{rid}/metrics.tsv``
      - Download evaluation metrics as TSV.
    * - ``GET``

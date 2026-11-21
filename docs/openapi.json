@@ -3517,6 +3517,60 @@
         ]
       }
     },
+    "/v1/annotations/evaluation-sets/{eval_id}/paired-comparisons": {
+      "get": {
+        "description": "The latest whole-panel ``compare_paired_panels`` of each pair of the window's results.\n\nEach one names its job, the result under test and the baseline, the method\naxis it declared, its operating point and resampling, and per panel the\ndifference, its interval, the interval's method, the verdict and the number\nof paired proteins. Returns ``404`` if the evaluation set is missing.",
+        "operationId": "list_paired_comparisons_v1_annotations_evaluation_sets__eval_id__paired_comparisons_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Paired Comparisons V1 Annotations Evaluation Sets  Eval Id  Paired Comparisons Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List the paired comparisons of an evaluation set's results",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
     "/v1/annotations/evaluation-sets/{eval_id}/results": {
       "get": {
         "description": "List every cafaeval result row attached to one evaluation set.\n\nEach row carries the prediction-set / scoring-config / reranker\ntriple used to produce it plus the cached metrics summary, so the UI\nbenchmark matrix can render without per-row drilldowns. Returns\n``404`` if the evaluation set itself is missing.",
