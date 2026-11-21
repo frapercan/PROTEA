@@ -37,6 +37,9 @@ export type AspectProfiles = {
   homology?: Record<string, Pool>;
   length?: Record<string, Pool>;
 };
+/** Whether an arm may be read on its window (protea.core.leakage_guard.training_cut_verdict). */
+export type LeakVerdict = "not_fitted" | "undeclared" | "contaminated" | "clean";
+
 export type PanelArm = {
   model: string | null;
   embedding_config_id: string | null;
@@ -45,6 +48,10 @@ export type PanelArm = {
   depth: number | null;
   exclude_self: boolean | null;
   reading: string;
+  /** Null when the window's ends are not releases or the arm names no producer. */
+  leak?: LeakVerdict | null;
+  /** The release the arm was fitted at: its configuration's cut or its method's instance. */
+  training_release?: number | null;
 };
 export type SummaryResult = {
   id: string;
@@ -59,7 +66,17 @@ export type SummaryResult = {
     profiles: Record<string, Record<string, AspectProfiles>>;
   } | null;
 };
-export type WindowSummary = { evaluation_set_id: string; results: SummaryResult[] };
+export type WindowSummary = {
+  evaluation_set_id: string;
+  /** The window's t0 and t1 as release ordinals, or null when they are not. */
+  window_releases?: [number, number] | null;
+  results: SummaryResult[];
+};
+
+/** An arm that has seen the window's answers, or cannot show it has not: fitted after t0 or silent. */
+export function mayNotBeRead(r: SummaryResult): boolean {
+  return r.arm.leak === "contaminated" || r.arm.leak === "undeclared";
+}
 
 /** Message keys for the bands, whose own names carry characters a key should not. */
 export const BAND_KEY: Record<string, string> = {
