@@ -1159,6 +1159,7 @@
     "openReranker": "Open reranker model",
     "proteinExamples": "Protein examples (prediction set)",
     "cellLegend": "Each cell: the IA-weighted micro F (f_micro_w), with the IA-weighted coverage at the reported threshold (LAFA's cov_w) and the cell's size in the weighted variant below it. Results made before 2026-11-21 do not record the last two.",
+    "edgeLegend": "A ▴ beside a figure: its curve peaks at the highest threshold that kept a prediction, so the figure is an edge of the grid and not a maximum, and no verdict is read from it (ADR-D55). ▾: the same at the lowest threshold.",
     "resultsTitle": "Results ({count})",
     "provenanceLabel": "provenance",
     "sourcesLabel": "files",

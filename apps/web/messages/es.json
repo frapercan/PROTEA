@@ -1159,6 +1159,7 @@
     "openReranker": "Abrir el modelo de reordenación",
     "proteinExamples": "Ejemplos de proteínas (conjunto de predicciones)",
     "cellLegend": "Cada celda: la F micro ponderada por IA (f_micro_w) y, debajo, la cobertura ponderada en el umbral publicado (el cov_w de LAFA) y el tamaño de la celda en la variante ponderada. Los resultados anteriores al 21-11-2026 no registran estos dos.",
+    "edgeLegend": "Un ▴ junto a una cifra: su curva alcanza el máximo en el umbral más alto que conservó alguna predicción, así que la cifra es un borde de la rejilla y no un máximo, y no se lee ningún veredicto de ella (ADR-D55). ▾: lo mismo en el umbral más bajo.",
     "resultsTitle": "Resultados ({count})",
     "provenanceLabel": "procedencia",
     "sourcesLabel": "ficheros",

@@ -598,6 +598,18 @@ fallback they are omitted. The ``/v1/benchmark/matrix`` endpoint ranks every
 cell by ``f_micro_w`` (falling back to ``fmax`` for legacy IC=1 rows, flagged
 via ``primary_metric``) and exposes a ``per_task`` mean and 95% CI.
 
+**Where each figure was read on the threshold grid.** cafaeval reports each F at
+the threshold where its curve peaks, on a grid of step ``th_step``. Each cell
+records, per F variant, that threshold and whether it is an edge:
+``maxima.f_micro_w.tau`` is the threshold of the headline, and
+``maxima.f_micro_w.edge`` is ``"top"`` when the curve peaks at the highest
+threshold that kept a prediction, ``"bottom"`` at the lowest, and null for an
+interior maximum. A figure at an edge is not a maximum and no verdict is read
+from it (ADR-D55, section 6); the window page marks it beside the figure and
+says so in its tooltip. The cell's own ``tau`` is the threshold of the
+unweighted ``fmax``, not of the headline: on 211 -> 227, LK's cellular component
+reads 0.97 there and 0.99 for ``f_micro_w``.
+
 **The files behind each figure.** A result records every file the run wrote:
 ``results.artifacts.keys`` lists their keys in the artifact store, and since
 2026-11-21 ``results.artifacts.sha256`` holds the digest of each file as it was
