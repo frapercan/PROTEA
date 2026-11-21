@@ -45,6 +45,9 @@ _SETTINGS = ("NK", "LK", "PK")
 _MEASURES = (
     "n_proteins",
     "variant",
+    "tp",
+    "pred",
+    "n_gt",
     "precision",
     "recall",
     "f_micro",
