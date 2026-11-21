@@ -328,7 +328,7 @@
     "tau": "tau",
     "tauHint": "El umbral de decisión que la ejecución reportó para este aspecto. Todas las puntuaciones de la tabla se toman en él.",
     "unplacedWhy": "{count} del panel no llevan banda: {noLength} no tienen longitud registrada y {offScale} llevan una identidad que no es un porcentaje. Se quedan en la tabla con las bandas vacias en vez de eliminarse, porque forman parte de la poblacion que el panel cuenta.",
-    "withoutDonorWhy": "{count} del panel llevan su banda de longitud pero no tienen ningun donante alineado, asi que los cuatro ejes del donante quedan sin leer. Estan contadas entre las situadas: no recuperar un donante cuesta esos cuatro ejes y ninguno mas.",
+    "withoutDonorWhy": "{count} del panel llevan sus bandas de longitud y homologia pero no tienen ningun donante alineado, asi que los tres ejes del donante quedan sin leer. Estan contadas entre las situadas: no recuperar un donante cuesta esos tres ejes y ninguno mas.",
     "sortLabel": "orden",
     "sort": {
       "f_asc": "peores primero",

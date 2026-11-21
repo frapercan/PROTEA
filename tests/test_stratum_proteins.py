@@ -20,6 +20,7 @@ from protea.api.routers.stratum_proteins import (
     _ordered,
 )
 from protea.core.strata import Neighbourhood
+from protea.core.window_placement import TargetPlacement
 
 
 def _frame(rows: list[dict]) -> pd.DataFrame:
@@ -54,6 +55,15 @@ def _row(
     }
 
 
+def _where(residues: int = 300, identity: float | None = 45.0) -> TargetPlacement:
+    """A target's placement in its window: what places the length and homology bands."""
+    return TargetPlacement(residues=residues, identity=identity)
+
+
+#: Two targets of the window, both placed.
+_TWO = {"P1": _where(), "P2": _where()}
+
+
 def _hood(identity: float | None = 45.0, experimental: bool = False) -> Neighbourhood:
     return Neighbourhood(
         best_identity=identity,
@@ -81,31 +91,33 @@ def test_the_population_is_the_panels_own_and_not_the_query_sets():
         frame[frame["namespace"] == "biological_process"],
         "biological_process",
         {"P1": _hood(), "P2": _hood()},
-        {"P1": 300, "P2": 300},
+        {"P1": _where(), "P2": _where()},
         "NK",
     )
     assert len(placed.rows) == 2
 
 
-def test_a_protein_whose_donors_were_never_aligned_still_places_on_length():
-    # The regression this file exists to pin. The length band is a fact about
-    # the query's own sequence and needs no alignment, so a missing donor must
-    # not discard it. It used to: the branch tested the neighbourhood first and
-    # left the whole stratum null, which emptied this drawer for every arm
-    # whose donors had never been aligned -- on the live record, 86,5% of all
-    # candidates -- while the operation next door placed the same rows.
+def test_a_protein_whose_donors_were_never_aligned_still_places_on_the_window_axes():
+    # The regression this file exists to pin. The length and homology bands are
+    # the window's placement and need no alignment of the arm's, so a missing
+    # donor must not discard them. It used to: the branch tested the
+    # neighbourhood first and left the whole stratum null, which emptied this
+    # drawer for every arm whose donors had never been aligned -- on the live
+    # record, 86,5% of all candidates -- while the operation next door placed
+    # the same rows.
     frame = _frame([_row("P1"), _row("P2")])
-    placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": 300, "P2": 300}, "NK")
+    placed = _join(frame, "biological_process", {"P1": _hood()}, _TWO, "NK")
 
     assert len(placed.rows) == 2
     assert placed.placed == 2
 
     orphan = next(r for r in placed.rows if r["accession"] == "P2")
     assert orphan["length_band"] == "<=512"
-    # The four donor axes read "none" rather than a band, and the raw donor
+    # The homology band is the window's, the same for every arm.
+    assert orphan["homology_band"] == "30-60" and orphan["identity"] == 45.0
+    # The three retrieval axes read "none" rather than a band, and the raw donor
     # facts stay absent. A band says "not read"; an identity of zero would say
     # "read, and distant", which is a different claim about the same protein.
-    assert orphan["homology_band"] == "none"
     assert orphan["donor_evidence"] == "none"
     assert orphan["best_identity"] is None
     assert orphan["taxonomic_relation"] is None
@@ -125,7 +137,7 @@ def test_a_missing_donor_is_counted_but_is_not_a_shortfall():
         frame,
         "biological_process",
         {"P1": _hood()},
-        {"P1": 300, "P2": 300},
+        {"P1": _where(), "P2": _where()},
         "NK",
     )
     assert placed.no_donor == 2
@@ -139,8 +151,8 @@ def test_the_two_ways_of_being_unplaced_are_counted_apart():
     placed = _join(
         frame,
         "biological_process",
-        {"P1": _hood(), "P2": _hood(identity=140.0), "P3": _hood()},
-        {"P1": 300, "P2": 300},
+        {"P1": _hood(), "P2": _hood(), "P3": _hood()},
+        {"P1": _where(), "P2": _where(identity=140.0)},
         "NK",
     )
     assert (placed.no_donor, placed.no_length, placed.off_scale) == (0, 1, 1)
@@ -153,7 +165,7 @@ def test_the_score_travels_and_is_not_derived_again():
     # panel published, which is why a row cannot disagree with the cell it is
     # inside. A second derivation here would reintroduce exactly that risk.
     frame = _frame([_row("P1", f=0.1234)])
-    placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": 300}, "NK")
+    placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": _where()}, "NK")
     assert placed.rows[0]["f"] == 0.1234
     assert placed.rows[0]["variant"] == "unweighted"
 
@@ -162,7 +174,7 @@ def test_the_weighting_is_carried_and_never_assumed():
     # Three of the seven scoring runs on this deployment were unweighted, and
     # the row used to call its numbers ``f_w`` whatever the run had done.
     frame = _frame([_row("P1", variant="weighted")])
-    placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": 300}, "NK")
+    placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": _where()}, "NK")
     assert placed.rows[0]["variant"] == "weighted"
     assert "f_w" not in placed.rows[0]
 
@@ -554,7 +566,7 @@ class TestTheRowShapeIsAContract:
 
     def test_every_key_the_consumers_read_is_a_key_the_producer_writes(self) -> None:
         frame = _frame([_row("P1"), _row("P2")])
-        placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": 300, "P2": 300}, "NK")
+        placed = _join(frame, "biological_process", {"P1": _hood()}, _TWO, "NK")
         produced = set(placed.rows[0])
         missing = [k for k in self._CONSUMED if k not in produced]
         assert not missing, f"the page reads {missing}, which _join does not write"
@@ -564,7 +576,7 @@ class TestTheRowShapeIsAContract:
         # out of the producer, so a key the producer stops writing fails here
         # instead of at the first request.
         frame = _frame([_row("P1"), _row("P2")])
-        placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": 300, "P2": 300}, "NK")
+        placed = _join(frame, "biological_process", {"P1": _hood()}, _TWO, "NK")
         for sort in _SORTS:
             page = _ordered(placed.rows, sort)
             assert len(page) == len(placed.rows), sort
@@ -573,5 +585,5 @@ class TestTheRowShapeIsAContract:
         from protea.api.routers.stratum_proteins import _scored_zero
 
         frame = _frame([_row("P1", f=0.0), _row("P2", f=0.5)])
-        placed = _join(frame, "biological_process", {"P1": _hood()}, {"P1": 300, "P2": 300}, "NK")
+        placed = _join(frame, "biological_process", {"P1": _hood()}, _TWO, "NK")
         assert _scored_zero(placed.rows) == 1

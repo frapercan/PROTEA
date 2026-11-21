@@ -49,11 +49,13 @@ into that number would show a reader nine times the proteins the panel is
 made of. The per-protein artefact carries the category (it is the directory)
 and the aspect (it is the namespace column), so this endpoint filters on both.
 
-What it adds to the artefact. The two retrieval axes, length and homology, are
-computed here with the same two functions the stratification itself uses, so a
-band shown beside a protein cannot disagree with the band that protein was
-pooled into. Nothing is recomputed that the artefact already holds: every score
-on every row is read, not derived.
+What it adds to the artefact. The length and the homology come from the
+window's placement (:mod:`protea.core.window_placement`), the same rows the
+stratification reads, and are banded with the same function, so a band shown
+beside a protein cannot disagree with the band that protein was pooled into.
+Beside them, what the arm's own retrieval found: its most homologous donor's
+identity and evidence, which place nothing. Nothing is recomputed that the
+artefact already holds: every score on every row is read, not derived.
 """
 
 from __future__ import annotations
@@ -88,6 +90,11 @@ from protea.core.operations._run_cafa_strata import VARIANT_COLUMNS as _VARIANT_
 # it holds without either side raising.
 from protea.core.operations.stratify_evaluation import _ASPECT_FOR_NAMESPACE, BEST_F_FILENAME
 from protea.core.strata import UNREAD_NEIGHBOURHOOD, stratum_for
+from protea.core.window_placement import (
+    TargetPlacement,
+    WindowNotPlacedError,
+    placement_of_window,
+)
 from protea.infrastructure.storage.factory import ArtifactStoreUnavailable, get_artifact_store
 
 router = APIRouter(prefix="/strata", tags=["strata"])
@@ -106,17 +113,6 @@ for _namespace, _aspect in _ASPECT_FOR_NAMESPACE.items():
     _NAMESPACE_FOR_ASPECT[_aspect.cafa] = _namespace
     _NAMESPACE_FOR_ASPECT[_aspect.code] = _namespace
 
-#: Sequence length per query. Restricted to the accessions actually in the
-#: artefact rather than read whole: the protein table holds the corpus and the
-#: artefact holds a panel, and the panel is four orders of magnitude smaller.
-_LENGTHS = text(
-    """
-    SELECT p.accession AS accession, p.length AS residues
-    FROM protein p
-    WHERE p.accession = ANY(:accessions) AND p.length IS NOT NULL
-    """
-)
-
 #: The arm, named the way the panels name it. ``display_name`` alone is not an
 #: identity here: the eight arms sharing a prediction set differ only in their
 #: scoring configuration and donor policy, so a picker that showed the model
@@ -126,6 +122,7 @@ _ARM = text(
     with_arm_identity(
         """
     SELECT er.prediction_set_id::text          AS prediction_set_id,
+           er.evaluation_set_id::text          AS evaluation_set_id,
            sc.name                             AS scoring_name,
            COALESCE(ec.display_name, ec.model_name) AS embedding_name,
 {DEPTH_IDENTITY_COLUMN},
@@ -174,17 +171,17 @@ def _namespace_for(raw: str) -> str:
 
 @dataclass
 class _Placed:
-    """The artefact's rows with the two retrieval axes attached.
+    """The artefact's rows with the window's placement and the arm's retrieval attached.
 
-    The reasons are broken down rather than totalled. A protein missing because
-    the record holds no length is a corpus fact; one missing because a stored
-    identity is not a percentage is a defect. Summing them would report a
-    single number that two different actions would fix.
+    The reasons are broken down rather than totalled. A protein the window's
+    placement does not hold has no recorded length there; one whose identity is
+    not a percentage is a defect. Summing them would report a single number that
+    two different actions would fix.
 
     ``no_donor`` is in this list but is NOT one of those reasons, and that is
     the distinction the first version got wrong. It counts rows whose donors
-    were never aligned: they still place on the three sequence axes and read
-    ``none`` on the four donor ones, so the number is a fact about the panel
+    were never aligned: they still place on the four window axes and read
+    ``none`` on the three retrieval ones, so the number is a fact about the panel
     and not a gap in it. The response keeps it outside ``unplaced`` so a reader
     cannot add it to the others and get the shortfall.
     """
@@ -499,7 +496,7 @@ def _sliced_at_the_published_tau(
 def _row(
     record: dict[str, Any],
     accession: str,
-    residues: int | None,
+    where: TargetPlacement | None,
     stratum: Any,
     hood: Any,
 ) -> dict[str, Any]:
@@ -514,9 +511,13 @@ def _row(
     """
     return {
         "accession": accession,
-        "residues": residues,
+        "residues": None if where is None else where.residues,
         "length_band": None if stratum is None else str(stratum.length),
         "homology_band": None if stratum is None else str(stratum.homology),
+        # What placed the homology band: the identity to the closest protein
+        # measured when the window opened. ``best_identity`` below is the arm's
+        # own most homologous donor, which places nothing.
+        "identity": None if where is None else where.identity,
         "donor_evidence": None if stratum is None else str(stratum.donor_evidence),
         "best_identity": None if hood is None else hood.best_identity,
         "donor_is_experimental": None if hood is None else hood.donor_is_experimental,
@@ -541,40 +542,38 @@ _UNPLACED_REASONS: tuple[str, ...] = ("no_length", "off_scale")
 def _spot(
     category: Category,
     aspect: Any,
-    residues: int | None,
+    where: TargetPlacement | None,
     hood: Any,
 ) -> tuple[Any, str | None]:
     """Where one protein sits, and the reason when it sits nowhere.
 
-    A MISSING DONOR DOES NOT UNPLACE A ROW, which is the whole point of this
-    function existing. The endpoint used to test the neighbourhood first and
-    leave the stratum null, so the length band -- a fact about the query's own
-    sequence, needing no alignment at all -- was discarded because a different
-    axis could not be read. On the live record that silently emptied the drawer
-    for every ingested arm and for 86,5% of all candidates: the endpoint
-    answered 0 placed over a panel of thousands while the operation next door
-    placed 100% of the same rows.
+    The length and the homology are the window's placement of the protein. A
+    protein the placement does not hold has no recorded length in the window and
+    sits nowhere; that cannot happen for a protein the evaluation scored, and is
+    counted rather than hidden if it does.
 
-    Now the row places with :data:`UNREAD_NEIGHBOURHOOD`, so its length band is
-    the band it always had and its four donor axes read ``none``. Filtering on
-    a donor axis excludes it on its own, with no help from a counter.
+    A MISSING DONOR DOES NOT UNPLACE A ROW. The row places with
+    :data:`UNREAD_NEIGHBOURHOOD`, so its window axes are the bands they always
+    are and its three retrieval axes read ``none``. Filtering on a retrieval axis
+    excludes it on its own, with no help from a counter.
     """
-    if not residues:
+    if where is None:
         return None, "no_length"
     try:
         return (
             stratum_for(
                 category=category,
                 aspect=aspect,
-                residues=residues,
-                neighbourhood=hood if hood is not None else UNREAD_NEIGHBOURHOOD,
+                residues=where.residues,
+                identity=where.identity,
+                retrieval=hood if hood is not None else UNREAD_NEIGHBOURHOOD,
             ),
             None,
         )
     except ValueError:
-        # A stored identity outside [0, 100] cannot be banded. Counted rather
-        # than clamped: clamping would put the protein in a band nobody
-        # measured it into.
+        # An identity outside [0, 100] cannot be banded. Counted rather than
+        # clamped: clamping would put the protein in a band nobody measured it
+        # into. The placement's check constraint makes it unreachable there.
         return None, "off_scale"
 
 
@@ -582,7 +581,7 @@ def _join(
     frame: Any,
     namespace: str,
     hoods: dict[str, Any],
-    lengths: dict[str, int],
+    placement: dict[str, TargetPlacement],
     setting: str,
 ) -> _Placed:
     """One row per protein in this panel, scored and placed.
@@ -604,14 +603,14 @@ def _join(
 
     for record in frame.to_dict("records"):
         accession = str(record["protein_accession"])
-        residues = lengths.get(accession)
+        where = placement.get(accession)
         hood = hoods.get(accession)
         if hood is None:
             no_donor += 1
-        stratum, why = _spot(category, aspect, residues, hood)
+        stratum, why = _spot(category, aspect, where, hood)
         if why is not None:
             unplaced[why] += 1
-        rows.append(_row(record, accession, residues, stratum, hood))
+        rows.append(_row(record, accession, where, stratum, hood))
 
     no_length = unplaced["no_length"]
     off_scale = unplaced["off_scale"]
@@ -743,20 +742,19 @@ def stratum_proteins(
             result_id=str(evaluation_result_id),
             setting=setting,
         )
-        accessions = frame["protein_accession"].unique().tolist()
         with factory() as session:
-            lengths = {
-                r["accession"]: int(r["residues"])
-                for r in session.execute(_LENGTHS, {"accessions": accessions}).mappings()
-            }
-        return _join(frame, namespace, hoods(factory, prediction_set_id), lengths, setting)
+            placement = placement_of_window(session, arm["evaluation_set_id"])
+        return _join(frame, namespace, hoods(factory, prediction_set_id), placement, setting)
 
-    placed = cached(
-        f"stratum:proteins:{evaluation_result_id}:{setting}:{namespace}",
-        _TTL,
-        produce,
-        serve_stale_on_error=True,
-    )
+    try:
+        placed = cached(
+            f"stratum:proteins:{evaluation_result_id}:{setting}:{namespace}",
+            _TTL,
+            produce,
+            serve_stale_on_error=True,
+        )
+    except WindowNotPlacedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     rows = placed.rows
     if at.length is not None:

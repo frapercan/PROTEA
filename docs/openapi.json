@@ -12363,7 +12363,7 @@
     },
     "/v1/stratum/{prediction_set_id}/members": {
       "get": {
-        "description": "The proteins a stratum is made of, with what put each one there.\n\nEvery row carries the identity to its nearest donor and whether that\ndonor is experimental, because that is what the band IS: a reader who\ncannot see what put a protein in a band cannot check the band, and a\nband nobody can check is a label.\n\nIt does NOT yet carry WHICH donor. ``Neighbourhood`` resolves five\nfacts about the retrieved donors and the accession is not among them,\nso naming it here would mean changing what retrieval returns. Until\nthen a reader can check the distance but not follow it, and this\ndocstring says so rather than implying otherwise.",
+        "description": "The targets a stratum is made of, with what put each one there.\n\nEvery row carries the identity that placed it, to the closest protein\nmeasured when the window opened, because that is what the band IS: a reader\nwho cannot see what put a protein in a band cannot check the band, and a\nband nobody can check is a label. Beside it, what the prediction set's own\nretrieval found, which places nothing.\n\nIt does NOT yet carry WHICH donor the arm retrieved. ``Neighbourhood``\nresolves five facts about the retrieved donors and the accession is not\namong them, so naming it here would mean changing what retrieval returns.",
         "operationId": "stratum_members_v1_stratum__prediction_set_id__members_get",
         "parameters": [
           {
@@ -12409,6 +12409,18 @@
             "schema": {
               "description": "GO aspect, asserted on the same terms as category.",
               "title": "Aspect",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The window whose placement places its targets on the length and homology axes.",
+            "in": "query",
+            "name": "evaluation_set_id",
+            "required": true,
+            "schema": {
+              "description": "The window whose placement places its targets on the length and homology axes.",
+              "format": "uuid",
+              "title": "Evaluation Set Id",
               "type": "string"
             }
           },

@@ -2,8 +2,9 @@
 //
 // The panel says a cell holds 448 proteins and scores 0.257, and the trail
 // ends at the count. This is the step from a published number to the things
-// it is about: which proteins, how far the nearest donor is, and whether that
-// donor carries experimental evidence.
+// it is about: which proteins, how close the closest protein measured when the
+// window opened is (what places the identity band, the same for every arm),
+// and what the arm's own retrieval found beside it.
 //
 // Weakest identity first. The reason to open a cell is usually to see what
 // makes it hard, and the hardest cases are the ones worth showing.
@@ -21,6 +22,9 @@ type Member = {
   residues: number;
   length_band: string;
   homology_band: string;
+  /** The window's identity, which places the band. Null: no measured homolog. */
+  identity: number | null;
+  /** The arm's own most homologous donor. Places nothing. */
   best_identity: number | null;
   donor_is_experimental: boolean | null;
   taxonomic_relation: string | null;
@@ -35,6 +39,8 @@ type Payload = {
 
 type Props = {
   predictionSetId: string;
+  /** The window whose placement places the targets on the length and identity bands. */
+  evaluationSetId: string;
   /** Asserted, not verified: see the endpoint's own note on why. */
   category: string;
   /** Either spelling. The panel emits "P", the benchmark board "BPO". */
@@ -48,6 +54,7 @@ const LIMIT = 25;
 
 export function StratumMembers({
   predictionSetId,
+  evaluationSetId,
   category,
   aspect,
   length,
@@ -59,7 +66,12 @@ export function StratumMembers({
 
   useEffect(() => {
     let live = true;
-    const q = new URLSearchParams({ category, aspect, limit: String(LIMIT) });
+    const q = new URLSearchParams({
+      category,
+      aspect,
+      evaluation_set_id: evaluationSetId,
+      limit: String(LIMIT),
+    });
     if (length) q.set("length", length);
     if (homology) q.set("homology", homology);
     // No reset here: the caller keys this component on the cell, so opening
@@ -83,7 +95,7 @@ export function StratumMembers({
     return () => {
       live = false;
     };
-  }, [predictionSetId, category, aspect, length, homology]);
+  }, [predictionSetId, evaluationSetId, category, aspect, length, homology]);
 
   if (error) {
     return (
@@ -123,6 +135,7 @@ export function StratumMembers({
           <tr className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500">
             <th className="py-1 text-left font-medium">protein</th>
             <th className="py-1 text-right font-medium">residues</th>
+            <th className="py-1 text-right font-medium">identity</th>
             <th className="py-1 text-right font-medium">nearest donor</th>
             <th className="py-1 text-left font-medium">donor evidence</th>
             <th className="py-1 text-left font-medium">taxonomy</th>
@@ -143,6 +156,9 @@ export function StratumMembers({
                 {formatCount(m.residues)}
               </td>
               <td className="py-1 text-right font-mono tabular-nums text-slate-800">
+                {m.identity === null ? "none" : `${m.identity.toFixed(1)}%`}
+              </td>
+              <td className="py-1 text-right font-mono tabular-nums text-slate-600">
                 {m.best_identity === null
                   ? "none"
                   : `${m.best_identity.toFixed(1)}%`}

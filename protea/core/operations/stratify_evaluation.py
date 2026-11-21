@@ -75,6 +75,7 @@ from protea.core.strata import (
     stratum_for,
 )
 from protea.core.utils import contract_payload
+from protea.core.window_placement import TargetPlacement, placement_of_window
 
 #: cafaeval reports the long namespace; the strata vocabulary speaks CAFA codes.
 _ASPECT_FOR_NAMESPACE: dict[str, Aspect] = {
@@ -83,13 +84,25 @@ _ASPECT_FOR_NAMESPACE: dict[str, Aspect] = {
     "cellular_component": Aspect.CELLULAR_COMPONENT,
 }
 
-_LENGTHS = "SELECT accession, length FROM protein WHERE length IS NOT NULL"
-
 
 class StratifyEvaluationPayload(ProteaPayload):
     """What to stratify, and how finely."""
 
-    prediction_set_id: Annotated[str, Field(description="the run whose neighbourhood is read")]
+    prediction_set_id: Annotated[
+        str,
+        Field(description="the run whose neighbourhood places the retrieval axes, when asked"),
+    ]
+    evaluation_set_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "the window whose placement places the length and homology axes; read "
+                "from the result when evaluation_result_id is given, and required with "
+                "a local artifacts_root, which names no result"
+            ),
+        ),
+    ]
     artifacts_root: Annotated[
         str | None,
         Field(
@@ -141,8 +154,33 @@ class StratifyEvaluationPayload(ProteaPayload):
         return value
 
 
-def _protein_lengths(session: Session) -> dict[str, int]:
-    return {r[0]: int(r[1]) for r in session.execute(text(_LENGTHS))}
+def _window_of(session: Session, p: StratifyEvaluationPayload) -> str:
+    """The window whose placement places the rows: the result's, or the payload's.
+
+    A result names the window it was scored on, so a payload that names another
+    one is refused rather than resolved: the cells would be placed on a window
+    the scores were not computed on.
+    """
+    named = p.evaluation_set_id
+    if p.evaluation_result_id:
+        found = session.execute(
+            text("SELECT evaluation_set_id FROM evaluation_result WHERE id = CAST(:r AS uuid)"),
+            {"r": p.evaluation_result_id},
+        ).scalar_one_or_none()
+        if found is None:
+            raise ValueError(f"no evaluation result {p.evaluation_result_id}")
+        if named and named != str(found):
+            raise ValueError(
+                f"the payload names window {named} and result {p.evaluation_result_id} was "
+                f"scored on window {found}"
+            )
+        return str(found)
+    if not named:
+        raise ValueError(
+            "a local artifacts_root names no result, so give evaluation_set_id: the window "
+            "whose placement places the length and homology axes"
+        )
+    return named
 
 
 def _category_for(setting: str) -> Category | None:
@@ -227,7 +265,7 @@ class _SettingWork(NamedTuple):
     result_id: str
     payload: StratifyEvaluationPayload
     store: Any
-    lengths: dict[str, int]
+    placement: dict[str, TargetPlacement]
     neighbourhoods: dict[str, Any]
 
 
@@ -268,39 +306,47 @@ def _strata_for_rows(
     rows: list[dict[str, Any]],
     *,
     category: Category,
-    lengths: dict[str, int],
+    placement: dict[str, TargetPlacement],
     neighbourhoods: dict[str, Any],
     axes: Sequence[str],
 ) -> dict[int, Stratum]:
-    """Index of row position -> stratum, skipping rows that cannot be placed.
+    """Index of row position -> stratum.
 
-    A protein with no length or no resolvable aspect is skipped rather than
-    defaulted into a band, because every default here would move a published
-    number by an amount nobody chose.
+    The length and the homology come from the window's placement, so every
+    method evaluated on the window places a protein in the same bands. A row whose
+    protein the placement does not hold is refused: every protein the evaluation
+    scored is a target of its window, so the two disagree about the window.
 
-    A missing donor neighbourhood is only disqualifying when the run asks for
-    an axis that reads one. It used to disqualify unconditionally, which meant
-    a run crossing category x aspect x length -- three facts about the query's
-    own sequence, needing no alignment at all -- silently reported on whichever
-    proteins happened to have aligned donors. On this campaign that was a small
-    and non-random minority, so the withheld-cell counts looked like a coverage
-    floor and were really a filter nobody had asked for.
+    A missing donor neighbourhood is only disqualifying when the run asks for a
+    retrieval axis. It used to disqualify unconditionally, which meant a run
+    crossing category x aspect x length, which needs no alignment at all,
+    silently reported on whichever proteins happened to have aligned donors.
     """
     needs_donor = bool(NEIGHBOURHOOD_AXES & set(axes))
     placed: dict[int, Stratum] = {}
     for i, row in enumerate(rows):
         aspect = _ASPECT_FOR_NAMESPACE.get(str(row.get("namespace")))
         acc = str(row.get("protein_accession"))
-        residues = lengths.get(acc)
-        if aspect is None or not residues:
+        if aspect is None:
             continue
-        neighbourhood = neighbourhoods.get(acc)
-        if neighbourhood is None:
+        where = placement.get(acc)
+        if where is None:
+            raise ValueError(
+                f"protein {acc} is scored in the grid and is not a target of the window's "
+                "placement; every scored protein is a target of its window, so the grid and "
+                "the placement describe different windows"
+            )
+        retrieval = neighbourhoods.get(acc)
+        if retrieval is None:
             if needs_donor:
                 continue
-            neighbourhood = _UNREAD_NEIGHBOURHOOD
+            retrieval = _UNREAD_NEIGHBOURHOOD
         placed[i] = stratum_for(
-            category=category, aspect=aspect, residues=residues, neighbourhood=neighbourhood
+            category=category,
+            aspect=aspect,
+            residues=where.residues,
+            identity=where.identity,
+            retrieval=retrieval,
         )
     return placed
 
@@ -422,13 +468,18 @@ class StratifyEvaluationOperation(Operation):
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = StratifyEvaluationPayload.model_validate(contract_payload(payload))
+        window = _window_of(session, p)
+        placement = placement_of_window(session, window)
         root, store, tmp = _resolve_source(p, emit)
-        neighbourhoods = neighbourhoods_for(session, p.prediction_set_id)
-        lengths = _protein_lengths(session)
+        neighbourhoods = (
+            neighbourhoods_for(session, p.prediction_set_id)
+            if NEIGHBOURHOOD_AXES & set(p.axes)
+            else {}
+        )
         emit(
             "stratify_evaluation.inputs",
             None,
-            {"neighbourhoods": len(neighbourhoods), "lengths": len(lengths)},
+            {"window": window, "placed": len(placement), "neighbourhoods": len(neighbourhoods)},
             "info",
         )
 
@@ -442,7 +493,7 @@ class StratifyEvaluationOperation(Operation):
                     result_id=result_id,
                     payload=p,
                     store=store,
-                    lengths=lengths,
+                    placement=placement,
                     neighbourhoods=neighbourhoods,
                 ),
                 emit,
@@ -493,7 +544,7 @@ class StratifyEvaluationOperation(Operation):
         placed = _strata_for_rows(
             rows,
             category=category,
-            lengths=work.lengths,
+            placement=work.placement,
             neighbourhoods=work.neighbourhoods,
             axes=p.axes,
         )

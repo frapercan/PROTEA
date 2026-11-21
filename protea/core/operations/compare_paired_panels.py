@@ -575,9 +575,7 @@ class ComparePairedPanelsOperation(Operation):
             # surface as an off-grid tau, the right refusal under a wrong name.
             cfg = self._config(sides, p)
             keep = (
-                stratum_population(
-                    session, p.restrict_to_stratum, prov_b["prediction_set_id"], emit
-                )
+                stratum_population(session, p.restrict_to_stratum, prov_b, emit)
                 if p.restrict_to_stratum
                 else None
             )
@@ -750,7 +748,13 @@ class ComparePairedPanelsOperation(Operation):
             "power": p.power,
             "min_population": p.min_population,
             "restrict_to_stratum": p.restrict_to_stratum,
-            "stratum_membership_from": "baseline" if p.restrict_to_stratum else None,
+            # The window axes come from the window's placement, the retrieval axes
+            # from the baseline's neighbours (_paired_panels_stratum).
+            "stratum_membership_from": (
+                {"window_axes": "window_placement", "retrieval_axes": "baseline"}
+                if p.restrict_to_stratum
+                else None
+            ),
             "population_rule": p.population_rule,
             "interval_method_requested": p.interval_method,
             "effect_of_interest": p.effect_of_interest,

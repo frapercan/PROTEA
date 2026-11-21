@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn
 from protea.core.operations._paired_panels_artifact import PanelComparabilityError
 from protea.core.operations._run_cafa_strata import neighbourhoods_for
-from protea.core.operations.stratify_evaluation import _protein_lengths
 from protea.core.strata import (
     NEIGHBOURHOOD_AXES,
     Aspect,
@@ -29,9 +28,10 @@ from protea.core.strata import (
     TaxonomyBand,
     stratum_for,
 )
+from protea.core.window_placement import TargetPlacement, placement_of_window
 
 #: Stands in when no donor axis was requested, so the one placement path serves
-#: both kinds of restriction. Only the sequence axes may be read off a stratum
+#: both kinds of restriction. Only the window axes may be read off a stratum
 #: built with it -- which is exactly the case in which it is used.
 _NO_DONOR_READ = Neighbourhood(best_identity=None, donor_is_experimental=None)
 
@@ -100,17 +100,19 @@ def stratum_label(key: str, restrict: dict[str, str] | None) -> str:
 
 
 def _place(
-    lengths: dict[str, int],
+    placement: dict[str, TargetPlacement],
     hoods: dict[str, Any],
     restrict: dict[str, str],
     *,
     needs_donor: bool,
 ) -> tuple[set[str], int]:
-    """Which proteins sit in the stratum, and how many could not be placed at all.
+    """Which targets sit in the stratum, and how many could not be placed at all.
 
     The two are returned together because reporting the first without the second
     would let a stratum thinned by missing alignments read as a stratum that is
-    genuinely small.
+    genuinely small. Only a retrieval axis can leave a target unplaced: the
+    length and the homology come from the window's placement, which holds every
+    target.
 
     ``category`` and ``aspect`` are fixed here rather than matched: they vary per
     ROW of the artefact, not per protein, so the panel key already carries them
@@ -118,10 +120,8 @@ def _place(
     """
     keep: set[str] = set()
     unplaceable = 0
-    axes = [a for a in restrict if a in NEIGHBOURHOOD_AXES or a == "length"]
-    for acc, residues in lengths.items():
-        if not residues:
-            continue
+    axes = [a for a in restrict if a not in ("category", "aspect")]
+    for acc, where in placement.items():
         hood = hoods.get(acc)
         if hood is None:
             if needs_donor:
@@ -131,8 +131,9 @@ def _place(
         st = stratum_for(
             category=Category.NO_KNOWLEDGE,
             aspect=Aspect.MOLECULAR_FUNCTION,
-            residues=residues,
-            neighbourhood=hood,
+            residues=where.residues,
+            identity=where.identity,
+            retrieval=hood,
         )
         if all(getattr(st, a) == restrict[a] for a in axes):
             keep.add(acc)
@@ -142,39 +143,46 @@ def _place(
 def stratum_population(
     session: Session,
     restrict: dict[str, str],
-    baseline_prediction_set_id: str,
+    baseline: dict[str, Any],
     emit: EmitFn,
 ) -> frozenset[str]:
-    """The accessions that sit in the requested stratum, read off the BASELINE.
+    """The accessions that sit in the requested stratum.
 
-    WHOSE NEIGHBOURHOOD DEFINES MEMBERSHIP. For the three sequence axes --
-    category, aspect, length -- the question does not arise: they are properties
-    of the query itself and both arms answer identically. The four donor axes
-    are properties of a RETRIEVAL, and the two arms retrieved different donors,
-    so the same protein can sit in ``<=30`` for one arm and ``30-50`` for the
-    other.
+    ``baseline`` is the baseline result's provenance: its window and its
+    prediction set.
 
-    Membership is therefore always taken from the baseline, never from the arm
-    under test. "Among the proteins the baseline found hard, does the challenger
-    help?" is a question with an answer. "Among the proteins the challenger
-    placed in the twilight zone" is the challenger choosing its own population,
-    and a method that retrieves worse would be handed an easier stratum to be
-    measured on. The choice is recorded on the job so a reader is never left to
-    infer which arm the band came from.
+    WHOSE PLACEMENT DEFINES MEMBERSHIP. The four window axes (category, aspect,
+    length, homology) are the window's: the length and the homology come from
+    its placement (:mod:`protea.core.window_placement`), so both arms answer
+    identically. The three retrieval axes are properties of a RETRIEVAL, and the
+    two arms retrieved different donors, so for those membership is taken from
+    the baseline, never from the arm under test. "Among the proteins whose
+    nearest donor the baseline found without experimental support, does the
+    challenger help?" is a question with an answer. Membership read from the
+    challenger would let a method that retrieves worse choose an easier
+    population to be measured on. The choice is recorded on the job.
     """
+    window = baseline.get("evaluation_set_id")
+    if not window:
+        raise PanelComparabilityError(
+            "restricting to a stratum reads the window's placement, and the baseline names "
+            "no window"
+        )
     needs_donor = bool(NEIGHBOURHOOD_AXES & set(restrict))
-    lengths = _protein_lengths(session)
-    hoods = neighbourhoods_for(session, baseline_prediction_set_id) if needs_donor else {}
+    placement = placement_of_window(session, str(window))
+    prediction_set_id = str(baseline.get("prediction_set_id"))
+    hoods = neighbourhoods_for(session, prediction_set_id) if needs_donor else {}
 
-    keep, unplaceable = _place(lengths, hoods, restrict, needs_donor=needs_donor)
+    keep, unplaceable = _place(placement, hoods, restrict, needs_donor=needs_donor)
 
     emit(
         "compare_paired_panels.stratum",
         f"population restricted to {restrict}",
         {
             "restrict_to_stratum": dict(restrict),
-            "membership_from": "baseline",
-            "baseline_prediction_set_id": baseline_prediction_set_id,
+            "window": str(window),
+            "retrieval_from": "baseline",
+            "baseline_prediction_set_id": prediction_set_id,
             "n_in_stratum": len(keep),
             "n_unplaceable": unplaceable,
             "reads_a_donor": needs_donor,
@@ -188,5 +196,3 @@ def stratum_population(
             "zero delta."
         )
     return frozenset(keep)
-
-

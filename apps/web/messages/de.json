@@ -329,7 +329,7 @@
     "tau": "Tau",
     "tauHint": "Die Entscheidungsschwelle, die der Lauf für diesen Aspekt berichtet hat. Jeder Wert in der Tabelle ist an ihr genommen.",
     "unplacedWhy": "{count} des Panels tragen kein Band: {noLength} haben keine erfasste Laenge und {offScale} tragen eine Identitaet, die kein Prozentwert ist. Sie bleiben mit leeren Baendern in der Tabelle statt entfernt zu werden, denn sie gehoeren zu der Population, die das Panel zaehlt.",
-    "withoutDonorWhy": "{count} des Panels tragen ihr Laengenband, haben aber keinen ausgerichteten Spender, sodass die vier Spenderachsen ungelesen bleiben. Sie zaehlen zu den platzierten: keinen Spender zu finden kostet diese vier Achsen und sonst keine.",
+    "withoutDonorWhy": "{count} des Panels tragen ihr Laengen- und Homologieband, haben aber keinen ausgerichteten Spender, sodass die drei Spenderachsen ungelesen bleiben. Sie zaehlen zu den platzierten: keinen Spender zu finden kostet diese drei Achsen und sonst keine.",
     "sortLabel": "Reihenfolge",
     "sort": {
       "f_asc": "schwächste zuerst",

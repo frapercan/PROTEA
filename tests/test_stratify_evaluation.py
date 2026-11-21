@@ -39,17 +39,24 @@ from protea.core.operations.stratify_evaluation import (
 )
 from protea.core.strata import (
     NEIGHBOURHOOD_AXES,
-    SEQUENCE_AXES,
+    WINDOW_AXES,
     Aspect,
     Category,
     Neighbourhood,
     Stratum,
     length_band_for,
 )
+from protea.core.window_placement import TargetPlacement
 
 _NB = Neighbourhood(best_identity=45.0, donor_is_experimental=True, taxonomic_relation="close")
 
-#: What the operation crosses by default, donor axis included.
+#: A target's placement in its window: 300 residues, 45 % to the closest measured protein.
+_AT = TargetPlacement(residues=300, identity=45.0)
+
+#: The window a local artifacts_root is stratified on.
+_WINDOW = str(uuid.uuid4())
+
+#: What the operation crosses by default: the four window axes.
 _ALL_AXES = ["category", "aspect", "length", "homology"]
 
 
@@ -146,83 +153,97 @@ class TestPlacingRows:
         placed = _strata_for_rows(
             [_row("Q1", "molecular_function")],
             category=Category.NO_KNOWLEDGE,
-            lengths={"Q1": 300},
+            placement={"Q1": _AT},
             neighbourhoods={"Q1": _NB},
             axes=_ALL_AXES,
         )
         assert placed[0].aspect is Aspect.MOLECULAR_FUNCTION
         assert placed[0].category is Category.NO_KNOWLEDGE
+        assert str(placed[0].homology) == "30-60"
 
     @pytest.mark.parametrize(
-        ("lengths", "neighbourhoods", "namespace"),
+        ("neighbourhoods", "namespace", "axes"),
         [
-            ({}, {"Q1": _NB}, "molecular_function"),               # no length
-            ({"Q1": 300}, {}, "molecular_function"),               # no non-self donor
-            ({"Q1": 300}, {"Q1": _NB}, "not_a_namespace"),         # unknown aspect
+            ({}, "molecular_function", ["length", "donor_evidence"]),  # no donor, asked for
+            ({"Q1": _NB}, "not_a_namespace", _ALL_AXES),  # unknown aspect
         ],
     )
     def test_rows_that_cannot_be_placed_are_skipped(
-        self, lengths: dict, neighbourhoods: dict, namespace: str
+        self, neighbourhoods: dict, namespace: str, axes: list[str]
     ) -> None:
         """Skipped, never defaulted: every default here would move a number by
-        an amount nobody chose.
+        an amount nobody chose."""
+        assert (
+            _strata_for_rows(
+                [_row("Q1", namespace)],
+                category=Category.NO_KNOWLEDGE,
+                placement={"Q1": _AT},
+                neighbourhoods=neighbourhoods,
+                axes=axes,
+            )
+            == {}
+        )
 
-        Every case here crosses a donor axis, which is what makes the missing
-        neighbourhood disqualifying. :class:`TestAxesDecideWhatAPlacementNeeds`
-        covers the run that asks for no donor axis and must not skip it.
-        """
-        assert _strata_for_rows(
-            [_row("Q1", namespace)],
-            category=Category.NO_KNOWLEDGE, lengths=lengths, neighbourhoods=neighbourhoods,
-            axes=_ALL_AXES,
-        ) == {}
+    def test_a_scored_protein_the_placement_does_not_hold_is_refused(self) -> None:
+        """Every protein the evaluation scored is a target of its window."""
+        with pytest.raises(ValueError, match="not a target of the window's placement"):
+            _strata_for_rows(
+                [_row("Q1", "molecular_function")],
+                category=Category.NO_KNOWLEDGE,
+                placement={},
+                neighbourhoods={"Q1": _NB},
+                axes=_ALL_AXES,
+            )
 
 
 class TestAxesDecideWhatAPlacementNeeds:
     """A donor neighbourhood is a cost, so only a run that reads one should pay it.
 
-    Placing a query used to require an aligned donor whatever was being
-    crossed. Category, aspect and length are three facts about the query's own
-    sequence and need no alignment, so that requirement discarded most of the
-    campaign from tables that never asked about homology, and reported the
-    surviving minority as though it were the population.
+    The four window axes come from the window's truth and its placement and need
+    no alignment of the arm's. Requiring an aligned donor whatever was being
+    crossed discarded most of the campaign from tables that never asked about a
+    retrieval, and reported the surviving minority as though it were the
+    population.
     """
 
-    def test_the_sequence_axes_place_a_query_with_no_donor_at_all(self) -> None:
+    def test_the_window_axes_place_a_query_with_no_donor_at_all(self) -> None:
         """Can act: the whole point of the change."""
         placed = _strata_for_rows(
             [_row("Q1", "molecular_function")],
             category=Category.NO_KNOWLEDGE,
-            lengths={"Q1": 300},
+            placement={"Q1": _AT},
             neighbourhoods={},
-            axes=["category", "aspect", "length"],
+            axes=_ALL_AXES,
         )
         assert list(placed) == [0]
         assert placed[0].length is length_band_for(300)
+        assert str(placed[0].homology) == "30-60"
 
     @pytest.mark.parametrize("axis", sorted(NEIGHBOURHOOD_AXES))
     def test_any_donor_axis_still_refuses_a_query_with_no_donor(self, axis: str) -> None:
-        """Can refuse, once per donor axis: a table that reports homology,
-        donor evidence, taxonomy or propagation for a query whose donors were
-        never aligned is reporting an empty neighbourhood as a measurement."""
-        assert _strata_for_rows(
-            [_row("Q1", "molecular_function")],
-            category=Category.NO_KNOWLEDGE,
-            lengths={"Q1": 300},
-            neighbourhoods={},
-            axes=["length", axis],
-        ) == {}
+        """Can refuse, once per retrieval axis: a table that reports donor
+        evidence, taxonomy or propagation for a query whose donors were never
+        aligned is reporting an empty neighbourhood as a measurement."""
+        assert (
+            _strata_for_rows(
+                [_row("Q1", "molecular_function")],
+                category=Category.NO_KNOWLEDGE,
+                placement={"Q1": _AT},
+                neighbourhoods={},
+                axes=["length", axis],
+            )
+            == {}
+        )
 
-    def test_dropping_the_donor_does_not_move_the_length_band(self) -> None:
+    def test_dropping_the_donor_does_not_move_the_window_bands(self) -> None:
         """The placement path is shared, so this pins that taking it without a
-        neighbourhood answers the sequence axes identically. If it did not, the
+        neighbourhood answers the window axes identically. If it did not, the
         change would have bought coverage by moving numbers."""
-        args = dict(category=Category.NO_KNOWLEDGE, lengths={"Q1": 300},
-                    axes=["category", "aspect", "length"])
-        with_donor = _strata_for_rows([_row("Q1", "molecular_function")],
-                                      neighbourhoods={"Q1": _NB}, **args)
-        without = _strata_for_rows([_row("Q1", "molecular_function")],
-                                   neighbourhoods={}, **args)
+        args = dict(category=Category.NO_KNOWLEDGE, placement={"Q1": _AT}, axes=_ALL_AXES)
+        with_donor = _strata_for_rows(
+            [_row("Q1", "molecular_function")], neighbourhoods={"Q1": _NB}, **args
+        )
+        without = _strata_for_rows([_row("Q1", "molecular_function")], neighbourhoods={}, **args)
         assert project(with_donor[0], args["axes"]) == project(without[0], args["axes"])
 
 
@@ -231,8 +252,8 @@ class TestTheSplitIsCheckedAgainstTheStratum:
         """A seventh axis added to Stratum without deciding which side it falls
         on would silently join the sequence axes and be reported for queries
         that cannot support it. This makes that a failing test instead."""
-        assert NEIGHBOURHOOD_AXES | SEQUENCE_AXES == set(Stratum._fields)
-        assert not (NEIGHBOURHOOD_AXES & SEQUENCE_AXES)
+        assert NEIGHBOURHOOD_AXES | WINDOW_AXES == set(Stratum._fields)
+        assert not (NEIGHBOURHOOD_AXES & WINDOW_AXES)
 
 
 class _FakeResult:
@@ -242,13 +263,23 @@ class _FakeResult:
 
 
 class _FakeSession:
-    """Answers the two queries the operation makes, in order."""
+    """Answers the operation's reads by what they ask, not by their order.
 
-    def __init__(self, neighbourhood_rows, length_rows):
-        self._answers = [neighbourhood_rows, length_rows]
+    The window's placement is always read; the neighbourhoods only when a
+    retrieval axis is asked for.
+    """
 
-    def execute(self, *_a, **_k):
-        return _FakeResult(self._answers.pop(0))
+    def __init__(self, neighbourhood_rows, placement_rows):
+        self._neighbourhoods = neighbourhood_rows
+        self._placement = placement_rows
+
+    def execute(self, statement, *_a, **_k):
+        sql = str(statement)
+        if "window_placement" in sql:
+            return _FakeResult(self._placement)
+        if "go_prediction" in sql:
+            return _FakeResult(self._neighbourhoods)
+        raise AssertionError(f"unexpected query: {sql[:80]}")
 
 
 class TestTheOperationEndToEnd:
@@ -259,6 +290,7 @@ class TestTheOperationEndToEnd:
     def _payload(root, **extra):
         base = {
             "prediction_set_id": str(uuid.uuid4()),
+            "evaluation_set_id": _WINDOW,
             "artifacts_root": str(root),
             "variant": "unweighted",
         }
@@ -272,7 +304,7 @@ class TestTheOperationEndToEnd:
              {"acc": "Q2", "best_identity": 20.0, "evidence_code": "IEA",
               "taxonomic_relation": "close", "nearest_any": 0.3,
               "nearest_experimental": None}],
-            [("Q1", 300), ("Q2", 300)],
+            [("Q1", 300, 45.0), ("Q2", 300, 20.0)],
         )
 
     def test_it_writes_one_row_per_cell(self, tmp_path) -> None:
@@ -453,7 +485,7 @@ class TestItReadsTheFileTheProducerWrites:
                     "nearest_experimental": 0.1,
                 }
             ],
-            [("Q1", 300)],
+            [("Q1", 300, 45.0)],
         )
 
     def test_the_slice_is_at_the_published_threshold(self, tmp_path) -> None:
@@ -468,6 +500,7 @@ class TestItReadsTheFileTheProducerWrites:
             self._session(),
             {
                 "prediction_set_id": str(uuid.uuid4()),
+                "evaluation_set_id": _WINDOW,
                 "artifacts_root": str(root),
                 "variant": "unweighted",
                 "axes": ["aspect"],
@@ -492,6 +525,7 @@ class TestItReadsTheFileTheProducerWrites:
                 self._session(),
                 {
                     "prediction_set_id": str(uuid.uuid4()),
+                    "evaluation_set_id": _WINDOW,
                     "artifacts_root": str(tmp_path),
                     "variant": "unweighted",
                     "axes": ["aspect"],
@@ -516,6 +550,7 @@ class TestItReadsTheFileTheProducerWrites:
                 self._session(),
                 {
                     "prediction_set_id": str(uuid.uuid4()),
+                    "evaluation_set_id": _WINDOW,
                     "artifacts_root": str(tmp_path),
                     "variant": "unweighted",
                     "axes": ["aspect"],
@@ -535,6 +570,7 @@ class TestItReadsTheFileTheProducerWrites:
                 self._session(),
                 {
                     "prediction_set_id": str(uuid.uuid4()),
+                    "evaluation_set_id": _WINDOW,
                     "artifacts_root": str(root),
                     "variant": "weighted",
                     "axes": ["aspect"],
@@ -555,6 +591,7 @@ class TestItReadsTheFileTheProducerWrites:
                 self._session(),
                 {
                     "prediction_set_id": str(uuid.uuid4()),
+                    "evaluation_set_id": _WINDOW,
                     "artifacts_root": str(root),
                     "variant": "unweighted",
                     "axes": ["aspect"],
@@ -570,6 +607,7 @@ class TestItReadsTheFileTheProducerWrites:
             self._session(),
             {
                 "prediction_set_id": str(uuid.uuid4()),
+                "evaluation_set_id": _WINDOW,
                 "artifacts_root": str(root),
                 "variant": "unweighted",
                 "axes": ["aspect"],
@@ -596,7 +634,7 @@ class TestASettingThatPooledNothingIsNotSuccess:
     """
 
     def _session(self):
-        return _FakeSession([], [("Q1", 300)])
+        return _FakeSession([], [("Q1", 300, 45.0)])
 
     def test_three_settings_and_no_cells_is_refused(self, tmp_path) -> None:
         root = _grid(tmp_path, [_row("Q1", "molecular_function")])
@@ -605,10 +643,11 @@ class TestASettingThatPooledNothingIsNotSuccess:
                 self._session(),
                 {
                     "prediction_set_id": str(uuid.uuid4()),
+                    "evaluation_set_id": _WINDOW,
                     "artifacts_root": str(root),
                     "variant": "unweighted",
-                    # the donor axis, over a set with no donors
-                    "axes": ["category", "aspect", "homology"],
+                    # a retrieval axis, over a set with no donors
+                    "axes": ["category", "aspect", "donor_evidence"],
                     "min_population": 1,
                 },
                 emit=lambda *a, **k: None,
@@ -622,6 +661,7 @@ class TestASettingThatPooledNothingIsNotSuccess:
             self._session(),
             {
                 "prediction_set_id": str(uuid.uuid4()),
+                "evaluation_set_id": _WINDOW,
                 "artifacts_root": str(root),
                 "variant": "unweighted",
                 "axes": ["category", "aspect"],

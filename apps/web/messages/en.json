@@ -328,7 +328,7 @@
     "tau": "tau",
     "tauHint": "The decision threshold the run reported for this aspect. Every score in the table is taken at it.",
     "unplacedWhy": "{count} of the panel carry no band: {noLength} have no recorded length and {offScale} carry an identity that is not a percentage. They stay in the table with empty bands rather than being dropped, because they are part of the population the panel counts.",
-    "withoutDonorWhy": "{count} of the panel carry their length band but have no aligned donor, so the four donor axes go unread. They are counted among the placed: retrieving no donor costs those four axes and nothing else.",
+    "withoutDonorWhy": "{count} of the panel carry their length and homology bands but have no aligned donor, so the three donor axes go unread. They are counted among the placed: retrieving no donor costs those three axes and nothing else.",
     "sortLabel": "order",
     "sort": {
       "f_asc": "weakest first",

@@ -339,6 +339,13 @@ protein in the same band.
 - No threshold is applied, neither by the homology table (ADR-D61, decision 4)
   nor here.
 
+Every reader of the two axes reads the placement: ``stratify_evaluation``, a
+paired comparison restricted to a stratum, and the two stratum pages. A window
+with no placement is refused with the operation to run. Only the three
+retrieval axes (donor evidence, taxonomy and propagation) read a method's own
+neighbours, and only when they are asked for; they describe that method's
+retrieval and are crossed with the homology band like any other pair of axes.
+
 Data model
 ----------
 
