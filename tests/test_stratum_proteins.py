@@ -60,6 +60,10 @@ def _where(residues: int = 300, identity: float | None = 45.0) -> TargetPlacemen
     return TargetPlacement(residues=residues, identity=identity)
 
 
+#: Two targets of the window, both placed.
+_TWO = {"P1": _where(), "P2": _where()}
+
+
 def _hood(identity: float | None = 45.0, experimental: bool = False) -> Neighbourhood:
     return Neighbourhood(
         best_identity=identity,
@@ -102,9 +106,7 @@ def test_a_protein_whose_donors_were_never_aligned_still_places_on_the_window_ax
     # record, 86,5% of all candidates -- while the operation next door placed
     # the same rows.
     frame = _frame([_row("P1"), _row("P2")])
-    placed = _join(
-        frame, "biological_process", {"P1": _hood()}, {"P1": _where(), "P2": _where()}, "NK"
-    )
+    placed = _join(frame, "biological_process", {"P1": _hood()}, _TWO, "NK")
 
     assert len(placed.rows) == 2
     assert placed.placed == 2
@@ -369,7 +371,9 @@ def _slice(grid: bytes, best_f: str, ns: str = "biological_process"):
 
     from protea.api.routers.stratum_proteins import _sliced_at_the_published_tau
 
-    return _sliced_at_the_published_tau(_io.BytesIO(grid), best_f, ns, result_id="r", setting="NK")
+    return _sliced_at_the_published_tau(
+        _io.BytesIO(grid), best_f, ns, result_id="r", setting="NK"
+    )
 
 
 def test_the_slice_is_at_the_threshold_the_panel_published():
@@ -562,9 +566,7 @@ class TestTheRowShapeIsAContract:
 
     def test_every_key_the_consumers_read_is_a_key_the_producer_writes(self) -> None:
         frame = _frame([_row("P1"), _row("P2")])
-        placed = _join(
-            frame, "biological_process", {"P1": _hood()}, {"P1": _where(), "P2": _where()}, "NK"
-        )
+        placed = _join(frame, "biological_process", {"P1": _hood()}, _TWO, "NK")
         produced = set(placed.rows[0])
         missing = [k for k in self._CONSUMED if k not in produced]
         assert not missing, f"the page reads {missing}, which _join does not write"
@@ -574,9 +576,7 @@ class TestTheRowShapeIsAContract:
         # out of the producer, so a key the producer stops writing fails here
         # instead of at the first request.
         frame = _frame([_row("P1"), _row("P2")])
-        placed = _join(
-            frame, "biological_process", {"P1": _hood()}, {"P1": _where(), "P2": _where()}, "NK"
-        )
+        placed = _join(frame, "biological_process", {"P1": _hood()}, _TWO, "NK")
         for sort in _SORTS:
             page = _ordered(placed.rows, sort)
             assert len(page) == len(placed.rows), sort
@@ -585,7 +585,5 @@ class TestTheRowShapeIsAContract:
         from protea.api.routers.stratum_proteins import _scored_zero
 
         frame = _frame([_row("P1", f=0.0), _row("P2", f=0.5)])
-        placed = _join(
-            frame, "biological_process", {"P1": _hood()}, {"P1": _where(), "P2": _where()}, "NK"
-        )
+        placed = _join(frame, "biological_process", {"P1": _hood()}, _TWO, "NK")
         assert _scored_zero(placed.rows) == 1

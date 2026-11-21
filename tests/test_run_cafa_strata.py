@@ -112,16 +112,8 @@ class TestTheVocabularyCoversWhatThePipelineEmits:
     """
 
     EMITTED = (
-        "same",
-        "close",
-        "intermediate",
-        "distant",
-        "root-only",
-        "ancestor",
-        "descendant",
-        "child",
-        "parent",
-        "unrelated",
+        "same", "close", "intermediate", "distant", "root-only",
+        "ancestor", "descendant", "child", "parent", "unrelated",
     )
 
     @pytest.mark.parametrize("relation", EMITTED)
@@ -199,9 +191,7 @@ class TestIdentityIsAPercentage:
     def test_out_of_range_is_refused(self) -> None:
         with pytest.raises(ValueError, match="not a percentage"):
             stratum_for(
-                category=Category.NO_KNOWLEDGE,
-                aspect=Aspect.MOLECULAR_FUNCTION,
-                residues=100,
+                category=Category.NO_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION, residues=100,
                 identity=140.0,
                 retrieval=Neighbourhood(best_identity=140.0, donor_is_experimental=True),
             )
@@ -242,48 +232,28 @@ class TestOneDonorDefinesTheStratum:
 
 
 class _FakeResult:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def mappings(self):
-        return self._rows
+    def __init__(self, rows): self._rows = rows
+    def mappings(self): return self._rows
 
 
 class _FakeSession:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def execute(self, *_a, **_k):
-        return _FakeResult(self._rows)
+    def __init__(self, rows): self._rows = rows
+    def execute(self, *_a, **_k): return _FakeResult(self._rows)
 
 
 class TestTheRowsBecomeNeighbourhoods:
     def test_an_experimental_donor_is_marked_experimental(self) -> None:
-        rows = [
-            {
-                "acc": "Q1",
-                "best_identity": 72.5,
-                "evidence_code": "IDA",
-                "taxonomic_relation": "close",
-                "nearest_any": 0.1,
-                "nearest_experimental": 0.1,
-            }
-        ]
+        rows = [{"acc": "Q1", "best_identity": 72.5, "evidence_code": "IDA",
+                 "taxonomic_relation": "close", "nearest_any": 0.1,
+                 "nearest_experimental": 0.1}]
         n = neighbourhoods_for(_FakeSession(rows), "pset")["Q1"]
         assert n.donor_is_experimental is True
         assert n.best_identity == pytest.approx(72.5)
 
     def test_a_computational_donor_is_not(self) -> None:
-        rows = [
-            {
-                "acc": "Q1",
-                "best_identity": 72.5,
-                "evidence_code": "IEA",
-                "taxonomic_relation": "close",
-                "nearest_any": 0.1,
-                "nearest_experimental": None,
-            }
-        ]
+        rows = [{"acc": "Q1", "best_identity": 72.5, "evidence_code": "IEA",
+                 "taxonomic_relation": "close", "nearest_any": 0.1,
+                 "nearest_experimental": None}]
         n = neighbourhoods_for(_FakeSession(rows), "pset")["Q1"]
         assert n.donor_is_experimental is False
         assert n.nearest_experimental is None
@@ -300,16 +270,9 @@ class TestTheRowsBecomeNeighbourhoods:
         aligned" is a third state, and folding it into either of the other two
         would move a published cell.
         """
-        rows = [
-            {
-                "acc": "Q1",
-                "best_identity": None,
-                "evidence_code": "IEA",
-                "taxonomic_relation": "close",
-                "nearest_any": 0.2,
-                "nearest_experimental": None,
-            }
-        ]
+        rows = [{"acc": "Q1", "best_identity": None, "evidence_code": "IEA",
+                 "taxonomic_relation": "close", "nearest_any": 0.2,
+                 "nearest_experimental": None}]
         assert neighbourhoods_for(_FakeSession(rows), "pset") == {}
 
     def test_a_query_with_no_non_self_donor_is_absent_not_defaulted(self) -> None:
