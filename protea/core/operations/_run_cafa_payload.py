@@ -10,8 +10,9 @@ names how a method's candidates become scores: the evaluator scores what a
 method stored and nothing else (the closure's question 6, 2026-11-20), and the
 fields that used to ask it to score, rerank, cut, graft or propagate are
 refused with where that work happens now (:data:`RETIRED_FIELDS`). None
-chooses the terms of interest either: they are the window's (decided on
-2026-11-20), and the two fields that chose them are refused the same way.
+chooses the terms of interest or the population either: both are the
+window's (decided on 2026-11-20), and the fields that chose them are refused
+the same way.
 """
 
 from __future__ import annotations
@@ -37,6 +38,11 @@ _GRAFT = (
 _SOFTPROP = (
     "the platform no longer propagates scores; a method that propagates its scores "
     "stores them propagated"
+)
+_WINDOW_POPULATION = (
+    "the population is the window's: every target counts, an unpredicted one as a "
+    "failure, with coverage beside it, as LAFA scores; the result records it as "
+    "results.population"
 )
 _WINDOW_TERMS = (
     "the terms of interest are the window's: the evaluator scores over the terms its "
@@ -65,6 +71,7 @@ RETIRED_FIELDS: dict[str, str] = {
     "softprop": _SOFTPROP,
     "toi_file": _WINDOW_TERMS,
     "toi_rule": _WINDOW_TERMS,
+    "restrict_gt_to_predicted": _WINDOW_POPULATION,
 }
 
 _EMPTY: tuple[Any, ...] = (None, False, "", {}, [])
@@ -94,8 +101,8 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         if asked:
             raise ValueError(
                 "; ".join(f"{key}: {RETIRED_FIELDS[key]}" for key in asked)
-                + ". The evaluator scores what a method stored, over the terms its window "
-                "names, and nothing else (docs: architecture/scoring)."
+                + ". The evaluator scores what a method stored, over the terms and the "
+                "population its window names, and nothing else (docs: architecture/scoring)."
             )
         return {key: value for key, value in data.items() if key not in RETIRED_FIELDS}
 
@@ -120,16 +127,6 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "fetched from the shared object store so any machine resolves the same "
             "bytes, and the stored sha256 is verified after download. A bare path "
             "records none of that. Mutually exclusive with ia_file."
-        ),
-    )
-    restrict_gt_to_predicted: bool = Field(
-        default=True,
-        description=(
-            "Standard CAFA practice: drop ground-truth proteins not present in the "
-            "PredictionSet before evaluation, so coverage / Fmax measure performance "
-            "on the actually-predicted cohort. Disable only when the eval set is "
-            "guaranteed to be a subset of the predicted query set (e.g. a re-eval "
-            "of a frozen lab dump where this filter has already been applied)."
         ),
     )
     th_step: float = Field(

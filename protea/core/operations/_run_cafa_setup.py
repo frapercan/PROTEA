@@ -185,6 +185,24 @@ def window_terms_of_interest(
     return rule, terms
 
 
+#: The population every result is scored over: all the window's targets, an
+#: unpredicted one counted as a failure, as LAFA scores (decided on 2026-11-20).
+POPULATION_RULE = "all_targets"
+
+
+def population_record(data: EvaluationData) -> dict[str, Any]:
+    """What a result records about the proteins it was scored over.
+
+    The rule, and how many targets each category holds. With every target in
+    the population, a method that predicts few of them shows it as coverage,
+    beside the number, instead of being scored over the ones it predicted.
+    """
+    return {
+        "rule": POPULATION_RULE,
+        "targets": {"NK": len(data.nk), "LK": len(data.lk), "PK": len(data.pk)},
+    }
+
+
 def terms_of_interest_record(rule: str, terms: list[str], path: str) -> dict[str, Any]:
     """What a result records about the terms it was scored over.
 

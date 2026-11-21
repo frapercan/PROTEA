@@ -126,7 +126,9 @@ Scoring
 
 LAFA scores with ``cafaeval`` at the t0 ontology, with t0's information
 accretion over the t0 Swiss-Prot cohort, the terms of interest, and
-``-prop fill -norm cafa -no_orphans``, adding ``-known`` for PK. PROTEA keeps
+``-prop fill -norm cafa -no_orphans``, adding ``-known`` for PK, over every
+target of the window: a target a method did not predict counts as a failure.
+PROTEA's evaluator does the same for every window. PROTEA keeps
 its own optimised evaluator, ``cafaeval-protea``, which reproduces LAFA's nine
 cells exactly when it is given LAFA's own truth. A window of the frame
 therefore has its pivot at the t0 ontology (the closure ``per_side_t0_pivot``),

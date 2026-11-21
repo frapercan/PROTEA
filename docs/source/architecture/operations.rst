@@ -1040,18 +1040,10 @@ Payload fields
        easy-to-predict ones. Without this file ``cafaeval`` runs with
        uniform IC=1, which inflates Fmax. For CAFA6 evaluations use the
        ``IA_cafa6.tsv`` file shipped with the benchmark.
-   * - ``restrict_gt_to_predicted``
-     - ``true``
-     - Standard CAFA practice: drop ground-truth proteins not present in
-       the ``PredictionSet`` before evaluation, so coverage / Fmax measure
-       performance on the actually-predicted cohort. Disable only when the
-       eval set is guaranteed to be a subset of the predicted query set
-       (e.g. a re-eval of a frozen lab dump where this filter has already
-       been applied).
 
-Retired on 2026-11-20 (the closure, step 4), with where the work happens now.
-A payload that still carries one of these with a value is refused with the
-pointer; one that carries it empty asked for nothing and is accepted.
+Retired in the closure (steps 4 and 5, 2026-11-20 and 21), with where the work
+happens now. A payload that still carries one of these with a value is refused
+with the pointer; one that carries it empty asked for nothing and is accepted.
 
 - ``scoring_config_id``, ``max_distance``, ``max_k_position``,
   ``max_sequence_rank``: ``score_prediction_set`` takes the configuration and
@@ -1063,6 +1055,13 @@ pointer; one that carries it empty asked for nothing and is accepted.
   predicting, on top of a reranker, and the record says so.
 - ``softprop``: the platform no longer propagates scores; a method that
   propagates its scores stores them propagated.
+- ``toi_file``, ``toi_rule``: the terms of interest are the window's. The
+  evaluator scores over the terms its gain rule names, and records the rule,
+  the count and the file's sha256 on the result.
+- ``restrict_gt_to_predicted``: the population is the window's. Every target
+  counts, an unpredicted one as a failure, with coverage beside the number, as
+  LAFA scores, and the result records it as ``results.population``. A request
+  that passed ``false`` asked for exactly that and is accepted.
 
 Execution flow
 ~~~~~~~~~~~~~~
@@ -1072,8 +1071,9 @@ Execution flow
    1. load EvaluationSet + PredictionSet + OntologySnapshot from DB
    2. compute_evaluation_data(): same delta as generate_evaluation_set
    3. download OBO file from snapshot.obo_url to a temp directory
-   4. write ground-truth TSVs: gt_NK.tsv, gt_LK.tsv, gt_PK.tsv,
-      known_terms.tsv, pk_known_terms.tsv
+   4. write ground-truth TSVs, the window's whole truth: gt_NK.tsv, gt_LK.tsv,
+      gt_PK.tsv, known_terms.tsv, pk_known_terms.tsv, and the window's terms
+      of interest
    5. write predictions in CAFA format (protein \\t go_id \\t score): the
       stored method_score of the delta proteins, as stored, at four decimals
    6. session.commit(): releases DB connection before cafaeval forks workers
@@ -1085,7 +1085,8 @@ Execution flow
       e. write cafaeval outputs (PR curves, metric TSVs) into a persistent
          staging dir under ``settings.storage.artifacts_dir`` and upload them
          through the configured ``ArtifactStore``
-   8. INSERT EvaluationResult row with results dict (NK → {BPO, MFO, CCO})
+   8. INSERT EvaluationResult row with results dict (NK → {BPO, MFO, CCO}),
+      beside the terms of interest and the population it was scored over
    9. return OperationResult(result={evaluation_result_id, results})
 
 PK known-terms

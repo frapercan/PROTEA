@@ -538,9 +538,10 @@ PROTEA were previously misaligned and the current state after the fix
 
 **How to run a LAFA-comparable evaluation.** In the ``run_cafa_evaluation``
 payload, leave ``th_step`` and ``max_terms`` at their defaults (``0.01`` and
-``None``) and name the IA table LAFA's frame uses; the terms of interest are
-the window's, and a window of LAFA's frame derives LAFA's own
-(:doc:`lafa-frame`).
+``None``) and name the IA table LAFA's frame uses. The terms of interest and
+the population are the window's: a window of LAFA's frame derives LAFA's own
+terms (:doc:`lafa-frame`), and every evaluation scores all the window's targets,
+an unpredicted one as a failure, with coverage beside the number.
 
 **Persisted metrics.** ``run_cafa_evaluation`` persists, per aspect, the
 IA-weighted ``f_micro_w`` (headline), ``fmax_w``, ``f_micro``, and the

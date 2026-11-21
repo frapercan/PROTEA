@@ -50,6 +50,7 @@ from protea.core.operations._run_cafa_setup import (  # noqa: F401
     _EvalInputs,
     _PipelineCtx,
     bundle_run_context,
+    population_record,
     terms_of_interest_record,
     window_terms_of_interest,
 )
@@ -62,8 +63,8 @@ from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import ArtifactStore, get_artifact_store
 
 #: The keys of a result that are not settings: what was uploaded, and the terms
-#: the settings were scored over.
-_NOT_SETTINGS: tuple[str, ...] = ("artifacts", "terms_of_interest")
+#: and the population the settings were scored over.
+_NOT_SETTINGS: tuple[str, ...] = ("artifacts", "terms_of_interest", "population")
 
 
 def _refuse_a_cyclic_snapshot(session: Session, snapshot: Any, emit: EmitFn) -> None:
@@ -321,6 +322,7 @@ class RunCafaEvaluationOperation:
             results["terms_of_interest"] = terms_of_interest_record(
                 ctx.inputs.toi_rule, ctx.inputs.toi_go_ids, run_data.toi_path
             )
+            results["population"] = population_record(ctx.inputs.data)
             return results
 
     def _stage_evaluator_inputs(
@@ -343,10 +345,6 @@ class RunCafaEvaluationOperation:
         obo_path = resolve_obo(tmpdir, inputs.snapshot, emit)
         ia_path = self._resolve_and_gate_ia(tmpdir, inputs.snapshot, p, emit, session)
         data = inputs.data
-        if p.restrict_gt_to_predicted:
-            data = _data.restrict_data_to_predicted(
-                session, prediction_set_id=inputs.pred_set_id, data=data, emit=emit
-            )
         gt_paths = _data.write_ground_truth_files(artifacts_root, data)
         toi_path = self._write_terms_of_interest(artifacts_root, inputs.toi_go_ids, emit)
 
