@@ -2,12 +2,54 @@
 
 // When the best result improved, on the whole cell or on one band of identity.
 
+import { useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { BAND_KEY, HOMOLOGY_BANDS, MIN_PROTEINS, armLabel, bandOf, cellF, championSteps, type SummaryResult } from "@/lib/windowPanel";
+import { deltaText, panelNote, verdictTone, type PairedComparison } from "@/lib/pairedComparison";
+import { BAND_KEY, HOMOLOGY_BANDS, MIN_PROTEINS, armLabel, bandOf, cellF, championSteps, stepComparison, type SummaryResult } from "@/lib/windowPanel";
 import { Figure, INK, Legend, SERIES, extent, fmt, pressable, signed, ticks, useTooltip } from "./chart";
 import type { PanelView } from "./WindowPanel";
 
 type Value = (r: SummaryResult) => number | null;
+
+const TONE = { higher: "text-emerald-700", lower: "text-rose-700", unresolved: "text-slate-500" } as const;
+
+/** Whether a step's pair was compared, and how it came out on the cell (or on the band shown). */
+function PairedCell({
+  comparisons,
+  cell,
+  item,
+  before,
+}: {
+  comparisons: PairedComparison[] | null | "failed";
+  cell: string;
+  item: SummaryResult;
+  before: SummaryResult | undefined;
+}) {
+  const t = useTranslations("windowPanel");
+  const quiet = (text: string) => <span className="text-slate-500">{text}</span>;
+  if (!before) return quiet("—");
+  if (comparisons === "failed") return quiet(t("trajectory.pairedUnavailable"));
+  if (comparisons == null) return quiet(t("trajectory.loadingPaired"));
+  const found = stepComparison(comparisons, item.id, before.id, cell);
+  if (!found) return quiet(t("trajectory.notCompared"));
+  const tone = verdictTone(found.panel);
+  const { status, effect_of_interest: effect } = found.panel;
+  const word =
+    tone === "higher"
+      ? t("trajectory.settledHigher")
+      : tone === "lower"
+        ? t("trajectory.settledLower")
+        : status === "null_with_power" && effect != null
+          ? t("trajectory.equivalent", { effect })
+          : status === "underpowered"
+            ? t("trajectory.underpowered")
+            : t("trajectory.unsettled");
+  return (
+    <span className={`tabular-nums ${TONE[tone]}`} title={panelNote(found.panel, found.comparison)}>
+      {deltaText(found.panel)} · {word}
+    </span>
+  );
+}
 
 function Trajectory({
   view,
@@ -88,6 +130,13 @@ export default function TrajectoryView({ view }: { view: PanelView }) {
   const { state, commit, shown, reference: ref } = view;
   const tip = useTooltip();
   const measure = state.measure === "five" || (HOMOLOGY_BANDS as readonly string[]).includes(state.measure) ? state.measure : "all";
+  const onBand = measure !== "all" && measure !== "five";
+  const { loadBand } = view;
+  useEffect(() => {
+    if (onBand) loadBand(measure);
+  }, [onBand, measure, loadBand]);
+  const listed = onBand ? view.bandComparisons[measure] : undefined;
+  const stepComparisons = onBand ? (listed === undefined || listed === "loading" ? null : listed) : view.comparisons;
   const arms = shown.filter((r) => r !== ref);
   const legend = (
     <Legend
@@ -165,13 +214,15 @@ export default function TrajectoryView({ view }: { view: PanelView }) {
                 </tr>
               </thead>
               <tbody>
-                {steps.map((s) => (
+                {steps.map((s, k) => (
                   <tr key={s.item.id} className="cursor-pointer border-t hover:bg-blue-50" onClick={() => view.toggleFocus(s.item)}>
                     <td className="px-3 py-1.5">{armLabel(s.item)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmt(s.before)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmt(s.now)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{signed(s.now - (refValue ?? 0))}</td>
-                    <td className="px-3 py-1.5 text-xs text-slate-500">{t("trajectory.pending")}</td>
+                    <td className="px-3 py-1.5 text-xs">
+                      <PairedCell comparisons={stepComparisons} cell={state.cell} item={s.item} before={k > 0 ? steps[k - 1].item : ref} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

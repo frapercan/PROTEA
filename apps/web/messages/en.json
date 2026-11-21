@@ -2551,8 +2551,15 @@
       "before": "Before",
       "now": "Now",
       "overReference": "over the reference",
-      "paired": "Paired comparison",
-      "pending": "pending"
+      "paired": "Paired comparison (this minus the one before)",
+      "notCompared": "not compared yet",
+      "loadingPaired": "reading the comparisons...",
+      "pairedUnavailable": "the comparisons could not be read",
+      "settledHigher": "higher, settled",
+      "settledLower": "lower, settled",
+      "unsettled": "not settled",
+      "equivalent": "the same within {effect}",
+      "underpowered": "too few proteins to tell"
     },
     "strata": {
       "question": "Where does each arm win?",

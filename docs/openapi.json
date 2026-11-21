@@ -3519,7 +3519,7 @@
     },
     "/v1/annotations/evaluation-sets/{eval_id}/paired-comparisons": {
       "get": {
-        "description": "The latest whole-panel ``compare_paired_panels`` of each pair of the window's results.\n\nEach one names its job, the result under test and the baseline, the method\naxis it declared, its operating point and resampling, and per panel the\ndifference, its interval, the interval's method, the verdict and the number\nof paired proteins. Returns ``404`` if the evaluation set is missing.",
+        "description": "The latest ``compare_paired_panels`` of each pair of the window's results.\n\nOver the whole panel, or, given ``axis`` and ``band`` together, restricted to\nthat stratum. Each one names its job, the result under test and the baseline,\nthe stratum, the method axis it declared, its operating point and resampling,\nand per panel the difference, its interval, the interval's method, the\nverdict, the number of paired proteins, the effect of interest and the\nsmallest detectable effect. Returns ``422`` for half a stratum or one outside\nthe closed vocabularies, ``404`` if the evaluation set is missing.",
         "operationId": "list_paired_comparisons_v1_annotations_evaluation_sets__eval_id__paired_comparisons_get",
         "parameters": [
           {
@@ -3530,6 +3530,42 @@
               "format": "uuid",
               "title": "Eval Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "With band: the stratum axis the comparisons were restricted to",
+            "in": "query",
+            "name": "axis",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With band: the stratum axis the comparisons were restricted to",
+              "title": "Axis"
+            }
+          },
+          {
+            "description": "With axis: the band of that axis, e.g. >90",
+            "in": "query",
+            "name": "band",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With axis: the band of that axis, e.g. >90",
+              "title": "Band"
             }
           }
         ],

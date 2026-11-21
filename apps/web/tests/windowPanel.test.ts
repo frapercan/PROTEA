@@ -10,6 +10,7 @@ import {
   modelName,
   modelsOf,
   referenceOf,
+  stepComparison,
   visibleResults,
   type SummaryResult,
 } from "@/lib/windowPanel";
@@ -20,6 +21,7 @@ import {
   toggledFocus,
   writePanelState,
 } from "@/lib/panelState";
+import type { PairedComparison, PanelComparison } from "@/lib/pairedComparison";
 
 function result(id: string, over: Partial<SummaryResult["arm"]> = {}, extra: Partial<SummaryResult> = {}): SummaryResult {
   return {
@@ -159,3 +161,67 @@ describe("the state in the address", () => {
     expect(toggledFocus("a,b", "a")).toBe("b");
   });
 });
+
+describe("a trajectory step's paired comparison", () => {
+  const panel = (over: Partial<PanelComparison> = {}): PanelComparison => ({
+    delta: 0.012,
+    ci_low: 0.004,
+    ci_high: 0.02,
+    interval_method: "bca",
+    verdict: "a_greater",
+    status: "ok",
+    n_paired: 1045,
+    ...over,
+  });
+  const comparison = (arm: string, baseline: string, panels: Record<string, PanelComparison>): PairedComparison => ({
+    job_id: `job-${arm}-${baseline}`,
+    evaluation_result_id: arm,
+    baseline_evaluation_result_id: baseline,
+    finished_at: null,
+    method_axis: ["scoring"],
+    operating_point: "reselected_per_resample",
+    weighting: "ia_weighted",
+    n_resamples: 2000,
+    seed: 0,
+    confidence: 0.95,
+    panels,
+  });
+
+  it("reads a comparison run as the step was, the new best under test", () => {
+    const found = stepComparison([comparison("new", "old", { "NK:MFO": panel() })], "new", "old", "NK:MFO");
+    expect(found?.panel).toEqual(panel());
+  });
+
+  it("turns a comparison run the other way round: difference and interval negated, verdict swapped", () => {
+    const found = stepComparison([comparison("old", "new", { "NK:MFO": panel() })], "new", "old", "NK:MFO");
+    expect(found?.panel.delta).toBeCloseTo(-0.012);
+    expect(found?.panel.ci_low).toBeCloseTo(-0.02);
+    expect(found?.panel.ci_high).toBeCloseTo(-0.004);
+    expect(found?.panel.verdict).toBe("b_greater");
+  });
+
+  it("prefers the comparison run as the step was when both exist", () => {
+    const both = [
+      comparison("old", "new", { "NK:MFO": panel({ delta: 0.5 }) }),
+      comparison("new", "old", { "NK:MFO": panel({ delta: 0.01 }) }),
+    ];
+    expect(stepComparison(both, "new", "old", "NK:MFO")?.panel.delta).toBe(0.01);
+  });
+
+  it("leaves an unresolved verdict as it is when turned over", () => {
+    const found = stepComparison(
+      [comparison("old", "new", { "NK:MFO": panel({ verdict: "not_resolved", status: "null_unread" }) })],
+      "new",
+      "old",
+      "NK:MFO",
+    );
+    expect(found?.panel.verdict).toBe("not_resolved");
+  });
+
+  it("is null when the pair was never compared, or not on that cell", () => {
+    const one = [comparison("new", "old", { "NK:MFO": panel() })];
+    expect(stepComparison(one, "new", "other", "NK:MFO")).toBeNull();
+    expect(stepComparison(one, "new", "old", "LK:BPO")).toBeNull();
+  });
+});
+

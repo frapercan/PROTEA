@@ -2552,8 +2552,15 @@
       "before": "Vorher",
       "now": "Jetzt",
       "overReference": "über der Referenz",
-      "paired": "Gepaarter Vergleich",
-      "pending": "ausstehend"
+      "paired": "Gepaarter Vergleich (dieses minus das vorherige)",
+      "notCompared": "noch nicht verglichen",
+      "loadingPaired": "Vergleiche werden gelesen...",
+      "pairedUnavailable": "die Vergleiche konnten nicht gelesen werden",
+      "settledHigher": "höher, entschieden",
+      "settledLower": "niedriger, entschieden",
+      "unsettled": "nicht entschieden",
+      "equivalent": "gleich innerhalb von {effect}",
+      "underpowered": "zu wenige Proteine für ein Urteil"
     },
     "strata": {
       "question": "Wo gewinnt jeder Arm?",

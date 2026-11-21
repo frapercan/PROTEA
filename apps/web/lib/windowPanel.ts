@@ -5,6 +5,8 @@
 // left on it. Everything here is a pure function of that summary and of the
 // panel's state, so the views stay drawings and the rules are tested once.
 
+import type { PairedComparison, PanelComparison } from "./pairedComparison";
+
 export const SETTINGS = ["NK", "LK", "PK"] as const;
 export const NAMESPACES = ["BPO", "MFO", "CCO"] as const;
 export const CELLS = SETTINGS.flatMap((s) => NAMESPACES.map((n) => `${s}:${n}`));
@@ -239,4 +241,33 @@ export function bandRanking(
     ? (ranked.find((x) => isNeighbour(x.result) !== isNeighbour(winner.result)) ?? null)
     : null;
   return { ranked, rival };
+}
+
+/**
+ * A trajectory step's paired comparison on one cell, read as the new best minus
+ * the one before it. A comparison run the other way round is read turned over:
+ * its difference and interval negated and its verdict swapped. Null when the
+ * pair was never compared on that cell.
+ */
+export function stepComparison(
+  comparisons: PairedComparison[],
+  newer: string,
+  before: string,
+  cell: string,
+): { panel: PanelComparison; comparison: PairedComparison } | null {
+  const direct = comparisons.find(
+    (c) => c.evaluation_result_id === newer && c.baseline_evaluation_result_id === before && c.panels[cell],
+  );
+  if (direct) return { panel: direct.panels[cell], comparison: direct };
+  const reverse = comparisons.find(
+    (c) => c.evaluation_result_id === before && c.baseline_evaluation_result_id === newer && c.panels[cell],
+  );
+  if (!reverse) return null;
+  const p = reverse.panels[cell];
+  const negated = (v: number | null) => (v == null ? null : -v);
+  const verdict = p.verdict === "a_greater" ? "b_greater" : p.verdict === "b_greater" ? "a_greater" : p.verdict;
+  return {
+    panel: { ...p, delta: negated(p.delta), ci_low: negated(p.ci_high), ci_high: negated(p.ci_low), verdict },
+    comparison: reverse,
+  };
 }
