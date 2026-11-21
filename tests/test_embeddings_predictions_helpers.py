@@ -94,6 +94,7 @@ def test_returns_expected_column_set() -> None:
         "neighbor_distance_std",
         "method_score",
         "explanation",
+        "score",
     }
 
 

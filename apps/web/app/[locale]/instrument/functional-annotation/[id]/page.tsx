@@ -388,7 +388,12 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
   const hasAlignment = preds.some((p) => p.identity_nw != null);
   const hasTaxonomy = preds.some((p) => p.taxonomic_relation != null);
   const hasReranker = preds.some((p) => p.vote_count != null);
-  const hasScore = !!scoringConfig;
+  // A scored set's rows carry the score it stored, which is the one the
+  // evaluator reads; it wins over anything the browser could compute.
+  const hasStored = preds.some((p) => p.score != null);
+  const hasScore = hasStored || !!scoringConfig;
+  const scoreOf = (p: Prediction) =>
+    hasStored ? (p.score ?? 0) : computeScore(p, scoringConfig!);
   // A native method (ADR-D60): its own score and a witness instead of a donor and a distance.
   const isMethod = !hasDistance && preds.some((p) => p.method_score != null);
   const hasDetail = hasAlignment || hasTaxonomy || hasReranker;
@@ -399,7 +404,7 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
   // order up to the sort implementation: by GO id instead, so the same set
   // reads the same way twice.
   const sorted = hasScore
-    ? [...preds].sort((a, b) => computeScore(b, scoringConfig!) - computeScore(a, scoringConfig!))
+    ? [...preds].sort((a, b) => scoreOf(b) - scoreOf(a) || a.go_id.localeCompare(b.go_id))
     : isMethod
     ? [...preds].sort((a, b) => (b.method_score ?? 0) - (a.method_score ?? 0) || a.go_id.localeCompare(b.go_id))
     : hasDistance
@@ -444,8 +449,8 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                 <span className="font-mono text-blue-600">{pred.go_id}</span>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {hasScore && (
-                    <span className={`font-mono text-[10px] ${scoreColor(computeScore(pred, scoringConfig!))}`}>
-                      {computeScore(pred, scoringConfig!).toFixed(3)}
+                    <span className={`font-mono text-[10px] ${scoreColor(scoreOf(pred))}`}>
+                      {scoreOf(pred).toFixed(3)}
                     </span>
                   )}
                   {isMethod && !hasScore && (
@@ -486,8 +491,8 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
               onClick={() => hasDetail ? setExpanded(isExpanded ? null : pred.go_id) : undefined}
             >
               {hasScore && (
-                <span className={`font-mono ${scoreColor(computeScore(pred, scoringConfig!))}`}>
-                  {computeScore(pred, scoringConfig!).toFixed(3)}
+                <span className={`font-mono ${scoreColor(scoreOf(pred))}`}>
+                  {scoreOf(pred).toFixed(3)}
                 </span>
               )}
               {isMethod && !hasScore && (
@@ -829,6 +834,9 @@ const tToast = useTranslations("toasts");
   const [annotationSetId, setAnnotationSetId] = useState<string | null>(null);
   const [ontologySnapshotId, setOntologySnapshotId] = useState<string | null>(null);
   const [limitPerEntry, setLimitPerEntry] = useState<number | null>(null);
+  // A scored set: the candidate set holding its rows, and the configuration it read.
+  const [scoredFrom, setScoredFrom] = useState<string | null>(null);
+  const [setScoringConfigId, setSetScoringConfigId] = useState<string | null>(null);
   // A failure loading the prediction set means this whole page has no
   // subject to render. A missing id resolves to the not-found boundary;
   // any other failure is re-thrown to the route error boundary. Both
@@ -875,6 +883,8 @@ const tToast = useTranslations("toasts");
         setAnnotationSetId(ps.annotation_set_id);
         setOntologySnapshotId(ps.ontology_snapshot_id);
         setLimitPerEntry(ps.limit_per_entry);
+        setScoredFrom(ps.scored_from ?? null);
+        setSetScoringConfigId(ps.scoring_config_id ?? null);
       })
       .catch((e: unknown) => {
         // A missing id is a 404: hand it to not-found, not the generic
@@ -985,6 +995,29 @@ const tToast = useTranslations("toasts");
             <p className="text-xs text-slate-600 mt-0.5">k = {limitPerEntry}</p>
           )}
         </div>
+        {scoredFrom ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* A scored set's scores are stored, and they are the ones the
+              evaluator reads, so nothing is recomputed here. */}
+            <p className="text-xs text-slate-600" data-testid="scored-set-notice">
+              Scored set: the scores shown are the ones stored with configuration{" "}
+              <span className="font-medium">
+                {scoringConfigs.find((c) => c.id === setScoringConfigId)?.name ??
+                  setScoringConfigId ??
+                  "unknown"}
+              </span>
+              , over the candidates of{" "}
+              <Link
+                href={`/${locale}/instrument/functional-annotation/${scoredFrom}`}
+                className="font-mono text-blue-600 hover:underline"
+              >
+                {scoredFrom.slice(0, 8)}
+              </Link>
+              .
+            </p>
+            <DownloadButton setId={setId} />
+          </div>
+        ) : (
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1.5">
             <label className="text-xs text-slate-500 whitespace-nowrap">Scoring</label>
@@ -1002,8 +1035,9 @@ const tToast = useTranslations("toasts");
           </div>
           <DownloadButton setId={setId} />
         </div>
+        )}
         <div>
-          {selectedConfigId && (
+          {!scoredFrom && selectedConfigId && (
             <WeightPanel
               config={selectedConfigId !== CUSTOM_ID ? selectedConfig : undefined}
               isCustom={selectedConfigId === CUSTOM_ID}

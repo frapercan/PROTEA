@@ -261,6 +261,8 @@ def _make_prediction_set(ps_id=None):
     ps.limit_per_entry = 5
     ps.distance_threshold = None
     ps.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+    # A candidate set's record: no scored_from, so its rows are its own.
+    ps.meta = {}
     return ps
 
 

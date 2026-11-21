@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session
 
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.embedding.prediction_score import PredictionScore
+from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.method.prediction_explanation import PredictionExplanation
 from protea.infrastructure.session import session_scope
 
@@ -169,7 +171,10 @@ def iter_predictions_tsv(
 
 
 def _prediction_row_to_dict(
-    pred: GOPrediction, gt: GOTerm, explanation: dict[str, Any] | None = None
+    pred: GOPrediction,
+    gt: GOTerm,
+    explanation: dict[str, Any] | None = None,
+    score: float | None = None,
 ) -> dict[str, Any]:
     """Shape one ``(GOPrediction, GOTerm)`` join row for the API response.
 
@@ -215,6 +220,9 @@ def _prediction_row_to_dict(
         # the explanation it wrote for the row when its spec says it explains.
         "method_score": pred.method_score,
         "explanation": explanation,
+        # The score a scored set stored for this candidate (score_prediction_set);
+        # None on a candidate set, which holds candidates and no scores.
+        "score": score,
     }
 
 
@@ -224,24 +232,51 @@ def build_predictions_for_protein(
     prediction_set_id: uuid.UUID,
     accession: str,
 ) -> list[dict[str, Any]]:
-    """Return all predicted GO terms for one protein, sorted by distance, then by the method's score.
+    """Return all predicted GO terms for one protein.
+
+    A candidate set's rows are its own, sorted by distance, then by the method's
+    score. A scored set holds no rows of its own (``score_prediction_set``): its
+    rows are its candidate set's, each with the score it stored, highest first,
+    and a candidate the scoring removed is left out, because the scored set does
+    not hold it. Read here, a scored set shows the scores the evaluator read
+    rather than nothing.
 
     The PredictionSet existence check stays in the service layer (so
     the domain exception type lives next to the rest of the validation
     logic); this helper assumes the caller has already verified the id.
     """
+    pset = session.get(PredictionSet, prediction_set_id)
+    scored_from = (pset.meta or {}).get("scored_from") if pset is not None else None
+    rows_of = uuid.UUID(str(scored_from)) if scored_from else prediction_set_id
     rows = (
         session.query(GOPrediction, GOTerm)
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
         .filter(
-            GOPrediction.prediction_set_id == prediction_set_id,
+            GOPrediction.prediction_set_id == rows_of,
             GOPrediction.protein_accession == accession,
         )
         .order_by(GOPrediction.distance, GOPrediction.method_score.desc())
         .all()
     )
+    if scored_from:
+        stored = _stored_scores(session, prediction_set_id, accession)
+        kept = [(pred, gt) for pred, gt in rows if pred.go_term_id in stored]
+        kept.sort(key=lambda row: (-stored[row[0].go_term_id], row[1].go_id))
+        return [
+            _prediction_row_to_dict(pred, gt, score=stored[pred.go_term_id]) for pred, gt in kept
+        ]
     why = _explanations(session, prediction_set_id, accession) if _from_a_method(rows) else {}
     return [_prediction_row_to_dict(pred, gt, why.get(gt.go_id)) for pred, gt in rows]
+
+
+def _stored_scores(
+    session: Session, prediction_set_id: uuid.UUID, accession: str
+) -> dict[int, float]:
+    """go_term_id -> the score a scored set stored for one protein; empty when none."""
+    row = session.get(PredictionScore, (prediction_set_id, accession))
+    if row is None:
+        return {}
+    return {int(t): float(s) for t, s in zip(row.go_term_ids, row.scores, strict=True)}
 
 
 def _from_a_method(rows: list[Any]) -> bool:
