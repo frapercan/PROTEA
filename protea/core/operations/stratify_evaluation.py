@@ -286,7 +286,7 @@ def _setting_rows(work: _SettingWork, emit: EmitFn) -> list[dict[str, Any]] | No
         return None
     meta = read_grid_metadata(grid, setting, result_id=work.result_id)
     require_variant(meta, p.variant, result_id=work.result_id)
-    taus = _published_taus(setting_dir, result_id=work.result_id)
+    taus = _published_taus(setting_dir, p.variant, result_id=work.result_id)
     rows = _rows_at_published_tau(grid, meta, p.variant, taus)
     emit(
         "stratify_evaluation.sliced",
@@ -356,18 +356,38 @@ def _strata_for_rows(
 #: grid -- the grid holds the whole sweep -- and reading it from here rather
 #: than from the ``evaluation_result`` row keeps one source for both modes: a
 #: local directory has no row to read.
-BEST_F_FILENAME = "evaluation_best_f.tsv"
+#:
+#: cafaeval writes one best table per measure, each at that measure's own
+#: maximum. A stratum pools the micro-averaged F of its variant, so it is sliced
+#: at the maximum of that same measure: the threshold its parent cell publishes
+#: as ``f_micro_w`` (weighted) or ``f_micro`` (unweighted). It used to read
+#: ``evaluation_best_f.tsv``, the maximum of the protein-centric F, which is a
+#: different threshold: on 211->227, ESM-2 650M with ``embedding_only`` read by
+#: percentile, NK molecular function, that table says tau 0.31 where the cell's
+#: ``f_micro_w`` peaks at 0.57, and the strata summed to 0.390 inside a cell that
+#: publishes 0.4405. Every stratum was a number at an operating point no
+#: published figure used.
+BEST_TABLE_FOR_VARIANT = {
+    "weighted": "evaluation_best_f_micro_w.tsv",
+    "unweighted": "evaluation_best_f_micro.tsv",
+}
 
 
-def _settings_from_store(store: Any, result_id: str, work: Path) -> list[str]:
-    """Fetch every setting's grid and best-F table under a result's prefix.
+def best_table_for(variant: str) -> str:
+    """The best table whose threshold a stratum of ``variant`` is sliced at."""
+    return BEST_TABLE_FOR_VARIANT[variant]
+
+
+def _settings_from_store(store: Any, result_id: str, work: Path, variant: str) -> list[str]:
+    """Fetch every setting's grid and the variant's best table under a result's prefix.
 
     The settings are not listed from the store: the store protocol has no list,
     and the three CAFA knowledge categories are the only settings an evaluation
     writes. A setting whose grid is absent is simply not returned; a setting
-    with a grid and no best-F table IS returned, and refused later by name,
+    with a grid and no best table IS returned, and refused later by name,
     because that is a damaged result rather than an unevaluated setting.
     """
+    best_table = best_table_for(variant)
     found: list[str] = []
     for setting in ("NK", "LK", "PK"):
         grid_key = eval_artifact_key(uuid.UUID(result_id), f"{setting}/{GRID_FILENAME}")
@@ -376,26 +396,29 @@ def _settings_from_store(store: Any, result_id: str, work: Path) -> list[str]:
         target = work / setting
         target.mkdir(parents=True, exist_ok=True)
         (target / GRID_FILENAME).write_bytes(store.get(grid_key))
-        best_key = eval_artifact_key(uuid.UUID(result_id), f"{setting}/{BEST_F_FILENAME}")
+        best_key = eval_artifact_key(uuid.UUID(result_id), f"{setting}/{best_table}")
         if store.exists(best_key):
-            (target / BEST_F_FILENAME).write_bytes(store.get(best_key))
+            (target / best_table).write_bytes(store.get(best_key))
         found.append(setting)
     return found
 
 
-def _published_taus(setting_dir: Path, *, result_id: str) -> dict[str, float]:
+def _published_taus(setting_dir: Path, variant: str, *, result_id: str) -> dict[str, float]:
     """``{cafaeval namespace: tau}``, the operating point each one reports.
 
     Read from the file cafaeval wrote and not chosen here. A stratum pooled at
     a threshold other than the one its parent cell published would be a
     different measurement wearing the same label, and the difference would be
-    invisible: both tables would say ``f_micro``.
+    invisible: both tables would say ``f_micro``. That is why the table is the
+    one of the variant's micro F (:data:`BEST_TABLE_FOR_VARIANT`) and not the
+    protein-centric one, which peaks elsewhere.
     """
-    path = setting_dir / BEST_F_FILENAME
+    best_table = best_table_for(variant)
+    path = setting_dir / best_table
     if not path.exists():
         raise ValueError(
             f"evaluation result {result_id}, setting {setting_dir.name}: there is a "
-            f"{GRID_FILENAME} and no {BEST_F_FILENAME}, so the grid holds a sweep and "
+            f"{GRID_FILENAME} and no {best_table}, so the grid holds a sweep and "
             "nothing says which column of it the result published. Refusing rather than "
             "picking a threshold: every column is a defensible number and only one of "
             "them is the one already reported."
@@ -441,7 +464,7 @@ def _resolve_source(
     emit(
         "stratify_evaluation.fetched",
         None,
-        {"settings": _settings_from_store(store, p.evaluation_result_id, root)},
+        {"settings": _settings_from_store(store, p.evaluation_result_id, root, p.variant)},
         "info",
     )
     return root, store, tmp

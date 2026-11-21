@@ -106,8 +106,8 @@ def test_the_stratification_counts_the_weighted_population(tmp_path: Path) -> No
 def test_the_stratum_route_lists_the_weighted_population(tmp_path: Path) -> None:
     from protea.api.routers.stratum_proteins import _sliced_at_the_published_tau
 
-    best_f = f"filename\tns\ttau\tf\npredictions.tsv\t{BP}\t0.5\t0.5\n"
+    best = f"filename\tns\ttau\tf\npredictions.tsv\t{BP}\t0.5\t0.5\n"
     grid = io.BytesIO(_grid(tmp_path).read_bytes())
-    frame = _sliced_at_the_published_tau(grid, best_f, BP, result_id="r", setting="PK")
+    frame = _sliced_at_the_published_tau(grid, lambda _v: best, BP, result_id="r", setting="PK")
     assert frame["protein_accession"].tolist() == ["P1"]
     assert set(frame["variant"]) == {"weighted"}

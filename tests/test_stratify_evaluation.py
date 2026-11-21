@@ -31,11 +31,11 @@ from protea.core.operations._run_cafa_grid_artifact import (
 from protea.core.operations._run_cafa_strata import VARIANT_COLUMNS, project
 from protea.core.operations.stratify_evaluation import (
     _ASPECT_FOR_NAMESPACE,
-    BEST_F_FILENAME,
     StratifyEvaluationOperation,
     StratifyEvaluationPayload,
     _category_for,
     _strata_for_rows,
+    best_table_for,
 )
 from protea.core.strata import (
     NEIGHBOURHOOD_AXES,
@@ -94,13 +94,19 @@ def _row(
 
 
 def _grid(root, rows: list[dict], *, setting: str = "NK", variant: str = "unweighted"):
-    """Write one setting through the producer, with the best-F table beside it.
+    """Write one setting through the producer, with its best tables beside it.
 
     `write_grid_parquet` decides the filename, the footer and the column
     layout. `information_accretion_set_id` is the string "null" because that is
     what the stored grids on this deployment carry: every evaluation here ran
     without an accretion table, which is why the unweighted variant is the one
     these tests pool.
+
+    Two best tables, as cafaeval writes them: the variant's micro F at the
+    reported threshold, and the protein-centric F at another one. The second
+    is a decoy that every slice in this file would read as a wrong number: the
+    strata used to be cut there, at an operating point no published figure
+    used.
     """
     frame = GridFrame(
         setting=setting,
@@ -117,10 +123,16 @@ def _grid(root, rows: list[dict], *, setting: str = "NK", variant: str = "unweig
     artifact = GridArtifact(rows=rows, variants=(variant,), n_tau=len(_TAUS), dropped=[])
     write_grid_parquet(root / setting / GRID_FILENAME, artifact, frame.stamp((variant,)))
     namespaces = sorted({r["namespace"] for r in rows})
-    lines = ["filename\tns\ttau\tf"]
-    lines += [f"predictions.tsv\t{ns}\t{_REPORTED_TAU}\t0.5" for ns in namespaces]
-    (root / setting / BEST_F_FILENAME).write_text("\n".join(lines) + "\n")
+    for table, tau in ((best_table_for(variant), _REPORTED_TAU), (_PROTEIN_CENTRIC, _TAUS[0])):
+        lines = ["filename\tns\ttau\tf"]
+        lines += [f"predictions.tsv\t{ns}\t{tau}\t0.5" for ns in namespaces]
+        (root / setting / table).write_text("\n".join(lines) + "\n")
     return root
+
+
+#: cafaeval's best table for the protein-centric F, which peaks at its own
+#: threshold. Written by ``_grid`` as a decoy, never read by the operation.
+_PROTEIN_CENTRIC = "evaluation_best_f.tsv"
 
 
 class TestTheSettingNamesTheCategory:
@@ -438,7 +450,7 @@ class TestReadingFromTheArtifactStore:
 
         store = _Store()
         rid = str(uuid.uuid4())
-        found = _settings_from_store(store, rid, tmp_path)
+        found = _settings_from_store(store, rid, tmp_path, "unweighted")
 
         assert found == ["NK"]
         assert (tmp_path / "NK" / GRID_FILENAME).read_bytes() == b"parquet-bytes"
@@ -446,7 +458,9 @@ class TestReadingFromTheArtifactStore:
         # which the producer stopped writing, and an absent file reads as a
         # setting that was not evaluated: the operation found nothing on every
         # result in the store and reported success.
-        assert all(GRID_FILENAME in key or BEST_F_FILENAME in key for key in store.asked)
+        assert all(
+            GRID_FILENAME in key or best_table_for("unweighted") in key for key in store.asked
+        )
         assert not any("per_protein.parquet" in key for key in store.asked)
         # three categories probed for the grid, and the best-F table fetched
         # only for the one that had one
@@ -511,6 +525,52 @@ class TestItReadsTheFileTheProducerWrites:
         frame = pd.read_parquet(root / "NK" / "strata.parquet")
         assert frame.precision.tolist() == [pytest.approx(0.5)]
         assert frame.recall.tolist() == [pytest.approx(0.5)]
+
+    def test_the_slice_is_at_the_micro_maximum_not_the_protein_centric_one(self, tmp_path) -> None:
+        """A stratum pools micro F, so it is cut where micro F peaks.
+
+        cafaeval writes one best table per measure. The protein-centric one
+        peaks elsewhere: on 211->227 it said tau 0.31 where the cell's
+        ``f_micro_w`` peaks at 0.57, and the strata of that cell summed to 0.390
+        while the cell publishes 0.4405. Here the decoy names 0.25 and the
+        variant's table 0.5, and the slice must report 0.5.
+        """
+        root = _grid(tmp_path, [_row("Q1", "molecular_function")])
+        events: list[tuple] = []
+        StratifyEvaluationOperation().execute(
+            self._session(),
+            {
+                "prediction_set_id": str(uuid.uuid4()),
+                "evaluation_set_id": _WINDOW,
+                "artifacts_root": str(root),
+                "variant": "unweighted",
+                "axes": ["aspect"],
+                "min_population": 1,
+            },
+            emit=lambda *a, **k: events.append(a),
+        )
+        sliced = [fields for name, _, fields, *_ in events if name == "stratify_evaluation.sliced"]
+        assert sliced[0]["taus"] == {"molecular_function": _REPORTED_TAU}
+
+    def test_a_weighted_stratification_reads_the_weighted_micro_table(self, tmp_path) -> None:
+        """``f_micro_w`` is the headline, and its own table holds its maximum."""
+        from protea.core.operations.stratify_evaluation import _settings_from_store
+
+        class _Store:
+            def __init__(self):
+                self.asked: list[str] = []
+
+            def exists(self, key: str) -> bool:
+                self.asked.append(key)
+                return "/NK/" in key
+
+            def get(self, key: str) -> bytes:
+                return b"bytes"
+
+        store = _Store()
+        _settings_from_store(store, str(uuid.uuid4()), tmp_path, "weighted")
+        assert (tmp_path / "NK" / "evaluation_best_f_micro_w.tsv").exists()
+        assert not any(key.endswith("/evaluation_best_f.tsv") for key in store.asked)
 
     def test_a_result_with_no_grid_is_refused_not_reported_as_success(self, tmp_path) -> None:
         """The whole defect in one assertion.
@@ -585,7 +645,7 @@ class TestItReadsTheFileTheProducerWrites:
         published. Every column is a defensible number and only one is the one
         already reported."""
         root = _grid(tmp_path, [_row("Q1", "molecular_function")])
-        (root / "NK" / BEST_F_FILENAME).unlink()
+        (root / "NK" / best_table_for("unweighted")).unlink()
         with pytest.raises(ValueError, match="nothing says which column"):
             StratifyEvaluationOperation().execute(
                 self._session(),
