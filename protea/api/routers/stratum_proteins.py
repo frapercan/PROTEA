@@ -467,7 +467,8 @@ def _sliced_at_the_published_tau(
     tp_col, pred_col, gt_col = _VARIANT_COLUMNS[footer.variant]
 
     frame = table.to_pandas()
-    frame = frame[frame["namespace"] == namespace]
+    # The variant's population only (in_variant_population): positive truth in it.
+    frame = frame[(frame["namespace"] == namespace) & (frame[gt_col] > 0.0)]
     rows = []
     for record in frame.to_dict("records"):
         tp = float(record[tp_col][position])

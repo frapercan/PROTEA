@@ -156,6 +156,9 @@ DROP_UNMAPPABLE_ROWS = "unmappable_row_numbering"
 #: 54 job events on this deployment, and a reader chasing one of those needs
 #: the code to still resolve to something.
 DROP_POOLED_SUMS_DIFFER = "pooled_sums_do_not_reproduce"
+#: Since 2026-11-21 raised only when the weighted branch scored a protein the
+#: unweighted one did not, which no run can do. Before, it refused every
+#: namespace whose weighted population was smaller, and it names those drops.
 DROP_VARIANT_POPULATIONS_DIFFER = "variant_populations_differ"
 DROP_ELIGIBILITY_DISAGREES = "eligibility_mask_disagrees"
 DROP_NO_UNWEIGHTED_RECORD = "no_unweighted_record"
@@ -422,31 +425,25 @@ def _population(
     return accs, keep, n_gt
 
 
-def _check_populations_agree(namespace: str, unweighted: list[str], weighted: list[str]) -> None:
-    """The two variants must have scored the same proteins, or one row set lies.
+def _check_weighted_within_unweighted(
+    namespace: str, unweighted: list[str], weighted: list[str]
+) -> None:
+    """Every protein the weighted branch scored, the unweighted one scored too.
 
-    Zero-padding the smaller variant keeps its ``f_micro_w`` exact, because zero
-    adds nothing to ``T``, ``P`` or ``G``, and reports its coverage over the
-    other variant's denominator. The estimator-parity guard downstream compares
-    ``f_micro_w`` and so cannot see it, which is why it has to be caught here.
+    The weighted branch scores the proteins with ground truth in ``toi_ia``, the
+    terms of interest that carry information accretion, and ``toi_ia`` is inside
+    ``toi``, so its population is inside the unweighted one. A protein only the
+    weighted branch scored would mean the two records describe different runs;
+    the file has no row for it, and the namespace is refused.
     """
     only_weighted = sorted(set(weighted) - set(unweighted))
-    only_unweighted = sorted(set(unweighted) - set(weighted))
-    if not (only_weighted or only_unweighted):
+    if not only_weighted:
         return
     raise GridProducerError(
-        f"{namespace}: the weighted branch scores {len(weighted)} proteins and the "
-        f"unweighted branch {len(unweighted)} ({len(only_unweighted)} only unweighted, first "
-        f"{only_unweighted[:3]}; {len(only_weighted)} only weighted, first "
-        f"{only_weighted[:3]}). The file carries one row per (protein, namespace) and the "
-        "consumer reads one variant at a time out of it, so the row count is the coverage "
-        "denominator for both variants and two populations cannot share one row set. Padding "
-        "the smaller variant with zero rows keeps its f_micro_w exact, because zero adds "
-        "nothing to T, P or G, and reports its coverage over the other variant's denominator, "
-        "which is a plausible number over the wrong population. The two sets part when a "
-        "protein's whole ground-truth closure carries zero information accretion, so it has "
-        "terms in toi and none in toi_ia. Refusing this namespace; the other aspects are "
-        "unaffected.",
+        f"{namespace}: the weighted branch scores {len(only_weighted)} proteins the unweighted "
+        f"branch does not (first {only_weighted[:3]}). Its terms of interest are inside the "
+        "unweighted ones, so its population must be too; the two records do not describe "
+        "one run. Refusing this namespace; the other aspects are unaffected.",
         code=DROP_VARIANT_POPULATIONS_DIFFER,
     )
 
@@ -456,26 +453,29 @@ def _namespace_rows(
     unweighted: dict[str, Any],
     weighted: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    """One namespace's rows, one per protein, carrying both variants.
+    """One namespace's rows, one per protein of the unweighted population, both variants.
 
-    The file has one row grain and the consumer reads one variant at a time out
-    of it, so the row count is the population denominator for BOTH variants.
-    That is only honest when the two variants scored the same proteins, and they
-    do not always: the weighted branch scores ``toi_ia`` and the unweighted
-    branch scores ``toi``, and a protein whose whole ground-truth closure carries
-    zero information accretion has terms in the second and none in the first.
+    The two variants need not score the same proteins. The weighted branch scores
+    ``toi_ia`` and the unweighted branch ``toi``, and a protein whose ground truth
+    carries no information accretion has terms in the second and none in the
+    first. It depends on the truth alone, so it happens to every method evaluated
+    on a window: on LAFA's 211 -> 227 window, to 38 PK proteins in biological
+    process and 4 in cellular component.
 
-    An earlier version of this function keyed on the unweighted population and
-    zero-filled the weighted-ineligible rows. The zeros really do leave the
-    weighted ``T``, ``P`` and ``G`` alone, so ``f_micro_w`` reproduced and the
-    parity guard stayed green, and the coverage printed beside it was quietly
-    computed over a larger denominator than the one cafaeval normalised by. That
-    is the defect shape this project keeps being bitten by, a plausible number
-    over the wrong population, so the disagreement is now a refusal.
+    So the rows are the unweighted population, and a protein outside the weighted
+    one carries zeros in its weighted columns, ``n_gt_w`` included. The zeros add
+    nothing to the weighted ``T``, ``P`` or ``G``, so the pooled sums are the
+    published ones; and every reader of the weighted variant keeps only the rows
+    with positive weighted ground truth
+    (:func:`protea.core.operations._paired_panels_artifact.in_variant_population`),
+    which is the population cafaeval normalised by, so a coverage or a resample
+    is taken over it. Until 2026-11-21 the namespace was refused instead, because
+    a reader that took every row would have computed the weighted coverage over
+    the unweighted denominator; the readers now know which rows are which.
 
-    Refusing the namespace rather than the file: the other two aspects are
-    unaffected and there is no reason to lose them. The drop is emitted, because
-    an absent namespace reaches the consumer as a null panel on a successful job.
+    The zeros are written rather than the predicted mass the weighted kernel
+    reports for those proteins: cafaeval leaves that mass out of the weighted
+    totals, and a reader that forgot the population would otherwise add it.
     """
     accs, keep, n_gt = _population(unweighted, namespace, "unweighted")
     kept_accs = [accs[int(i)] for i in keep]
@@ -486,7 +486,9 @@ def _namespace_rows(
         by_acc = {
             w_accs[int(i)]: (w_tp[int(i)], w_pred[int(i)], float(w_gt[int(i)])) for i in w_keep
         }
-        _check_populations_agree(namespace, kept_accs, sorted(by_acc))
+        _check_weighted_within_unweighted(namespace, kept_accs, sorted(by_acc))
+    n_tau = int(np.asarray(unweighted["tp_at_tau"]).shape[1])
+    outside = (np.zeros(n_tau), np.zeros(n_tau), 0.0)
     rows: list[dict[str, Any]] = []
     for i in keep:
         acc = accs[int(i)]
@@ -498,7 +500,7 @@ def _namespace_rows(
             "n_gt": float(n_gt[int(i)]),
         }
         if weighted is not None:
-            w_tp_row, w_pred_row, w_gt_row = by_acc[acc]
+            w_tp_row, w_pred_row, w_gt_row = by_acc.get(acc, outside)
             row.update({"tp_w": w_tp_row, "pred_w": w_pred_row, "n_gt_w": w_gt_row})
         rows.append(row)
     return rows

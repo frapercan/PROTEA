@@ -591,14 +591,16 @@ nearest-neighbour set at cut 211 scored with ``embedding_only``, on the window
 Every cell agrees, protein by protein.
 
 Two cells, PK's biological process and cellular component, are compared at
-the chosen threshold only. The platform does not store their grid, because its
-weighted and unweighted branches score different proteins: 38 and 4 PK
-proteins whose remaining truth carries no information accretion. The grid
-holds one row per protein for both variants, so it refuses those namespaces
-and records the refusal (``per_protein_grid_namespace_dropped``,
-``variant_populations_differ``). Those proteins come from the truth, not from
-the method, so on this window every method loses those two grids. This is a
-known limitation, and it goes when the grid can hold a population per variant.
+the chosen threshold only. When the record was made, the platform did not store
+their grid, because its weighted and unweighted branches score different
+proteins: 38 and 4 PK proteins whose remaining truth carries no information
+accretion. The grid held one row per protein for both variants, so it refused
+those namespaces and recorded the refusal (``per_protein_grid_namespace_dropped``,
+``variant_populations_differ``). Since 2026-11-21 each variant has its own
+population in the grid. The rows are the unweighted population, a protein
+outside the weighted one carries zeros in its weighted columns, and every
+reader of the weighted variant keeps the rows with positive weighted ground
+truth, so evaluations made since then store both cells.
 
 Every input has a door:
 

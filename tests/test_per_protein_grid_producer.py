@@ -475,22 +475,57 @@ def test_a_pk_namespace_with_ineligible_mass_is_now_written(tmp_path: Path) -> N
     assert len(bp) == int((n_gt > 0.0).sum()), "an ineligible row reached the file"
 
 
-def test_refuses_a_namespace_whose_two_variants_scored_different_proteins(
-    tmp_path: Path,
-) -> None:
-    """One row set cannot be the coverage denominator for two populations.
+def test_a_protein_outside_the_weighted_population_carries_zeros_in_its_weighted_columns() -> None:
+    """The row set is the unweighted population; the weighted one is the rows with weighted truth.
 
-    Zero-filling the smaller variant keeps its ``f_micro_w`` exact, because zero
-    adds nothing to ``T``, ``P`` or ``G``, and reports its coverage over the
-    other variant's denominator. The estimator-parity guard cannot see that, so
-    the producer has to.
+    P00003's surviving ground truth carries no information accretion, so only the
+    unweighted branch scores it. Its row is written for the unweighted variant and
+    carries zeros in the weighted columns, ``n_gt_w`` included, and the weighted
+    pooled sums are still the weighted kernel's own: zeros add nothing to T, P or
+    G. Readers of the weighted variant leave it out (``in_variant_population``).
+    """
+    sink = _pk_sink_split_populations()
+    artifact = grid_rows_from_sink(sink)
+    assert artifact.dropped == []
+
+    rows = {r["protein_accession"]: r for r in artifact.rows if r["namespace"] == BP}
+    assert sorted(rows) == ["P00001", "P00003"]
+    outside = rows["P00003"]
+    assert outside["n_gt"] == 1.0
+    assert outside["n_gt_w"] == 0.0
+    assert not np.any(outside["tp_w"]) and not np.any(outside["pred_w"])
+
+    weighted = next(r for r in sink.records if r["variant"] == "weighted")
+    kept = np.asarray(weighted["protein_rows"])
+    for column, key in (("tp_w", "tp_at_tau"), ("pred_w", "pred_at_tau")):
+        pooled = np.sum([np.asarray(r[column]) for r in rows.values()], axis=0)
+        assert np.allclose(pooled, np.asarray(weighted[key])[kept].sum(axis=0))
+
+
+def test_a_protein_only_the_weighted_branch_scored_refuses_the_namespace() -> None:
+    """The weighted terms of interest are inside the unweighted ones, so must its population be.
+
+    A weighted record naming a protein the unweighted one did not score cannot
+    come from one run; the file would have no row for it, and the namespace is
+    refused rather than written short.
     """
     from protea.core.operations import _run_cafa_per_protein as prod
 
-    artifact = grid_rows_from_sink(_pk_sink_split_populations())
+    unweighted, _ = _pk_sink_split_populations().records
+    weighted = _record(
+        BP,
+        "weighted",
+        _block([[5.0, 5.0, 3.5], [1.0, 1.0, 0.5], [0.0, 0.0, 0.0]], 3),
+        _block([[5.0, 5.0, 3.5], [1.0, 1.0, 0.5], [0.0, 0.0, 0.0]], 3),
+        np.array([5.0, 1.0, 0.0]),
+        ids=IDS,
+        row_index=np.arange(3),
+        protein_rows=np.array([True, True, False]),
+    )
+    artifact = grid_rows_from_sink(FakeSink([unweighted, weighted]))
     assert artifact.rows == []
     assert [d["code"] for d in artifact.dropped] == [prod.DROP_VARIANT_POPULATIONS_DIFFER]
-    assert "coverage denominator" in artifact.dropped[0]["reason"]
+    assert "the unweighted branch does not" in artifact.dropped[0]["reason"]
 
 
 def _assert_pooled(consumer: Any, path: Path, sink: FakeSink, *, setting: str = "NK") -> None:

@@ -185,7 +185,10 @@ def _rows_at_published_tau(
     carry instead of reading the nearest one.
 
     A namespace with no published tau is dropped rather than defaulted: it was
-    not in the best-F table, so the result never reported it.
+    not in the best-F table, so the result never reported it. A row outside the
+    variant's population (no ground-truth mass in it,
+    :func:`~protea.core.operations._paired_panels_artifact.in_variant_population`)
+    is left out, so a stratum counts the proteins the variant scored.
     """
     import pandas as pd
 
@@ -196,7 +199,7 @@ def _rows_at_published_tau(
     for record in frame.to_dict("records"):
         namespace = str(record.get("namespace"))
         position = index_for.get(namespace)
-        if position is None:
+        if position is None or float(record[gt_col]) <= 0.0:
             continue
         rows.append(
             {
