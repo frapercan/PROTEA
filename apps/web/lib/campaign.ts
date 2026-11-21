@@ -92,14 +92,9 @@ export const LIVE_ANNOTATION_AVAILABLE = true;
  * | /instrument/evaluation            | 130 evaluation sets (2026-10-29) |
  * | /feature-registry                 | 78 features, schema 1.7.0 |
  * | /instrument/graph                 | GET /v1/graph answers with 10 nodes |
- * | /instrument/benchmark             | 130 sets, 14 results (2026-10-29) |
  * | /instrument/datasets              | 0 |
  * | /instrument/reranker              | 0 reranker models |
  * | /instrument/scoring               | 0 (/v1/scoring/rerankers is empty) |
- *
- * ``benchmark`` stays hidden deliberately: three results is a table with one
- * row of nine cells, which is the blank-table-with-admin-buttons the original
- * audit objected to. It comes back with the arms, not with this edit.
  *
  * Update an entry the way the old flag asked: by counting ROWS, not by reading
  * a green job. And update the table above in the same commit, because an entry
@@ -113,13 +108,8 @@ export const SURFACE_HAS_ROWS: Record<string, boolean> = {
   "/instrument/evaluation": true,
   "/feature-registry": true,
   "/instrument/graph": true,
-  // Measured on this server 2026-10-28, and two of these had gone stale in the
-  // direction the docstring below says is the expensive one: invisible and
-  // live. evaluation_result holds 14 rows on 2026-10-29 (8 when this comment
-  // was written), which is what the matrix reads, and scoring_config holds 1.
-  // Both were false and both were hidden from an anonymous visitor while they
-  // had something to show.
-  "/instrument/benchmark": true,
+  // Measured on this server 2026-10-28: scoring_config holds 1. It was false,
+  // hidden from an anonymous visitor while it had something to show.
   "/instrument/scoring": true,
   // Still true, and checked rather than assumed: dataset holds 0 rows and
   // reranker_model holds 0, which the graph also reports as the reason

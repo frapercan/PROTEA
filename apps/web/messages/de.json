@@ -12,7 +12,6 @@
     "functionalAnnotation": "KNN-Suche",
     "scoring": "Scoring",
     "evaluation": "CAFA-Evaluierung",
-    "benchmark": "Benchmark",
     "graph": "Experimentgraph",
     "stratum": "Im Panel",
     "reranker": "Re-Ranker",
@@ -46,7 +45,7 @@
     "farmCost": "Kosten",
     "pipelineHint": "Von Sequenz zu GO-Term",
     "dataHint": "Referenzproteom, Ground Truth, Query-Sets",
-    "resultsHint": "Benchmark-Matrix und CAFA-Evaluierung",
+    "resultsHint": "Fenster, ihre Panels und CAFA-Auswertung",
     "operationsHint": "Queues, Wartung, Stack-Status",
     "groupAnnotate": "Annotieren",
     "groupAnnotateLabel": "Pipeline auf eigenen Sequenzen ausführen",
@@ -89,7 +88,7 @@
     "bestResults": "Beste Ergebnisse",
     "bestOverall": "Bestes Gesamtergebnis",
     "avgFmaxAcrossCells": "Mittleres Fmax über 9 Zellen",
-    "viewBenchmark": "Vollständigen Benchmark anzeigen",
+    "viewWindows": "Alle Fenster ansehen",
     "pipelineStageBaseline": "baseline",
     "pipelineStageAlignmentWeighted": "alignment-gewichtet",
     "pipelineStageReranker": "re-ranker",
@@ -270,20 +269,6 @@
         "A pair with no voting neighbour has no score. The empty states on this page are the honest answer, never a fabricated value."
       ]
     }
-  },
-  "benchmark": {
-    "loadingTitle": "Benchmark wird geladen…",
-    "title": "Benchmark-Matrix",
-    "awaitingTitle": "Gebaut, wartet auf Daten",
-    "awaitingBody": "Der Benchmark ist gebaut und läuft. Er vergleicht Protein-Sprachmodelle über die neun Auswertungszellen, drei Wissensregime gekreuzt mit den drei Zweigen der Gene Ontology, auf einer leckfreien zeitlichen Aufteilung. Er hat noch nichts zu zeichnen, weil der Annotationskorpus, gegen den er bewertet, neu aufgebaut wird.",
-    "awaitingDetail": "Stand {asOf} hat die Kampagne {read, number} von {releases, number} GOA-Releases der Serie gelesen, insgesamt {gigabytes, number} GB.",
-    "awaitingJobs": "Die Job-Queue ansehen",
-    "awaitingGraph": "Das Instrument ansehen",
-    "loadingHint": "Embeddings und Matrix werden aufgelöst.",
-    "loadingStepMatrix": "Matrix",
-    "loadingStepEmbeddings": "Embeddings",
-    "loadingRowsPreview": "Zeilenvorschau",
-    "backToHome": "Zurück zur Startseite"
   },
   "stratum": {
     "title": "Im Inneren eines Panels",
@@ -1080,7 +1065,7 @@
         "title": "Noch keine Annotation ausgeführt",
         "body": "Jeder Lauf erzeugt ein PredictionSet mit GO-Scores pro Protein, ladbar als TSV oder exportierbar nach cafaeval. Sobald Sie den ersten Lauf im vorherigen Tab starten, erscheint er hier.",
         "ctaPrimary": "Zu Annotation starten",
-        "ctaSecondary": "Beispiele finden Sie auch unter /benchmark"
+        "ctaSecondary": "Du kannst die Arme jedes Fensters auch in seinem Panel unter Auswertung vergleichen."
       },
       "tableHeaders": {
         "id": "ID",
@@ -1134,10 +1119,13 @@
       "scoring": "Scoring:",
       "artifactsDownload": "↓ Artefakte (.zip)",
       "resultDelete": "Löschen",
-      "deleteResultConfirm": "Dieses Evaluierungsergebnis löschen?"
+      "deleteResultConfirm": "Dieses Evaluierungsergebnis löschen?",
+      "openPanel": "Panel des Fensters öffnen"
     },
     "evaluationSetsSection": {
-      "heading": "Evaluierungssets"
+      "heading": "Evaluierungssets",
+      "superseded": "Überholte Fenster ({count})",
+      "supersededBy": "ersetzt durch"
     },
     "generateSection": {
       "heading": "Neues Evaluierungsset",

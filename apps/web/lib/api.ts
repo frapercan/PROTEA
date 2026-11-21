@@ -1343,20 +1343,6 @@ export type BenchmarkEmbedding = {
   param_count: number | null;
 };
 
-export type BenchmarkEmbeddingsResponse = {
-  embeddings: BenchmarkEmbedding[];
-  total: number;
-};
-
-export type BenchmarkStageKind = "scoring" | "reranker";
-
-export type BenchmarkStage = {
-  name: string;
-  label: string;
-  kind: BenchmarkStageKind;
-  is_baseline: boolean;
-};
-
 export type BenchmarkRow = {
   embedding_config_id: string;
   evaluation_set_id: string;
@@ -1415,110 +1401,6 @@ export type BenchmarkRow = {
   prediction_set_status?: string | null;
   self_hit_rate?: number | null;
 };
-
-export type BenchmarkBestCell = {
-  category: string;
-  aspect: string;
-  /** IA-weighted best-cell score (f_micro_w, fmax fallback). This is the
-   *  per-cell MAXIMUM across models: label it "best cell", never as the
-   *  headline number (winner's-curse, FIX-METRIC-IA). */
-  primary: number;
-  primary_metric: "f_micro_w" | "fmax";
-  f_micro_w: number | null;
-  precision_w: number | null;
-  recall_w: number | null;
-  fmax: number;
-  precision: number | null;
-  recall: number | null;
-  coverage: number | null;
-  embedding_config_id: string;
-  k: number;
-  stage: string;
-  evaluation_result_id: string;
-  evaluation_set_id: string;
-  /** Method-surface provenance for the winning cell (see BenchmarkRow). */
-  frame?: string | null;
-  temporal_window?: string | null;
-  arms_enabled?: Record<string, boolean> | null;
-  leakage_role?: string | null;
-};
-
-export type BenchmarkEvalSet = {
-  id: string;
-  label: string;
-  old_source: string | null;
-  old_source_version: string | null;
-  new_source: string | null;
-  new_source_version: string | null;
-  old_obo_version: string | null;
-  new_obo_version: string | null;
-  stats: {
-    delta_proteins?: number;
-    nk_proteins?: number;
-    lk_proteins?: number;
-    pk_proteins?: number;
-    nk_annotations?: number;
-    lk_annotations?: number;
-    pk_annotations?: number;
-    known_terms_count?: number;
-  };
-};
-
-export type BenchmarkMatrixResponse = {
-  rows: BenchmarkRow[];
-  total: number;
-  /** Headline metric for the matrix: always "f_micro_w" (IA-weighted). */
-  primary_metric: "f_micro_w";
-  /** Honest per-task mean ± 95% CI across models, in the current selection.
-   *  The benchmark headline; the best-cell tables remain max-labelled. */
-  per_task: PerTaskAggregate[];
-  evaluation_sets: BenchmarkEvalSet[];
-  embedding_config_ids: string[];
-  stages: BenchmarkStage[];
-  categories: string[];
-  aspects: string[];
-  ks: number[];
-  /** The ONE window both grids are about. Null only when nothing is scored.
-   *  The per-cell maximum used to run over the rows of every stored window,
-   *  so each of the nine cells could land on a different one; the API now
-   *  decides the window once and names it here, and the grid has to print it
-   *  or a reader cannot tell nine measurements from one. */
-  grid_evaluation_set_id: string | null;
-  best_per_cell: BenchmarkBestCell[];
-  /** Same shape as best_per_cell but ignores stage and K filters. Stable
-   *  across filter changes; the absolute champion per cell within the
-   *  active evaluation_set scope. */
-  best_per_cell_global: BenchmarkBestCell[];
-  filters: {
-    evaluation_set_id: string | null;
-    stage: string | null;
-    k: number | null;
-  };
-};
-
-export function getBenchmarkEmbeddings() {
-  return http<BenchmarkEmbeddingsResponse>("/benchmark/embeddings/", { cacheable: true });
-}
-
-export function getBenchmarkMatrix(params?: {
-  evaluation_set_id?: string;
-  stage?: string;
-  k?: number;
-  /** Ask the server to pick the default stage instead of sending them all. */
-  resolve_stage?: boolean;
-}) {
-  const qs = new URLSearchParams();
-  if (params?.evaluation_set_id) qs.set("evaluation_set_id", params.evaluation_set_id);
-  if (params?.stage) qs.set("stage", params.stage);
-  if (params?.k !== undefined) qs.set("k", String(params.k));
-  if (params?.resolve_stage) qs.set("resolve_stage", "true");
-  const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  // Cacheable: the benchmark matrix only changes when a new evaluation result
-  // lands (rare, minutes-to-hours apart). A 60s revalidation window lets the
-  // first visitor warm the cache so subsequent navigations across stage / K /
-  // eval-set chips are instant instead of paying ~2-10s per round-trip.
-  return http<BenchmarkMatrixResponse>(`/benchmark/matrix/${suffix}`, { cacheable: true });
-}
 
 export type StackRepo = {
   name: string;

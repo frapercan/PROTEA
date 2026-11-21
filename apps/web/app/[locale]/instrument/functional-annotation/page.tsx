@@ -854,7 +854,7 @@ export default function FunctionalAnnotationPage() {
                 </div>
                 <p className="mt-5 text-xs text-slate-500">
                   <Link
-                    href={`/${locale}/instrument/benchmark`}
+                    href={`/${locale}/instrument/evaluation`}
                     className="text-blue-600 hover:text-blue-800 hover:underline"
                   >
                     {t("resultsTab.emptyHero.ctaSecondary")}

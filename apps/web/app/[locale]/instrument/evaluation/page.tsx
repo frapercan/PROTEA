@@ -2,6 +2,7 @@
 
 import { formatCount, formatDate, formatDateTime } from "@/lib/format";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { ContextBanner } from "@/components/ContextBanner";
@@ -79,6 +80,10 @@ type EvaluationSet = {
   new_annotation_set_id: string;
   job_id: string | null;
   created_at: string;
+  /** What the window is, in a sentence its writer derives. */
+  description?: string | null;
+  /** The window that replaces this one, when it has been superseded. */
+  superseded_by_id?: string | null;
   stats: {
     delta_proteins?: number;
     nk_proteins?: number;
@@ -186,8 +191,8 @@ function ResultsTable({ results }: { results: Record<string, SettingResults> }) 
         </span>
         <span className="text-[11px] text-slate-500">
           Per-cell threshold-optimal F1 (not IA-weighted). For the
-          IA-weighted f_micro_w matrix used on the LAFA / CAFA leaderboards,
-          see <span className="font-mono">/benchmark</span>.
+          IA-weighted f_micro_w used on the LAFA / CAFA leaderboards, open the
+          window&apos;s panel.
         </span>
       </div>
       {settings.map((setting) => (
@@ -349,7 +354,17 @@ function EvaluationSetCard({
         onClick={onSelect}
       >
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div className="text-sm font-medium text-slate-800">{evalLabel(e, annotationSets)}</div>
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-slate-800">{evalLabel(e, annotationSets)}</div>
+            {e.description ? <div className="mt-0.5 text-xs text-slate-500">{e.description}</div> : null}
+            <Link
+              href={`/${locale}/instrument/evaluation/${e.id}`}
+              onClick={(ev) => ev.stopPropagation()}
+              className="mt-1 inline-block text-xs font-medium text-blue-700 hover:underline"
+            >
+              {t("evaluationSetCard.openPanel")}
+            </Link>
+          </div>
           <button
             onClick={async (ev) => {
               ev.stopPropagation();
@@ -660,6 +675,7 @@ function EvaluationSetCard({
 
 export default function EvaluationPage() {
   const t = useTranslations("evaluation");
+  const locale = useLocale();
   const [annotationSets, setAnnotationSets] = useState<AnnotationSet[]>([]);
   const [predictionSets, setPredictionSets] = useState<PredictionSet[]>([]);
   const [evaluationSets, setEvaluationSets] = useState<EvaluationSet[]>([]);
@@ -696,6 +712,9 @@ export default function EvaluationPage() {
   useEffect(() => { reload(); }, []);
 
   const goaSets = annotationSets.filter((s) => s.source === "goa");
+  // The live windows first; a superseded one is folded with a link to its successor.
+  const liveSets = evaluationSets.filter((e) => !e.superseded_by_id);
+  const supersededSets = evaluationSets.filter((e) => e.superseded_by_id);
   const canGenerate = oldSetId && newSetId && oldSetId !== newSetId;
 
   async function handleGenerate() {
@@ -823,10 +842,10 @@ export default function EvaluationPage() {
       </section>
 
       {/* ── Evaluation Sets ───────────────────────────────────────── */}
-      {evaluationSets.length > 0 && (
+      {liveSets.length > 0 && (
         <section className="space-y-4">
           <h2 className="text-base font-semibold text-slate-800">{t("evaluationSetsSection.heading")}</h2>
-          {evaluationSets.slice(0, visibleEvalCount).map((e) => (
+          {liveSets.slice(0, visibleEvalCount).map((e) => (
             <EvaluationSetCard
               key={e.id}
               e={e}
@@ -839,7 +858,7 @@ export default function EvaluationPage() {
               onDeleted={() => setEvaluationSets((prev) => prev.filter((x) => x.id !== e.id))}
             />
           ))}
-          {evaluationSets.length > visibleEvalCount && (
+          {liveSets.length > visibleEvalCount && (
             <div className="flex flex-col items-center gap-1.5 pt-1">
               <button
                 type="button"
@@ -849,11 +868,42 @@ export default function EvaluationPage() {
                 Load more evaluation sets
               </button>
               <span className="text-xs text-slate-500 tabular-nums">
-                Showing {Math.min(visibleEvalCount, evaluationSets.length)} of {evaluationSets.length}
+                Showing {Math.min(visibleEvalCount, liveSets.length)} of {liveSets.length}
               </span>
             </div>
           )}
         </section>
+      )}
+
+      {/* ── Superseded windows, folded ─────────────────────────────── */}
+      {supersededSets.length > 0 && (
+        <details className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium text-slate-700">
+            {t("evaluationSetsSection.superseded", { count: supersededSets.length })}
+          </summary>
+          <ul className="mt-3 space-y-2">
+            {supersededSets.map((e) => {
+              const successor = evaluationSets.find((x) => x.id === e.superseded_by_id);
+              return (
+                <li key={e.id} className="text-xs text-slate-600">
+                  <Link href={`/${locale}/instrument/evaluation/${e.id}`} className="font-medium text-slate-800 hover:underline">
+                    {evalLabel(e, annotationSets)}
+                  </Link>
+                  {e.description ? <span className="text-slate-500"> · {e.description}</span> : null}
+                  {successor ? (
+                    <>
+                      {" · "}
+                      {t("evaluationSetsSection.supersededBy")}{" "}
+                      <Link href={`/${locale}/instrument/evaluation/${successor.id}`} className="text-blue-700 hover:underline">
+                        {evalLabel(successor, annotationSets)}
+                      </Link>
+                    </>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       )}
 
       {/* ── Evaluator command reference ───────────────────────────── */}

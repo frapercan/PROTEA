@@ -18,7 +18,6 @@ type NavKey =
   | "datasets"
   | "querySets"
   | "maintenance"
-  | "benchmark"
   | "graph"
   | "stratum"
   | "stack"
@@ -61,7 +60,6 @@ const SEGMENT_TO_NAV_KEY: Record<string, NavKey> = {
   datasets: "datasets",
   "query-sets": "querySets",
   maintenance: "maintenance",
-  benchmark: "benchmark",
   graph: "graph",
   stratum: "stratum",
   stack: "stack",

@@ -151,7 +151,6 @@ describe("Sidebar nav", () => {
       "/instrument/query-sets",
       "/instrument/evaluation",
       "/instrument/graph",
-      "/instrument/benchmark",
       "/instrument/datasets",
       "/instrument/reranker",
       "/instrument/scoring",
