@@ -60,6 +60,7 @@ from protea.core.method_write import (
     ensure_method,
     new_prediction_set,
 )
+from protea.core.query_population import population_of
 from protea.core.source_guards import SourceGuardError
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.cut_photo import CutPhoto
@@ -432,6 +433,7 @@ class RunCountMapOperation:
                     },
                 },
                 job_id=job_id_from_payload(payload),
+                population=population_of(data.targets),
             ),
         )
         ids = term_ids(session, src.eset.pivot_snapshot_id)

@@ -12,13 +12,16 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from protea.core import evaluation
+from protea.core import evaluation, method_write
 from protea.core._binding_rule import DESCENDANTS_STEP
 from protea.core._lafa_frame_data import EndOntology
+from protea.core.code_revision import code_revision
+from protea.core.method_seal import method_identity
 from protea.core.operations import run_own_annotations as op
+from protea.core.query_population import population_of
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
@@ -28,6 +31,9 @@ from protea.infrastructure.orm.models.method.prediction_explanation import Predi
 from protea.infrastructure.orm.models.protein.protein import Protein
 from tests.helpers.windows import make_window
 from tests.test_run_count_map import pg  # noqa: F401
+
+#: A prediction set as ``SELECT *`` returns it, which is what the method seal reads.
+_WHOLE_ROW = text("SELECT * FROM prediction_set WHERE id = :p")
 
 PARENTS = {"GO:0000003": {"GO:0000002"}, "GO:0000002": {"GO:0008150"}}
 
@@ -172,6 +178,8 @@ def test_a_run_writes_its_method_rows_and_explanations_once(
     pg: Session,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Whatever this environment installed its siblings from, the set records them.
+    monkeypatch.setattr(method_write, "dependency_revisions", lambda: {"protea-x": "c" * 40})
     eset = _window_with_rows(pg)
     photo = SimpleNamespace(
         id=uuid.uuid4(),
@@ -194,6 +202,11 @@ def test_a_run_writes_its_method_rows_and_explanations_once(
     assert result["rows"] == result["explanations"] == 2 and result["targets_with_a_term"] == 1
     pset = pg.get(PredictionSet, uuid.UUID(result["prediction_set_id"]))
     assert pset.meta["evaluation_set_id"] == str(eset.id)
+    # It was asked about the window's targets, with or without a term, and says so.
+    assert pset.meta["query_population"] == population_of(["P1", "P2"])
+    assert pset.meta["code_revision"] == code_revision()
+    # And the seal can read it whole: nothing unclassified, nothing unrecorded.
+    method_identity(dict(pg.execute(_WHOLE_ROW, {"p": pset.id}).mappings().one()))
     explained = pg.execute(select(func.count()).select_from(PredictionExplanation)).scalar_one()
     assert explained == 2
     again = op.RunOwnAnnotationsOperation().execute(pg, payload, emit=lambda *a, **k: None).result

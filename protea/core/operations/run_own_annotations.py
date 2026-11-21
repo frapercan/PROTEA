@@ -55,6 +55,7 @@ from protea.core.method_write import (
     new_prediction_set,
 )
 from protea.core.operations.run_count_map import CountMapRefused, term_ids
+from protea.core.query_population import population_of
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.cut_photo import CutPhoto
@@ -267,6 +268,7 @@ class RunOwnAnnotationsOperation:
                 ),
                 meta={"evaluation_set_id": str(eset.id), "targets_with_a_term": covered},
                 job_id=job_id_from_payload(payload),
+                population=population_of(targets),
             ),
         )
         written = copy_predictions(session, pset, ((a, t, s) for a, t, s, _ in rows))

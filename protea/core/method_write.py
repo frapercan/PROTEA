@@ -24,7 +24,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from protea.core.code_revision import code_revision
+from protea.core.code_revision import code_revision, dependency_revisions
 from protea.core.contracts.method import MethodSpec, TrainingWindow
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.method.method import Method
@@ -52,6 +52,9 @@ class SetContext:
     description: str
     meta: dict[str, Any] = field(default_factory=dict)
     job_id: uuid.UUID | None = None
+    #: The proteins the method was asked about (protea.core.query_population):
+    #: a window's targets for a method that reads a window.
+    population: dict[str, Any] | None = None
 
 
 def new_prediction_set(session: Session, method: Method, context: SetContext) -> PredictionSet:
@@ -64,7 +67,18 @@ def new_prediction_set(session: Session, method: Method, context: SetContext) ->
         ontology_snapshot_id=context.ontology_snapshot_id,
         limit_per_entry=context.limit_per_entry,
         description=context.description,
-        meta={"algorithm": "native_method", "method": method.short_name, **context.meta},
+        meta={
+            "algorithm": "native_method",
+            "method": method.short_name,
+            **context.meta,
+            # Written last, so a method's own keys cannot stand in for them: the
+            # code and libraries that wrote the rows, as a retrieval's receipt
+            # records them, and the proteins asked about. A comparison refuses a
+            # set that does not say all three (protea.core.method_seal).
+            "code_revision": code_revision(),
+            "dependency_revisions": dependency_revisions(),
+            **({"query_population": context.population} if context.population else {}),
+        },
         job_id=context.job_id,
         producer_git_sha=code_revision(),
     )

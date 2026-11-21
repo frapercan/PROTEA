@@ -16,12 +16,15 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 import protea.infrastructure.orm.models  # noqa: F401  (registers every table)
+from protea.core import method_write
 from protea.core._cut_state import CutState
+from protea.core.method_seal import method_identity
 from protea.core.operations import run_count_map as op
+from protea.core.query_population import population_of
 from protea.infrastructure.orm.base import Base
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -32,6 +35,9 @@ from protea.infrastructure.orm.models.method.method import Method
 from protea.infrastructure.orm.models.method.prediction_explanation import PredictionExplanation
 from protea.infrastructure.storage import LocalFsArtifactStore
 from tests.helpers.windows import make_window
+
+#: A prediction set as ``SELECT *`` returns it, which is what the method seal reads.
+_WHOLE_ROW = text("SELECT * FROM prediction_set WHERE id = :p")
 
 TERMS = {
     "GO:0000001": "P",
@@ -115,6 +121,8 @@ def _run(pg: Session, eset_id: str) -> dict:
 def test_a_run_writes_its_method_weights_predictions_and_witnesses(
     pg: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Whatever this environment installed its siblings from, the set records them.
+    monkeypatch.setattr(method_write, "dependency_revisions", lambda: {"protea-x": "c" * 40})
     eset_id = _scenario(pg, tmp_path, monkeypatch)
     result = _run(pg, eset_id)
     method = pg.get(Method, uuid.UUID(result["method_id"]))
@@ -128,6 +136,10 @@ def test_a_run_writes_its_method_weights_predictions_and_witnesses(
     assert (
         pset.meta["evaluation_set_id"] == eset_id and pset.meta["targets_without_a_sequence"] == 1
     )
+    # Every target was asked about, the one without a sequence included.
+    assert pset.meta["query_population"] == population_of(["D1", "T1", "T2", "T3"])
+    # And the seal can read it whole: nothing unclassified, nothing unrecorded.
+    method_identity(dict(pg.execute(_WHOLE_ROW, {"p": pset.id}).mappings().one()))
     rows = pg.execute(
         select(func.count(GOPrediction.id)).where(GOPrediction.prediction_set_id == pset.id)
     ).scalar_one()

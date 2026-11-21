@@ -420,8 +420,9 @@ class TestItDoesNotWidenInSilence:
         from protea.core.operations.predict_go_terms._receipt import run_receipt
 
         written: set[str] = set()
-        for backend in ("numpy", "faiss"):
+        for backend, asked in (("numpy", None), ("faiss", ["P12345", "Q67890"])):
             payload = PredictGOTermsPayload(
+                query_accessions=asked,
                 embedding_config_id=str(uuid.uuid4()),
                 annotation_set_id=str(uuid.uuid4()),
                 ontology_snapshot_id=str(uuid.uuid4()),
@@ -434,7 +435,9 @@ class TestItDoesNotWidenInSilence:
             written |= set(run_receipt(payload, uuid.uuid4()))
         classified = set(METHOD_IDENTITY_FIELDS) | set(EXECUTION_ONLY_FIELDS)
         assert written - classified == set(), "the receipt writes keys the seal does not know"
-        assert {"faiss", "rerankers"} <= written, "the conditional blocks stopped being written"
+        assert {"faiss", "rerankers", "query_population"} <= written, (
+            "the conditional blocks stopped being written"
+        )
 
     def test_an_unrecorded_revision_is_not_a_shared_revision(self) -> None:
         # Two absences agree everywhere else in this seal, and correctly: two

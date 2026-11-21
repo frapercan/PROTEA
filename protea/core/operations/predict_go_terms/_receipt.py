@@ -28,6 +28,7 @@ from protea_contracts import PredictGOTermsPayload
 
 from protea.core import denials
 from protea.core.code_revision import code_revision, dependency_revisions
+from protea.core.query_population import population_of
 
 #: Payload flags that turn on an extra feature block during prediction.
 #: Recorded by name so a set can say what it computed without this module
@@ -81,6 +82,10 @@ def run_receipt(p: PredictGOTermsPayload, job_id: UUID) -> dict[str, Any]:
         "denials": {"honoured": True, **denials.POLICY},
         "features": [f for f in _FEATURE_FLAGS if getattr(p, f, False)],
     }
+    if getattr(p, "query_accessions", None):
+        # A list handed to the run declares the population as a query set would;
+        # the set keeps its digest and the job keeps the list.
+        receipt["query_population"] = population_of(p.query_accessions)
     if p.search_backend == "faiss":
         # Only meaningful under faiss, and misleading beside numpy, where
         # the search is exact and these knobs did nothing.
