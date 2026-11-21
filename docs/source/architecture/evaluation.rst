@@ -598,6 +598,18 @@ fallback they are omitted. The ``/v1/benchmark/matrix`` endpoint ranks every
 cell by ``f_micro_w`` (falling back to ``fmax`` for legacy IC=1 rows, flagged
 via ``primary_metric``) and exposes a ``per_task`` mean and 95% CI.
 
+**The files behind each figure.** A result records every file the run wrote:
+``results.artifacts.keys`` lists their keys in the artifact store, and since
+2026-11-21 ``results.artifacts.sha256`` holds the digest of each file as it was
+uploaded. A cell's ``f_micro_w`` and ``cov_w`` are read from its category's
+``evaluation_best_f_micro_w.tsv``, and its size from the category's
+``per_protein_grid.parquet``. ``GET
+/annotations/evaluation-sets/{id}/results/{rid}/artifacts/{path}`` serves one
+recorded file by itself, with the recorded digest in the ``X-Recorded-SHA256``
+header, so whoever downloads it can check that the bytes are the ones the
+figures were read from. The window page names the file and the digest behind
+each cell. Results made before 2026-11-21 record the keys only.
+
 **Obsolete metrics.** Unweighted ``fmax`` / ``f_micro`` (equal weight on all
 GO terms) are superseded by IA-weighted ``f_micro_w``; they are kept for
 history but are not LAFA-comparable. Numbers from the v226 evaluation window

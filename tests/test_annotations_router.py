@@ -1252,6 +1252,89 @@ class TestDownloadEvaluationArtifacts:
 
 
 # ---------------------------------------------------------------------------
+# GET .../results/{result_id}/artifacts/{relpath}
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadOneEvaluationArtifact:
+    """One recorded file, with the sha256 the result recorded for it."""
+
+    _RELPATH = "PK/evaluation_best_f_micro_w.tsv"
+    _BODY = b"ns\tf_micro_w\nBPO\t0.0981\n"
+
+    def _result(self, eval_id, *, digests: bool):
+        result = _make_evaluation_result(eval_set_id=eval_id)
+        key = f"eval_artifacts/{result.id}/{self._RELPATH}"
+        record: dict = {"keys": [key]}
+        if digests:
+            record["sha256"] = {key: "ab" * 32}
+        result.results = {"artifacts": record}
+        return result, key
+
+    def test_it_serves_the_file_with_the_recorded_digest(
+        self, client_with_artifacts, artifact_store
+    ):
+        c, session, _ = client_with_artifacts
+        eval_id = uuid4()
+        result, key = self._result(eval_id, digests=True)
+        session.get.return_value = result
+        artifact_store.iter_chunks.side_effect = lambda k, chunk_size=0: iter([self._BODY])
+
+        resp = c.get(
+            f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts/{self._RELPATH}"
+        )
+        assert resp.status_code == 200
+        assert resp.content == self._BODY
+        assert resp.headers["x-recorded-sha256"] == "ab" * 32
+        assert resp.headers["content-type"].startswith("text/tab-separated-values")
+        assert 'filename="evaluation_best_f_micro_w.tsv"' in resp.headers["content-disposition"]
+        artifact_store.iter_chunks.assert_called_once_with(key)
+
+    def test_a_result_written_before_the_digests_is_served_without_one(
+        self, client_with_artifacts, artifact_store
+    ):
+        c, session, _ = client_with_artifacts
+        eval_id = uuid4()
+        result, _ = self._result(eval_id, digests=False)
+        session.get.return_value = result
+        artifact_store.iter_chunks.side_effect = lambda k, chunk_size=0: iter([self._BODY])
+
+        resp = c.get(
+            f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts/{self._RELPATH}"
+        )
+        assert resp.status_code == 200
+        assert "x-recorded-sha256" not in resp.headers
+
+    @pytest.mark.parametrize("relpath", ["PK/evaluation_all.tsv", "..%2F..%2Fother%2Fkey"])
+    def test_a_file_the_result_did_not_record_is_not_served(
+        self, client_with_artifacts, artifact_store, relpath
+    ):
+        c, session, _ = client_with_artifacts
+        eval_id = uuid4()
+        result, _ = self._result(eval_id, digests=True)
+        session.get.return_value = result
+
+        resp = c.get(
+            f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts/{relpath}"
+        )
+        assert resp.status_code == 404
+        assert "recorded no file" in resp.json()["detail"]
+        artifact_store.iter_chunks.assert_not_called()
+
+    def test_a_result_of_another_window_is_not_served(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
+        result, _ = self._result(uuid4(), digests=True)
+        session.get.return_value = result
+
+        resp = c.get(
+            f"/annotations/evaluation-sets/{uuid4()}/results/{result.id}/artifacts/{self._RELPATH}"
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "EvaluationResult not found"
+        artifact_store.iter_chunks.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # GET .../results (lines 800-809)
 # ---------------------------------------------------------------------------
 

@@ -3716,6 +3716,72 @@
         ]
       }
     },
+    "/v1/annotations/evaluation-sets/{eval_id}/results/{result_id}/artifacts/{relpath}": {
+      "get": {
+        "description": "Stream one file the result recorded, by its path under the result.\n\n``relpath`` is the path the evaluator wrote, such as\n``PK/evaluation_best_f_micro_w.tsv``, the file a cell's ``f_micro_w`` and\n``cov_w`` are read from. When the result recorded the file's sha256, the\n``X-Recorded-SHA256`` header carries it: the sha256 of the body is that\nvalue, or the stored bytes are not the ones the figures were read from.\nReturns ``404`` when the result does not belong to ``eval_id`` or recorded\nno file at ``relpath``.",
+        "operationId": "download_evaluation_artifact_v1_annotations_evaluation_sets__eval_id__results__result_id__artifacts__relpath__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "result_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Result Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "relpath",
+            "required": true,
+            "schema": {
+              "title": "Relpath",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download one file an evaluation result wrote",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
     "/v1/annotations/evaluation-sets/{eval_id}/results/{result_id}/metrics.tsv": {
       "get": {
         "description": "Stream the per-aspect metrics table for one evaluation result.\n\nRenders the cafaeval-style summary (Fmax, Smin, AUPRC) as TSV with one\nrow per CAFA aspect (``BPO``/``MFO``/``CCO``). Returns ``404`` if the\n``(eval_id, result_id)`` pair does not match.",

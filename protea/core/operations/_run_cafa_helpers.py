@@ -30,6 +30,18 @@ def eval_artifact_key(result_id: uuid.UUID, relpath: str) -> str:
     return f"eval_artifacts/{result_id}/{relpath.lstrip('/')}"
 
 
+def artifacts_record(digests: dict[str, str]) -> dict[str, Any]:
+    """What a result records about the files it wrote: each key and its sha256.
+
+    ``keys`` is what the readers already walk (the ZIP, the strata, the
+    deletion). ``sha256`` holds the digest of each file as it was uploaded, so a
+    figure can name the file it was read from and whoever fetches that file can
+    check the bytes are the same. Results written before 2026-11-21 record keys
+    only.
+    """
+    return {"keys": list(digests), "sha256": dict(digests)}
+
+
 # Namespace labels used by cafaeval OBO parser. The full names come from
 # the obo file; we map them to PROTEA's canonical CAFA codes.
 _NS_LABELS: dict[str, str] = {

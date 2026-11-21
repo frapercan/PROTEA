@@ -1162,6 +1162,8 @@
     "cellLegend": "Cada célula: o F micro ponderado por IA (f_micro_w) e, por baixo, a cobertura ponderada no limiar reportado (o cov_w do LAFA) e o tamanho da célula na variante ponderada. Os resultados anteriores a 21-11-2026 não registam estes dois.",
     "resultsTitle": "Resultados ({count})",
     "provenanceLabel": "procedência",
+    "sourcesLabel": "ficheiros",
+    "sourcesHint": "O ficheiro de onde se leem as células de cada categoria, servido à parte, com o sha256 que o seu resultado registou. O sha256 do ficheiro descarregado é esse mesmo.",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
