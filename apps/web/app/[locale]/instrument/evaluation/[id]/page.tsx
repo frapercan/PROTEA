@@ -140,6 +140,11 @@ type EvaluationResult = {
   job_id: string | null;
   /** The code revision the evaluating job recorded when it started. */
   code_revision: string | null;
+  /**
+   * How the scores were read before cafaeval thresholded them (ADR-D55): ``raw``,
+   * LAFA's reading, or ``percentile_rank``, the comparison reading.
+   */
+  score_reading: string | null;
   created_at: string;
   // Method-surface provenance (slice F-METHOD-EVAL-SURFACE). Optional:
   // null on rows written before the columns existed; the badge strip then
@@ -475,6 +480,14 @@ export default function EvaluationDetailPage() {
                             {r.scoring_config_id
                               ? shortId(r.scoring_config_id)
                               : "—"}
+                            {r.score_reading ? (
+                              <div
+                                className="text-[10px] text-slate-500"
+                                title="how the scores were read before the thresholds (ADR-D55)"
+                              >
+                                {r.score_reading === "percentile_rank" ? "read by percentile" : `read ${r.score_reading}`}
+                              </div>
+                            ) : null}
                           </td>
                           {/* Forward link to the reranker registry so reviewers
                             can inspect the booster (provenance, metrics,

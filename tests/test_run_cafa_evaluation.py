@@ -1393,6 +1393,8 @@ class TestExecuteHappyPath:
             "rule": "all_targets",
             "targets": {"NK": 1, "LK": 1, "PK": 1},
         }
+        # How the scores were read, so two readings of one set tell themselves apart.
+        assert results["reading"] == {"score_reading": "raw", "th_step": 0.01}
 
     @patch("protea.core.operations.run_cafa_evaluation.get_artifact_store")
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")

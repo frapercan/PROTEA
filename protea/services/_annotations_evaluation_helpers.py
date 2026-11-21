@@ -26,7 +26,9 @@ from protea.infrastructure.orm.models.annotation.evaluation_set import Evaluatio
 
 
 def evaluation_result_to_dict(
-    r: EvaluationResult, code_revision: str | None = None
+    r: EvaluationResult,
+    code_revision: str | None = None,
+    score_reading: str | None = None,
 ) -> dict[str, Any]:
     """Serialise an :class:`EvaluationResult` to its API dict shape.
 
@@ -52,6 +54,10 @@ def evaluation_result_to_dict(
         # The revision of the code that evaluated, as its job recorded it when it
         # started; None for a result with no job or a job that recorded none.
         "code_revision": code_revision,
+        # How the scores were read before cafaeval thresholded them (ADR-D55):
+        # the result's own record, else the job's payload, else None.
+        "score_reading": ((r.results or {}).get("reading") or {}).get("score_reading")
+        or score_reading,
         "created_at": r.created_at.isoformat(),
         # F-METHOD-EVAL-SURFACE provenance (read-through; ``None`` on legacy
         # rows so the UI shows an "unknown" empty state).
@@ -83,9 +89,15 @@ def list_evaluation_results_data(
         .order_by(EvaluationResult.created_at.desc())
         .all()
     )
-    revisions = job_revisions(session, [r.job_id for r in rows if r.job_id])
+    jobs = [r.job_id for r in rows if r.job_id]
+    revisions = job_revisions(session, jobs)
+    readings = job_readings(session, jobs)
     return [
-        evaluation_result_to_dict(r, revisions.get(str(r.job_id)) if r.job_id else None)
+        evaluation_result_to_dict(
+            r,
+            revisions.get(str(r.job_id)) if r.job_id else None,
+            readings.get(str(r.job_id)) if r.job_id else None,
+        )
         for r in rows
     ]
 
@@ -108,6 +120,26 @@ def job_revisions(session: Session, job_ids: list[uuid.UUID]) -> dict[str, str]:
         return {}
     rows = session.execute(_JOB_REVISIONS, {"jobs": [str(j) for j in job_ids]}).mappings()
     return {r["job_id"]: r["code_revision"] for r in rows if r["code_revision"]}
+
+
+#: The reading each evaluating job was asked for. ``raw`` is the payload's
+#: default and what every run read before the field existed (ADR-D55), so a job
+#: that names none read raw.
+_JOB_READINGS = text(
+    """
+    SELECT id::text AS job_id, COALESCE(payload ->> 'score_reading', 'raw') AS score_reading
+    FROM job
+    WHERE id = ANY(CAST(:jobs AS uuid[])) AND operation = 'run_cafa_evaluation'
+    """
+)
+
+
+def job_readings(session: Session, job_ids: list[uuid.UUID]) -> dict[str, str]:
+    """job id -> the score reading its evaluation was asked for."""
+    if not job_ids:
+        return {}
+    rows = session.execute(_JOB_READINGS, {"jobs": [str(j) for j in job_ids]}).mappings()
+    return {r["job_id"]: r["score_reading"] for r in rows}
 
 
 def get_eval_result_with_keys(
