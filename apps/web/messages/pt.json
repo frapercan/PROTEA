@@ -2559,7 +2559,9 @@
       "bandNotCompared": "comparado só na célula inteira; por banda, ainda não",
       "settledHigher": "maior, resolvido",
       "settledLower": "menor, resolvido",
-      "unsettled": "não resolvido"
+      "unsettled": "não resolvido",
+      "equivalent": "iguais dentro de {effect}",
+      "underpowered": "poucas proteínas para saber"
     },
     "strata": {
       "question": "Onde ganha cada braço?",

@@ -14,6 +14,9 @@ export type PanelComparison = {
   verdict: string | null;
   status: string | null;
   n_paired: number | null;
+  /** The difference declared worth detecting, and the smallest one this comparison could detect. */
+  effect_of_interest?: number | null;
+  minimum_detectable_effect?: number | null;
 };
 
 export type PairedComparison = {
@@ -73,6 +76,8 @@ export function panelNote(p: PanelComparison, c: PairedComparison): string {
   const parts = [`f_micro_w of the arm minus the baseline: ${deltaText(p)}`];
   if (level || method) parts.push(`${level} ${method} interval`.trim());
   if (p.n_paired != null) parts.push(`${p.n_paired.toLocaleString("en-US")} paired proteins`);
+  if (p.effect_of_interest != null) parts.push(`effect of interest ${p.effect_of_interest}`);
+  if (p.minimum_detectable_effect != null) parts.push(`smallest detectable ${p.minimum_detectable_effect.toFixed(3)}`);
   parts.push(`verdict: ${p.verdict ?? "none"}${p.status && p.status !== "ok" ? ` (${p.status})` : ""}`);
   if (c.n_resamples != null) parts.push(`${c.n_resamples.toLocaleString("en-US")} resamples, seed ${c.seed}`);
   if (c.operating_point) parts.push(`operating point ${c.operating_point.replaceAll("_", " ")}`);

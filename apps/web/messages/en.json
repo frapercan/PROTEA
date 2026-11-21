@@ -2558,7 +2558,9 @@
       "bandNotCompared": "compared on the whole cell only; per band, not yet",
       "settledHigher": "higher, settled",
       "settledLower": "lower, settled",
-      "unsettled": "not settled"
+      "unsettled": "not settled",
+      "equivalent": "the same within {effect}",
+      "underpowered": "too few proteins to tell"
     },
     "strata": {
       "question": "Where does each arm win?",

@@ -52,6 +52,12 @@ PANEL_FIELDS: tuple[str, ...] = (
     "verdict",
     "status",
     "n_paired",
+    # What a null is read against: the difference the comparison declared worth
+    # detecting, and the smallest one it could have detected. Without them a page
+    # cannot tell sameness within the effect (null_with_power) from too little
+    # data to tell (underpowered).
+    "effect_of_interest",
+    "minimum_detectable_effect",
 )
 
 #: What the page shows of the comparison as a whole.

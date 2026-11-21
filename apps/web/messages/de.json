@@ -2559,7 +2559,9 @@
       "bandNotCompared": "nur über die ganze Zelle verglichen; pro Band noch nicht",
       "settledHigher": "höher, entschieden",
       "settledLower": "niedriger, entschieden",
-      "unsettled": "nicht entschieden"
+      "unsettled": "nicht entschieden",
+      "equivalent": "gleich innerhalb von {effect}",
+      "underpowered": "zu wenige Proteine für ein Urteil"
     },
     "strata": {
       "question": "Wo gewinnt jeder Arm?",

@@ -33,6 +33,8 @@ PANEL = {
     "verdict": "a_greater",
     "status": "ok",
     "n_paired": 22681,
+    "effect_of_interest": 0.01,
+    "minimum_detectable_effect": 0.0034,
     "diagnostics": {"kept": "in the job only"},
 }
 

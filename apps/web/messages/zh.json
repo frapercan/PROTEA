@@ -2559,7 +2559,9 @@
       "bandNotCompared": "仅在整个单元格上比较；按区间尚未比较",
       "settledHigher": "更高，已确定",
       "settledLower": "更低，已确定",
-      "unsettled": "未确定"
+      "unsettled": "未确定",
+      "equivalent": "在 {effect} 内相同",
+      "underpowered": "蛋白质太少，无法判断"
     },
     "strata": {
       "question": "每个分支在哪里胜出？",

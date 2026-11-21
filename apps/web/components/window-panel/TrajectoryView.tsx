@@ -33,7 +33,17 @@ function PairedCell({
   const found = stepComparison(view.comparisons, item.id, before.id, view.state.cell);
   if (!found) return quiet(t("trajectory.notCompared"));
   const tone = verdictTone(found.panel);
-  const word = tone === "higher" ? t("trajectory.settledHigher") : tone === "lower" ? t("trajectory.settledLower") : t("trajectory.unsettled");
+  const { status, effect_of_interest: effect } = found.panel;
+  const word =
+    tone === "higher"
+      ? t("trajectory.settledHigher")
+      : tone === "lower"
+        ? t("trajectory.settledLower")
+        : status === "null_with_power" && effect != null
+          ? t("trajectory.equivalent", { effect })
+          : status === "underpowered"
+            ? t("trajectory.underpowered")
+            : t("trajectory.unsettled");
   return (
     <span className={`tabular-nums ${TONE[tone]}`} title={panelNote(found.panel, found.comparison)}>
       {deltaText(found.panel)} · {word}
