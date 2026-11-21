@@ -300,7 +300,7 @@ class TestRefreshDoesNotEmptyTheStore:
 
 
 class TestNoPrewarmDropsItsKeyFirst:
-    """The wiring across the seven prewarms, not just the primitive."""
+    """The wiring across the prewarms, not just the primitive."""
 
     FICHEROS = (
         "protea/api/routers/proteins_stats.py",
@@ -308,7 +308,6 @@ class TestNoPrewarmDropsItsKeyFirst:
         "protea/api/routers/annotations/sets.py",
         "protea/api/routers/annotations/snapshots.py",
         "protea/api/routers/embeddings.py",
-        "protea/api/routers/benchmark.py",
     )
 
     def test_no_prewarm_calls_invalidate_before_producing(self) -> None:
@@ -326,14 +325,7 @@ class TestNoPrewarmDropsItsKeyFirst:
         assert culpables == [], f"these drop the key before producing: {culpables}"
 
     def test_every_prewarm_that_caches_goes_through_refresh(self) -> None:
-        """Only the ones that write the in-process cache are in scope.
-
-        ``prewarm_benchmark_matrix`` is deliberately not: it holds no key and
-        warms Postgres's buffer cache by running the query, so there is nothing
-        to drop and nothing to swap. An earlier version of this test required
-        ``refresh`` of every ``prewarm_*`` and flagged it, which is the test
-        being wrong rather than the code.
-        """
+        """Only the ones that write the in-process cache are in scope."""
         import pathlib
         import re
 
