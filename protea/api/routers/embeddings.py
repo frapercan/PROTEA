@@ -401,12 +401,20 @@ def resolve_prediction_set(
 @router.get("/prediction-sets/{set_id}", summary="Get prediction set details")
 def get_prediction_set(
     set_id: UUID,
+    per_protein: bool = Query(
+        default=False,
+        description="Also return every protein's number of terms (``per_protein_counts``).",
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
-    """Retrieve a prediction set with total prediction count and per-protein GO term counts."""
+    """Retrieve a prediction set with its prediction and protein counts.
+
+    The counts are the set's summary, counted on its first read and kept.
+    ``per_protein_counts`` is ``None`` unless ``per_protein`` asks for it.
+    """
     try:
         with session_scope(factory) as session:
-            return get_prediction_set_data(session, set_id)
+            return get_prediction_set_data(session, set_id, per_protein=per_protein)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

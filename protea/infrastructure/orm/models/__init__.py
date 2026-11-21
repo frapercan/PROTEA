@@ -37,6 +37,7 @@ from .embedding.lexicon_bank import LexiconBank  # noqa: F401
 from .embedding.model_weights import ModelWeights  # noqa: F401
 from .embedding.prediction_score import PredictionScore  # noqa: F401
 from .embedding.prediction_set import PredictionSet  # noqa: F401
+from .embedding.prediction_set_protein import PredictionSetProtein  # noqa: F401
 from .embedding.reranker_model import RerankerModel  # noqa: F401
 from .embedding.residue_code import ResidueCode  # noqa: F401
 from .embedding.scoring_config import ScoringConfig  # noqa: F401

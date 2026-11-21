@@ -147,6 +147,7 @@ from protea.core.operations.seal_evaluation_groundtruth import (
 )
 from protea.core.operations.store_residue_codes import StoreResidueCodesOperation
 from protea.core.operations.stratify_evaluation import StratifyEvaluationOperation
+from protea.core.operations.summarize_prediction_sets import SummarizePredictionSetsOperation
 from protea.core.operations.supersede_evaluation_sets import (
     SupersedeEvaluationSetsOperation,
 )
@@ -365,6 +366,7 @@ _METHOD: tuple[_Row, ...] = (
     # A transfer method's candidates become predictions here, with a record: the
     # evaluator scores what a method stored and nothing else (closure, step 4).
     (ScorePredictionSetOperation, _METHOD_JOB),
+    (SummarizePredictionSetsOperation, _METHOD_JOB),
     # The offline half of the association feature the prediction path reads.
     (BuildGoCooccurrenceOperation, replace(_METHOD_JOB, family="embedding-reranker")),
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer publicly

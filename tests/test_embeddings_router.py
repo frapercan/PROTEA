@@ -263,6 +263,14 @@ def _make_prediction_set(ps_id=None):
     ps.created_at = datetime(2024, 1, 1, tzinfo=UTC)
     # A candidate set's record: no scored_from, so its rows are its own.
     ps.meta = {}
+    # Counted already, as a set is after its first read.
+    ps.summary = {
+        "rows": 0,
+        "proteins": 0,
+        "aspect_totals": {},
+        "top_terms": [],
+        "computed_at": "2024-01-01T00:00:00+00:00",
+    }
     return ps
 
 
@@ -900,22 +908,32 @@ class TestListPredictionSets:
 
 class TestGetPredictionSet:
     def test_returns_details(self, client, session):
+        """The counts come from the set's summary; per-protein counts only when asked."""
         ps = _make_prediction_set()
+        ps.summary = {
+            "rows": 50,
+            "proteins": 2,
+            "aspect_totals": {"F": 50},
+            "top_terms": [],
+            "computed_at": "2026-11-21T19:00:00+00:00",
+        }
         ps_id = ps.id
         session.get.return_value = ps
-        session.query.return_value.filter.return_value.scalar.return_value = 50
-        session.query.return_value.filter.return_value.group_by.return_value.all.return_value = [
-            ("P12345", 30),
-            ("Q67890", 20),
-        ]
 
         resp = client.get(f"/embeddings/prediction-sets/{ps_id}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == str(ps_id)
         assert data["prediction_count"] == 50
-        assert data["per_protein_counts"]["P12345"] == 30
-        assert data["per_protein_counts"]["Q67890"] == 20
+        assert data["protein_count"] == 2
+        assert data["per_protein_counts"] is None
+
+        with patch(
+            "protea.services.embeddings_service.per_protein_counts",
+            return_value={"P12345": 30, "Q67890": 20},
+        ):
+            data = client.get(f"/embeddings/prediction-sets/{ps_id}?per_protein=true").json()
+        assert data["per_protein_counts"] == {"P12345": 30, "Q67890": 20}
 
     def test_not_found_returns_404(self, client, session):
         session.get.return_value = None
@@ -946,15 +964,6 @@ class TestListPredictionSetProteins:
         # The endpoint does multiple session.query(...) calls with different args.
         # Use a side_effect on session.query to return different mocks per call.
         call_idx = [0]
-        main_q = MagicMock()
-        main_q.filter.return_value = main_q
-        main_q.group_by.return_value = main_q
-        main_q.count.return_value = len(rows_data)
-        main_q.order_by.return_value = main_q
-        main_q.offset.return_value = main_q
-        main_q.limit.return_value = main_q
-        main_q.all.return_value = rows_data
-
         prot_q = MagicMock()
         prot_mock = MagicMock()
         prot_mock.accession = rows_data[0][0] if rows_data else "X"
@@ -972,7 +981,9 @@ class TestListPredictionSetProteins:
         match_q.group_by.return_value = match_q
         match_q.all.return_value = [(rows_data[0][0], 3)] if rows_data else []
 
-        queries = [main_q, prot_q, ann_q, match_q]
+        # The page itself comes from the counted table (protein_page); the
+        # three per-page lookups still query the session in this order.
+        queries = [prot_q, ann_q, match_q]
 
         def _query_side(*args, **kwargs):
             idx = call_idx[0]
@@ -987,9 +998,14 @@ class TestListPredictionSetProteins:
         ps = _make_prediction_set()
         ps_id = ps.id
         session.get.return_value = ps
-        self._setup_proteins_mocks(session, ps, [("P12345", 10, 0.05)])
+        rows = [("P12345", 10, 0.05)]
+        self._setup_proteins_mocks(session, ps, rows)
 
-        resp = client.get(f"/embeddings/prediction-sets/{ps_id}/proteins")
+        with patch(
+            "protea.services._embeddings_proteins_helpers.protein_page",
+            return_value=(len(rows), rows),
+        ):
+            resp = client.get(f"/embeddings/prediction-sets/{ps_id}/proteins")
         assert resp.status_code == 200
         data = resp.json()
         assert "total" in data
@@ -1010,20 +1026,11 @@ class TestListPredictionSetProteins:
         session.get.return_value = ps
 
         call_idx = [0]
-        main_q = MagicMock()
-        main_q.filter.return_value = main_q
-        main_q.group_by.return_value = main_q
-        main_q.count.return_value = 0
-        main_q.order_by.return_value = main_q
-        main_q.offset.return_value = main_q
-        main_q.limit.return_value = main_q
-        main_q.all.return_value = []
-
         prot_q = MagicMock()
         prot_q.filter.return_value = prot_q
         prot_q.all.return_value = []
 
-        queries = [main_q, prot_q]
+        queries = [prot_q]
 
         def _query_side(*args, **kwargs):
             idx = call_idx[0]
@@ -1034,11 +1041,15 @@ class TestListPredictionSetProteins:
 
         session.query.side_effect = _query_side
 
-        resp = client.get(
-            f"/embeddings/prediction-sets/{ps.id}/proteins",
-            params={"search": "P123"},
-        )
+        with patch(
+            "protea.services._embeddings_proteins_helpers.protein_page", return_value=(0, [])
+        ) as page:
+            resp = client.get(
+                f"/embeddings/prediction-sets/{ps.id}/proteins",
+                params={"search": "P123"},
+            )
         assert resp.status_code == 200
+        assert page.call_args.args[2] == "P123"
 
 
 # ---------------------------------------------------------------------------
