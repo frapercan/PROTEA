@@ -10,6 +10,7 @@ import {
   modelName,
   modelsOf,
   referenceOf,
+  sameExclusion,
   stepComparison,
   visibleResults,
   type SummaryResult,
@@ -67,6 +68,16 @@ describe("the names people read", () => {
     expect(armLabel(result("t", { model: null, scoring: null, depth: null, method: "count-map-themes-lexico-93k-211" }))).toBe(
       "count map: themes",
     );
+  });
+
+  it("tells an arm that excluded only the query from the one that excluded its twins too", () => {
+    const byAccession = result("acc", { depth: 30, self_exclusion: "accession" });
+    const bySequence = result("seq", { depth: 30 });
+    expect(armLabel(byAccession)).toBe("ESM-2 650M · embedding_only · k=30 · self by accession");
+    expect(armShort(byAccession)).toBe("650M emb k=30 acc");
+    expect(armLabel(bySequence)).toBe("ESM-2 650M · embedding_only · k=30");
+    expect(sameExclusion(byAccession.arm, bySequence.arm)).toBe(false);
+    expect(sameExclusion(bySequence.arm, result("old", { depth: 30, self_exclusion: null }).arm)).toBe(true);
   });
 
   it("names a method built on the own annotations by its own name, never as them", () => {

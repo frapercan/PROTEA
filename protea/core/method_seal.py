@@ -118,7 +118,9 @@ _IDENTITY_COLUMNS: tuple[str, ...] = (
 #: other decision is taken. ``aspect_separated_knn`` decides whether the
 #: neighbour list is retrieved once or once per aspect, so it changes which
 #: donors exist. ``exclude_self_neighbour`` decides whether a query votes for
-#: itself, which is the difference between a measurement and a leak.
+#: itself, which is the difference between a measurement and a leak, and
+#: ``self_exclusion`` decides who leaves with it: its twins (other proteins with
+#: the identical sequence) under ``"sequence"``, nobody under ``"accession"``.
 #: ``donor_policy`` decides which donors and which annotations may vote at all.
 #: ``metric`` decides which neighbours are near. ``features`` decides which
 #: channels were computed and fed forward. ``faiss`` and ``rerankers`` are
@@ -175,6 +177,7 @@ _IDENTITY_META: tuple[str, ...] = (
     # cut and the code that applied them (score_prediction_set).
     "scoring",
     "search_backend",
+    "self_exclusion",
 )
 
 #: Columns that are NOT method identity, each with why. An exclusion put wrong

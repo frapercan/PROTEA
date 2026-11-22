@@ -47,6 +47,7 @@ def _row(**over: Any) -> dict[str, Any]:
         "depth_cut": "3",
         "depth_retrieved": 30,
         "exclude_self": "true",
+        "self_exclusion": None,
         "job_reading": None,
         "backend": "esm",
         "config_release": None,
@@ -125,6 +126,7 @@ def test_a_neighbour_arm_reads_its_cut_its_exclusion_and_its_reading() -> None:
         "method": None,
         "depth": 3,
         "exclude_self": True,
+        "self_exclusion": None,
         "reading": "percentile_rank",
         "leak": "not_fitted",
         "training_release": None,
@@ -132,6 +134,11 @@ def test_a_neighbour_arm_reads_its_cut_its_exclusion_and_its_reading() -> None:
     assert shown["cells"] == {"NK:MFO": {"f": 0.4405, "tau": 0.57, "edge": None, "targets": 1045}}
     assert shown["created_at"] == "2026-11-21T12:00:00+00:00"
     assert shown["strata"] is None
+
+
+def test_an_arm_that_excluded_only_the_query_says_so() -> None:
+    arm = summary_row(_row(self_exclusion="accession"), FRAME)["arm"]
+    assert (arm["exclude_self"], arm["self_exclusion"]) == (True, "accession")
 
 
 def test_an_uncut_set_reads_what_its_candidates_retrieved() -> None:

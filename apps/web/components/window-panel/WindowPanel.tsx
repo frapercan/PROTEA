@@ -25,6 +25,7 @@ import {
   modelsOf,
   mayNotBeRead,
   referenceOf,
+  sameExclusion,
   visibleResults,
   type SummaryResult,
   type WindowSummary,
@@ -63,7 +64,7 @@ function counterpart(r: SummaryResult, results: SummaryResult[], reading: string
     a.scoring === b.scoring &&
     a.method === b.method &&
     a.depth === b.depth &&
-    a.exclude_self === b.exclude_self;
+    sameExclusion(a, b);
   return results.find((x) => x.arm.reading === reading && same(x.arm, r.arm));
 }
 

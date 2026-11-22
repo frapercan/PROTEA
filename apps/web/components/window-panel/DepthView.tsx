@@ -14,6 +14,7 @@ import {
   isNeighbour,
   modelName,
   modelsOf,
+  sameExclusion,
   type SummaryResult,
 } from "@/lib/windowPanel";
 import { Figure, INK, Legend, SERIES, extent, fmt, pressable, signed, ticks, useTooltip } from "./chart";
@@ -162,7 +163,7 @@ export default function DepthView({ view }: { view: PanelView }) {
           x.arm.scoring === a.arm.scoring &&
           x.arm.method === a.arm.method &&
           x.arm.depth === a.arm.depth &&
-          x.arm.exclude_self === a.arm.exclude_self,
+          sameExclusion(x.arm, a.arm),
       );
       return b && cellF(a, state.cell) != null && cellF(b, state.cell) != null ? ([a, b] as const) : null;
     })
