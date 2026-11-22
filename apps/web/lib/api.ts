@@ -395,13 +395,26 @@ export type ProteinItem = {
   isoform_index?: number | null;
 };
 
+/** A protein's current UniProt entry and the release that served it: shown, never used on a cut. */
+export type CurrentEntry = {
+  uniprot_release?: string | null;
+  uniprot_release_date?: string | null;
+  entry_name?: string | null;
+  reviewed?: boolean | null;
+  protein_names?: string | null;
+  gene_names?: string | null;
+  organism_name?: string | null;
+  organism_id?: number | null;
+  length?: number | null;
+};
+
 export type ProteinDetail = ProteinItem & {
   canonical_accession: string;
   isoforms: string[];
   sequence_id?: number | null;
   embedding_count: number;
   go_annotation_count: number;
-  metadata?: {
+  metadata?: (CurrentEntry & {
     function_cc?: string | null;
     ec_number?: string | null;
     catalytic_activity?: string | null;
@@ -409,8 +422,18 @@ export type ProteinDetail = ProteinItem & {
     keywords?: string | null;
     cofactor?: string | null;
     activity_regulation?: string | null;
-    [key: string]: string | null | undefined;
-  } | null;
+    absorption?: string | null;
+    kinetics?: string | null;
+    ph_dependence?: string | null;
+    redox_potential?: string | null;
+    temperature_dependence?: string | null;
+    active_site?: string | null;
+    binding_site?: string | null;
+    dna_binding?: string | null;
+    rhea_id?: string | null;
+    site?: string | null;
+    features?: string | null;
+  }) | null;
 };
 
 export type ProteinStats = {

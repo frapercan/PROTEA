@@ -64,6 +64,7 @@ TODAY: dict[str, str] = {
     "fetch_uniprot_metadata": queues.JOBS,
     "extract_goa_universe": queues.JOBS,
     "resolve_protein_sequences": queues.JOBS,
+    "resolve_protein_metadata": queues.JOBS,
     "load_interpro_go_mapping": queues.JOBS,
     "run_interproscan_batch": queues.JOBS,
     "predict_go_terms_from_interpro": queues.JOBS,
@@ -290,7 +291,7 @@ def _constant(module: str, name: str) -> str:
 def test_every_registered_operation_declares_a_spec() -> None:
     registry = build_operation_registry()
     assert set(registry.specs()) == set(registry._ops)
-    assert len(CATALOG) == len(registry._ops) == 69
+    assert len(CATALOG) == len(registry._ops) == 70
 
 
 def test_each_spec_routes_where_the_code_routes_today(specs: dict[str, OperationSpec]) -> None:

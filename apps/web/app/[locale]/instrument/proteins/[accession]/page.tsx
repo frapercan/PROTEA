@@ -1,5 +1,6 @@
 "use client";
 
+import { CurrentEntryCard } from "@/components/CurrentEntryCard";
 import { formatCount } from "@/lib/format";
 
 import { use, useEffect, useState } from "react";
@@ -308,6 +309,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
           <div className="lg:col-span-2 space-y-4">
             {meta ? (
               <>
+                <CurrentEntryCard entry={meta} />
                 {meta.function_cc && (
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">{t("overviewTab.function")}</p>

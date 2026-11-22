@@ -161,6 +161,9 @@ from protea.core.operations.refresh_goa_release_dates import (
 from protea.core.operations.register_ingested_method import (
     RegisterIngestedMethodPayload,
 )
+from protea.core.operations.resolve_protein_metadata import (
+    ResolveProteinMetadataPayload,
+)
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesPayload,
 )
@@ -626,6 +629,14 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
     (
         "resolve_protein_sequences",
         ResolveProteinSequencesPayload,
+        {"max_accessions": 0},
+        ("max_accessions",),
+    ),
+    # zero-cap, likewise: a capped smoke run that asks about nothing would report
+    # success and read exactly like a platform whose entries were all current.
+    (
+        "resolve_protein_metadata",
+        ResolveProteinMetadataPayload,
         {"max_accessions": 0},
         ("max_accessions",),
     ),

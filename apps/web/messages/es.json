@@ -750,7 +750,14 @@
         "evidence": "Evidencia",
         "qualifier": "Calificador",
         "source": "Fuente"
-      }
+      },
+      "currentEntry": "Entrada actual de UniProt",
+      "currentEntryNote": "Versión {release} ({date}). Conocimiento actual de la proteína: se muestra aquí y nunca se usa para predecir ni evaluar en un corte anterior.",
+      "unknownRelease": "Esta entrada no registra su versión de UniProt.",
+      "entryName": "Nombre de la entrada",
+      "proteinNames": "Nombres de la proteína",
+      "reviewedEntry": "Revisada (Swiss-Prot)",
+      "no": "No"
     },
     "notFound": {
       "title": "Proteína no encontrada",

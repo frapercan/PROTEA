@@ -751,7 +751,14 @@
         "evidence": "证据",
         "qualifier": "限定词",
         "source": "来源"
-      }
+      },
+      "currentEntry": "当前 UniProt 条目",
+      "currentEntryNote": "版本 {release}（{date}）。该蛋白质的当前知识：仅在此显示，从不用于在较早的截点上进行预测或评估。",
+      "unknownRelease": "此条目未记录 UniProt 版本。",
+      "entryName": "条目名称",
+      "proteinNames": "蛋白质名称",
+      "reviewedEntry": "已审阅（Swiss-Prot）",
+      "no": "否"
     },
     "notFound": {
       "title": "未找到蛋白质",
