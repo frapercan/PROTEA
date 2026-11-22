@@ -47,6 +47,9 @@ export type PanelArm = {
   method: string | null;
   depth: number | null;
   exclude_self: boolean | null;
+  /** Who left the query's neighbourhood with it: its twins too ("sequence") or
+   *  nobody ("accession"). Null when the run left the rule to the flag. */
+  self_exclusion?: string | null;
   reading: string;
   /** Null when the window's ends are not releases or the arm names no producer. */
   leak?: LeakVerdict | null;
@@ -153,7 +156,13 @@ export function armLabel(r: SummaryResult): string {
   if (!isNeighbour(r)) return methodName(r.arm.method) || r.prediction_set_id.slice(0, 8);
   const parts = [modelName(r.arm.model), r.arm.scoring ?? "candidates"];
   if (r.arm.depth != null) parts.push(`k=${r.arm.depth}`);
+  if (r.arm.self_exclusion === "accession") parts.push("self by accession");
   return parts.join(" · ");
+}
+
+/** Two arms that differ only in which proteins left with the query are two arms. */
+export function sameExclusion(a: SummaryResult["arm"], b: SummaryResult["arm"]): boolean {
+  return a.exclude_self === b.exclude_self && (a.self_exclusion ?? null) === (b.self_exclusion ?? null);
 }
 
 /** The arm in a few characters, for rows and cells: "650M emb k=1". */
@@ -161,7 +170,8 @@ export function armShort(r: SummaryResult): string {
   if (!isNeighbour(r)) return methodName(r.arm.method) || r.prediction_set_id.slice(0, 8);
   const model = modelName(r.arm.model).replace(/^ESM-2 /, "");
   const scoring = r.arm.scoring ? (SCORING_SHORT[r.arm.scoring] ?? r.arm.scoring) : "cand";
-  return `${model} ${scoring}${r.arm.depth != null ? ` k=${r.arm.depth}` : ""}`;
+  const self = r.arm.self_exclusion === "accession" ? " acc" : "";
+  return `${model} ${scoring}${r.arm.depth != null ? ` k=${r.arm.depth}` : ""}${self}`;
 }
 
 /** Superseded by the protocol: an arm whose targets' own sequences could vote. */

@@ -431,11 +431,12 @@ class TestItDoesNotWidenInSilence:
                 metric="cosine",
                 donor_policy=DonorPolicy(reviewed_only=False, evidence_codes=["EXP"]),
                 reranker_model_id=str(uuid.uuid4()),
+                self_exclusion="accession" if asked else None,
             )
             written |= set(run_receipt(payload, uuid.uuid4()))
         classified = set(METHOD_IDENTITY_FIELDS) | set(EXECUTION_ONLY_FIELDS)
         assert written - classified == set(), "the receipt writes keys the seal does not know"
-        assert {"faiss", "rerankers", "query_population"} <= written, (
+        assert {"faiss", "rerankers", "query_population", "self_exclusion"} <= written, (
             "the conditional blocks stopped being written"
         )
 
@@ -633,3 +634,23 @@ class TestTheClassificationIsAPartition:
         }
         assert method_identity(a) == method_identity(rerun)
         assert assert_one_axis([], a, rerun) == ()
+
+
+def test_the_self_exclusion_rule_is_an_axis_of_the_method() -> None:
+    """By accession a query's twins stay as donors; by sequence they leave with it.
+
+    Two retrievers, so a comparison across the rule has to declare it.
+    """
+    shared: dict[str, Any] = {
+        "annotation_set_id": "cbb35a32-44e4-4e39-b524-05b4b7433727",
+        "ontology_snapshot_id": "6b78af68-eb01-477e-a599-fcde11ff0135",
+        "code_revision": "8699bfd7eec382aadd03f471b127f8be6f71cffd",
+        "aspect_separated_knn": True,
+        "expand_votes_to_ancestors": False,
+    }
+    by_sequence = _pset(_BANK_220, **shared)
+    by_accession = _pset(_BANK_165, **shared, meta={"self_exclusion": "accession"})
+    assert "self_exclusion" in METHOD_IDENTITY_FIELDS
+    with pytest.raises(CrossedMethodAxes, match="self_exclusion"):
+        assert_one_axis(["metric"], by_accession, by_sequence)
+    assert_one_axis(["self_exclusion"], by_accession, by_sequence)

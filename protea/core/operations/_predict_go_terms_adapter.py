@@ -146,8 +146,10 @@ def _build_predict_config(
         # The flag has to reach the search that produces rows. PROTEA's own
         # pre-search feeds only the pair features, so applying it there and
         # not here is how a run dispatched with the flag came back with
-        # 133,866 self-donated rows.
+        # 133,866 self-donated rows. The rule travels with it, for the same
+        # reason: the pre-search reads both (predict_go_terms._self_exclusion).
         exclude_self_neighbour=bool(getattr(p, "exclude_self_neighbour", False)),
+        self_exclusion=getattr(p, "self_exclusion", None),
     )
 
 

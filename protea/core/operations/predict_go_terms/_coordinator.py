@@ -362,6 +362,8 @@ class PredictGOTermsOperation:
             # allowed: the query was its own nearest neighbour for 95.0 per
             # cent of candidate rows at depth 1.
             "exclude_self_neighbour": getattr(p, "exclude_self_neighbour", False),
+            # By sequence (the query and its twins) or by accession (it alone).
+            "self_exclusion": getattr(p, "self_exclusion", None),
             "compute_protst": getattr(p, "compute_protst", False),
             "compute_ia": getattr(p, "compute_ia", False),
             "ia_file": getattr(p, "ia_file", None),

@@ -55,6 +55,8 @@ _SUMMARY = text(
            coalesce(cand.limit_per_entry, ps.limit_per_entry) AS depth_retrieved,
            coalesce(cand.meta ->> 'exclude_self_neighbour',
                     ps.meta ->> 'exclude_self_neighbour') AS exclude_self,
+           coalesce(cand.meta ->> 'self_exclusion',
+                    ps.meta ->> 'self_exclusion') AS self_exclusion,
            j.payload ->> 'score_reading' AS job_reading
     FROM evaluation_result r
     JOIN prediction_set ps ON ps.id = r.prediction_set_id
@@ -151,6 +153,9 @@ def summary_row(row: dict[str, Any], frame: Frame | None = None) -> dict[str, An
             "method": row["method"],
             "depth": depth,
             "exclude_self": None if exclude is None else exclude == "true",
+            # Who left with the query: its twins too ("sequence") or nobody
+            # ("accession"). None when the run left it to the flag.
+            "self_exclusion": row["self_exclusion"],
             "reading": (results.get("reading") or {}).get("score_reading")
             or row["job_reading"]
             or "raw",
