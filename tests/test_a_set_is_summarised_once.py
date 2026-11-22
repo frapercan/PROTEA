@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from protea.core.operations.summarize_prediction_sets import SummarizePredictionSetsOperation
@@ -21,7 +21,13 @@ from protea.infrastructure.orm.models.embedding.go_prediction import GOPredictio
 from protea.infrastructure.orm.models.embedding.prediction_score import PredictionScore
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.prediction_set_protein import PredictionSetProtein
-from protea.services._prediction_set_summary import go_term_distribution, protein_page, summarize
+from protea.infrastructure.orm.models.job import Job, JobStatus
+from protea.services._prediction_set_summary import (
+    go_term_distribution,
+    per_protein_counts,
+    protein_page,
+    summarize,
+)
 from tests.helpers.windows import make_window
 from tests.test_run_count_map import pg  # noqa: F401
 
@@ -181,6 +187,106 @@ def test_the_operation_counts_every_set_without_a_summary(pg: Session) -> None: 
     events: list[tuple] = []
     out = SummarizePredictionSetsOperation().execute(pg, {}, emit=lambda *a, **k: events.append(a))
 
-    assert out.result == {"sets": 2, "rows": 2}
+    assert out.result == {"sets": 2, "still_writing": 0, "rows": 2}
     assert all(pg.get(PredictionSet, s.id).summary["rows"] == 1 for s in sets)
     assert [e[0] for e in events].count("summarize_prediction_sets.set") == 2
+
+
+def _written_by(pg: Session, pset: PredictionSet, status: JobStatus) -> Job:  # noqa: F811
+    """Give the set the job that writes it, in ``status``."""
+    job = Job(operation="run_count_map", queue_name="protea.training", status=status, payload={})
+    pg.add(job)
+    pg.flush()
+    pset.job_id = job.id
+    pg.flush()
+    return job
+
+
+def _pair(pg: Session, pset: PredictionSet, term: int, accession: str = "P1") -> None:  # noqa: F811
+    pg.add(
+        GOPrediction(
+            prediction_set_id=pset.id,
+            protein_accession=accession,
+            ref_protein_accession="R",
+            go_term_id=term,
+            distance=0.2,
+        )
+    )
+    pg.flush()
+
+
+def _kept_proteins(pg: Session, pset: PredictionSet) -> int:  # noqa: F811
+    return pg.scalar(
+        select(func.count())
+        .select_from(PredictionSetProtein)
+        .where(PredictionSetProtein.prediction_set_id == pset.id)
+    )
+
+
+def test_a_set_still_being_written_is_read_live_and_nothing_is_kept(pg: Session) -> None:  # noqa: F811
+    parents, ids = _parents(pg)
+    pset = _method_set(pg, parents)
+    job = _written_by(pg, pset, JobStatus.RUNNING)
+    _pair(pg, pset, ids["GO:0000001"], "P1")
+    _pair(pg, pset, ids["GO:0000003"], "P2")
+
+    live = summarize(pg, pset.id)
+
+    assert live["provisional"] is True and (live["rows"], live["proteins"]) == (2, 2)
+    pg.expire_all()
+    assert pg.get(PredictionSet, pset.id).summary is None and _kept_proteins(pg, pset) == 0
+    assert protein_page(pg, pset.id, None, 50, 0, live=True) == (
+        2,
+        [("P1", 1, 0.2), ("P2", 1, 0.2)],
+    )
+    assert protein_page(pg, pset.id, "p2", 50, 0, live=True) == (1, [("P2", 1, 0.2)])
+    assert per_protein_counts(pg, pset.id, live=True) == {"P1": 1, "P2": 1}
+
+    # Once its job has finished, the set holds every row it will and is kept.
+    job.status = JobStatus.SUCCEEDED
+    pg.flush()
+    kept = summarize(pg, pset.id)
+    assert "provisional" not in kept and kept["rows"] == 2 and _kept_proteins(pg, pset) == 2
+
+
+def test_a_failed_jobs_set_is_kept_as_it_was_left(pg: Session) -> None:  # noqa: F811
+    parents, ids = _parents(pg)
+    pset = _method_set(pg, parents)
+    _written_by(pg, pset, JobStatus.FAILED)
+    _pair(pg, pset, ids["GO:0000002"])
+    assert "provisional" not in summarize(pg, pset.id)
+    pg.expire_all()
+    assert pg.get(PredictionSet, pset.id).summary["rows"] == 1
+
+
+def test_a_reader_that_waited_reads_what_the_first_count_kept(pg: Session) -> None:  # noqa: F811
+    # Under the set's lock the reader reads the set again: a summary another
+    # reader kept meanwhile is returned as it is, not counted a second time.
+    parents, ids = _parents(pg)
+    pset = _method_set(pg, parents)
+    _pair(pg, pset, ids["GO:0000001"])
+    pset.summary = {
+        "rows": 1,
+        "proteins": 1,
+        "aspect_totals": {"P": 1},
+        "top_terms": [],
+        "computed_at": "kept",
+    }
+    pg.flush()
+    assert summarize(pg, pset.id)["computed_at"] == "kept"
+
+
+def test_the_sweep_leaves_a_set_still_being_written(pg: Session) -> None:  # noqa: F811
+    parents, ids = _parents(pg)
+    done, writing = _method_set(pg, parents), _method_set(pg, parents)
+    _pair(pg, done, ids["GO:0000001"])
+    _pair(pg, writing, ids["GO:0000001"])
+    _written_by(pg, writing, JobStatus.RUNNING)
+    pg.commit()
+
+    events: list[tuple] = []
+    out = SummarizePredictionSetsOperation().execute(pg, {}, emit=lambda *a, **k: events.append(a))
+
+    assert out.result == {"sets": 1, "still_writing": 1, "rows": 1}
+    assert pg.get(PredictionSet, writing.id).summary is None
+    assert "summarize_prediction_sets.still_writing" in [e[0] for e in events]
