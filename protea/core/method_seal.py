@@ -160,6 +160,12 @@ _IDENTITY_META: tuple[str, ...] = (
     # candidates and adds InterPro's own, so it changes the stored set.
     "interpro_bp_graft",
     "metric",
+    # The bytes an ingested set was read from (ingest_method_predictions): two
+    # files are two sets of predictions, whatever the producer's record says.
+    "predictions_sha256",
+    # An ingested set's producer: its own record of name, commit, shas and
+    # models (ingest_method_predictions). The producing method, so identity.
+    "producer",
     # The proteins the set was asked about, when they were handed to the run as a
     # list rather than as a query set: their count and digest
     # (protea.core.query_population). Two arms of one window ask about its targets.
@@ -262,6 +268,12 @@ _EXECUTION_META: Mapping[str, str] = {
         "what a count map's fit found per aspect: its sizes and the strength the "
         "bits chose. Outcomes of the method over its inputs, which are identity "
         "(method_id with its pins, the cut, the population)"
+    ),
+    "source": (
+        "where an ingested file was read from and what its scan counted (rows, "
+        "unknown terms, aspect disagreements). The location of the same bytes "
+        "can change and the counts follow from them; the bytes are named by "
+        "predictions_sha256, which is identity"
     ),
 }
 
