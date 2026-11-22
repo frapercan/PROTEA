@@ -12,9 +12,10 @@ import ast
 import inspect
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+from protea_sources.uniprot import accession_batches
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -86,6 +87,30 @@ class TestTheTransportBelongsToThePlugin:
             )
         }
         assert not imported & {"requests", "httpx", "urllib", "urllib3", "aiohttp", "http"}
+
+
+class TestEveryBatchFitsOneRequest:
+    """The batches are the plugin's, cut with the same fields the request asks for.
+
+    A count of 1,000 sent 1,000 ten-character TrEMBL accessions with these 26
+    fields as one request, an 11,348-character target that UniProt refused with
+    414 on the first smoke run (2026-11-22). The fields are part of the target, so
+    batching with other fields than the request's would cut the wrong batches.
+    """
+
+    def test_the_batches_are_accession_batches_of_the_requested_fields(self) -> None:
+        trembl = [f"A0A{i:07d}" for i in range(1000)]
+        op = _op()
+        op._uniprot.fetch_accessions.side_effect = lambda *_a, **_k: _answer()
+        with patch.object(ResolveProteinMetadataOperation, "_population", return_value=trembl):
+            op.execute(MagicMock(), {}, emit=_emit)
+
+        fields = ",".join(module.FIELDS)
+        calls = op._uniprot.fetch_accessions.call_args_list
+        assert [(c.args[0], c.kwargs["fields"]) for c in calls] == [
+            (batch, fields) for batch in accession_batches(trembl, fields=fields)
+        ]
+        assert len(calls) > 1, "1,000 ten-character accessions do not fit one request"
 
 
 def test_every_row_names_the_release_that_served_it(pg: Session) -> None:  # noqa: F811
