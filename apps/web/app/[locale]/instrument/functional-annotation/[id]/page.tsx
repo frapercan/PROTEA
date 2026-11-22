@@ -27,10 +27,14 @@ const GoGraph = dynamic(() => import("@/components/GoGraph"), { ssr: false });
 
 type Tab = "proteins" | "distribution";
 
-/** What the page says while a set's counts are read: they are counted on every
- *  visit, which on a set of about two million candidates takes up to 20 s. */
+/** What the page says while a set's counts are read: a set is counted on its
+ *  first visit and kept, which on a set of a few million rows takes a while once. */
 const LOADING_NOTE =
-  "Loading\u2026 This set's counts are computed on every visit: on a set of a few million candidates it takes up to 20 s.";
+  "Loading\u2026 A set is counted on its first visit and the counts are kept: on a set of a few million rows that first visit takes up to a minute.";
+
+/** What the page says of a set whose job is still writing it. */
+const PROVISIONAL_NOTE =
+  "This set is still being written: its counts are read as they stand and will change, and none is kept until its job ends.";
 
 const ASPECT_LABELS: Record<string, string> = {
   F: "Molecular Function",
@@ -628,6 +632,7 @@ const tToast = useTranslations("toasts");
   // Until the set's record arrives, the page says it is loading rather than
   // stating anything about the set: on a large set the record takes seconds.
   const [setLoaded, setSetLoaded] = useState(false);
+  const [countsProvisional, setCountsProvisional] = useState(false);
   // A failure loading the prediction set means this whole page has no
   // subject to render. A missing id resolves to the not-found boundary;
   // any other failure is re-thrown to the route error boundary. Both
@@ -673,6 +678,7 @@ const tToast = useTranslations("toasts");
         setSetScoringConfigId(ps.scoring_config_id ?? null);
         setSetScoringConfigName(ps.scoring_config_name ?? null);
         setScoredSets(ps.scored_sets ?? []);
+        setCountsProvisional(Boolean(ps.counts_provisional));
         setSetLoaded(true);
       })
       .catch((e: unknown) => {
@@ -769,6 +775,11 @@ const tToast = useTranslations("toasts");
             <p className="text-xs text-slate-600 mt-0.5">k = {limitPerEntry}</p>
           )}
         </div>
+        {setLoaded && countsProvisional ? (
+          <p className="text-xs text-amber-800" data-testid="set-provisional-notice">
+            {PROVISIONAL_NOTE}
+          </p>
+        ) : null}
         {!setLoaded ? (
           <p className="text-xs text-slate-600" data-testid="set-loading-notice">
             {LOADING_NOTE}

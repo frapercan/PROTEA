@@ -148,9 +148,11 @@ def list_proteins_in_prediction_set(
     if ps is None:
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
 
-    # The proteins are counted once, on the set's first read (_prediction_set_summary).
-    summary_of(session, ps.id, ps.summary)
-    total, rows = protein_page(session, ps.id, search, limit, offset)
+    # The proteins are counted once, on the set's first read (_prediction_set_summary);
+    # a set still being written is read live, its proteins not kept.
+    summary = summary_of(session, ps.id, ps.summary)
+    live = bool(summary.get("provisional"))
+    total, rows = protein_page(session, ps.id, search, limit, offset, live=live)
     accessions = [r[0] for r in rows]
     protein_map = _load_protein_orm_map(session, accessions)
     ann_counts = _load_annotation_counts(session, accessions, ps.annotation_set_id)

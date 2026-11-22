@@ -336,6 +336,8 @@ export type PredictionSet = {
   distance_threshold?: number | null;
   created_at: string;
   prediction_count?: number;
+  /** True while the job that writes the set runs: its counts are read live and will change. */
+  counts_provisional?: boolean;
   /** A scored set's candidate set, which holds its rows; null on a candidate set. */
   scored_from?: string | null;
   /** The configuration a scored set read; null on a candidate set. */

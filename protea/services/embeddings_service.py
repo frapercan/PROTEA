@@ -320,7 +320,14 @@ def get_prediction_set_data(
         "created_at": ps.created_at.isoformat(),
         "prediction_count": summary["rows"],
         "protein_count": summary["proteins"],
-        "per_protein_counts": per_protein_counts(session, ps.id) if per_protein else None,
+        # True while the job that writes the set runs: the counts are read live
+        # and will change, and nothing is kept until the set is complete.
+        "counts_provisional": bool(summary.get("provisional")),
+        "per_protein_counts": (
+            per_protein_counts(session, ps.id, live=bool(summary.get("provisional")))
+            if per_protein
+            else None
+        ),
         # A scored set names the candidate set it scored and the configuration
         # it read; both None on a candidate set.
         "scored_from": (ps.meta or {}).get("scored_from"),

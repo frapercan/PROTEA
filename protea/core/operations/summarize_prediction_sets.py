@@ -62,10 +62,15 @@ class SummarizePredictionSetsOperation(Operation):
         ]
         emit("summarize_prediction_sets.start", None, {"sets": len(ids)}, "info")
         rows = 0
+        writing: list[str] = []
         for set_id in ids:
             started = time.monotonic()
             summary = summarize(session, uuid.UUID(set_id))
             session.commit()
+            if summary.get("provisional"):
+                # Its job is still writing it: counted, not kept; the next sweep keeps it.
+                writing.append(set_id)
+                continue
             rows += summary["rows"]
             emit(
                 "summarize_prediction_sets.set",
@@ -78,4 +83,13 @@ class SummarizePredictionSetsOperation(Operation):
                 },
                 "info",
             )
-        return OperationResult(result={"sets": len(ids), "rows": rows})
+        if writing:
+            emit(
+                "summarize_prediction_sets.still_writing",
+                f"{len(writing)} sets are still being written and were not kept",
+                {"prediction_set_ids": writing},
+                "info",
+            )
+        return OperationResult(
+            result={"sets": len(ids) - len(writing), "still_writing": len(writing), "rows": rows}
+        )
