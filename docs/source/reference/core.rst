@@ -625,6 +625,17 @@ are documented below; the four ephemeral siblings
    :undoc-members:
    :show-inheritance:
 
+**resolve_protein_metadata**
+   Fetches each canonical protein's current UniProt entry, stamped with the
+   release that served it, for display and today's annotation. Writes
+   ``protein_uniprot_metadata`` only; nothing that predicts or evaluates on a cut
+   reads it.
+
+.. automodule:: protea.core.operations.resolve_protein_metadata
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **load_goa_annotations**
    Bulk-loads a GAF (Gene Association Format) file. Annotations are filtered
    against canonical accessions present in the database, avoiding orphaned

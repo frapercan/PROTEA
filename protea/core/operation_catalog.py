@@ -127,6 +127,9 @@ from protea.core.operations.refresh_goa_release_dates import (
 from protea.core.operations.register_ingested_method import (
     RegisterIngestedMethodOperation,
 )
+from protea.core.operations.resolve_protein_metadata import (
+    ResolveProteinMetadataOperation,
+)
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesOperation,
 )
@@ -194,6 +197,8 @@ _UNIVERSE: tuple[_Row, ...] = (
     (LoadQuickGOAnnotationsOperation, replace(_FETCHED, status="review")),
     (ExtractGoaUniverseOperation, _FETCHED),
     (ResolveProteinSequencesOperation, _FETCHED),
+    # Today's entries, for display only: nothing on a cut reads what it writes.
+    (ResolveProteinMetadataOperation, _FETCHED),
     # Its auto-frame child is a generate_evaluation_set job on protea.jobs.
     (LoadGOAAnnotationsOperation, replace(_FETCHED, publishes_to=(queues.JOBS,))),
     (LoadSwissProtReleaseOperation, _FETCHED),

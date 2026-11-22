@@ -511,6 +511,54 @@ Published under ``protein_resolution/<job_id>/`` in the ``ArtifactStore``:
 Annotations of a protein whose sequence never arrives are KEPT: the protein took
 part in the deltas. Queries that need a chain filter on ``sequence_id IS NOT NULL``.
 
+resolve_protein_metadata
+------------------------
+
+**Operation name:** ``resolve_protein_metadata``; queue: ``protea.jobs``
+
+| **Tables touched:** ``ProteinUniProtMetadata`` (insert and update). Never ``Protein``.
+
+Fetches each canonical protein's current UniProt entry, to SHOW it and to annotate
+today: names, organism, length, reviewed, function, catalytic activity, cofactors,
+pathways, sites, keywords. Every row is stamped with the UniProt release that
+served it (``uniprot_release``, ``uniprot_release_date``, from the
+``X-UniProt-Release`` headers), and a batch whose answer names no release is
+refused rather than stamped with a guess.
+
+What an entry says today was not known at an earlier cut, so nothing that
+predicts, builds features, exports a training set or evaluates on a cut reads
+``protein_uniprot_metadata``; ``tests/test_current_metadata_stays_out_of_experiments.py``
+pins it by reading the source. For the same reason the operation never writes the
+``Protein`` row, whose organism and taxonomy feature code reads. A protein's
+organism at a cut is in that cut's photo (``cut_photo_member.taxon_id``).
+
+Its population is a query, as in ``resolve_protein_sequences``: every canonical
+accession with no metadata row, or with a row that names no release, in order and
+through the accession grammar. Accessions UniProt no longer serves are counted as
+``absent`` in the result and get no row. Transport belongs to the
+``protea_sources`` UniProt plugin (``fetch_accessions``).
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 18 57
+
+   * - Field
+     - Default
+     - Description
+   * - ``timeout_seconds``
+     - ``120``
+     - Per-request timeout; the other transport knobs are the plugin's measured defaults.
+   * - ``max_accessions``
+     - ``null``
+     - Stop after this many candidates, for a smoke run. Reported back as
+       ``limit`` so a capped run cannot be read as a complete one.
+   * - ``dry_run``
+     - ``false``
+     - Count the candidates and write nothing.
+
 load_goa_annotations
 ---------------------
 

@@ -750,7 +750,14 @@
         "evidence": "Evidence",
         "qualifier": "Qualifier",
         "source": "Source"
-      }
+      },
+      "currentEntry": "Current UniProt entry",
+      "currentEntryNote": "Release {release} ({date}). Today's knowledge of the protein: shown here, never used to predict or evaluate on an earlier cut.",
+      "unknownRelease": "UniProt release not recorded for this entry.",
+      "entryName": "Entry name",
+      "proteinNames": "Protein names",
+      "reviewedEntry": "Reviewed (Swiss-Prot)",
+      "no": "No"
     },
     "notFound": {
       "title": "Protein not found",
