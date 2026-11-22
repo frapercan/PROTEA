@@ -48,7 +48,9 @@ _SUMMARY = text(
            trained.source_version AS config_release,
            m.instance_release AS method_release,
            sc.name AS scoring,
-           m.short_name AS method,
+           -- An ingested set (ingest_method_predictions) has no method row: its
+           -- producer's record names the method, and it read no neighbours.
+           coalesce(m.short_name, ps.meta -> 'producer' ->> 'name') AS method,
            ps.meta -> 'scoring' -> 'depth' ->> 'max_k_position' AS depth_cut,
            coalesce(cand.limit_per_entry, ps.limit_per_entry) AS depth_retrieved,
            coalesce(cand.meta ->> 'exclude_self_neighbour',
@@ -121,7 +123,8 @@ def summary_row(row: dict[str, Any], frame: Frame | None = None) -> dict[str, An
 
     ``depth`` is how many neighbours the arm read: the scored set's cut when it
     has one, else what its candidate set retrieved. A method's set has no
-    neighbours, so its depth is ``None`` whatever its limit per entry says.
+    neighbours, so its depth is ``None`` whatever its limit per entry says; an
+    ingested set is a method too, named by its producer's record.
     ``reading`` falls back on the job's payload for results stored before the
     result recorded it, and on ``raw`` before readings existed.
     """

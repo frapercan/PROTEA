@@ -68,6 +68,18 @@ describe("the names people read", () => {
       "count map: themes",
     );
   });
+
+  it("names a method built on the own annotations by its own name, never as them", () => {
+    const ranked = result("k", {
+      model: "own-annotations-ranked-coan-lafa-194",
+      scoring: null,
+      depth: null,
+      method: "own-annotations-ranked-coan-lafa-194",
+    });
+    expect(armLabel(ranked)).toBe("own-annotations-ranked-coan");
+    expect(armShort(ranked)).toBe("own-annotations-ranked-coan");
+    expect(referenceOf([ranked, own], null)?.id).toBe("own");
+  });
 });
 
 describe("what the panel shows", () => {
