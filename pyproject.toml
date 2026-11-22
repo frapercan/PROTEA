@@ -81,7 +81,7 @@ priority = "explicit"
 # protea.core.contracts.operation); the remaining four are optional
 # plugin extras installed via --with plugins.
 protea-method = { git = "https://github.com/frapercan/protea-method.git", rev = "68853e35a059c8de0e895e9f25f519d7fe0d2136" }
-protea-sources = { git = "https://github.com/frapercan/protea-sources.git", rev = "696533ba9afb9422d8ff19d54be29904790b0350" }
+protea-sources = { git = "https://github.com/frapercan/protea-sources.git", rev = "956c6e66ae096b88f809b9b7f6f3bfedc273c12c" }
 protea-runners = { git = "https://github.com/frapercan/protea-runners.git", rev = "fb8ae81b5674a94e2d8ec29c68f21c944510501f" }
 protea-backends = { git = "https://github.com/frapercan/protea-backends.git", rev = "2cb6b479e5a2f2009915412b0e888676e4f9b199" }
 

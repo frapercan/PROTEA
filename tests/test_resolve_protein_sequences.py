@@ -131,14 +131,20 @@ class TestTheTransportBelongsToThePlugin:
             __import__("protea.core.operations._universe_http")
 
     def test_the_batch_sizes_are_the_plugins_measured_constants(self):
-        """1001 answers "Only '1000' accessions are allowed in each request", and
-        101 OR conditions answer "Maximum allowed is 100". These are facts about
+        """1001 answers "Only '1000' accessions are allowed in each request", 101
+        OR conditions answer "Maximum allowed is 100", and a request target of 8,202
+        characters answers 414 where one of 8,191 is answered. These are facts about
         UniProt, not parameters: a caller cannot choose them, so they are not
         payload fields."""
-        from protea_sources.uniprot import MAX_ACCESSIONS_PER_REQUEST, MAX_OR_CONDITIONS
+        from protea_sources.uniprot import (
+            MAX_ACCESSIONS_PER_REQUEST,
+            MAX_OR_CONDITIONS,
+            MAX_REQUEST_TARGET,
+        )
 
         assert MAX_ACCESSIONS_PER_REQUEST == 1000
         assert MAX_OR_CONDITIONS == 100
+        assert MAX_REQUEST_TARGET == 8191
 
     def test_the_payload_timeout_reaches_the_knobs(self):
         knobs = ResolveProteinSequencesOperation._knobs(
@@ -146,6 +152,50 @@ class TestTheTransportBelongsToThePlugin:
         )
         assert knobs.timeout_seconds == 7
         assert knobs.max_retries == 6, "everything else keeps the measured values"
+
+
+class TestEveryBatchFitsOneRequest:
+    """Both accessions passes cut their batches with the plugin's accession_batches.
+
+    A count of 1,000 sent 1,000 ten-character TrEMBL accessions as one request, a
+    target UniProt refuses with 414 (measured 2026-11-22). The fields are part of
+    the target, so each pass batches with the fields its own request asks for.
+    """
+
+    TREMBL = [f"A0A{i:07d}" for i in range(1500)]
+
+    @staticmethod
+    def _sent(op):
+        calls = op._uniprot.fetch_accessions_tsv.call_args_list
+        return [(c.args[0], c.kwargs["fields"]) for c in calls]
+
+    def test_the_sequence_pass(self):
+        from protea_sources.uniprot import accession_batches
+
+        from protea.core.operations._universe_sources import _TSV_FIELDS
+
+        op = _op()
+        op._uniprot.fetch_accessions_tsv.return_value = ""
+        op._fetch_sequences(
+            MagicMock(), self.TREMBL, ResolveProteinSequencesPayload(), MagicMock(), _FetchOutcome()
+        )
+        batches = list(accession_batches(self.TREMBL, fields=_TSV_FIELDS))
+        assert self._sent(op) == [(b, _TSV_FIELDS) for b in batches]
+        assert len(batches) > 2, "the target binds here, not the count of 1,000"
+
+    def test_the_date_pass(self):
+        from protea_sources.uniprot import accession_batches
+
+        from protea.core.operations._universe_sources import _DATE_FIELDS
+
+        op = _op()
+        op._uniprot.fetch_accessions_tsv.return_value = ""
+        session = MagicMock()
+        session.scalars.return_value.all.return_value = self.TREMBL
+        op._backfill_dates(session, ResolveProteinSequencesPayload(), MagicMock(), _FetchOutcome())
+        batches = list(accession_batches(self.TREMBL, fields=_DATE_FIELDS))
+        assert self._sent(op) == [(b, _DATE_FIELDS) for b in batches]
+        assert len(batches) > 2, "the target binds here, not the count of 1,000"
 
 
 class TestSecondaryAccessions:

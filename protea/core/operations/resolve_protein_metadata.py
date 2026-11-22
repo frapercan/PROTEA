@@ -21,6 +21,11 @@ THE RELEASE. Each batch's answer names the UniProt release that served it, and
 every row is stamped with it. A batch whose answer names no release is refused
 rather than stamped with a guess: an unplaceable row is the hazard this guards.
 
+THE BATCHES are cut by the plugin's ``accession_batches`` with the same fields the
+request asks for, because the endpoint refuses on two limits: 1,000 accessions, and
+a request target of 8,191 characters that 1,000 ten-character TrEMBL accessions with
+these 26 fields exceed (414, measured 2026-11-22).
+
 ABSENT accessions, those UniProt no longer serves, are missing from their batch's
 answer; the result counts them and they get no row.
 
@@ -40,7 +45,7 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
 from protea.core.operations._universe_sources import ACCESSION_GRAMMAR
 from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOperation
-from protea.core.utils import chunks, contract_payload
+from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUniProtMetadata
 
@@ -96,11 +101,7 @@ class ResolveProteinMetadataOperation(Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        from protea_sources.uniprot import (
-            MAX_ACCESSIONS_PER_REQUEST,
-            RetryKnobs,
-            parse_metadata_tsv,
-        )
+        from protea_sources.uniprot import RetryKnobs, accession_batches, parse_metadata_tsv
 
         t0 = time.perf_counter()
         p = ResolveProteinMetadataPayload.model_validate(contract_payload(payload))
@@ -115,9 +116,10 @@ class ResolveProteinMetadataOperation(Operation):
         releases: set[str] = set()
         if not p.dry_run:
             knobs = RetryKnobs(timeout_seconds=p.timeout_seconds)
-            for batch in chunks(candidates, MAX_ACCESSIONS_PER_REQUEST):
+            fields = ",".join(FIELDS)
+            for batch in accession_batches(candidates, fields=fields):
                 answer = self._uniprot.fetch_accessions(
-                    batch, fields=",".join(FIELDS), emit=emit, knobs=knobs
+                    batch, fields=fields, emit=emit, knobs=knobs
                 )
                 if not answer.release:
                     raise RuntimeError(
