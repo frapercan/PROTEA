@@ -75,7 +75,7 @@ function trainWindow(pairs: string[]): string {
 function familyOf(emb: EmbeddingConfig | undefined): string {
   if (!emb) return "—";
   // The DB EmbeddingConfig row doesn't carry an explicit `family` field
-  // (that's a BenchmarkEmbedding concept). Derive a stable family slug
+  // (a family was a concept of the retired benchmark). Derive a stable family slug
   // from the model_name prefix so the filter chip groups by PLM family.
   const m = emb.model_name.toLowerCase();
   if (m.startsWith("esm2_") || m.startsWith("esm-2")) return "esm2";

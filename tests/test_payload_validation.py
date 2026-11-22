@@ -131,7 +131,6 @@ from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsPayload,
 )
 from protea.core.operations.load_homology_table import LoadHomologyTablePayload
-from protea.core.operations.place_window_targets import PlaceWindowTargetsPayload
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingPayload,
 )
@@ -152,6 +151,7 @@ from protea.core.operations.load_swissprot_release import (
 from protea.core.operations.measure_embedding_magnitude import (
     MeasureEmbeddingMagnitudePayload,
 )
+from protea.core.operations.place_window_targets import PlaceWindowTargetsPayload
 from protea.core.operations.predict_go_terms_from_interpro import (
     PredictGOTermsFromInterProPayload,
 )
@@ -174,13 +174,13 @@ from protea.core.operations.run_interproscan_batch import (
 )
 from protea.core.operations.run_lab_method import RunLabMethodPayload
 from protea.core.operations.run_own_annotations import RunOwnAnnotationsPayload
+from protea.core.operations.score_prediction_set import ScorePredictionSetPayload
 from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
 from protea.core.operations.seal_evaluation_groundtruth import (
     SealEvaluationGroundtruthPayload,
 )
 from protea.core.operations.store_residue_codes import StoreResidueCodesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
-from protea.core.operations.score_prediction_set import ScorePredictionSetPayload
 from protea.core.operations.summarize_prediction_sets import SummarizePredictionSetsPayload
 from protea.core.operations.supersede_evaluation_sets import SupersedeEvaluationSetsPayload
 from protea.core.operations.upload_residue_shard import UploadResidueShardPayload

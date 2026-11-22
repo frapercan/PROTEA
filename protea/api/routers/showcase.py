@@ -1,8 +1,8 @@
 """Showcase endpoint: aggregates platform stats and the single best evaluation
 result with full embedding attribution.
 
-Unlike :mod:`protea.api.routers.benchmark`, which exposes the full per-model
-per-stage matrix, this module is deliberately minimal: it returns **one**
+Unlike a window's panel (``GET /annotations/evaluation-sets/{id}/summary``),
+which shows every arm of a window, this module is deliberately minimal: it returns **one**
 "spotlight" result that the Home page can use for its hero card, plus the
 pipeline stage counts.
 
@@ -255,7 +255,7 @@ def get_showcase(
                 "count": int(counts["reranker_models"]),
                 "href": "/reranker",
             },
-            {"name": "evaluations", "count": total_evaluations, "href": "/benchmark"},
+            {"name": "evaluations", "count": total_evaluations, "href": "/evaluation"},
         ]
         return {
             "protein_stats": {

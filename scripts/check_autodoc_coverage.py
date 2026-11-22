@@ -57,7 +57,6 @@ MUST_DOCUMENT_PATTERNS: list[str] = [
     "protea.api.routers.admin",
     "protea.api.routers.showcase",
     "protea.api.routers.support",
-    "protea.api.routers.benchmark",
     "protea.api.routers.datasets",
     "protea.api.routers.registry",
     "protea.api.routers.reranker_models",
