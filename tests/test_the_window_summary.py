@@ -231,3 +231,53 @@ def test_the_window_is_read_in_one_query_oldest_first(pg: Session) -> None:  # n
     assert second["prediction_set_id"] == str(scored.id)
     assert (second["arm"]["depth"], second["arm"]["exclude_self"]) == (3, True)
     assert second["cells"]["NK:MFO"]["f"] == 0.4405
+
+
+def test_an_ingested_set_is_the_method_its_producer_names(pg: Session) -> None:  # noqa: F811
+    """No method row and no neighbours: the producer's record names the arm.
+
+    An ingested set's configuration carries the method's name as its model name,
+    and its limit per entry is how many terms the busiest protein holds, so read
+    as a retrieval it showed as "candidates" at a depth of hundreds.
+    """
+    window = pg.get(EvaluationSet, make_window(pg, snapshot_version="ingested"))
+    config = EmbeddingConfig(
+        model_name="own-annotations-ranked-194",
+        model_backend="ingested-method",
+        layer_indices=[0],
+        layer_agg="mean",
+        pooling="mean",
+        normalize_residues=False,
+        normalize=False,
+        use_chunking=False,
+        chunk_size=1,
+        chunk_overlap=0,
+        max_length=1,
+        embedding_scale=1.0,
+        trained_on_annotation_set_id=window.old_annotation_set_id,
+    )
+    pg.add(config)
+    pg.flush()
+    ingested = PredictionSet(
+        embedding_config_id=config.id,
+        annotation_set_id=window.old_annotation_set_id,
+        ontology_snapshot_id=window.pivot_snapshot_id,
+        limit_per_entry=893,
+        meta={"producer": {"name": "own-annotations-ranked-194"}},
+    )
+    pg.add(ingested)
+    pg.flush()
+    pg.add(
+        EvaluationResult(
+            evaluation_set_id=window.id,
+            prediction_set_id=ingested.id,
+            results={"NK": {"MFO": CELL}, "reading": {"score_reading": "percentile_rank"}},
+        )
+    )
+    pg.flush()
+
+    (shown,) = window_summary_data(pg, window.id)["results"]
+
+    assert shown["arm"]["method"] == "own-annotations-ranked-194"
+    assert shown["arm"]["depth"] is None
+    assert shown["arm"]["scoring"] is None

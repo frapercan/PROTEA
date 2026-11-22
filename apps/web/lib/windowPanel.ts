@@ -111,6 +111,17 @@ export function modelName(model: string | null): string {
   return name;
 }
 
+/** A method's identifier without its cut and frame: the code and the variant. */
+function bareMethod(method: string): string {
+  return method.replace(/-\d+$/, "").replace(/-lafa$/, "");
+}
+
+/**
+ * The platform's own-annotations method, and only it: a method built on its rows
+ * (ranked by a fitted model, or with a retrieval's terms added) has its own name.
+ */
+const OWN_ANNOTATIONS = /^own-annotations(?:-nonexp)?$/;
+
 /**
  * A method as people name it. The short name is an identifier (code, variant,
  * cut: ``own-annotations-nonexp-lafa-211``); the panel shows what it is: "own
@@ -119,8 +130,8 @@ export function modelName(model: string | null): string {
  */
 export function methodName(method: string | null): string {
   if (!method) return "";
-  const bare = method.replace(/-\d+$/, "").replace(/-lafa$/, "");
-  if (bare.startsWith("own-annotations")) return "own annotations";
+  const bare = bareMethod(method);
+  if (OWN_ANNOTATIONS.test(bare)) return "own annotations";
   const map = /^count-map-(themes|families)(?:-(permissive|strict))?-/.exec(bare);
   if (map) return `count map: ${map[1]}${map[2] ? ` (${map[2]})` : ""}`;
   return bare;
@@ -160,7 +171,7 @@ export function isSuperseded(r: SummaryResult): boolean {
 
 /** The own-annotations arm is the default reference (the panel's decision a). */
 export function isOwnAnnotations(r: SummaryResult): boolean {
-  return (r.arm.method ?? "").startsWith("own-annotations");
+  return OWN_ANNOTATIONS.test(bareMethod(r.arm.method ?? ""));
 }
 
 export function cellF(r: SummaryResult | undefined, cell: string): number | null {
