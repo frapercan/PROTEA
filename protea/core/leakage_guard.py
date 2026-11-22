@@ -49,6 +49,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def release_ordinal(value: object) -> int | None:
+    """A GOA release ordinal, or None when the version is not one.
+
+    Sources other than GOA carry versions that are not ordinals, and a window
+    whose ends cannot be ordered has no inside for a cut to fall into.
+
+    DIGITS ONLY, not ``int()``. Python accepts underscores as digit
+    separators, so ``int("2026_01")`` is 202601: the Swiss-Prot release
+    naming this store also holds would have been read as an enormous GOA
+    ordinal, every cut would have fallen outside every window, and a read
+    surface would have said "clean" for all of them. A test caught it; the
+    parse is narrow because the failure was silent and in the safe-looking
+    direction.
+    """
+    text = str(value).strip()
+    return int(text) if text.isdigit() else None
+
+
 class LeakageRefusal(ValueError):
     """An arm was dispatched whose encoding may have seen the answer."""
 
@@ -69,9 +87,7 @@ class Frame:
 VERDICTS: tuple[str, ...] = ("not_fitted", "undeclared", "contaminated", "clean")
 
 
-def training_cut_verdict(
-    *, fitted: bool, training_release: int | None, frame: Frame
-) -> str:
+def training_cut_verdict(*, fitted: bool, training_release: int | None, frame: Frame) -> str:
     """Which of the four states this arm is in on this frame.
 
     Written for a surface that has to SHOW the answer for every arm of every
@@ -106,9 +122,7 @@ def check_training_cut(
     ``training_release`` is the release ordinal the encoding was fitted
     against, or None if it declares none.
     """
-    verdict = training_cut_verdict(
-        fitted=fitted, training_release=training_release, frame=frame
-    )
+    verdict = training_cut_verdict(fitted=fitted, training_release=training_release, frame=frame)
     if verdict == "not_fitted":
         # A pretrained backbone saw none of our annotations. It has no cut
         # to declare and declaring one would be false.

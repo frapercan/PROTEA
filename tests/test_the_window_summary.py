@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from sqlalchemy.orm import Session
 
+from protea.core.leakage_guard import Frame, release_ordinal
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
@@ -47,12 +48,62 @@ def _row(**over: Any) -> dict[str, Any]:
         "depth_retrieved": 30,
         "exclude_self": "true",
         "job_reading": None,
+        "backend": "esm",
+        "config_release": None,
+        "method_release": None,
     }
     return {**row, **over}
 
 
+#: 211 -> 227, the window of via 1.
+FRAME = Frame(211, 227)
+
+
+def _method(release: int) -> dict[str, Any]:
+    return _row(
+        model=None,
+        embedding_config_id=None,
+        backend=None,
+        method="own-annotations-nonexp-lafa-211",
+        method_release=release,
+    )
+
+
+class TestEachArmSaysWhetherItMayBeRead:
+    def test_a_pretrained_backbone_saw_none_of_our_annotations(self) -> None:
+        arm = summary_row(_row(), FRAME)["arm"]
+        assert (arm["leak"], arm["training_release"]) == ("not_fitted", None)
+
+    def test_a_method_living_at_t0_read_what_every_arm_may_read(self) -> None:
+        arm = summary_row(_method(211), FRAME)["arm"]
+        assert (arm["leak"], arm["training_release"]) == ("clean", 211)
+
+    def test_a_method_living_after_t0_has_read_the_answers(self) -> None:
+        # Inside the window or past its end alike: the guard's rule, not a second one.
+        assert summary_row(_method(227), FRAME)["arm"]["leak"] == "contaminated"
+        assert summary_row(_method(230), FRAME)["arm"]["leak"] == "contaminated"
+
+    def test_a_fitted_encoder_is_read_by_the_cut_its_configuration_declares(self) -> None:
+        at_t0 = _row(backend="ingested-method", config_release="211")
+        silent = _row(backend="learned-code", config_release=None)
+        assert summary_row(at_t0, FRAME)["arm"]["leak"] == "clean"
+        assert summary_row(silent, FRAME)["arm"]["leak"] == "undeclared"
+
+    def test_a_window_whose_ends_are_not_releases_derives_nothing(self) -> None:
+        arm = summary_row(_method(211), None)["arm"]
+        assert (arm["leak"], arm["training_release"]) == (None, None)
+
+
+def test_a_release_is_read_from_its_digits_only() -> None:
+    assert release_ordinal(" 227 ") == 227
+    # int() would read the underscore as a digit separator: 202601, a "release"
+    # after every window.
+    assert release_ordinal("2026_01") is None
+    assert release_ordinal(None) is None
+
+
 def test_a_neighbour_arm_reads_its_cut_its_exclusion_and_its_reading() -> None:
-    shown = summary_row(_row())
+    shown = summary_row(_row(), FRAME)
     assert shown["arm"] == {
         "model": "facebook/esm2_t33_650M_UR50D",
         "embedding_config_id": "e1",
@@ -61,6 +112,8 @@ def test_a_neighbour_arm_reads_its_cut_its_exclusion_and_its_reading() -> None:
         "depth": 3,
         "exclude_self": True,
         "reading": "percentile_rank",
+        "leak": "not_fitted",
+        "training_release": None,
     }
     assert shown["cells"] == {"NK:MFO": {"f": 0.4405, "tau": 0.57, "edge": None, "targets": 1045}}
     assert shown["created_at"] == "2026-11-21T12:00:00+00:00"
@@ -156,7 +209,9 @@ def test_the_window_is_read_in_one_query_oldest_first(pg: Session) -> None:  # n
     summary = window_summary_data(pg, window.id)
 
     assert summary["evaluation_set_id"] == str(window.id)
+    assert summary["window_releases"] == [211, 227]
     first, second = summary["results"]
+    assert first["arm"]["leak"] == "not_fitted"
     assert first["prediction_set_id"] == str(candidates.id)
     assert (first["arm"]["depth"], first["arm"]["exclude_self"]) == (30, True)
     assert second["prediction_set_id"] == str(scored.id)

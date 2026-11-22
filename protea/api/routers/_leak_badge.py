@@ -39,27 +39,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased
 
 from protea.core._evaluation_leakage import FITTED_BACKENDS
-from protea.core.leakage_guard import Frame, training_cut_verdict
+from protea.core.leakage_guard import Frame, release_ordinal, training_cut_verdict
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 
-
-def _as_release(value: Any) -> int | None:
-    """A GOA release ordinal, or None when the version is not one.
-
-    Sources other than GOA carry versions that are not ordinals, and a window
-    whose ends cannot be ordered has no inside for a cut to fall into.
-
-    DIGITS ONLY, not ``int()``. Python accepts underscores as digit
-    separators, so ``int("2026_01")`` is 202601: the Swiss-Prot release
-    naming this store also holds would have been read as an enormous GOA
-    ordinal, every cut would have fallen outside every window, and the badge
-    would have said "clean" for all of them. A test caught it; the parse is
-    narrow now because the failure was silent and in the safe-looking
-    direction.
-    """
-    text = str(value).strip()
-    return int(text) if text.isdigit() else None
+#: One parse of a release, the guard's (:func:`release_ordinal`).
+_as_release = release_ordinal
 
 
 def cuts_by_config(session: Session) -> dict[str, tuple[bool, int | None]]:

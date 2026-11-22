@@ -5,7 +5,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { CELLS, armLabel, cellEdge, cellF, isNeighbour, modelName, type SummaryResult } from "@/lib/windowPanel";
+import { CELLS, armLabel, cellEdge, cellF, isNeighbour, mayNotBeRead, modelName, type SummaryResult } from "@/lib/windowPanel";
 import { INK, deltaFill, fmt, signed } from "./chart";
 import type { PanelView } from "./WindowPanel";
 
@@ -72,6 +72,7 @@ export default function DetailView({ view }: { view: PanelView }) {
               {header("f", `F ${state.cell.replace(":", " ")}`, true)}
               {header("delta", t("detail.vsReference"), true)}
               <th className="px-3 py-2">{t("detail.edge")}</th>
+              <th className="whitespace-nowrap px-3 py-2">{t("detail.leak")}</th>
               <th className="px-3 py-2">{t("detail.cells")}</th>
               {header("time", t("detail.time"))}
               <th className="px-3 py-2">{t("detail.set")}</th>
@@ -95,6 +96,9 @@ export default function DetailView({ view }: { view: PanelView }) {
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmt(v)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{r === ref ? "—" : signed((v ?? 0) - refF(state.cell))}</td>
                     <td className="px-3 py-1.5 text-xs" style={{ color: INK.edge }}>{cellEdge(r, state.cell) ? t("detail.edgeShort") : ""}</td>
+                    <td className={`whitespace-nowrap px-3 py-1.5 text-xs ${mayNotBeRead(r) ? "font-semibold text-rose-700" : "text-slate-500"}`}>
+                      {r.arm.leak ? t(`leak.${r.arm.leak}`, { cut: r.arm.training_release ?? "" }) : "—"}
+                    </td>
                     <td className="px-3 py-1.5">
                       <span className="inline-grid grid-cols-9 gap-px align-middle">
                         {CELLS.map((c) => {
@@ -121,7 +125,7 @@ export default function DetailView({ view }: { view: PanelView }) {
               })
             ) : (
               <tr>
-                <td colSpan={11} className="px-3 py-3 text-xs text-slate-500">{t("detail.nothing")}</td>
+                <td colSpan={12} className="px-3 py-3 text-xs text-slate-500">{t("detail.nothing")}</td>
               </tr>
             )}
           </tbody>

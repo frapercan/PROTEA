@@ -8,6 +8,14 @@ read, whether a target's own sequence could vote, how its scores were read),
 the f_micro_w of each cell with the threshold it peaks at and whether that
 threshold is the grid's edge, and the strata profiles the stratification left
 on the result (``results["strata"]``). One query gives all of it.
+
+Each arm also says whether it may be read on the window at all: the release it
+was fitted at against the window's t0, by the rule the dispatch guard refuses on
+(:func:`protea.core.leakage_guard.training_cut_verdict`). A fitted encoder's cut
+is the annotation set its configuration declares; a native method's is the
+release its instance lives at, since it read the annotations of that release; a
+pretrained backbone fitted on none of ours is ``not_fitted``. The verdict is a
+mark and not a filter: a contaminated arm stays in the summary, saying what it is.
 """
 
 from __future__ import annotations
@@ -17,6 +25,9 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from protea.core._evaluation_leakage import FITTED_BACKENDS
+from protea.core.leakage_guard import Frame, release_ordinal, training_cut_verdict
 
 #: The cells of a result, as the evaluator stores them: ``results[setting][aspect]``.
 SETTINGS = ("NK", "LK", "PK")
@@ -33,6 +44,9 @@ _SUMMARY = text(
            ) AS results,
            ec.model_name AS model,
            ec.id::text AS embedding_config_id,
+           ec.model_backend AS backend,
+           trained.source_version AS config_release,
+           m.instance_release AS method_release,
            sc.name AS scoring,
            m.short_name AS method,
            ps.meta -> 'scoring' -> 'depth' ->> 'max_k_position' AS depth_cut,
@@ -44,6 +58,7 @@ _SUMMARY = text(
     JOIN prediction_set ps ON ps.id = r.prediction_set_id
     LEFT JOIN prediction_set cand ON cand.id::text = ps.meta ->> 'scored_from'
     LEFT JOIN embedding_config ec ON ec.id = ps.embedding_config_id
+    LEFT JOIN annotation_set trained ON trained.id = ec.trained_on_annotation_set_id
     LEFT JOIN scoring_config sc ON sc.id::text = ps.meta ->> 'scoring_config_id'
     LEFT JOIN method m ON m.id = ps.method_id
     LEFT JOIN job j ON j.id = r.job_id
@@ -51,6 +66,37 @@ _SUMMARY = text(
     ORDER BY r.created_at, r.id
     """
 )
+
+
+#: The window's two ends, as the annotation sets it spans name their releases.
+_FRAME = text(
+    """
+    SELECT o.source_version AS t0, n.source_version AS t1
+    FROM evaluation_set e
+    JOIN annotation_set o ON o.id = e.old_annotation_set_id
+    JOIN annotation_set n ON n.id = e.new_annotation_set_id
+    WHERE e.id = :window
+    """
+)
+
+
+def read_verdict(row: dict[str, Any], frame: Frame | None) -> tuple[str | None, int | None]:
+    """``(verdict, training release)`` of an arm on the window, or ``(None, None)``.
+
+    None when the window's ends are not release ordinals or the arm names
+    neither a configuration nor a method: a verdict nobody can derive is not a
+    clean one, and the page has to be able to tell.
+    """
+    if frame is None:
+        return None, None
+    if row.get("method_release") is not None:
+        cut = int(row["method_release"])
+        return training_cut_verdict(fitted=True, training_release=cut, frame=frame), cut
+    if row.get("backend") is None:
+        return None, None
+    declared = release_ordinal(row.get("config_release"))
+    fitted = row["backend"] in FITTED_BACKENDS
+    return training_cut_verdict(fitted=fitted, training_release=declared, frame=frame), declared
 
 
 def _cells(results: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -70,8 +116,8 @@ def _cells(results: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
-def summary_row(row: dict[str, Any]) -> dict[str, Any]:
-    """One result as the panel shows it.
+def summary_row(row: dict[str, Any], frame: Frame | None = None) -> dict[str, Any]:
+    """One result as the panel shows it, on the window ``frame`` spans.
 
     ``depth`` is how many neighbours the arm read: the scored set's cut when it
     has one, else what its candidate set retrieved. A method's set has no
@@ -89,6 +135,7 @@ def summary_row(row: dict[str, Any]) -> dict[str, Any]:
         depth = row["depth_retrieved"]
     exclude = row["exclude_self"]
     strata = results.get("strata")
+    leak, training_release = read_verdict(row, frame)
     return {
         "id": row["id"],
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
@@ -104,6 +151,8 @@ def summary_row(row: dict[str, Any]) -> dict[str, Any]:
             "reading": (results.get("reading") or {}).get("score_reading")
             or row["job_reading"]
             or "raw",
+            "leak": leak,
+            "training_release": training_release,
         },
         "cells": _cells(results),
         "strata": None
@@ -125,7 +174,11 @@ def window_summary_data(session: Session, eval_id: uuid.UUID) -> dict[str, Any]:
 
     assert_evaluation_set_exists(session, eval_id)
     rows = session.execute(_SUMMARY, {"window": eval_id}).mappings().all()
+    ends = session.execute(_FRAME, {"window": eval_id}).mappings().first()
+    t0, t1 = (release_ordinal(ends["t0"]), release_ordinal(ends["t1"])) if ends else (None, None)
+    frame = Frame(t0, t1) if t0 is not None and t1 is not None else None
     return {
         "evaluation_set_id": str(eval_id),
-        "results": [summary_row(dict(r)) for r in rows],
+        "window_releases": [frame.start, frame.end] if frame else None,
+        "results": [summary_row(dict(r), frame) for r in rows],
     }

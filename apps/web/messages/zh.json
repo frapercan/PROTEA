@@ -2452,6 +2452,13 @@
     }
   },
   "windowPanel": {
+    "leakNote": "显示的 {count} 个分支不可在此窗口读取：它们在 t0（{t0}）之后或在未记录截点的情况下拟合，其数值可能衡量的是对答案的记忆。详情页会标记它们。",
+    "leak": {
+      "not_fitted": "是，预训练",
+      "clean": "是，截点 {cut}",
+      "contaminated": "否：截点 {cut}，晚于 t0",
+      "undeclared": "未知：未记录截点"
+    },
     "title": "窗口面板",
     "loading": "正在读取该窗口的结果…",
     "error": "无法读取该窗口的摘要（{message}）。",
@@ -2606,6 +2613,7 @@
       "vsReference": "相对参照",
       "edge": "边缘",
       "edgeShort": "边缘",
+      "leak": "可读取",
       "cells": "9 个单元",
       "time": "时间",
       "set": "集合",
