@@ -104,11 +104,12 @@ Neither path can publish through the other.
 **5. The API reads both at request time.** The routes follow the pattern of
 ``GET /stack`` and of the thesis PDF mount:
 
-- ``GET /news`` returns the editorial file merged with the latest nightly
-  record;
-- ``GET /champion`` returns the nightly record;
-- ``GET /champion/predictions/{accession}`` reads the protein's rows from the
-  Parquet file.
+- ``/news`` returns the editorial file merged with the latest nightly record;
+- ``/champion`` returns the nightly record;
+- ``/champion/predictions/{accession}`` reads the protein's rows from the Parquet
+  file.
+
+All three are read-only, and all three are proposed: none of them exists yet.
 
 No value is cached at import, so an overwrite at either path is served without
 a rebuild or a restart. The web front shows the latest announcements and the
