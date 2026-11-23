@@ -246,10 +246,14 @@ def unified_load_pair_inputs(
     ref_tax_ids: dict[str, int | None] = {}
     query_tax_ids: dict[str, int | None] = {}
     if p.compute_alignments:
-        ref_sequences = op._load_sequences_for_proteins(session, unique_neighbors)
+        ref_sequences = op._load_sequences_for_proteins(
+            session, unique_neighbors, annotation_set_id=p.annotation_set_id
+        )
         query_sequences = op._load_sequences_for_queries(session, p, ctx.valid_accessions)
     if p.compute_taxonomy:
-        ref_tax_ids = op._load_taxonomy_ids_for_proteins(session, unique_neighbors)
+        ref_tax_ids = op._load_taxonomy_ids_for_proteins(
+            session, unique_neighbors, annotation_set_id=p.annotation_set_id
+        )
         query_tax_ids = op._load_taxonomy_ids_for_queries(session, p, ctx.valid_accessions)
     return ref_sequences, query_sequences, ref_tax_ids, query_tax_ids
 

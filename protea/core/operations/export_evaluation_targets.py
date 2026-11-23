@@ -70,6 +70,7 @@ from protea.core.contracts.operation import (
     ProteaPayload,
 )
 from protea.core.evaluation import load_evaluation_data_for_set
+from protea.core.operations.predict_go_terms._photo_sequences import photo_of, photo_sequences
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.protein.protein import Protein
@@ -164,8 +165,18 @@ def delta_accessions(data: Any, categories: list[str]) -> list[str]:
     return sorted(accessions)
 
 
-def _load_sequences(session: Session, accessions: list[str]) -> dict[str, str]:
-    """Accession to residue string, for those that have one."""
+def _load_sequences(
+    session: Session, accessions: list[str], photo: uuid.UUID | None = None
+) -> dict[str, str]:
+    """Accession to residue string, for those that have one.
+
+    On a window whose start set a photo loaded, the residues are each member's at
+    the cut (``photo_sequences``): the FASTA a method is scored on must hold the
+    sequences it could have known, not today's entries.
+    """
+    if photo is not None:
+        at_cut = photo_sequences(session, photo, accessions)
+        return {accession: residues for accession, (_, residues) in at_cut.items()}
     rows = session.execute(
         select(Protein.accession, Sequence.sequence)
         .join(Sequence, Sequence.id == Protein.sequence_id)
@@ -186,14 +197,20 @@ def targets_key_for(evaluation_set_id: str, output_name: str, digest: str) -> st
     return f"eval_targets/{evaluation_set_id}/{output_name}-{digest[:12]}.fasta"
 
 
-def _sequence_ids(session: Session, accessions: list[str]) -> dict[str, int]:
+def _sequence_ids(
+    session: Session, accessions: list[str], photo: uuid.UUID | None = None
+) -> dict[str, int]:
     """Accession to the id of the sequence row the PROTEIN already points at.
 
     Taken from the row and never re-hashed from the published bytes. The bytes
     are canonicalised and the stored sequence is not, so hashing them again can
     name a different sequence, which is how the hand-registration route could
-    have pointed a query set at sequences with no embedding.
+    have pointed a query set at sequences with no embedding. On a photo's
+    window the row is the member's sequence at the cut, the one the FASTA holds.
     """
+    if photo is not None:
+        at_cut = photo_sequences(session, photo, accessions)
+        return {accession: sequence_id for accession, (sequence_id, _) in at_cut.items()}
     rows = session.execute(
         select(Protein.accession, Protein.sequence_id).where(Protein.accession.in_(accessions))
     ).all()
@@ -218,9 +235,14 @@ class _Declaration(NamedTuple):
     name: str
     description: str
     job_id: uuid.UUID | None
+    #: The photo that loaded the window's start set, or None: it decides which
+    #: sequence rows the declared entries point at.
+    photo: uuid.UUID | None = None
 
 
-def _sequence_ids_or_refuse(session: Session, records: list[tuple[str, str]]) -> dict[str, int]:
+def _sequence_ids_or_refuse(
+    session: Session, records: list[tuple[str, str]], photo: uuid.UUID | None = None
+) -> dict[str, int]:
     """The sequence id of every published accession, or a refusal naming the gaps.
 
     IT REFUSES INSTEAD OF SKIPPING. The first version wrote the entries it
@@ -234,7 +256,7 @@ def _sequence_ids_or_refuse(session: Session, records: list[tuple[str, str]]) ->
     already in the store with its digest by this point, and that is fine: the
     artifact is true, and only the declaration is refused.
     """
-    ids = _sequence_ids(session, [a for a, _ in records])
+    ids = _sequence_ids(session, [a for a, _ in records], photo)
     sin_fila = sorted(a for a, _ in records if a not in ids)
     if sin_fila:
         raise ValueError(
@@ -296,7 +318,7 @@ def _declare(session: Session, dec: _Declaration, pub: _Published, emit: EmitFn)
         )
         return ya.id
 
-    ids = _sequence_ids_or_refuse(session, pub.records)
+    ids = _sequence_ids_or_refuse(session, pub.records, dec.photo)
     qs = QuerySet(
         name=dec.name,
         description=dec.description,
@@ -409,9 +431,10 @@ class ExportEvaluationTargetsOperation(Operation):
                 f"{p.categories}; a target file with no targets would score nothing"
             )
 
-        sequences = _load_sequences(session, accessions)
+        photo = photo_of(session, eval_set.old_annotation_set_id)
+        sequences = _load_sequences(session, accessions, photo)
         pub = self._publish(p, accessions, sequences, emit)
-        dec = _declaration_for(eval_set, p, pub, job_id_from_payload(payload))
+        dec = _declaration_for(eval_set, p, pub, job_id_from_payload(payload))._replace(photo=photo)
         query_set_id = _declare(session, dec, pub, emit)
         return OperationResult(
             result={
