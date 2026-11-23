@@ -16,6 +16,7 @@ extensions = [
     'sphinx_design',
     'sphinxcontrib.bibtex',
     'feature_docs_table',
+    'news_feed',
 ]
 
 # sphinxcontrib-bibtex configuration

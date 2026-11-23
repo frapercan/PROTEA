@@ -1,0 +1,149 @@
+{
+ "source": "cut photo manifests (ADR-D59), one entry per photo",
+ "cuts": [
+  {
+   "cut_release": 160,
+   "kind": "full",
+   "cut_date": "2016-11-01",
+   "manifest_sha256": "0313f1d3fcc54a9b2368742b72938862634a6e153a956ac566edd911687b4a55",
+   "members": {
+    "members": 1131551,
+    "superset": 552259,
+    "outside_superset": 579292,
+    "by_truth": 118960,
+    "by_curated_only": 46840,
+    "by_neighbour": 507840
+   },
+   "rows": {
+    "member_rows": 15127014,
+    "member_rows_curated": 406095,
+    "member_rows_no_data": 49450,
+    "member_rows_orthology_electronic": 4202969,
+    "member_rows_phylogenetic": 659642,
+    "member_rows_reviewed_field_electronic": 3243492,
+    "member_rows_signature_electronic": 5675429,
+    "member_rows_truth": 889937
+   }
+  },
+  {
+   "cut_release": 177,
+   "kind": "full",
+   "cut_date": "2018-04-24",
+   "manifest_sha256": "30681e0deee13cc43d2df9ca15a7e7607d14a427939963eeb83bec19c1a8f0d3",
+   "members": {
+    "members": 1186657,
+    "superset": 557012,
+    "outside_superset": 629645,
+    "by_truth": 126648,
+    "by_curated_only": 48650,
+    "by_neighbour": 555133
+   },
+   "rows": {
+    "member_rows": 15223386,
+    "member_rows_curated": 464588,
+    "member_rows_no_data": 45605,
+    "member_rows_orthology_electronic": 4676570,
+    "member_rows_phylogenetic": 583475,
+    "member_rows_reviewed_field_electronic": 3139870,
+    "member_rows_signature_electronic": 5322777,
+    "member_rows_truth": 990501
+   }
+  },
+  {
+   "cut_release": 194,
+   "kind": "full",
+   "cut_date": "2019-11-12",
+   "manifest_sha256": "16b768310221134e174cdd26abce4f9c72fd07bd15037384db4b9a94e3eb965d",
+   "members": {
+    "members": 1479088,
+    "superset": 561176,
+    "outside_superset": 917912,
+    "by_truth": 134607,
+    "by_curated_only": 57919,
+    "by_neighbour": 831006
+   },
+   "rows": {
+    "member_rows": 20495791,
+    "member_rows_curated": 715628,
+    "member_rows_no_data": 46557,
+    "member_rows_orthology_electronic": 6430356,
+    "member_rows_phylogenetic": 1545926,
+    "member_rows_reviewed_field_electronic": 3122874,
+    "member_rows_signature_electronic": 7578174,
+    "member_rows_truth": 1056276
+   }
+  },
+  {
+   "cut_release": 205,
+   "kind": "truth_only",
+   "cut_date": "2021-11-09",
+   "manifest_sha256": "352bc18d5d69004e3f1f22f4f5d4f88eff80680da8bf873f9649b7995f5d5926",
+   "members": {
+    "members": 651760,
+    "superset": 565254,
+    "outside_superset": 86506,
+    "by_truth": 138377,
+    "by_curated_only": 57777,
+    "by_neighbour": 0
+   },
+   "rows": {
+    "member_rows": 9607172,
+    "member_rows_curated": 717123,
+    "member_rows_no_data": 43387,
+    "member_rows_orthology_electronic": 452018,
+    "member_rows_phylogenetic": 581781,
+    "member_rows_reviewed_field_electronic": 3322737,
+    "member_rows_signature_electronic": 3249945,
+    "member_rows_truth": 1240181
+   }
+  },
+  {
+   "cut_release": 211,
+   "kind": "full",
+   "cut_date": "2022-09-16",
+   "manifest_sha256": "37767527775310437598fe460fa14c433d23ff053302ad727b024af56e33140b",
+   "members": {
+    "members": 1530992,
+    "superset": 568002,
+    "outside_superset": 962990,
+    "by_truth": 142514,
+    "by_curated_only": 63658,
+    "by_neighbour": 868800
+   },
+   "rows": {
+    "member_rows": 23600054,
+    "member_rows_curated": 832630,
+    "member_rows_no_data": 53057,
+    "member_rows_orthology_electronic": 7244201,
+    "member_rows_phylogenetic": 1695551,
+    "member_rows_reviewed_field_electronic": 3312294,
+    "member_rows_signature_electronic": 9146575,
+    "member_rows_truth": 1315746
+   }
+  },
+  {
+   "cut_release": 227,
+   "kind": "full",
+   "cut_date": "2025-09-04",
+   "manifest_sha256": "65710a9f9e26d2de5a39f464ea25ff76cd4d1e78ef16ccea9057784b88983fb0",
+   "members": {
+    "members": 1850077,
+    "superset": 573661,
+    "outside_superset": 1276416,
+    "by_truth": 145721,
+    "by_curated_only": 52798,
+    "by_neighbour": 1195703
+   },
+   "rows": {
+    "member_rows": 33707963,
+    "member_rows_curated": 735189,
+    "member_rows_no_data": 34502,
+    "member_rows_orthology_electronic": 11480088,
+    "member_rows_phylogenetic": 1556281,
+    "member_rows_reviewed_field_electronic": 2702905,
+    "member_rows_signature_electronic": 15815408,
+    "member_rows_truth": 1383590
+   }
+  }
+ ]
+}
