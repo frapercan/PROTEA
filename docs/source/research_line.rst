@@ -277,5 +277,26 @@ F-measure, mean of the nine cells):
      - (no fitting)
      - 0.3241
      - ``1db46620``
+   * - The larger of the champion's and the head's probability, per term (a
+       fixed rule)
+     - 194->211, and the state at 211
+     - 0.3664
+     - ``9479a035``
+   * - A GO head over ProtT5-XL, Ankh large and ESM-2 3B vectors (stage 1.2)
+     - the state at 211
+     - 0.3144
+     - ``67275320``
+   * - A GO head over ProtT5-XL vectors (stage 1.2)
+     - the state at 211
+     - 0.3081
+     - ``57d7b4be``
+
+The heads of stage 1.2 learn from the experimental annotation each protein
+carried at the cut. As a source on their own they stay below transfer from the
+nearest neighbour, but they complement the protein's own annotations: taking the
+larger of the two probabilities is better than the champion in six of the nine
+cells by paired comparison, mostly where the protein knows little about itself,
+and worse in one (biological process for partly known proteins). Which arm
+should answer which cell is the routing question of stage 6.
 
 The current state and the next steps are on :doc:`news`.

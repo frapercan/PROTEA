@@ -22,6 +22,12 @@
  "announcements": [
   {
    "date": "2026-11-23",
+   "title": "Learned vectors complement what a protein says about itself",
+   "body": "A GO head learned over ProtT5-XL vectors from the experimental annotation known at the cut is weaker than nearest-neighbour transfer on its own, but taking the larger of its probability and the champion's reaches 0.3664 on 211->227, better than the champion in six of the nine cells by paired comparison.",
+   "link": "research_line"
+  },
+  {
+   "date": "2026-11-23",
    "title": "One research line, by stages",
    "body": "Everything explored so far now sits in a single line: representations of the protein, sources of candidate terms, signals, two learners that read the same evidence (a world model and decision trees), stratified evaluation, and routing per stratum. Every component is defined, run and validated in the platform at every cut.",
    "link": "research_line"
