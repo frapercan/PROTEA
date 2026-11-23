@@ -31,7 +31,7 @@ WHAT IT REFUSES, structurally:
 
 * a window carrying a ``window_role``. That is the holdout and the two
   declared bands, and ``holdout-227-230`` has ZERO results in PROTEA because
-  its single declared look was spent in the laboratory. A "no results" filter
+  it is held out for the decisive read. A "no results" filter
   would have swept it up, and I wrote such a filter once;
 * a window of the LIVE frame;
 * a window anything points at. THE REFERRERS ARE DERIVED FROM
@@ -177,8 +177,8 @@ def _refusal(
         return (
             f"it carries window_role={eset.window_role!r}, so it is the holdout or a "
             "declared band. The role is the protection and the result count is not: "
-            "holdout-227-230 has zero results here because its look was spent in the "
-            "laboratory"
+            "holdout-227-230 has zero results here because it is held out for the "
+            "decisive read"
         )
     rules = (eset.truth_profile, eset.toi_rule, eset.not_codes)
     if rules != SUPERSEDED:

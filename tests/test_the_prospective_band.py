@@ -1,21 +1,19 @@
-"""A band beyond the spent holdout, and the straddle that is not one.
+"""A band beyond the holdout, and the straddle that is not one.
 
 The board's mark says where selection stops. It does not say that everything
 after it is one single band, and the platform behaved as though it did: the
 only way past the guard was ``HOLDOUT_WAIVER``, a sentence that says of itself
-that it is the single declared pass and that is already written on the payload
-of the job that built `cb46395a`, the 227 -> 230 window. Claiming it again
-would not have been a second pass on the holdout. It would have been a false
-record of the first one.
+that it is the single declared pass on the holdout, the 227 -> 230 window
+(`cb46395a`). Using it for anything else would be a false record of that pass.
 
 What the waiver protects is looking at the same held-back data twice -- look,
-tune, look again. A band that does not overlap anything already scored cannot
-be that, and refusing it would mean the platform can never report on data
-newer than the one band it already spent.
+tune, look again. A band that does not overlap the holdout cannot be that,
+and refusing it would mean the platform can never report on data newer than
+the holdout.
 
 So there is a second sentence, and the one thing it checks is where the band
 BEGINS. The dangerous case is the straddle: a window that starts before the
-spent band ends and finishes after it is the union of a window used for
+holdout band ends and finishes after it is the union of a window used for
 selection and the one held back, which is the exact shape of the 220 -> 230
 windows whose 594 results were deleted on 2026-08-27.
 """
@@ -40,7 +38,7 @@ from protea.core.split_registry import (
 
 MARK = release(BOARD_MARK).published
 BAND_END = release(HOLDOUT_BAND_END).published
-#: goa 235, the first corpus beyond the spent band. Its date is the one on the
+#: goa 235, the first corpus beyond the holdout band. Its date is the one on the
 #: annotation set this platform holds, not a cadence guess.
 V235 = date(2026, 7, 9)
 
@@ -55,8 +53,8 @@ class TestTheTwoSentencesAreDifferent:
         assert "single declared pass" in HOLDOUT_WAIVER
         assert "begins after the holdout" in PROSPECTIVE_DECLARATION
 
-    def test_the_band_end_is_where_the_spent_window_ended(self) -> None:
-        # cb46395a is 227 -> 230; the band that was read ends at 230.
+    def test_the_band_end_is_where_the_holdout_window_ends(self) -> None:
+        # cb46395a is 227 -> 230; the holdout band ends at 230.
         assert HOLDOUT_BAND_END == "v230"
         assert BAND_END > MARK
 

@@ -1,10 +1,9 @@
 """The mark: the last GOA release the universe may read, and the UniProt ceiling.
 
-The campaign's test is the 227->230 window. It was read once, on 2026-10-27,
-and a test can be read only once: that read spent it. It stays untouchable for
-good, and rebuilding the data from public sources does not restore it
-(ADR-D60). So nothing published after the cut it opens may reach the universe,
-a model fitted in it or a choice made with it:
+The campaign's test is the 227->230 window, held out for one read of the frozen
+method, by the author's word (ADR-D60). Until then nothing published after the
+cut it opens may reach the universe, a model fitted in it or a choice made with
+it:
 
 - ``MARK_RELEASE`` is that cut, the GOA release of the 227 instance. A frame may
   end at the mark; no cut, photo or source may come after it.

@@ -16,9 +16,8 @@ already been replaced before the seal, this records the replacement as
 authentic. It closes the future, not the past.
 
 IT NEVER DESERIALISES. Only bytes in, digest out. That is a rule and not an
-optimisation: ``cb46395a`` is the holdout, its single declared look was spent
-in the laboratory on 2026-10-26, and parsing its truth inside the platform
-would be a second read of the one artefact the waiver protects. Hashing bytes
+optimisation: ``cb46395a`` is the holdout, and parsing its truth inside the
+platform would be a read of the one artefact the waiver protects. Hashing bytes
 is not reading a truth.
 
 THE WINDOWS ARE NAMED, never "all the unsealed ones". A scope that lives in a
@@ -59,7 +58,7 @@ class SealEvaluationGroundtruthPayload(ProteaPayload, frozen=True):
 
         An "all the unsealed ones" default would have reached the holdout
         without anybody typing its id, and the holdout is the one artefact
-        whose single declared look is already spent.
+        the waiver protects.
         """
         if not value:
             raise ValueError(

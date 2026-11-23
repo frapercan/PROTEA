@@ -14,8 +14,7 @@ carry them. The three of ADR-D60 say what a window is for in a frame:
   on it (ADR-D60: nothing is fitted on annotations after the instance cut, and
   selecting on a later window is allowed);
 * ``test_spent``: a test window whose single read has happened. It is kept so
-  the evaluator can refuse it by name; the 227 -> 230 window is one, spent on
-  2026-10-27.
+  the evaluator can refuse it by name.
 
 A role is the window's role in the frame. Which windows one method instance
 fits on is that method's own declaration (ADR-D60 decision 3), because one

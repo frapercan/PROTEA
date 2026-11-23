@@ -1,8 +1,8 @@
 """The universe refuses a cut after the mark, a UniProt release from the ceiling on,
 and a source published after the cut it serves (ADR-D60, decision 1).
 
-The 227->230 test was spent on 2026-10-27, so 228 is the first cut no door may
-open and 2025_04 the first UniProt release no door may read. Each door is tried
+The 227->230 test is held out for the decisive read, so 228 is the first cut no
+door may open and 2025_04 the first UniProt release no door may read. Each door is tried
 with exactly those two values, and with the last ones it still accepts, so a
 guard that drifted by one release in either direction fails here.
 """

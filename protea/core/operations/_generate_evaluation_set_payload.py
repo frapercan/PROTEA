@@ -125,10 +125,9 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     #: to be scored once, at the end, and a flag that can be set by reflex is a
     #: flag that gets set by reflex. See split_registry.HOLDOUT_WAIVER.
     holdout_waiver: str | None = None
-    #: The other sentence: a band BEYOND the spent holdout, which begins at or
-    #: after it and therefore cannot be a second look at it. Separate from the
-    #: waiver because the waiver says of itself that it is the single pass, and
-    #: that pass is written on a row already. Honoured only when the window's
+    #: The other sentence: a band BEYOND the holdout, which begins at or after
+    #: it and therefore cannot read it. Separate from the waiver, because the
+    #: waiver says of itself that it is the single pass. Honoured only when the window's
     #: start is at or after the band's end; a straddle is refused by name. See
     #: split_registry.PROSPECTIVE_DECLARATION.
     prospective_declaration: str | None = None
