@@ -78,6 +78,11 @@ class _Rows:
     def all(self):
         return self._rows
 
+    def scalar_one_or_none(self):
+        # This universe has no photos, so the lookup of the photo that loaded the
+        # window's start set (photo_of) finds none and today's sequences are read.
+        return None
+
 
 class _Data:
     def __init__(self, por_proteina) -> None:
