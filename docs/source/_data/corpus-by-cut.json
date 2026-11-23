@@ -23,7 +23,9 @@
     "member_rows_reviewed_field_electronic": 3243492,
     "member_rows_signature_electronic": 5675429,
     "member_rows_truth": 889937
-   }
+   },
+   "channel_table_sha256": "ce0089ab6d08b928718e80eb8e2cc1a3da146ad11a48f033d2c92b89b24b922a",
+   "unknown_evidence_rows": 0
   },
   {
    "cut_release": 177,
@@ -47,7 +49,9 @@
     "member_rows_reviewed_field_electronic": 3139870,
     "member_rows_signature_electronic": 5322777,
     "member_rows_truth": 990501
-   }
+   },
+   "channel_table_sha256": "ce0089ab6d08b928718e80eb8e2cc1a3da146ad11a48f033d2c92b89b24b922a",
+   "unknown_evidence_rows": 0
   },
   {
    "cut_release": 194,
@@ -71,7 +75,9 @@
     "member_rows_reviewed_field_electronic": 3122874,
     "member_rows_signature_electronic": 7578174,
     "member_rows_truth": 1056276
-   }
+   },
+   "channel_table_sha256": "ce0089ab6d08b928718e80eb8e2cc1a3da146ad11a48f033d2c92b89b24b922a",
+   "unknown_evidence_rows": 0
   },
   {
    "cut_release": 205,
@@ -95,7 +101,9 @@
     "member_rows_reviewed_field_electronic": 3322737,
     "member_rows_signature_electronic": 3249945,
     "member_rows_truth": 1240181
-   }
+   },
+   "channel_table_sha256": "ce0089ab6d08b928718e80eb8e2cc1a3da146ad11a48f033d2c92b89b24b922a",
+   "unknown_evidence_rows": 0
   },
   {
    "cut_release": 211,
@@ -119,7 +127,9 @@
     "member_rows_reviewed_field_electronic": 3312294,
     "member_rows_signature_electronic": 9146575,
     "member_rows_truth": 1315746
-   }
+   },
+   "channel_table_sha256": "ce0089ab6d08b928718e80eb8e2cc1a3da146ad11a48f033d2c92b89b24b922a",
+   "unknown_evidence_rows": 0
   },
   {
    "cut_release": 227,
@@ -143,7 +153,9 @@
     "member_rows_reviewed_field_electronic": 2702905,
     "member_rows_signature_electronic": 15815408,
     "member_rows_truth": 1383590
-   }
+   },
+   "channel_table_sha256": "ce0089ab6d08b928718e80eb8e2cc1a3da146ad11a48f033d2c92b89b24b922a",
+   "unknown_evidence_rows": 0
   }
  ]
 }

@@ -114,6 +114,12 @@ the manifest of each photo and writes the tables, the figures and
 full sha256 digest of the manifest it came from. Running it again on the same
 manifests writes the same bytes.
 
+Two columns of the table below license the figures above. Every photo classed its
+rows with the same channel table, so a channel means the same thing at every cut
+and a series over cuts compares like with like. And no row fell outside the
+table: the seven channels are the whole of each photo, with nothing swept into
+a residual class.
+
 .. csv-table:: The photo manifests
    :file: _data/corpus-manifests.csv
    :header-rows: 1

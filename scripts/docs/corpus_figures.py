@@ -107,6 +107,10 @@ def read_manifests(paths: list[Path]) -> list[dict]:
                     )
                 },
                 "rows": {k: v for k, v in counts["rows"].items() if k.startswith("member_rows")},
+                # The channel table the rows were classed by, and the rows it could not
+                # place: one table across cuts is what makes the channels comparable.
+                "channel_table_sha256": photo["channel_table"]["sha256"],
+                "unknown_evidence_rows": counts["rows"]["unknown_evidence_rows"],
             }
         )
     return sorted(cuts, key=lambda c: c["cut_release"])
@@ -143,7 +147,16 @@ def write_tables(cuts: list[dict]) -> None:
             out.writerow([label, *[f"{c['rows'][key]:,}" for c in cuts]])
     with (DATA / "corpus-manifests.csv").open("w", newline="") as fh:
         out = csv.writer(fh, lineterminator="\n")
-        out.writerow(["Cut", "Photo", "Date", "Manifest sha256, first 16 hex digits"])
+        out.writerow(
+            [
+                "Cut",
+                "Photo",
+                "Date",
+                "Manifest sha256, first 16 hex digits",
+                "Channel table sha256, first 16",
+                "Rows outside the channel table",
+            ]
+        )
         for c in cuts:
             out.writerow(
                 [
@@ -151,6 +164,8 @@ def write_tables(cuts: list[dict]) -> None:
                     c["kind"].replace("_", " "),
                     c["cut_date"],
                     c["manifest_sha256"][:16],
+                    c["channel_table_sha256"][:16],
+                    f"{c['unknown_evidence_rows']:,}",
                 ]
             )
 
