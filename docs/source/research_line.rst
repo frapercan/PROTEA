@@ -100,37 +100,48 @@ the lexicon.
 
 .. list-table:: Transfer from the nearest neighbour on LAFA 211->227, by language model
    :header-rows: 1
-   :widths: 40 30 30
+   :widths: 34 26 18 22
 
    * - Model
      - Weighted micro F, mean of nine cells
      - Gap to the best
+     - Evaluation result
    * - ProtT5-XL
      - 0.3241
      - 0
+     - ``1db46620``
    * - Ankh large
      - 0.3231
      - 0.0010
+     - ``99a48782``
    * - Ankh base
      - 0.3219
      - 0.0022
+     - ``b3f8543c``
    * - ESM-2 3B
      - 0.3217
      - 0.0024
+     - ``c189426f``
    * - ESM-2 650M
      - 0.3203
      - 0.0038
+     - ``7ea12145``
    * - ProstT5
      - 0.3199
      - 0.0042
+     - ``faa9c427``
    * - ESM-2 150M
      - 0.3162
      - 0.0079
+     - ``f2a07a8d``
    * - ESM C 600M
      - 0.3149
      - 0.0092
+     - ``52b87a1e``
 
-The scores are read raw, as the benchmark reads them. The choice of model moves
+The scores are read raw, as the benchmark reads them; each row names the stored
+evaluation result it was read from (the first eight hexadecimal digits of its
+id). The choice of model moves
 the result by less than a hundredth, so the expensive stages (1.2 and the world
 model's perception) start from the best few.
 
@@ -247,20 +258,24 @@ F-measure, mean of the nine cells):
 
 .. list-table::
    :header-rows: 1
-   :widths: 60 20 20
+   :widths: 50 16 14 20
 
    * - Arm
      - Fitted on
      - 211->227
+     - Evaluation result
    * - The protein's own annotations, ordered by a model that reads
        co-annotation (**champion**)
      - 194->211
      - 0.3543
+     - ``fc04821a``
    * - The protein's own annotations, ordered without co-annotation
      - 194->211
      - 0.3505
+     - ``0ddb3363``
    * - Transfer from the nearest neighbour, ProtT5-XL
      - (no fitting)
      - 0.3241
+     - ``1db46620``
 
 The current state and the next steps are on :doc:`news`.
