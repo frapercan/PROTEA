@@ -66,21 +66,35 @@ class TestCaptureProvenance:
             payload = capture_provenance()
         assert payload["protea_git_sha"] is None
 
-    def test_resilient_to_socket_failure(self) -> None:
-        # ``socket.gethostname`` raising must fall through to None
-        # instead of breaking the whole provenance snapshot.
+    def test_the_host_is_the_one_definition(self, monkeypatch) -> None:
+        # Phase 3 (ADR-D60): job.started, the child events and this snapshot
+        # name the machine one way, so a job and its batches cannot disagree.
         from protea.core import provenance
+        from protea.core.host import compute_host
 
-        with patch.object(provenance.socket, "gethostname", side_effect=OSError):
-            assert provenance._safe_hostname() is None
+        compute_host.cache_clear()
+        monkeypatch.setenv("PROTEA_COMPUTE_HOST", "desktop-gpu")
+        try:
+            assert capture_provenance()["hostname"] == "desktop-gpu"
+            assert provenance.where_it_runs()["host"] == "desktop-gpu"
+        finally:
+            compute_host.cache_clear()
 
-    def test_socket_returning_empty_string_yields_none(self) -> None:
-        # Some containers return "" from gethostname(); the helper
-        # normalises that to None so the field is "missing" not "blank".
+    def test_resilient_to_socket_failure(self, monkeypatch) -> None:
+        # ``socket.gethostname`` raising must not break the snapshot: the one
+        # definition names such a machine "unknown".
+        import socket
+
         from protea.core import provenance
+        from protea.core.host import compute_host
 
-        with patch.object(provenance.socket, "gethostname", return_value=""):
-            assert provenance._safe_hostname() is None
+        compute_host.cache_clear()
+        monkeypatch.delenv("PROTEA_COMPUTE_HOST", raising=False)
+        monkeypatch.setattr(socket, "gethostname", lambda: (_ for _ in ()).throw(OSError))
+        try:
+            assert provenance._safe_hostname() == "unknown"
+        finally:
+            compute_host.cache_clear()
 
     def test_resilient_to_platform_failure(self) -> None:
         from protea.core import provenance

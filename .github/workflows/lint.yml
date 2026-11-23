@@ -87,4 +87,4 @@ jobs:
       # bloquear es `--strict`, y eso lo enciende la ultima de esas
       # migraciones, no esta linea.
       - name: set guard (declarado, descrito, verificable) -- informe
-        run: poetry run python scripts/check_sets.py
+        run: poetry run python scripts/check_sets.py --strict

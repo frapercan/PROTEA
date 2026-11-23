@@ -110,9 +110,29 @@ def _load_ia_feature_map(
 @lru_cache(maxsize=4)
 def _cached_ia_map(path: str) -> dict[str, float]:
     """Parse + cache a go_id-keyed IA TSV (raw IA, 0 .. ~19)."""
-    from protea.core.operations._run_cafa_artifacts import load_ia_map
-
     return load_ia_map(path)
+
+
+def load_ia_map(ia_path: str) -> dict[str, float]:
+    """Parse a cafaeval IA TSV (``go_id<TAB>raw_ia``) into ``{go_id: raw_ia}``.
+
+    The IA file is the SAME ``go_id``-keyed information-accretion table the
+    cafaeval ``f_micro_w`` metric weights with. Raw IA is unbounded (0 .. ~19).
+    """
+    ia_map: dict[str, float] = {}
+    with open(ia_path, encoding="utf-8") as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 2:
+                continue
+            go_id = parts[0].strip()
+            if not go_id or go_id.lower() in ("go_id", "term"):
+                continue
+            try:
+                ia_map[go_id] = float(parts[1])
+            except ValueError:
+                continue
+    return ia_map
 
 
 @lru_cache(maxsize=4)

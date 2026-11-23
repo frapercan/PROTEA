@@ -110,3 +110,29 @@ def fetch_and_verify(
             "different artefact."
         )
     return blob
+
+
+def fetch_verified_to_file(store: Any, key: str, expected: str, dest: Path, label: str) -> Path:
+    """Stream the object at ``key`` into ``dest``, hashing it on the way, and refuse a mismatch.
+
+    :func:`fetch_and_verify` for an artefact too large to hold in memory: a cut's
+    homology hits are about 2.5 GB, and the worker that reads them is capped at 8.
+    The digest is taken over the bytes written, so what is checked is what is read
+    next. ``expected`` is required: a large artefact that predates its sha column
+    has no reader that would accept it unverified. On a mismatch ``dest`` is
+    removed, so nothing downstream can open the wrong bytes by name.
+    """
+    digest = hashlib.sha256()
+    with dest.open("wb") as handle:
+        for chunk in store.iter_chunks(key):
+            digest.update(chunk)
+            handle.write(chunk)
+    got = digest.hexdigest()
+    if got != expected:
+        dest.unlink(missing_ok=True)
+        raise ArtifactMismatch(
+            f"{label} does not match what its row declares. The row says "
+            f"{expected[:16]}... and the bytes under {key!r} hash to {got[:16]}.... "
+            "Either the object was replaced, or the row belongs to a different artefact."
+        )
+    return dest

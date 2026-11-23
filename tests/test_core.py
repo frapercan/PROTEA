@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import pytest
 
+from protea.core import queues
 from protea.core.contracts.operation import OperationResult, RetryLaterError
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL, is_experimental, normalize
+from protea.core.operation_spec import OperationSpec
 from protea.core.operations.ping import PingOperation
 from protea.core.utils import chunks
 
@@ -18,18 +20,22 @@ from protea.core.utils import chunks
 # ---------------------------------------------------------------------------
 
 
+_PING_SPEC = OperationSpec("infrastructure", "job", queues.PING, "database", "cpu")
+
+
 class TestOperationRegistry:
     def test_register_and_get(self):
         reg = OperationRegistry()
         op = PingOperation()
-        reg.register(op)
+        reg.register(op, _PING_SPEC)
         assert reg.get("ping") is op
+        assert reg.spec("ping") is _PING_SPEC
 
     def test_duplicate_register_raises(self):
         reg = OperationRegistry()
-        reg.register(PingOperation())
+        reg.register(PingOperation(), _PING_SPEC)
         with pytest.raises(ValueError, match="already registered"):
-            reg.register(PingOperation())
+            reg.register(PingOperation(), _PING_SPEC)
 
     def test_get_unknown_raises(self):
         reg = OperationRegistry()

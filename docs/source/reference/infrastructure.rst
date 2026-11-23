@@ -37,6 +37,21 @@ usable across local development, CI, and production deployments.
    :undoc-members:
    :show-inheritance:
 
+Environment check
+-----------------
+
+The API and every worker started with ``PROTEA_ENVIRONMENT=dev``, the reaper
+included, refuse to start unless the database and the AMQP vhost in their URLs
+carry the dev names. It is the second layer of the dev isolation, after the
+separate stack, and it exits with status 78 (``EX_CONFIG``) and one line on
+stderr. Other entry points, such as Alembic and the one-off scripts, do not
+check. The variables are in :doc:`/appendix/configuration`.
+
+.. automodule:: protea.infrastructure.environment_check
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Session management
 ------------------
 
@@ -68,17 +83,6 @@ for every request, query, and queue publish.
    :undoc-members:
    :show-inheritance:
 
-.. rubric:: Benchmark configuration
-
-``protea.infrastructure.benchmark_config`` loads the
-``protea/config/benchmark.yaml`` file that drives the ``/benchmark``
-router. It maps scoring-config display names, GO categories, and the
-baseline tag used in the Fmax comparison grid.
-
-.. automodule:: protea.infrastructure.benchmark_config
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 ORM models
 ----------
@@ -292,7 +296,9 @@ pipeline.
 ``PredictionSet`` is the result container for one run of
 ``predict_go_terms``. It links the query set, embedding configuration,
 annotation set, and ontology snapshot used, making every prediction set
-fully reproducible. ``GOPrediction`` stores one row per (query protein,
+fully reproducible. A set produced by a method (ADR-D60) names it in
+``method_id``; ``embedding_config_id`` is NULL for a method that is not a
+vote over one embedding, and a CHECK requires one of the two. ``GOPrediction`` stores one row per (query protein,
 GO term, reference protein) triple. The 14 optional feature-engineering
 columns (alignment statistics and taxonomy fields) and 5 re-ranker aggregate
 features (``vote_count``, ``k_position``, ``go_term_frequency``,
@@ -305,6 +311,29 @@ corresponding flags were set in the prediction payload.
    :show-inheritance:
 
 .. automodule:: protea.infrastructure.orm.models.embedding.go_prediction
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**Methods**
+
+A ``Method`` row is the stored form of a ``MethodSpec`` (ADR-D60, decision
+3). Its id is the uuid5 the spec derives and ``spec_sha256`` the sha256 of the
+same canonical JSON, and a ``before_insert`` listener refuses a row whose own
+spec derives neither. ``MethodPin`` holds the bytes the method depends on by
+role and sha256, with their references; ``MethodTrainingWindow`` holds the
+windows its fitted pins were trained on, by evaluation set id, with the role
+``fit`` or ``holdout`` and at most one holdout. The leakage guard reads the
+instance cut, the windows and the dated pin references against the frame an
+evaluation scores. ``PredictionExplanation`` holds, per prediction set,
+accession and GO term, the explanation a method that explains wrote as JSON.
+
+.. automodule:: protea.infrastructure.orm.models.method.method
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.infrastructure.orm.models.method.prediction_explanation
    :members:
    :undoc-members:
    :show-inheritance:

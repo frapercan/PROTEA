@@ -202,15 +202,15 @@ Predictions
    │        PredictionSet         │──────────▶│          GOPrediction             │
    │──────────────────────────────│           │───────────────────────────────────│
    │ id (UUID, PK)                │           │ id (PK)                           │
-   │ embedding_config_id (FK)     │           │ prediction_set_id (FK)            │
-   │ annotation_set_id (FK)       │           │ protein_accession (query)         │
-   │ ontology_snapshot_id (FK)    │           │ go_term_id (FK)                   │
-   │ query_set_id (FK, nullable)  │           │ distance (cosine/L2)              │
-   │ limit_per_entry              │           │ ref_protein_accession             │
-   │ distance_threshold           │           │ qualifier, evidence_code          │
-   │ created_at                   │           │ ── alignment (NW) ──              │
-   └──────────────────────────────┘           │ identity_nw, similarity_nw        │
-                                              │ alignment_score_nw                │
+   │ embedding_config_id (FK,null)│           │ prediction_set_id (FK)            │
+   │ method_id (FK, null)         │           │ protein_accession (query)         │
+   │ annotation_set_id (FK)       │           │ go_term_id (FK)                   │
+   │ ontology_snapshot_id (FK)    │           │ distance (cosine/L2)              │
+   │ query_set_id (FK, nullable)  │           │ ref_protein_accession             │
+   │ limit_per_entry              │           │ qualifier, evidence_code          │
+   │ distance_threshold           │           │ ── alignment (NW) ──              │
+   │ created_at                   │           │ identity_nw, similarity_nw        │
+   └──────────────────────────────┘           │ alignment_score_nw                │
                                               │ gaps_pct_nw, alignment_length_nw  │
                                               │ ── alignment (SW) ──              │
                                               │ identity_sw, similarity_sw        │
@@ -231,6 +231,20 @@ Predictions
    Groups all GO predictions for one run of ``predict_go_terms``. References the
    ``EmbeddingConfig``, ``AnnotationSet``, and ``OntologySnapshot`` used.
    Optionally linked to a ``QuerySet`` when predictions were run from a FASTA upload.
+   A set produced by a method with a row of its own (ADR-D60) names it in
+   ``method_id``. ``embedding_config_id`` is NULL for a method that is not a vote
+   over one embedding, and ``ck_prediction_set_has_a_producer`` requires one of
+   the two; every set written before the method tables has a configuration and
+   no method.
+
+**PredictionScore**
+   The scores of a scored set (``score_prediction_set``): one row per protein,
+   with its GO term ids, ascending, and their scores as two aligned arrays
+   (``ck_prediction_score_aligned``; a protein with nothing scored has no row).
+   A scored set holds no ``GOPrediction`` rows: the candidates and their
+   evidence stay in the candidate set it was scored from, and the scores take
+   20 bytes per pair, about 29 times less than the average ``GOPrediction``
+   row (:doc:`/architecture/scoring`).
 
 **GOPrediction**
    One row per (query protein, GO term, reference protein) triple. The alignment and
@@ -292,6 +306,39 @@ Predictions
    Defines a named scoring recipe: a set of feature weights and parameters
    that can be applied to any prediction set. Immutable once created.
 
+Methods
+-------
+
+ADR-D60 gives a method an identity of its own, so it no longer has to pass as
+an embedding configuration. The contract it is stored from is
+``protea.core.contracts.method``.
+
+**Method**
+   One row per ``MethodSpec``: its family (``embedding-reranker``,
+   ``world-model`` or ``explainable-units``), its code, the instance cut it
+   lives at (``instance_release`` and ``ontology_snapshot_id``), its recipe as
+   JSONB, its runtime (``native`` or ``container``) and whether it explains its
+   predictions. ``id`` is the uuid5 of the spec's canonical JSON and
+   ``spec_sha256`` the sha256 of the same bytes, so the row is identity: a
+   method that changes is another method.
+
+**MethodPin**
+   The bytes a method depends on, one row per (method, role, sha256), with the
+   references that locate them as a JSON array. A reference spelled
+   ``annotation_set:<uuid>``, ``evaluation_set:<uuid>`` or
+   ``model_weights:<uuid>`` names a row the leakage guard can date.
+
+**MethodTrainingWindow**
+   The windows a method's fitted pins were trained on, by evaluation set id,
+   with the role ``fit`` or ``holdout``; at most one holdout per method. The
+   leakage guard refuses to score a method on a frame that starts before its
+   instance cut, any of these windows or any dated pin reference ends.
+
+**PredictionExplanation**
+   Why a method predicted a term for a protein: one row per (prediction set,
+   accession, GO term), the key ``go_prediction`` is unique on, with the
+   explanation as JSONB. Deleted with its prediction set.
+
 Re-ranker datasets
 ------------------
 
@@ -351,8 +398,9 @@ Evaluation
    │ ontology_snapshot_id (FK)    │           │ scoring_config_id (FK, nullable)  │
    │ stats (JSONB)                │           │ reranker_model_id (FK, nullable)  │
    │ job_id (FK)                  │           │ results (JSONB)                   │
-   │ created_at                   │           │ max_distance (Float, nullable)    │
-   └──────────────────────────────┘           │ job_id (FK)                       │
+   │ created_at                   │           │ max_k_position (nullable)         │
+   └──────────────────────────────┘           │ max_sequence_rank (nullable)      │
+                                              │ job_id (FK)                       │
                                               │ created_at                        │
                                               └───────────────────────────────────┘
 
@@ -365,8 +413,17 @@ Evaluation
    Stores the output of running ``cafaeval`` against a prediction set for
    a given evaluation set. The ``results`` JSONB column contains per-category
    (NK/LK/PK) per-namespace (BPO/MFO/CCO) Fmax, precision, recall, τ, and
-   coverage. Optionally references a ``ScoringConfig`` or ``RerankerModel``
-   when predictions were scored or re-ranked before evaluation.
+   coverage. The evaluator scores the prediction set's stored scores as they
+   are; when the set was scored by ``score_prediction_set``, the result row
+   copies the ``ScoringConfig`` and the depth cut from the set's record, so a
+   result names how its scores were made. Rows written before 2026-11-20 keep
+   the ``ScoringConfig``, ``RerankerModel`` and cut the evaluator applied
+   itself. Beside the categories, ``results`` holds ``artifacts`` (the keys of
+   the files the run stored) and, since 2026-11-20, ``terms_of_interest``: the
+   rule the window named, the number of terms and the sha256 of the file
+   cafaeval read. Since 2026-11-21 it also holds ``population``: the rule
+   (``all_targets``) and how many targets each category held. The frame seal
+   reads both rules.
 
 Support
 -------

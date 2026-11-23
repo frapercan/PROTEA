@@ -66,6 +66,13 @@ class SequenceEmbedding(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    #: The bank that wrote this row (ADR-D62), or NULL for a row the queue computed.
+    #: Not indexed: a bank counts its own rows, and nothing reads a bank's rows by it.
+    embedding_bank_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("embedding_bank.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
 
     sequence: Mapped[Sequence] = relationship("Sequence")
     embedding_config: Mapped[EmbeddingConfig] = relationship("EmbeddingConfig")

@@ -19,6 +19,11 @@ import {
 
 type Stage = "idle" | "uploading" | "embedding" | "predicting" | "done" | "error";
 
+//: The guide lives in this instance's own published documentation, so it
+//: travels with the deployment instead of pointing at a page somebody has
+//: to remember to keep alive.
+const COMPUTE_NODE_GUIDE = "/sphinx/operate/join-a-compute-node.html";
+
 const POLL_MS = 3_000;
 const QUEUE_POLL_MS = 30_000;
 
@@ -229,9 +234,10 @@ export function AnnotateForm() {
     };
   }, []);
 
-  // Surface CPU-only mode so users understand why a novel sequence is slow.
-  // `gpu_present` is undefined on older backends; only warn when explicitly false.
-  const cpuOnly = gpu?.gpu_present === false;
+  // No card on the machine that serves this API, measured by the backend with
+  // `torch.cuda.is_available()` and not by looking at the queues. Undefined on
+  // an older backend, so only suggest a node when it says false explicitly.
+  const noCompute = gpu?.gpu_present === false;
   const isRunning = stage === "uploading" || stage === "embedding" || stage === "predicting";
   // A running local annotation flow already owns the UI; don't double-block.
   // Only block on genuinely-active GPU work (backend `busy`), never on
@@ -301,7 +307,7 @@ export function AnnotateForm() {
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-3">
                 <Link
-                  href={`/${locale}/instrument/benchmark`}
+                  href={`/${locale}/instrument/evaluation`}
                   className="inline-flex min-h-[40px] items-center gap-1 rounded-md bg-white px-3 py-2 text-xs font-semibold text-amber-900 ring-1 ring-inset ring-amber-200 hover:bg-amber-100 transition-colors"
                 >
                   {t("annotateQueueViewResults" as any)}
@@ -340,17 +346,32 @@ export function AnnotateForm() {
         </div>
       )}
 
-      {/* CPU-only notice: no CUDA GPU is visible to the workers, so embedding
-          a sequence not already in the database runs on CPU and is slower.
-          Purely informational, never blocks submission. */}
-      {cpuOnly && !isQueueBlocked && (
+      {/* A SUGGESTION, NOT A WARNING. The notice this replaces said only that a
+          novel sequence would be slower, which is information the visitor can
+          do nothing with. This one says what to do about it and links the guide
+          that explains how. The copy lives in messages/*.json so changing what
+          it says needs no change here. */}
+      {noCompute && !isQueueBlocked && (
         <div
           role="status"
           className="mb-5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
         >
           <div className="flex items-start gap-2">
             <span aria-hidden className="text-base leading-none">🖥️</span>
-            <p className="flex-1 min-w-0">{t("annotateCpuModeNotice" as any)}</p>
+            <p className="flex-1 min-w-0">
+              {t.rich("annotateNoComputeNotice" as any, {
+                guia: (chunks) => (
+                  <a
+                    href={COMPUTE_NODE_GUIDE}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 underline hover:text-blue-800"
+                  >
+                    {chunks}
+                  </a>
+                ),
+              })}
+            </p>
           </div>
         </div>
       )}

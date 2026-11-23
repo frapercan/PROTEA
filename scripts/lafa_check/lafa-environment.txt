@@ -1,0 +1,17 @@
+# The environment LAFA's own code runs in for the comparison, pinned to the
+# versions its democafaenv.yaml fixes. democafa itself is installed apart, with
+# --no-deps, because its pyproject.toml does not declare obonet, networkx or
+# tqdm, all three of which it imports.
+#
+#   uv venv --python 3.10 <venv>
+#   uv pip install --python <venv>/bin/python -r scripts/lafa_check/lafa-environment.txt
+#   uv pip install --python <venv>/bin/python --no-deps \
+#     "democafa @ git+https://github.com/anphan0828/democafa_package@1102e34ec2cdc9aa3737ef8b48992b4fc7775e60"
+biopython==1.85
+networkx==3.4.2
+numpy==2.2.4
+obonet==1.1.0
+pandas==2.2.3
+requests==2.32.3
+scipy==1.15.2
+tqdm==4.67.1

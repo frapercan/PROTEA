@@ -63,7 +63,7 @@ poetry run pytest --with-postgres
 ## Adding a New Operation
 
 1. Create `protea/core/operations/my_operation.py` implementing `name` + `execute(session, payload, *, emit)`
-2. Register it in `scripts/worker.py`
+2. Add one row to `CATALOG` in `protea/core/operation_catalog.py`: the class and the `OperationSpec` it declares (ADR-D60, decision 6); the registry refuses an operation without one
 3. Add tests in `tests/`
 4. Document it in `docs/source/architecture/operations.rst`
 

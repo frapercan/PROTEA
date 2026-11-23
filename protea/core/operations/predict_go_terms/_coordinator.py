@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.operations.predict_go_terms._common import (
     _BATCH_QUEUE,
@@ -19,6 +20,7 @@ from protea.core.operations.predict_go_terms._common import (
     _RerankerBinding,
     _RerankerDispatch,
 )
+from protea.core.operations.predict_go_terms._photo_sequences import member_sequences, photo_of
 from protea.core.operations.predict_go_terms._receipt import run_receipt
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -81,6 +83,29 @@ def _refuse_an_undeclared_corpus(count: int) -> None:
         "PROTEA_TUNING__operation__max_implicit_query_population also works "
         "and is process-wide: it lifts this gate for every dispatch the worker "
         "handles afterwards, including ones somebody else sent"
+    )
+
+
+def _new_prediction_set(
+    p: PredictGOTermsPayload, ids: tuple[Any, Any, Any], queries: int, parent_job_id: UUID
+) -> PredictionSet:
+    """The set this run writes into: its inputs, its receipt, what it is and who made it."""
+    embedding_config_id, annotation_set_id, ontology_snapshot_id = ids
+    return PredictionSet(
+        embedding_config_id=embedding_config_id,
+        annotation_set_id=annotation_set_id,
+        ontology_snapshot_id=ontology_snapshot_id,
+        query_set_id=uuid.UUID(p.query_set_id) if p.query_set_id else None,
+        limit_per_entry=p.limit_per_entry,
+        distance_threshold=p.distance_threshold,
+        meta=run_receipt(p, parent_job_id),
+        description=(
+            f"Nearest-neighbour transfer from embedding configuration {embedding_config_id} "
+            f"over annotation set {annotation_set_id}, {queries} queries, at most "
+            f"{p.limit_per_entry} per entry."
+        ),
+        job_id=parent_job_id,
+        producer_git_sha=code_revision(),
     )
 
 
@@ -171,15 +196,8 @@ class PredictGOTermsOperation:
             emit("predict_go_terms.no_queries", None, {}, "warning")
             return OperationResult(result={"batches": 0, "queries": 0})
 
-        prediction_set = PredictionSet(
-            embedding_config_id=embedding_config_id,
-            annotation_set_id=annotation_set_id,
-            ontology_snapshot_id=ontology_snapshot_id,
-            query_set_id=uuid.UUID(p.query_set_id) if p.query_set_id else None,
-            limit_per_entry=p.limit_per_entry,
-            distance_threshold=p.distance_threshold,
-            meta=run_receipt(p, parent_job_id),
-        )
+        ids = (embedding_config_id, annotation_set_id, ontology_snapshot_id)
+        prediction_set = _new_prediction_set(p, ids, len(query_accessions), parent_job_id)
         session.add(prediction_set)
         session.flush()
 
@@ -338,12 +356,14 @@ class PredictGOTermsOperation:
             # Forwarded, and dumped rather than passed as objects: this payload
             # is JSON-serialised onto AMQP. Both were silently dropped before,
             # see test_coordinator_forwards_payload_fields.
-            "donor_policy": (
-                p.donor_policy.model_dump(mode="json") if p.donor_policy else None
-            ),
+            "donor_policy": (p.donor_policy.model_dump(mode="json") if p.donor_policy else None),
             # Retriever, not donor policy: who may be a neighbour, not which
-            # annotations may donate. See _self_neighbour for the measurement.
+            # annotations may donate. Measured 2026-08-28 with self-retrieval
+            # allowed: the query was its own nearest neighbour for 95.0 per
+            # cent of candidate rows at depth 1.
             "exclude_self_neighbour": getattr(p, "exclude_self_neighbour", False),
+            # By sequence (the query and its twins) or by accession (it alone).
+            "self_exclusion": getattr(p, "self_exclusion", None),
             "compute_protst": getattr(p, "compute_protst", False),
             "compute_ia": getattr(p, "compute_ia", False),
             "ia_file": getattr(p, "ia_file", None),
@@ -451,18 +471,7 @@ class PredictGOTermsOperation:
                 .all()
             )
         else:
-            q = (
-                session.query(Protein.accession)
-                .join(Protein.sequence)
-                .join(
-                    SequenceEmbedding,
-                    (SequenceEmbedding.sequence_id == Protein.sequence_id)
-                    & (SequenceEmbedding.embedding_config_id == embedding_config_id),
-                )
-            )
-            if p.query_accessions:
-                q = q.filter(Protein.accession.in_(p.query_accessions))
-            rows = q.order_by(Protein.accession).all()
+            rows = _accessions_with_a_vector(session, p, embedding_config_id, emit)
         accessions = [r[0] for r in rows]
         implicit = not p.query_set_id and not p.query_accessions
         emit(
@@ -474,6 +483,42 @@ class PredictGOTermsOperation:
         if implicit:
             _refuse_an_undeclared_corpus(len(accessions))
         return accessions
+
+
+def _accessions_with_a_vector(
+    session: Session, p: PredictGOTermsPayload, embedding_config_id: uuid.UUID, emit: EmitFn
+) -> list[Any]:
+    """The queries with a vector of the config, by the photo's sequences on a photo's run."""
+    photo = photo_of(session, p.annotation_set_id)
+    if photo is not None:
+        # A photo's run: each query searches with its sequence at the cut.
+        if p.compute_alignments:
+            raise ValueError(
+                "alignments read today's sequences, and this run transfers from a photo; "
+                "run it with compute_alignments off"
+            )
+        members = member_sequences(photo)
+        q = session.query(members.c.accession).join(
+            SequenceEmbedding,
+            (SequenceEmbedding.sequence_id == members.c.sequence_id)
+            & (SequenceEmbedding.embedding_config_id == embedding_config_id),
+        )
+        if p.query_accessions:
+            q = q.filter(members.c.accession.in_(p.query_accessions))
+        emit("predict_go_terms.photo_sequences", None, {"photo_id": str(photo)}, "info")
+        return q.order_by(members.c.accession).all()
+    q = (
+        session.query(Protein.accession)
+        .join(Protein.sequence)
+        .join(
+            SequenceEmbedding,
+            (SequenceEmbedding.sequence_id == Protein.sequence_id)
+            & (SequenceEmbedding.embedding_config_id == embedding_config_id),
+        )
+    )
+    if p.query_accessions:
+        q = q.filter(Protein.accession.in_(p.query_accessions))
+    return q.order_by(Protein.accession).all()
 
 
 def _refuse_a_snapshot_the_terms_do_not_come_from(

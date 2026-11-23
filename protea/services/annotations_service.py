@@ -236,8 +236,7 @@ def delete_annotation_set_data(
         session.flush()
     except IntegrityError as exc:
         raise AnnotationSetReferencedError(
-            "This annotation set is referenced by one or more prediction "
-            "sets. Delete those first."
+            "This annotation set is referenced by one or more prediction sets. Delete those first."
         ) from exc
     return {
         "deleted": str(set_id),
@@ -282,16 +281,16 @@ def iter_groundtruth_tsv(
 
 
 # EvaluationSet + EvaluationResult helpers (serialisers, list/get/delete
-# handlers, baseline-scoring auto-attach) live in
+# handlers) live in
 # _annotations_evaluation_helpers and are re-exported here so existing
 # router/CLI imports keep working unchanged.
 from protea.services._annotations_evaluation_helpers import (  # noqa: E402,F401
-    apply_baseline_scoring_default,
     assert_evaluation_set_exists,
     delete_eval_result_collect_keys,
     delete_evaluation_set_collect_keys,
     evaluation_result_to_dict,
     evaluation_set_to_dict,
+    get_eval_result_artifact,
     get_eval_result_with_keys,
     get_evaluation_set_data,
     list_evaluation_results_data,
@@ -306,12 +305,19 @@ from protea.services._annotations_method_helpers import (  # noqa: E402,F401
     iter_delta_proteins_fasta,
 )
 
+# The paired comparisons of a window's results, read from their jobs.
+from protea.services._annotations_paired_helpers import (  # noqa: E402,F401
+    list_paired_comparisons_data,
+)
+
 # iter_evaluation_artifacts_zip + render_evaluation_metrics_tsv live in
 # _annotations_streaming_helpers (no domain-exception coupling).
 from protea.services._annotations_streaming_helpers import (  # noqa: E402,F401
+    iter_evaluation_artifact,
     iter_evaluation_artifacts_zip,
     render_evaluation_metrics_tsv,
 )
+from protea.services._window_summary import window_summary_data  # noqa: E402,F401
 
 __all__ = [
     "AnnotationSetReferencedError",
@@ -326,11 +332,16 @@ __all__ = [
     "get_snapshot_data",
     "delete_eval_result_collect_keys",
     "evaluation_result_to_dict",
+    "get_eval_result_artifact",
     "get_eval_result_with_keys",
     "get_go_subgraph_data",
     "iter_delta_proteins_fasta",
+    "iter_evaluation_artifact",
+    "iter_evaluation_artifacts_zip",
     "iter_groundtruth_tsv",
     "list_evaluation_results_data",
+    "list_paired_comparisons_data",
+    "window_summary_data",
     "render_evaluation_metrics_tsv",
     "list_annotation_sets_data",
     "list_evaluation_sets_data",
@@ -401,9 +412,8 @@ def list_information_accretion_sets_data(
     table computed on a release past the board's mark. Set it only where the
     waiver already applies.
     """
-    q = (
-        session.query(InformationAccretionSet, AnnotationSet.source_version)
-        .join(AnnotationSet, AnnotationSet.id == InformationAccretionSet.annotation_set_id)
+    q = session.query(InformationAccretionSet, AnnotationSet.source_version).join(
+        AnnotationSet, AnnotationSet.id == InformationAccretionSet.annotation_set_id
     )
     if ontology_snapshot_id is not None:
         q = q.filter(InformationAccretionSet.ontology_snapshot_id == ontology_snapshot_id)

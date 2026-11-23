@@ -15,6 +15,7 @@ from pydantic import Field, field_validator
 from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
 
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -182,6 +183,11 @@ class LoadQuickGOAnnotationsOperation:
                 "quickgo_base_url": p.quickgo_base_url,
                 "job_ids": [str(job_id)] if job_id else [],
             },
+            description=(
+                f"QuickGO annotations, version {p.source_version}, as "
+                f"load_quickgo_annotations streamed them from {p.quickgo_base_url}."
+            ),
+            code_revision=code_revision(),
         )
         session.add(annotation_set)
         session.flush()

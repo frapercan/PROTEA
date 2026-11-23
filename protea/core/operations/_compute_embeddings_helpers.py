@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from protea.core import queues
 from protea.core.operations._long_sequence_isolation import partition_sequence_ids
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -26,8 +27,8 @@ if TYPE_CHECKING:
     )
     from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
-_BATCH_QUEUE = "protea.embeddings.batch"
-_WRITE_QUEUE = "protea.embeddings.write"
+_BATCH_QUEUE = queues.EMBEDDINGS_BATCH
+_WRITE_QUEUE = queues.EMBEDDINGS_WRITE
 
 _LEGACY_CONFIG_KEY = "embedding_config_id"
 _GROUP_CONFIG_KEY = "embedding_config_ids"

@@ -26,6 +26,11 @@ from protea.api.deps import get_session_factory
 router = APIRouter(prefix="/receipts", tags=["receipts"])
 
 #: One row: the set, its receipt, and the names behind its identifiers.
+#:
+#: The producer is joined OUTER, the configuration and the method alike. A set
+#: produced by a method has no embedding configuration (ADR-D60, decision 3),
+#: and the inner join this replaced answered 404 for a set that exists, which is
+#: the one confusion this endpoint refuses to make.
 _RECEIPT = text(
     """
     SELECT ps.id                     AS prediction_set_id,
@@ -38,11 +43,18 @@ _RECEIPT = text(
            ec.family                 AS model_family,
            ec.pooling                AS pooling,
            ec.max_length             AS max_length,
+           ps.method_id              AS method_id,
+           m.family                  AS method_family,
+           m.code                    AS method_code,
+           m.instance_release        AS method_instance_release,
+           m.runtime                 AS method_runtime,
+           m.explains                AS method_explains,
            a.source_version          AS bank_release,
            a.source_published_at     AS bank_published_at,
            os.obo_url                AS ontology_url
     FROM prediction_set ps
-    JOIN embedding_config ec ON ec.id = ps.embedding_config_id
+    LEFT JOIN embedding_config ec ON ec.id = ps.embedding_config_id
+    LEFT JOIN method m       ON m.id = ps.method_id
     JOIN annotation_set a    ON a.id = ps.annotation_set_id
     JOIN ontology_snapshot os ON os.id = ps.ontology_snapshot_id
     WHERE ps.id = :psid
@@ -117,6 +129,25 @@ def _donors(policy: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _method(row: Any) -> dict[str, Any] | None:
+    """The method row that produced the set, or None when no method row did.
+
+    None is every set written before methods had rows of their own, whose
+    ``model`` block names the configuration as it always did. A method's set
+    without a configuration carries None in every field of that block.
+    """
+    if row["method_id"] is None:
+        return None
+    return {
+        "id": str(row["method_id"]),
+        "family": row["method_family"],
+        "code": row["method_code"],
+        "instance_release": row["method_instance_release"],
+        "runtime": row["method_runtime"],
+        "explains": row["method_explains"],
+    }
+
+
 def _payload(
     row: Any, receipt: dict[str, Any], campaign: dict[str, Any] | None, job: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -138,6 +169,7 @@ def _payload(
             "pooling": row["pooling"],
             "max_length": row["max_length"],
         },
+        "method": _method(row),
         "search": {
             "neighbours": row["k"],
             "metric": receipt.get("metric"),

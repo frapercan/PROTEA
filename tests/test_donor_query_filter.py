@@ -20,6 +20,7 @@ from protea_contracts.payloads import DonorPolicy
 from sqlalchemy.orm import Session
 
 from protea.core.disk_cache import RefPoolKey
+from protea.core.operations.predict_go_terms import _photo_sequences as photo_sequences
 from protea.core.operations.predict_go_terms._batch_op_reference import (
     _PoolRequest,
     _ReferenceMixin,
@@ -29,6 +30,17 @@ from protea.infrastructure.orm.models.annotation.protein_go_annotation import Pr
 
 CFG = uuid.UUID("11111111-1111-1111-1111-111111111111")
 ANN = uuid.UUID("22222222-2222-2222-2222-222222222222")
+
+
+@pytest.fixture(autouse=True)
+def _no_photo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These pools are over an annotation set no photo loaded, so no store is asked.
+
+    A photo's run builds its pool from the photo's members
+    (``_photo_sequences.donor_pool_base``); these tests compile the other pool,
+    with a session that has no database behind it.
+    """
+    monkeypatch.setattr(photo_sequences, "photo_of", lambda session, annotation_set_id: None)
 
 
 def _sql(request: _PoolRequest) -> str:

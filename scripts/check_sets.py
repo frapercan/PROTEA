@@ -68,6 +68,12 @@ EXPECTED: dict[str, str] = {
     "prediction_set": "what one method predicted, over one query set, from one reference pool",
     "information_accretion_set": "the IA weights, identified by snapshot x corpus x evidence regime",
     "dataset": "the frozen re-ranker dump the laboratory pulls to train",
+    "cut_photo": "the corpus at a cut: Swiss-Prot, live tiers and annotated UniRef50 neighbours",
+    "homology_table": "the homology of a cut: its superset searched against its photo (MMseqs2)",
+    "window_placement": "each target of a window on the length and identity axes, read at its start",
+    "embedding_bank": "one configuration's vectors of every member sequence of a set of photos",
+    "lexicon_bank": "one lexicon's cut and theme mass of every member sequence of a set of photos",
+    "segment_families": "the families of one cut's lexicon segments, linked by MMseqs2",
 }
 
 #: Tables whose name ends in ``_set`` but which are membership or join rows,
@@ -122,13 +128,9 @@ def _audit(table) -> dict[str, tuple[str, bool]]:
     out: dict[str, tuple[str, bool]] = {}
 
     derivations = sorted(
-        fk.parent.name
-        for fk in table.foreign_keys
-        if fk.parent.name not in NOT_DERIVATION
+        fk.parent.name for fk in table.foreign_keys if fk.parent.name not in NOT_DERIVATION
     )
-    out["declarado"] = (
-        (", ".join(derivations), True) if derivations else ("SIN NINGUNA FK", False)
-    )
+    out["declarado"] = (", ".join(derivations), True) if derivations else ("SIN NINGUNA FK", False)
 
     described = sorted(columns & DESCRIPTION_COLUMNS)
     out["descrito"] = (", ".join(described), True) if described else ("NO HAY COLUMNA", False)
@@ -195,8 +197,7 @@ def main() -> int:
             print(f"          {criterio:13} {'' if cumple else '!'} {texto}")
         if falla:
             errores.append(
-                f"{name}: "
-                + "; ".join(f"{k}={t}" for k, (t, ok) in veredicto.items() if not ok)
+                f"{name}: " + "; ".join(f"{k}={t}" for k, (t, ok) in veredicto.items() if not ok)
             )
         print()
 

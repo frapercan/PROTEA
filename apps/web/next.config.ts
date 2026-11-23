@@ -57,7 +57,17 @@ const nextConfig: NextConfig = {
     proxyClientMaxBodySize: 100 * 1024 * 1024, // 100 MB
   },
   async redirects() {
-    return movedRouteRedirects();
+    return [
+      ...movedRouteRedirects(),
+      // The benchmark matrix gave way to each window's panel (2026-11-21): an old
+      // link lands on the list of windows, each of which opens its panel.
+      { source: "/instrument/benchmark", destination: "/instrument/evaluation", permanent: true },
+      {
+        source: `/:locale(${LOCALES})/instrument/benchmark`,
+        destination: "/:locale/instrument/evaluation",
+        permanent: true,
+      },
+    ];
   },
   async rewrites() {
     return [

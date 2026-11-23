@@ -16,6 +16,10 @@ depths of one retrieval belong under one digest and differ in their level. That
 is precisely why five correct results and five that had scored no cut at all
 shared the digest ``f-1c245d41f26ff70c3b0a9247`` and could not be separated by
 it.
+
+Since the evaluator stopped scoring (closure, step 4) the cut is the scored
+set's, taken by ``score_prediction_set`` and written in its record; the result
+row copies it from there, so the surfaces read a result's own cut as before.
 """
 
 from __future__ import annotations
@@ -58,8 +62,7 @@ def test_a_prediction_set_still_reports_the_retrieval_depth() -> None:
     # result's field by name, and asserting on raw text catches the prose
     # rather than the query, which is a test that fails for the wrong reason.
     sql = "\n".join(
-        line for line in str(_Q_PREDICTION_SETS).splitlines()
-        if not line.strip().startswith("--")
+        line for line in str(_Q_PREDICTION_SETS).splitlines() if not line.strip().startswith("--")
     )
     assert "ps.limit_per_entry::text" in sql
     assert "er.max_sequence_rank" not in sql
@@ -70,29 +73,53 @@ def test_depth_is_one_of_the_fields_a_level_is_named_by() -> None:
     assert "depth" in _LEVEL_FIELDS
 
 
-def test_the_writer_carries_the_cut_from_payload_to_row() -> None:
-    """Both halves of the journey, since it now crosses two modules.
+def test_the_row_carries_the_cut_the_scored_set_records() -> None:
+    """From the scored set's record to the result row, both units and the config."""
+    from types import SimpleNamespace
 
-    Constructing a real result needs a staged run, a session and an artifact
-    store, so this reads the two hops from source: the operation must put the
-    payload's cut into the bundle, and the builder must put the bundle's cut
-    onto the row. Checking only one hop passes while the other drops it.
-    """
-    from pathlib import Path
+    from protea.core.operations._run_cafa_helpers import ResultRow, build_result_row
 
-    root = Path(__file__).resolve().parents[1] / "protea/core/operations"
+    config = uuid.uuid4()
+    scored = SimpleNamespace(
+        meta={
+            "scoring_config_id": str(config),
+            "scoring": {"depth": {"max_k_position": 5, "max_sequence_rank": None}},
+        }
+    )
+    inputs = SimpleNamespace(eval_set_id=uuid.uuid4(), pred_set_id=uuid.uuid4(), pred_set=scored)
+    row = build_result_row(
+        ResultRow(
+            result_id=uuid.uuid4(),
+            inputs=inputs,
+            payload={},
+            results={},
+            provenance=(None, None, None, None),
+        )
+    )
+    assert (row.scoring_config_id, row.max_k_position, row.max_sequence_rank) == (config, 5, None)
 
-    op = (root / "run_cafa_evaluation.py").read_text()
-    at = op.index("ResultRow(")
-    bundle = op[at : op.index(")", op.index("max_k_position", at))]
-    assert "max_sequence_rank=p.max_sequence_rank" in bundle
-    assert "max_k_position=p.max_k_position" in bundle
 
-    helper = (root / "_run_cafa_helpers.py").read_text()
-    at = helper.index("return EvaluationResult(")
-    row = helper[at : helper.index("job_id=", at)]
-    assert "max_sequence_rank=row.max_sequence_rank" in row
-    assert "max_k_position=row.max_k_position" in row
+def test_a_set_it_did_not_score_leaves_the_row_without_a_cut() -> None:
+    """An ingested method's set has no scoring record, so there is no cut to copy."""
+    from types import SimpleNamespace
+
+    from protea.core.operations._run_cafa_helpers import ResultRow, build_result_row
+
+    inputs = SimpleNamespace(
+        eval_set_id=uuid.uuid4(),
+        pred_set_id=uuid.uuid4(),
+        pred_set=SimpleNamespace(meta={"algorithm": "ingested_method"}),
+    )
+    row = build_result_row(
+        ResultRow(
+            result_id=uuid.uuid4(),
+            inputs=inputs,
+            payload={},
+            results={},
+            provenance=(None, None, None, None),
+        )
+    )
+    assert (row.scoring_config_id, row.max_k_position, row.max_sequence_rank) == (None, None, None)
 
 
 def test_the_queries_are_valid_against_the_real_schema(postgres_url: str) -> None:

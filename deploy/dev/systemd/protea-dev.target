@@ -1,0 +1,13 @@
+[Unit]
+# Groups the dev stack: the three Quadlet containers (their [Install]
+# sections point here), the readiness gate, and whichever dev worker and API
+# units were enabled. Nothing of production's is wanted by it.
+#
+# Starting this target starts dev and nothing else. Enabling it (WantedBy
+# below) brings dev up at every boot, which is a separate decision; see
+# deploy/dev/README.md.
+Description=PROTEA development stack on this machine
+Documentation=file://%h/protea-dev/deploy/PROTEA/deploy/dev/README.md
+
+[Install]
+WantedBy=default.target

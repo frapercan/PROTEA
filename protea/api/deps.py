@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
 from protea.core.contracts.registry import OperationRegistry
-from protea.infrastructure.benchmark_config import BenchmarkConfig
 from protea.infrastructure.settings import Settings
 
 
@@ -38,13 +37,6 @@ def get_artifacts_dir(request: Request) -> Path:
     if d is None:
         raise RuntimeError("app.state.artifacts_dir is not set")
     return d  # type: ignore[no-any-return]
-
-
-def get_benchmark_config(request: Request) -> BenchmarkConfig:
-    cfg = getattr(request.app.state, "benchmark_config", None)
-    if cfg is None:
-        raise RuntimeError("app.state.benchmark_config is not set")
-    return cfg  # type: ignore[no-any-return]
 
 
 def get_settings(request: Request) -> Settings:

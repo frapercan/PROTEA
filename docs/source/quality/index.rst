@@ -47,8 +47,9 @@ Integration tests
 
 Tests that need a real PostgreSQL instance are activated via the
 ``with-postgres`` pytest flag. The ``conftest.py`` session fixture spins up a
-``pgvector/pgvector:pg16`` Docker container, enables the ``vector``
-extension, and tears it down after the session. Key integration modules:
+``pgvector/pgvector:pg18`` Docker container (the image ``docker-compose.yml``
+pins, by digest), enables the ``vector`` extension, and tears it down after the
+session. Key integration modules:
 
 * ``tests/test_infrastructure.py`` (session, engine, app factory)
 * ``tests/test_pair_feature_perf_equivalence.py`` (parallelised vs serial

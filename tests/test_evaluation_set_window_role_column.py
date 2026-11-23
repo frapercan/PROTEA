@@ -2,10 +2,12 @@
 
 Pin the rolling-origin protocol-window marker (ADR D40) added by Alembic
 migration ``f2a4c6e8b0d1_add_window_role_to_evaluation_set`` so the
-column stays declared on the ORM model, nullable, typed ``String(8)``,
-and guarded by the closed-vocabulary CHECK constraint. The migration is
+column stays declared on the ORM model, nullable, typed ``String(16)``,
+and guarded by the closed-vocabulary CHECK constraint. It was ``String(8)``
+until migration ``b71e2396e5c3`` added ADR-D60's frame roles, two of which
+(``validation``, ``test_spent``) are ten characters long. The migrations are
 the source of truth for the database; this test stops the ORM mapping
-from drifting silently from it.
+from drifting silently from them.
 
 Also asserts the migration is reachable from the previous head and that
 its ``upgrade`` / ``downgrade`` reference the expected DDL (smoke check
@@ -28,11 +30,11 @@ def _column(name: str) -> Column[Any]:
     return EvaluationSet.__table__.c[name]
 
 
-def test_window_role_declared_string8_nullable() -> None:
+def test_window_role_declared_string16_nullable() -> None:
     col = _column("window_role")
     assert col.nullable is True, "window_role must be nullable (legacy + ad-hoc sets)"
     assert isinstance(col.type, String)
-    assert col.type.length == 8
+    assert col.type.length == 16
 
 
 def test_window_role_check_constraint_present() -> None:

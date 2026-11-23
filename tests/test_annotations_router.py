@@ -56,7 +56,6 @@ def _make_app(session_factory, amqp_url="amqp://guest:guest@localhost", artifact
     app.state.session_factory = session_factory
     app.state.amqp_url = amqp_url
     app.state.artifacts_dir = artifacts_dir or Path("/tmp/protea-test-artifacts")
-    app.state.benchmark_config = MagicMock()
     app.include_router(router)
     return app
 
@@ -444,6 +443,7 @@ class TestDependencyGuards:
                 )
         assert resp.status_code == 500
 
+
 # ---------------------------------------------------------------------------
 # PATCH /annotations/snapshots/{snapshot_id}/ia-url (lines 146-158)
 # ---------------------------------------------------------------------------
@@ -713,7 +713,8 @@ class TestDownloadGroundTruthNK:
 
         fake_data = _EvalData(nk={"P12345": {"GO:0003674", "GO:0008150"}})
         with patch(
-            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-NK.tsv")
         assert resp.status_code == 200
@@ -750,7 +751,8 @@ class TestDownloadGroundTruthLK:
 
         fake_data = _EvalData(lk={"Q99999": {"GO:0005575"}})
         with patch(
-            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-LK.tsv")
         assert resp.status_code == 200
@@ -779,7 +781,8 @@ class TestDownloadGroundTruthPK:
 
         fake_data = _EvalData(pk={"A00001": {"GO:0003674"}})
         with patch(
-            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-PK.tsv")
         assert resp.status_code == 200
@@ -806,7 +809,8 @@ class TestDownloadKnownTerms:
 
         fake_data = _EvalData(known={"P12345": {"GO:0003674"}, "Q99999": {"GO:0005575"}})
         with patch(
-            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/known-terms.tsv")
         assert resp.status_code == 200
@@ -912,7 +916,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         assert resp.status_code == 200
@@ -937,7 +942,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=nk")
         assert resp.status_code == 200
@@ -952,7 +958,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         assert resp.status_code == 200
@@ -975,7 +982,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         lines = resp.text.strip().split("\n")
@@ -1001,7 +1009,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=pk")
         assert resp.status_code == 200
@@ -1025,7 +1034,8 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set",
+            return_value=(fake_data, uuid4()),
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=all")
         assert resp.status_code == 200
@@ -1060,6 +1070,40 @@ class TestRunCafaEvaluation:
             )
         assert resp.status_code == 200
         assert resp.json()["status"] == "queued"
+
+    def test_the_job_carries_no_scoring_config_it_was_not_given(self, client):
+        """The evaluator scores stored scores and refuses a scoring config, so the
+        route must not attach the benchmark's baseline one, as it used to."""
+        from protea.infrastructure.orm.models.job import Job
+
+        c, session = client
+        eval_id = uuid4()
+        session.get.return_value = _make_evaluation_set(eval_id=eval_id)
+        jobs: list[Job] = []
+
+        def add_side(obj):
+            if isinstance(obj, Job):
+                obj.id = uuid4()
+                jobs.append(obj)
+
+        session.add.side_effect = add_side
+        with patch("protea.api.routers.annotations.evaluation_sets.publish_job"):
+            resp = c.post(
+                f"/annotations/evaluation-sets/{eval_id}/run",
+                json={"prediction_set_id": str(uuid4())},
+            )
+        assert resp.status_code == 200
+        assert len(jobs) == 1
+        assert "scoring_config_id" not in jobs[0].payload
+
+    def test_a_retired_field_is_refused_with_where_its_work_happens(self, client):
+        c, _session = client
+        resp = c.post(
+            f"/annotations/evaluation-sets/{uuid4()}/run",
+            json={"prediction_set_id": str(uuid4()), "max_distance": 0.5},
+        )
+        assert resp.status_code == 422
+        assert "score_prediction_set" in str(resp.json()["detail"])
 
     def test_invalid_payload_returns_422(self, client):
         c, session = client
@@ -1204,6 +1248,152 @@ class TestDownloadEvaluationArtifacts:
         resp = c.get(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts.zip")
         assert resp.status_code == 404
         assert "No artifacts found" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# GET .../results/{result_id}/artifacts/{relpath}
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadOneEvaluationArtifact:
+    """One recorded file, with the sha256 the result recorded for it."""
+
+    _RELPATH = "PK/evaluation_best_f_micro_w.tsv"
+    _BODY = b"ns\tf_micro_w\nBPO\t0.0981\n"
+
+    def _result(self, eval_id, *, digests: bool):
+        result = _make_evaluation_result(eval_set_id=eval_id)
+        key = f"eval_artifacts/{result.id}/{self._RELPATH}"
+        record: dict = {"keys": [key]}
+        if digests:
+            record["sha256"] = {key: "ab" * 32}
+        result.results = {"artifacts": record}
+        return result, key
+
+    def test_it_serves_the_file_with_the_recorded_digest(
+        self, client_with_artifacts, artifact_store
+    ):
+        c, session, _ = client_with_artifacts
+        eval_id = uuid4()
+        result, key = self._result(eval_id, digests=True)
+        session.get.return_value = result
+        artifact_store.iter_chunks.side_effect = lambda k, chunk_size=0: iter([self._BODY])
+
+        resp = c.get(
+            f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts/{self._RELPATH}"
+        )
+        assert resp.status_code == 200
+        assert resp.content == self._BODY
+        assert resp.headers["x-recorded-sha256"] == "ab" * 32
+        assert resp.headers["content-type"].startswith("text/tab-separated-values")
+        assert 'filename="evaluation_best_f_micro_w.tsv"' in resp.headers["content-disposition"]
+        artifact_store.iter_chunks.assert_called_once_with(key)
+
+    def test_a_result_written_before_the_digests_is_served_without_one(
+        self, client_with_artifacts, artifact_store
+    ):
+        c, session, _ = client_with_artifacts
+        eval_id = uuid4()
+        result, _ = self._result(eval_id, digests=False)
+        session.get.return_value = result
+        artifact_store.iter_chunks.side_effect = lambda k, chunk_size=0: iter([self._BODY])
+
+        resp = c.get(
+            f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts/{self._RELPATH}"
+        )
+        assert resp.status_code == 200
+        assert "x-recorded-sha256" not in resp.headers
+
+    @pytest.mark.parametrize("relpath", ["PK/evaluation_all.tsv", "..%2F..%2Fother%2Fkey"])
+    def test_a_file_the_result_did_not_record_is_not_served(
+        self, client_with_artifacts, artifact_store, relpath
+    ):
+        c, session, _ = client_with_artifacts
+        eval_id = uuid4()
+        result, _ = self._result(eval_id, digests=True)
+        session.get.return_value = result
+
+        resp = c.get(
+            f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts/{relpath}"
+        )
+        assert resp.status_code == 404
+        assert "recorded no file" in resp.json()["detail"]
+        artifact_store.iter_chunks.assert_not_called()
+
+    def test_a_result_of_another_window_is_not_served(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
+        result, _ = self._result(uuid4(), digests=True)
+        session.get.return_value = result
+
+        resp = c.get(
+            f"/annotations/evaluation-sets/{uuid4()}/results/{result.id}/artifacts/{self._RELPATH}"
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "EvaluationResult not found"
+        artifact_store.iter_chunks.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# GET .../paired-comparisons
+# ---------------------------------------------------------------------------
+
+
+class TestListPairedComparisons:
+    def test_it_lists_the_windows_comparisons(self, client):
+        from datetime import UTC, datetime
+
+        c, session = client
+        eval_id, a, b = uuid4(), uuid4(), uuid4()
+        session.get.return_value = _make_evaluation_set(eval_id=eval_id)
+        session.query.return_value.filter.return_value.__iter__.return_value = iter([(a,), (b,)])
+        session.execute.return_value.mappings.return_value = [
+            {
+                "job_id": "j1",
+                "evaluation_result_id": str(a),
+                "baseline_evaluation_result_id": str(b),
+                "finished_at": datetime(2026, 11, 21, tzinfo=UTC),
+                "result": {"method_axis": [], "panels": {"NK:BPO": {"delta": 0.01, "x": 1}}},
+            }
+        ]
+
+        resp = c.get(f"/annotations/evaluation-sets/{eval_id}/paired-comparisons")
+        assert resp.status_code == 200
+        (shown,) = resp.json()
+        assert shown["job_id"] == "j1" and shown["method_axis"] == []
+        assert shown["panels"]["NK:BPO"]["delta"] == 0.01
+        assert "x" not in shown["panels"]["NK:BPO"]
+
+    def test_a_missing_window_is_not_found(self, client):
+        c, session = client
+        session.get.return_value = None
+        resp = c.get(f"/annotations/evaluation-sets/{uuid4()}/paired-comparisons")
+        assert resp.status_code == 404
+
+    def test_half_a_stratum_is_refused(self, client):
+        c, _ = client
+        resp = c.get(f"/annotations/evaluation-sets/{uuid4()}/paired-comparisons?axis=homology")
+        assert resp.status_code == 422
+
+    def test_a_band_outside_the_vocabulary_is_refused(self, client):
+        c, _ = client
+        resp = c.get(
+            f"/annotations/evaluation-sets/{uuid4()}/paired-comparisons?axis=homology&band=close"
+        )
+        assert resp.status_code == 422
+        assert "not one of" in resp.json()["detail"]
+
+    def test_a_band_reaches_the_listing_as_asked(self, client):
+        c, session = client
+        eval_id, a = uuid4(), uuid4()
+        session.get.return_value = _make_evaluation_set(eval_id=eval_id)
+        session.query.return_value.filter.return_value.__iter__.return_value = iter([(a,)])
+        session.execute.return_value.mappings.return_value = []
+        resp = c.get(
+            f"/annotations/evaluation-sets/{eval_id}/paired-comparisons?axis=homology&band=%3E90"
+        )
+        assert resp.status_code == 200
+        params = session.execute.call_args.args[1]
+        assert params["stratum"] == '{"homology": ">90"}'
 
 
 # ---------------------------------------------------------------------------

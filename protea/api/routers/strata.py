@@ -45,6 +45,9 @@ _SETTINGS = ("NK", "LK", "PK")
 _MEASURES = (
     "n_proteins",
     "variant",
+    "tp",
+    "pred",
+    "n_gt",
     "precision",
     "recall",
     "f_micro",
@@ -132,13 +135,22 @@ _COMPARE_TTL = 300.0
 #: ``esm2_650m`` at eight different scores. A reader comparing two of those rows
 #: believes they differ in the field the column names, which is the defect this
 #: project has already hit and named: a single-field comparison that was not.
+#:
+#: The producer is joined OUTER (ADR-D60, decision 3). A set produced by a
+#: method has no embedding configuration, and the inner join this replaced
+#: dropped its results from the comparison while they sat in the table. An arm
+#: produced by a method is named by the method's code, configuration or not,
+#: because the method is what the arm is; every other arm reads exactly as it
+#: did.
 _ARMS = text(
     with_arm_identity(
         """
     SELECT er.id            AS evaluation_result_id,
            ec.id            AS embedding_config_id,
-           ec.model_name    AS model,
-           ec.display_name  AS display_name,
+           ps.method_id     AS method_id,
+           COALESCE(m.code, ec.model_name) AS model,
+           CASE WHEN m.id IS NULL THEN ec.display_name ELSE m.code END
+                            AS display_name,
            -- Both sides of this merge added identity to the arm, and both are
            -- needed: an arm is told apart by every field that varied, and a
            -- comparison whose rows cannot be told apart is the defect this
@@ -150,10 +162,11 @@ _ARMS = text(
            ps.meta ->> 'metric' AS metric
     FROM evaluation_result er
     JOIN prediction_set ps ON ps.id = er.prediction_set_id
-    JOIN embedding_config ec ON ec.id = ps.embedding_config_id
+    LEFT JOIN embedding_config ec ON ec.id = ps.embedding_config_id
+    LEFT JOIN method m ON m.id = ps.method_id
     LEFT JOIN scoring_config sc ON sc.id = er.scoring_config_id
     WHERE er.evaluation_set_id = :esid
-    ORDER BY ec.model_name, ec.layer_indices, ps.limit_per_entry, sc.name
+    ORDER BY model, ec.layer_indices, ps.limit_per_entry, sc.name
     """
     )
 )
@@ -165,7 +178,8 @@ def _load_arms(session: Any, evaluation_set_id: str) -> list[dict[str, Any]]:
         [
             {
                 "evaluation_result_id": str(r["evaluation_result_id"]),
-                "embedding_config_id": str(r["embedding_config_id"]),
+                "embedding_config_id": _id_text(r["embedding_config_id"]),
+                "method_id": _id_text(r["method_id"]),
                 "model": r["model"],
                 "display_name": r["display_name"] or r["model"],
                 "layer_indices": r["layer_indices"],
@@ -181,6 +195,16 @@ def _load_arms(session: Any, evaluation_set_id: str) -> list[dict[str, Any]]:
             for r in session.execute(_ARMS, {"esid": evaluation_set_id}).mappings().all()
         ]
     )
+
+
+def _id_text(value: Any) -> str | None:
+    """A nullable id as text, without turning an absent one into the word None."""
+    return None if value is None else str(value)
+
+
+def _arm_identity(arm: dict[str, Any]) -> str:
+    """What tells two arms apart: the method when one produced it, else the config."""
+    return arm.get("method_id") or arm["embedding_config_id"] or ""
 
 
 def _label(arms: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -200,17 +224,20 @@ def _label(arms: list[dict[str, Any]]) -> list[dict[str, Any]]:
     configuration in this evaluation set. Models with a single config keep
     the label they had, because renaming every arm to fix a collision that
     is not there makes the common case worse.
+
+    An arm produced by a method (ADR-D60) is told apart by its method id
+    instead, since one configuration can serve several methods.
     """
     by_model: dict[str, set[str]] = {}
     for a in arms:
-        by_model.setdefault(a["model"], set()).add(a["embedding_config_id"])
+        by_model.setdefault(a["model"], set()).add(_arm_identity(a))
     for a in arms:
         if len(by_model[a["model"]]) < 2:
             continue
         layers = a.get("layer_indices")
         # Layer first when it is what differs, since it is the axis rung 2
-        # declares. Otherwise the config id, which always distinguishes.
-        suffix = f"L{layers}" if layers is not None else a["embedding_config_id"][:8]
+        # declares. Otherwise the identity, which always distinguishes.
+        suffix = f"L{layers}" if layers is not None else _arm_identity(a)[:8]
         a["display_name"] = f"{a['display_name']} [{suffix}]"
     return arms
 

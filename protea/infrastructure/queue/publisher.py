@@ -10,6 +10,7 @@ from uuid import UUID
 import pika
 
 from protea.config.tuning import get_tuning
+from protea.core import queues
 from protea.infrastructure.telemetry import get_tracer, inject_trace_context
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,15 @@ def _close_cached_connection() -> None:
     _local.connection = None
 
 
+def _close_quietly(channel: Any) -> None:
+    """Close a publishing channel; a channel already gone needs nothing."""
+    try:
+        if channel.is_open:
+            channel.close()
+    except Exception:
+        pass
+
+
 def _publish_with_span(channel: Any, queue_name: str, body: bytes) -> None:
     """Wrap a single ``basic_publish`` in an OTel CLIENT span and inject
     the ``traceparent`` header so consumers can stitch the trace.
@@ -59,6 +69,9 @@ def _publish_with_span(channel: Any, queue_name: str, body: bytes) -> None:
         span.set_attribute("messaging.destination_kind", "queue")
         headers: dict[str, Any] = {}
         inject_trace_context(headers)
+        # ``mandatory`` with publisher confirms (see :func:`_publish`): the call
+        # returns only once the broker has taken the message, and raises when it
+        # could not route or store it.
         channel.basic_publish(
             exchange="",
             routing_key=queue_name,
@@ -67,7 +80,33 @@ def _publish_with_span(channel: Any, queue_name: str, body: bytes) -> None:
                 delivery_mode=pika.DeliveryMode.Persistent,
                 headers=headers or None,
             ),
+            mandatory=True,
         )
+
+
+def _publish_confirmed(connection: Any, queue_name: str, body: bytes) -> None:
+    """One attempt: declare, publish and wait for the broker's confirm, then close.
+
+    THE BROKER CONFIRMS BEFORE THIS RETURNS (ADR-D60, phase 3). The channel
+    runs in confirm mode, so the publish returns only after the broker has
+    taken the message and raises when it nacks it or cannot route it. A
+    consumer that publishes downstream messages and then acks its own input
+    therefore acks only what the broker already holds: before, a broker that
+    fell over between the two lost the downstream work while the input was
+    already gone. The channel is closed after the attempt, where it used to
+    stay open on the cached connection, one more per publish.
+    """
+    channel = connection.channel()
+    try:
+        channel.confirm_delivery()
+        channel.queue_declare(
+            queue=queue_name,
+            durable=True,
+            arguments={"x-dead-letter-exchange": queues.DEAD_LETTER_EXCHANGE},
+        )
+        _publish_with_span(channel, queue_name, body)
+    finally:
+        _close_quietly(channel)
 
 
 def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
@@ -75,7 +114,8 @@ def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
 
     T5.1b: each attempt is wrapped in a CLIENT span via
     :func:`_publish_with_span` so the W3C ``traceparent`` flows onto the
-    outbound AMQP message.
+    outbound AMQP message. Each attempt waits for the broker's confirm
+    (:func:`_publish_confirmed`).
     """
     settings = get_tuning().queue
     max_attempts = settings.publisher_max_attempts
@@ -84,14 +124,7 @@ def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
 
     for attempt in range(1, max_attempts + 1):
         try:
-            connection = _get_connection(amqp_url)
-            channel = connection.channel()
-            channel.queue_declare(
-                queue=queue_name,
-                durable=True,
-                arguments={"x-dead-letter-exchange": "protea.dlx"},
-            )
-            _publish_with_span(channel, queue_name, body)
+            _publish_confirmed(_get_connection(amqp_url), queue_name, body)
             return
         except Exception as exc:
             last_exc = exc

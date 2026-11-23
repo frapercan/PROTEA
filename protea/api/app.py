@@ -28,7 +28,6 @@ from protea.api.routers import auth_api_keys as auth_api_keys_router
 from protea.api.routers import auth_login as auth_login_router
 from protea.api.routers import auth_smtp as auth_smtp_router
 from protea.api.routers import auth_user as auth_user_router
-from protea.api.routers import benchmark as benchmark_router
 from protea.api.routers import datasets as datasets_router
 from protea.api.routers import embeddings as embeddings_router
 from protea.api.routers import experiment_runs as experiment_runs_router
@@ -46,7 +45,6 @@ from protea.api.routers import query_sets as query_sets_router
 from protea.api.routers import receipts as receipts_router
 from protea.api.routers import registry as registry_router
 from protea.api.routers import reranker_models as reranker_models_router
-from protea.api.routers import rungs as rungs_router
 from protea.api.routers import scoring as scoring_router
 from protea.api.routers import showcase as showcase_router
 from protea.api.routers import stack as stack_router
@@ -62,12 +60,6 @@ from protea.api.routers.annotations.snapshots import (
     SNAPSHOTS_TTL_SECONDS,
     prewarm_snapshots,
 )
-from protea.api.routers.benchmark import (
-    BENCHMARK_EMBEDDINGS_TTL_SECONDS,
-    BENCHMARK_MATRIX_TTL_SECONDS,
-    prewarm_benchmark_embeddings,
-    prewarm_benchmark_matrix,
-)
 from protea.api.routers.embeddings import (
     EMBEDDING_CONFIGS_TTL_SECONDS,
     PREDICTION_SETS_TTL_SECONDS,
@@ -81,7 +73,7 @@ from protea.api.routers.proteins import (
 from protea.api.routers.proteins_stats import prewarm_all as prewarm_protein_stats_sections
 from protea.core.code_revision import code_revision, is_identifying
 from protea.core.operation_catalog import build_operation_registry
-from protea.infrastructure.benchmark_config import load_benchmark_config
+from protea.infrastructure.environment_check import exit_on_environment_mismatch
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.telemetry import build_metric_registry, configure_telemetry
@@ -120,13 +112,6 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
     {
         "name": "scoring",
         "description": "Scoring configs, scored prediction export, and CAFA metrics.",
-    },
-    {
-        "name": "benchmark",
-        "description": (
-            "Per-embedding / per-stage Fmax matrix across every "
-            "evaluation result. Powers the /benchmark page in the UI."
-        ),
     },
     {"name": "support", "description": "Community thumbs-up and comments."},
     {
@@ -208,9 +193,7 @@ _ROUTER_MODULES = (
     admin_router,
     scoring_router,
     showcase_router,
-    benchmark_router,
     receipts_router,
-    rungs_router,
     strata_router,
     stratum_members_router,
     stratum_proteins_router,
@@ -336,26 +319,70 @@ def _declared_revision() -> str | None:
     return None
 
 
-def _register_health_endpoints(app: FastAPI, factory, settings) -> None:
+#: Where ``scripts/deploy-docs.sh`` stamps the revision it built from. Inside
+#: ``_static`` because Sphinx copies that directory verbatim and nothing else
+#: in the build is guaranteed to survive a theme change.
+_DOCS_STAMP = Path("docs") / "build" / "html" / "_static" / "protea-revision.txt"
+
+
+def _docs_revision(project_root: Path) -> str | None:
+    """The revision the SERVED documentation was built from, or ``None``.
+
+    Read at request time rather than at startup, because a docs swap replaces
+    the directory under a running process and a value cached at import would
+    outlive it. ``None`` means the build carries no stamp, which is what every
+    build made before this script existed looks like: it is not agreement and
+    must not be reported as any.
+    """
+    try:
+        crudo = (project_root / _DOCS_STAMP).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return crudo if is_identifying(crudo) and len(crudo) == 40 else None
+
+
+def _revisions(project_root: Path) -> dict[str, str | bool | None]:
+    """The three revisions this instance can be asked about, and their agreement.
+
+    ``revision_matches_declaration`` compares the code this process LOADED
+    against the revision the fleet declares it is running, and
+    ``docs_match_code`` compares the documentation this instance SERVES against
+    that same loaded code. Both are ``None`` when the question cannot be
+    answered, which is NOT ``True``: one reports an absent agent-farm clone, the
+    other a build made before ``scripts/deploy-docs.sh`` stamped anything.
+
+    The second field exists because its answer was no for five weeks and
+    nothing said so. ``/health`` reported agreement with the declaration all
+    along, truthfully, because that field is about the code; the documentation
+    was a month behind and no field was about it.
+    """
+    served = code_revision()
+    declared = _declared_revision()
+    matches: bool | None = None
+    if declared is not None and is_identifying(served):
+        matches = served == declared
+    docs = _docs_revision(project_root)
+    docs_match: bool | None = None
+    if docs is not None and is_identifying(served):
+        docs_match = docs == served
+    return {
+        "code_revision": served,
+        "declared_revision": declared,
+        "revision_matches_declaration": matches,
+        "docs_revision": docs,
+        "docs_match_code": docs_match,
+    }
+
+
+def _register_health_endpoints(app: FastAPI, factory, settings, project_root: Path) -> None:
     @app.get("/health", tags=["health"])
     def health_check() -> dict[str, str | bool | None]:
-        """Liveness, and WHICH REVISION THIS PROCESS SERVES.
+        """Liveness, and WHICH REVISIONS THIS INSTANCE SERVES.
 
-        ``revision_matches_declaration`` is ``None`` when the question cannot
-        be answered, which is NOT ``True``. See :func:`_declared_revision`
-        for why this reports and never enforces.
+        See :func:`_revisions` for what each field answers and why a
+        ``None`` there must never be read as agreement.
         """
-        served = code_revision()
-        declared = _declared_revision()
-        matches: bool | None = None
-        if declared is not None and is_identifying(served):
-            matches = served == declared
-        return {
-            "status": "ok",
-            "code_revision": served,
-            "declared_revision": declared,
-            "revision_matches_declaration": matches,
-        }
+        return {"status": "ok", **_revisions(project_root)}
 
     @app.get("/health/ready", tags=["health"])
     def readiness_check() -> dict[str, str]:
@@ -489,12 +516,6 @@ def _prewarm_targets():
         ("annotations:snapshots", prewarm_snapshots, SNAPSHOTS_TTL_SECONDS),
         ("annotations:sets", prewarm_annotation_sets, ANNOTATION_SETS_TTL_SECONDS),
         ("proteins:stats:sections", prewarm_protein_stats_sections, 600),
-        (
-            "benchmark:embeddings",
-            prewarm_benchmark_embeddings,
-            BENCHMARK_EMBEDDINGS_TTL_SECONDS,
-        ),
-        ("benchmark:matrix", prewarm_benchmark_matrix, BENCHMARK_MATRIX_TTL_SECONDS),
     )
 
 
@@ -554,6 +575,8 @@ def create_app(project_root: Path | None = None) -> FastAPI:
         project_root = Path(__file__).resolve().parents[2]
 
     settings = load_settings(project_root)
+    # A dev API on a database or vhost that is not dev's exits 78 here.
+    exit_on_environment_mismatch(settings)
     factory = build_session_factory(settings.db_url)
 
     # T5.6b: fail loudly when the bearer secret is missing in a
@@ -574,7 +597,6 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.state.artifacts_dir = settings.artifacts_dir
     app.state.settings = settings
     app.state.operation_registry = build_operation_registry()
-    app.state.benchmark_config = load_benchmark_config(project_root)
     # FARM-AUTH.7: expose quota limits so the dependency can read them
     # without importing the full Settings object.
     app.state.user_quota_per_day = settings.user_quota_per_day
@@ -599,7 +621,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     install_rate_limiter(app)
     register_problem_handlers(app)
     install_problem_openapi_schema(app)
-    _register_health_endpoints(app, factory, settings)
+    _register_health_endpoints(app, factory, settings, project_root)
     _register_routers(app)
     _register_thesis_pdf(app, project_root)
     _mount_static_assets(app, project_root)

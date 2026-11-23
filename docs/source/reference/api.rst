@@ -198,10 +198,13 @@ Key endpoints:
   ``DELETE /scoring/rerankers/{id}``: read/delete operations for
   registered re-ranker models. Creation lives at
   ``POST /reranker-models/import``.
-- ``GET /scoring/prediction-sets/{id}/rerank.tsv``: applies a trained
-  re-ranker to a prediction set, streaming re-scored predictions.
-- ``GET /scoring/prediction-sets/{id}/reranker-metrics``: computes CAFA-style
-  Fmax and AUC-PR using re-ranker probability scores.
+
+Nothing under ``/scoring`` scores a set or measures one. A reranker runs when
+the method predicts and its score is stored; a ScoringConfig is applied by
+``score_prediction_set``; the numbers are the evaluator's. The endpoints that
+scored, reranked and measured on the fly (``score.tsv``, ``rerank.tsv``,
+``score``, ``metrics``, ``reranker-metrics``) were retired on 2026-11-20
+(:doc:`/architecture/scoring`).
 
 .. automodule:: protea.api.routers.scoring
    :members:
@@ -285,22 +288,6 @@ the total thumbs-up count and recent comments. ``POST /support`` submits a
 new thumbs-up with an optional comment (max 500 characters).
 
 .. automodule:: protea.api.routers.support
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Benchmark router
-----------------
-
-The ``/benchmark`` router powers the per-PLM comparison grid in the UI.
-Where ``/showcase`` collapses every model into a few buckets and reports
-the maximum, this router preserves *which* embedding produced each number
-and *which* scoring config was used, exposing one stage per distinct
-``ScoringConfig.name`` plus an implicit ``"reranker"`` stage for evaluations
-that used a re-ranker. Stage labels, GO categories, and the baseline tag are
-read from ``protea/config/benchmark.yaml``; no hardcoded constants.
-
-.. automodule:: protea.api.routers.benchmark
    :members:
    :undoc-members:
    :show-inheritance:
@@ -713,11 +700,19 @@ Endpoints summary
      - ``/annotations/evaluation-sets/{id}/results``
      - List evaluation results for an evaluation set.
    * - ``GET``
+     - ``/annotations/evaluation-sets/{id}/paired-comparisons``
+     - The latest whole-panel paired comparison of each pair of the window's results,
+       read from the jobs that ran them.
+   * - ``GET``
      - ``/annotations/evaluation-sets/{id}/results/{rid}/metrics.tsv``
      - Download evaluation metrics as TSV.
    * - ``GET``
      - ``/annotations/evaluation-sets/{id}/results/{rid}/artifacts.zip``
      - Download all cafaeval artifacts as a zip.
+   * - ``GET``
+     - ``/annotations/evaluation-sets/{id}/results/{rid}/artifacts/{path}``
+     - Download one file the result recorded, with the sha256 it recorded for it in
+       ``X-Recorded-SHA256``.
    * - ``DELETE``
      - ``/annotations/evaluation-sets/{id}/results/{rid}``
      - Delete an evaluation result.
@@ -791,7 +786,7 @@ Endpoints summary
      - Stream all predictions as TSV (filtered by accession / aspect / distance).
    * - ``GET``
      - ``/embeddings/prediction-sets/{id}/predictions-cafa.tsv``
-     - Download predictions in CAFA submission format.
+     - Download a set's stored scores in CAFA format, as the evaluator writes them.
    * - ``DELETE``
      - ``/embeddings/prediction-sets/{id}``
      - Delete a prediction set.
@@ -815,12 +810,6 @@ Endpoints summary
      - ``/scoring/configs/{id}``
      - Delete a scoring configuration.
    * - ``GET``
-     - ``/scoring/prediction-sets/{id}/score.tsv``
-     - Stream scored predictions as TSV.
-   * - ``GET``
-     - ``/scoring/prediction-sets/{id}/metrics``
-     - Compute CAFA-style metrics for scored predictions.
-   * - ``GET``
      - ``/scoring/prediction-sets/{id}/training-data.tsv``
      - Export labeled training data for the re-ranker.
    * - ``GET``
@@ -832,12 +821,6 @@ Endpoints summary
    * - ``DELETE``
      - ``/scoring/rerankers/{id}``
      - Delete a trained re-ranker model.
-   * - ``GET``
-     - ``/scoring/prediction-sets/{id}/rerank.tsv``
-     - Apply a re-ranker to a prediction set and stream re-scored TSV.
-   * - ``GET``
-     - ``/scoring/prediction-sets/{id}/reranker-metrics``
-     - Compute CAFA Fmax and AUC-PR using re-ranker scores.
 
    * -
      - **Query Sets**
@@ -901,16 +884,6 @@ Endpoints summary
    * - ``POST``
      - ``/support``
      - Submit a thumbs-up with optional comment.
-
-   * -
-     - **Benchmark**
-     -
-   * - ``GET``
-     - ``/benchmark/embeddings``
-     - List embedding configs with persisted display metadata.
-   * - ``GET``
-     - ``/benchmark/matrix``
-     - Per-embedding / per-stage Fmax matrix across all evaluation results.
 
    * -
      - **Datasets**
@@ -997,6 +970,14 @@ the ``Job`` row and never interpreted by the API. ``description`` and
 ``GET /jobs`` and ``GET /jobs/{id}`` responses; they let any caller
 attach human intent and ad-hoc grouping tokens at submission time
 without round-tripping through a separate metadata endpoint.
+
+``queue_name`` must be the queue the operation's spec names (ADR-D60,
+decision 6). The endpoint answers 422 before it writes anything when the
+operation is not registered (``unknown_operation``), when its kind never gets
+a ``Job`` row, as a message stage or a write does (``not_a_job``), and when
+the queue is another one (``wrong_queue``, with the right one in
+``expected_queue``). The ``ping`` probe is the one operation any job queue
+accepts.
 
 .. code-block:: json
 

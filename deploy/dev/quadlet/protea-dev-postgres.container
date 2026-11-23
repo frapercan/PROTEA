@@ -1,0 +1,65 @@
+# Development Postgres for the desktop stack (rootless podman, Quadlet).
+#
+# This stack runs BESIDE a production worker on the same machine and shares
+# nothing with it: its own loopback port, its own credentials, its own data
+# directory, its own slice. See deploy/dev/README.md.
+#
+# The image is the one docker-compose.yml pins for the postgres service, by
+# the same digest, so dev and production run the same build. Written fully
+# qualified (docker.io/...) because a short name resolves through
+# registries.conf, and without a terminal an ambiguous one fails.
+[Unit]
+Description=PROTEA dev Postgres (pg18 + pgvector, 127.0.0.1:26432)
+PartOf=protea-dev.target
+# The dev data lives on the system disk, beside production (the author's
+# decision of 2026-11-15: no new disk, no copies). The directory must exist,
+# and the disk gate in [Service] stops the unit before the data can fill
+# the disk production runs on.
+AssertPathIsDirectory=%h/protea-dev
+# A refusal of the disk gate (exit 78) must not loop: at most three starts
+# in fifteen minutes.
+StartLimitIntervalSec=900
+StartLimitBurst=3
+
+[Container]
+ContainerName=protea-dev-postgres
+Image=docker.io/pgvector/pgvector:pg18@sha256:1d50c689b0a6511b9ea0a15615281c81a59fd04a08eb35057ec8646fb3a2118a
+# Loopback only, and never 5432. A dev process that lost its PROTEA_DB_URL
+# falls back to the settings default on 5432, and must find nothing there.
+PublishPort=127.0.0.1:26432:5432
+# pg18 images keep data in a major-version subdirectory of this mount point
+# (docker-compose.yml explains the layout change).
+Volume=%h/protea-dev/postgres:/var/lib/postgresql
+Environment=POSTGRES_USER=protea_dev
+Environment=POSTGRES_DB=protea_dev
+# Created once from stdin (README). Never written in this file and never
+# passed on a command line, where any local user can read it in /proc.
+Secret=protea-dev-postgres-password,type=env,target=POSTGRES_PASSWORD
+# Parallel hash joins allocate dynamic shared memory in /dev/shm, and
+# podman's 64 MB default fails them. Scaled from docker-compose.yml's 2gb
+# with the memory cap.
+ShmSize=1g
+# Sized to MemoryMax below. shared_buffers is taken once; effective_cache_size
+# must not claim more cache than the cgroup can hold, or the planner chooses
+# against memory that does not exist (docker-compose.yml, the 2026-08-29
+# measurement). work_mem and maintenance_work_mem as in production. WAL and
+# temporary files are bounded so one runaway query cannot fill the dev
+# volume.
+Exec=postgres -c shared_buffers=768MB -c effective_cache_size=2GB -c work_mem=16MB -c maintenance_work_mem=512MB -c max_wal_size=8GB -c temp_file_limit=100GB
+# The image stops Postgres with SIGINT (fast shutdown). Give it time to
+# checkpoint before podman escalates; stays under the unit's stop timeout.
+StopTimeout=60
+
+[Service]
+# The disk gate (README, "Disk"): refuses to start below the free-space floor.
+ExecStartPre=/bin/bash %h/protea-dev/deploy/PROTEA/deploy/dev/protea-dev-disk-gate.sh %h/protea-dev %n
+Slice=protea-dev.slice
+MemoryMax=3G
+# The first start pulls the image, which the default 90 s does not cover.
+TimeoutStartSec=900
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=protea-dev.target

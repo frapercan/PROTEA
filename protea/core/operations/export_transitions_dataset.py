@@ -33,11 +33,14 @@ import hashlib
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
-from pydantic import field_validator
+import pyarrow.parquet as pq
+from pydantic import field_validator, model_validator
 from sqlalchemy.orm import Session
 
+from protea.core._truth_remap import SideFrame
+from protea.core._truth_rules import _frame_of
 from protea.core.code_revision import code_revision, is_identifying, revisions_conflict
 from protea.core.contracts.operation import (
     EmitFn,
@@ -45,10 +48,30 @@ from protea.core.contracts.operation import (
     OperationResult,
     ProteaPayload,
 )
+from protea.core.operations.export_evaluation_targets import SCORED_CATEGORIES
 from protea.core.training_dump._window_choice import _refuse_wrong_pivot, window_identity
+from protea.core.transitions_export._gains import WindowGains, gains_of, new_columns
+from protea.core.transitions_export._gains import write_table as write_gains
+from protea.core.transitions_export._queries import WindowQueries, queries_of
+from protea.core.transitions_export._queries import write_table as write_queries
+from protea.core.transitions_export._query_state import WindowState, state_of
+from protea.core.transitions_export._query_state import Writer as StateWriter
+from protea.core.transitions_export._residue_refs import refs_of
+from protea.core.transitions_export._residue_refs import write_table as write_refs
+from protea.core.transitions_export._terms import (
+    Axis,
+    axis_of,
+    verified_vectors,
+    write_ancestors,
+    write_terms,
+)
+from protea.core.transitions_export._window_facts import (
+    WindowFacts,
+    facts_of,
+    refuse_after_the_cut,
+)
 from protea.core.transitions_export._window_terms_out import (
     WindowTerms,
-    axis_live_terms,
     terms_out,
     write_table,
 )
@@ -74,7 +97,35 @@ TABLES: tuple[str, ...] = (
 #: What this revision can actually write. Named separately from ``TABLES`` so
 #: the refusal can say "declared but not written yet" instead of "unknown",
 #: which are different answers for whoever reads the error.
-IMPLEMENTED: frozenset[str] = frozenset({"window_terms_out"})
+IMPLEMENTED: frozenset[str] = frozenset(
+    {
+        "window_terms_out",
+        "queries",
+        "gains",
+        "query_state",
+        "terms",
+        "term_ancestors",
+        "residue_refs",
+    }
+)
+
+#: Tables that depend on NO window, so a run asking only for these needs no
+#: window list: demanding ids would be asking for a scope the table does not
+#: use. ``terms`` and ``term_ancestors`` are keyed by the axis;
+#: ``residue_refs`` by an embedding config, and it covers the WHOLE bank, which
+#: is a superset of any selection a bundle could make.
+WINDOWLESS: frozenset[str] = frozenset({"terms", "term_ancestors", "residue_refs"})
+
+#: Tables that need the axis read. ``window_terms_out`` is keyed by a window
+#: and still needs it, which is why this is not the complement of
+#: :data:`AXIS_ONLY`.
+_NEEDS_AXIS: frozenset[str] = frozenset({"window_terms_out", "terms", "term_ancestors", "gains"})
+
+#: Tables whose population IS the query population, so asking for either makes
+#: it worth computing once. ``gains`` does not write ``queries`` and still
+#: needs its population: a gain for a protein ``queries`` excludes would be a
+#: gain for a query the loader does not know.
+_NEEDS_QUERIES: frozenset[str] = frozenset({"queries", "gains", "query_state"})
 
 
 class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
@@ -83,29 +134,108 @@ class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
     windows: list[str]
     cut: str
     cut_version: str
-    tables: list[str] = ["window_terms_out"]
+    tables: list[str] = ["window_terms_out", "queries"]
+    categories: list[str] = list(SCORED_CATEGORIES)
     output_name: str = "transitions"
     accept_revisions: list[str] = []
+    term_vectors_key: str | None = None
+    term_vectors_sha256: str | None = None
+    #: The config whose per-residue CODES index ``residue_refs`` and, later,
+    #: ``feature_tokens``: the VOCABULARY config, not the model one it was
+    #: derived from.
+    #:
+    #: NOT called ``embedding_config_id``, which is what it was called for one
+    #: commit. There are two configs in this dataset and neither derives from
+    #: the other: the codes config indexes the reference tables, and the kNN
+    #: config gives the neighbourhood. One field named for both invites
+    #: putting one where the other goes, which is the ``cut`` and
+    #: ``cut_version`` mistake again. ``knn_config_id`` arrives with
+    #: ``neighbourhood`` and not before, because a field that does nothing
+    #: lies about what the run declared.
+    #:
+    #: The COLUMN inside ``residue_refs`` stays ``embedding_config_id``,
+    #: because that is the laboratory loader's contract and inside one table
+    #: there is only one config to mean.
+    codes_config_id: str | None = None
 
     @field_validator("windows")
     @classmethod
     def _named_and_distinct(cls, value: list[str]) -> list[str]:
-        """Refuse an empty list and refuse repeats.
+        """Refuse repeats, and SORT, which is load-bearing and was not here.
 
-        There is no "all the windows" mode. A scope living in a default is a
-        scope nobody declared, and this one decides which transitions a model
-        is trained on.
+        ``gains`` builds its rows per window as the pass walks them and never
+        sorts 9,6 million rows afterwards, so its bytes were a function of the
+        order the CALLER listed the windows in: the same 65 windows in a
+        different payload order gave a different sha. My own docstring for that
+        writer claimed "the caller walks the windows sorted" while the pass
+        iterated the payload as given.
+
+        Sorting here makes the canonical order a property of the RUN rather
+        than of whoever wrote the list, which is what the sha has to be about.
+        It changes nothing semantically: the field declares a SET of windows.
         """
-        if not value:
-            raise ValueError(
-                "windows cannot be empty and has no 'all' mode: the scope of a "
-                "training set is not something to leave to a default"
-            )
         repetidas = sorted({w for w in value if value.count(w) > 1})
         if repetidas:
             raise ValueError(
                 f"windows repeats {repetidas}. A window exported twice would write "
                 "its terms twice and the row count would stop being a count"
+            )
+        return sorted(value)
+
+    @model_validator(mode="after")
+    def _scope_and_vectors_match_the_tables(self) -> ExportTransitionsDatasetPayload:
+        """What a run must declare depends on which tables it asks for.
+
+        Window-keyed tables need their window list named: there is no "all the
+        windows" mode, because a scope living in a default is a scope nobody
+        declared and this one decides which transitions a model is trained on.
+        The axis-keyed tables need no windows at all, and demanding them would
+        be asking for a scope the table does not use.
+
+        And ``terms`` needs the vectors NAMED, because its two vector columns
+        are published only after those bytes are fetched and their digest
+        checked. A sha from a message would be a locator for bytes nobody
+        verified.
+        """
+        por_ventana = sorted(set(self.tables) - WINDOWLESS)
+        if por_ventana and not self.windows:
+            raise ValueError(
+                f"tables {por_ventana} are keyed by a window, so windows cannot be "
+                "empty and there is no 'all' mode for it"
+            )
+        if "residue_refs" in self.tables and not self.codes_config_id:
+            raise ValueError(
+                "residue_refs is keyed by an embedding config, so "
+                "codes_config_id has to be named. And it is the VOCABULARY "
+                "config that keys those rows, not the model config the vocabulary "
+                "was derived from: the second has zero rows, and an empty "
+                "residue_refs is indistinguishable from a bank with no codes"
+            )
+        if "terms" in self.tables and not (self.term_vectors_key and self.term_vectors_sha256):
+            raise ValueError(
+                "terms carries vector_uri and vector_sha256, so term_vectors_key and "
+                "term_vectors_sha256 have to be named. They are fetched and their "
+                "digest checked before either column is written: a sha nobody "
+                "verified is worse in a table than absent from one"
+            )
+        return self
+
+    @field_validator("categories")
+    @classmethod
+    def _only_scored_categories(cls, value: list[str]) -> list[str]:
+        """The same refusal the target export makes, for the same reason.
+
+        Naming ``removed`` would be a plausible request that silently changes
+        the population a model is trained on: those proteins only LOST
+        annotation, which the evaluation reports and never scores.
+        """
+        if not value:
+            raise ValueError("categories cannot be empty; omit it to take all three")
+        unknown = sorted(set(value) - set(SCORED_CATEGORIES))
+        if unknown:
+            raise ValueError(
+                f"unknown categories {unknown}; only {list(SCORED_CATEGORIES)} are "
+                "scored, and proteins that only lost annotation are not queries"
             )
         return value
 
@@ -127,6 +257,34 @@ class ExportTransitionsDatasetPayload(ProteaPayload, frozen=True):
                 "nobody can tell from a complete one"
             )
         return value
+
+
+def _publish_one(
+    store: Any, p: ExportTransitionsDatasetPayload, tmp: str, nombre: str
+) -> dict[str, Any]:
+    """Hash and publish a file the pass already wrote, without rewriting it."""
+    local = Path(tmp) / f"{nombre}.parquet"
+    raw = local.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    key = f"transitions/{p.output_name}/{p.cut[:8]}/{nombre}-{digest[:12]}.parquet"
+    return {
+        "uri": store.put(key, raw),
+        "key": key,
+        "sha256": digest,
+        "rows": pq.ParquetFile(str(local)).metadata.num_rows,
+    }
+
+
+def _write_one(
+    store: Any, p: ExportTransitionsDatasetPayload, tmp: str, nombre: str, escribir: Any
+) -> dict[str, Any]:
+    """Write one table's parquet, publish it, and report its digest."""
+    local = Path(tmp) / f"{nombre}.parquet"
+    filas = escribir(str(local))
+    raw = local.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    key = f"transitions/{p.output_name}/{p.cut[:8]}/{nombre}-{digest[:12]}.parquet"
+    return {"uri": store.put(key, raw), "key": key, "sha256": digest, "rows": filas}
 
 
 def _window_or_refuse(session: Session, raw: str) -> EvaluationSet:
@@ -174,6 +332,288 @@ def _refuse_unstamped(eset: EvaluationSet, accepted: list[str], running: str) ->
         )
 
 
+class _Run(NamedTuple):
+    """What does not change between windows, bundled.
+
+    Same reason as the retirement's ``_Plan``: a signature that took them
+    loose is one somebody can call with five of the six, and ``query_state``
+    added a sixth -- its writer, which has to outlive the loop because the
+    table is streamed one row group per window rather than accumulated.
+    """
+
+    p: ExportTransitionsDatasetPayload
+    axis: Axis | None
+    running: str
+    state: Any
+    #: The AXIS's own frame: its live ids and its synonym map, read once from
+    #: the snapshot ``cut`` names. ``query_state`` rewrites every card into
+    #: this id space BEFORE collapsing equal cards, so the two have to come
+    #: from one snapshot, which is what :class:`SideFrame` is for.
+    frame: SideFrame | None
+
+
+class _Bundle(NamedTuple):
+    """What one run computed: the per-window lists, and the axis if it read one."""
+
+    hecho: _Computed
+    axis: Axis | None
+    refs: Any
+
+
+class _Computed(NamedTuple):
+    """What the per-window pass produced, one list per table."""
+
+    terms: list[WindowTerms]
+    queries: list[WindowQueries]
+    gains: list[WindowGains]
+    state: list[WindowState]
+    #: The six parallel lists ``gains`` accumulates into. Built once and
+    #: appended per window, because a tuple per row over 9,6 million rows is
+    #: the one avoidable cost in that table.
+    gain_columns: dict[str, list]
+
+
+def _emit_terms(r: WindowTerms, eset: Any, emit: EmitFn) -> WindowTerms:
+    emit(
+        "transitions.window_terms_out",
+        f"{r.window[:8]}: {len(r.out)} of {r.axis_size} axis terms out",
+        {
+            **window_identity(eset),
+            "terms_out": len(r.out),
+            "axis_live_terms": r.axis_size,
+            "toi_terms": r.toi_size,
+            # The TOI is NOT a subset of the axis, so this is emitted rather
+            # than left to be inferred from the other two.
+            "toi_terms_off_axis": r.toi_off_axis,
+            # Whether the rule trims at all. An empty table because the rule
+            # does not restrict and an empty table because the intersection
+            # covered the axis look identical in the parquet.
+            "toi_restricts_the_gain": r.restricts,
+            # From the window's own sealed parquet, which is what the
+            # cross-table invariant was checked against.
+            "gain_terms": r.gain_terms,
+        },
+        "info",
+    )
+    return r
+
+
+def _emit_queries(q: WindowQueries, facts: WindowFacts, emit: EmitFn) -> WindowQueries:
+    emit(
+        "transitions.queries",
+        f"{q.window[:8]}: {len(q.rows)} queries over {facts.horizon_days} days",
+        {
+            "window": q.window,
+            "queries": len(q.rows),
+            "delta_proteins": q.asked,
+            # Excluded for the same reason the exported FASTA excludes them, so
+            # the training rows are about the population that file contains.
+            "without_sequence": q.without_sequence,
+            "version_t": facts.version_t,
+            "version_t_prime": facts.version_t_prime,
+            "horizon_days": facts.horizon_days,
+        },
+        "info",
+    )
+    return q
+
+
+def _emit_gains(g: WindowGains, emit: EmitFn) -> WindowGains:
+    emit(
+        "transitions.gains",
+        f"{g.window[:8]}: {g.rows} gains over {g.distinct_terms} terms, {g.closure} closure",
+        {
+            "window": g.window,
+            "gains": g.rows,
+            # Per stratum, so a bundle whose strata shifted is visible from the
+            # event instead of from a diff of two parquets.
+            **{f"gains_{k}": v for k, v in g.by_stratum.items()},
+            "distinct_terms": g.distinct_terms,
+            # Which graph the gain is expressed in. The same window under two
+            # closures is two different truths.
+            "closure": g.closure,
+        },
+        "info",
+    )
+    return g
+
+
+def _streamed(
+    session: Session, p: ExportTransitionsDatasetPayload, tmp: str
+) -> tuple[Any, SideFrame | None]:
+    """The streamed writer and the axis frame, which only ``query_state`` needs.
+
+    THE TWO ARE RETURNED TOGETHER so that "a writer with no frame" cannot be
+    built: every card has to be rewritten into the axis before equal cards are
+    collapsed, and a writer that ran without the frame would publish a table
+    whose ``go_id`` lives in each snapshot's own id space, which the loader
+    joins to nothing and nothing would raise.
+
+    The frame comes from the SAME snapshot ``axis_of`` read, and ``_frame_of``
+    refuses one with no alias rows: without the map, "rewritten into the axis"
+    would quietly mean "not rewritten".
+    """
+    if "query_state" not in p.tables:
+        return None, None
+    return (
+        StateWriter(str(Path(tmp) / "query_state.parquet")),
+        _frame_of(session, uuid.UUID(p.cut)),
+    )
+
+
+# WHAT `discarded_off_axis` IS, BECAUSE A COMMENT INSIDE THIS FUNCTION SAID THE
+# OPPOSITE UNTIL IT WAS MEASURED.
+#
+# It said the figure was expected to be zero while the axis is release 211's own
+# corpus ontology, and that it was the first thing to read before trusting a
+# bundle. Over the 65 published windows it is 689,055 rows, 1.54 per cent of the
+# raw cards, and it is zero in neither.
+#
+# The reasoning behind the wrong comment was a real measurement applied to the
+# wrong half: release 211 does drop nothing, because the pivot IS the ontology
+# that release's corpus was loaded under. But this table reads BOTH ends of a
+# window, and the end at t is an earlier release whose corpus named terms the
+# 2022 ontology no longer has and cannot rename through an alias. So the drop
+# tracks the window's distance from the axis's era: 0.02 per cent on 205 -> 211,
+# 0.84 on 174 -> 202, 1.66 on 160 -> 177, 4.54 on 170 -> 171.
+#
+# TWO CONSEQUENCES, and the second is the one that leaves this file.
+#
+# It is not a signal to trust a bundle by. The signals that are:
+# `remapped_across_aspects` and `discarded_without_evidence`, both zero, and
+# both about a row the writer could have placed and chose not to.
+#
+# And the state at t is systematically THINNER for old windows than for recent
+# ones, by up to four and a half per cent, because the axis is a 2022 ontology.
+# That is a difference correlated with a window's age, which a model trained
+# across mixed horizons can see. Which is why the event carries the split per
+# moment AND both eras: a total cannot be crossed against "the end at t drops
+# more than the end at t'", and a drop cannot be read without the age it tracks.
+# The axis's own era is in the run's result as `cut_version`, once, because it
+# does not vary per window.
+def _emit_state(st: WindowState, facts: WindowFacts, emit: EmitFn) -> WindowState:
+    emit(
+        "transitions.query_state",
+        f"{st.window[:8]}: {st.rows} cards, {st.collapse.gaf} collapsed by the GAF "
+        f"and {st.collapse.remap} by the remap, {st.discards.off_axis} off the axis",
+        {
+            "window": st.window,
+            "state_rows": st.rows,
+            **{f"state_{k.replace(chr(39), '_prime')}": v for k, v in st.by_moment.items()},
+            "distinct_terms": st.distinct_terms,
+            # Per moment, per code, because the point of this table is that it
+            # is NOT the truth: a moment with thirteen codes or fewer is
+            # carrying only the experimental ones and somebody narrowed it.
+            **{f"evidence_{k.replace(chr(39), '_prime')}": v for k, v in st.evidence.items()},
+            # The two collapses APART. One number for both would print the same
+            # digit for a bundle whose GAF duplication changed and one whose
+            # synonym map changed.
+            "collapsed_by_gaf": st.collapse.gaf,
+            "collapsed_by_remap": st.collapse.remap,
+            # Not zero. See the block above this function.
+            "discarded_off_axis": st.discards.off_axis,
+            **{
+                f"off_axis_{k.replace(chr(39), '_prime')}": v
+                for k, v in st.off_axis_by_moment.items()
+            },
+            "version_t": facts.version_t,
+            "version_t_prime": facts.version_t_prime,
+            "remapped_across_aspects": st.discards.crossed_aspect,
+            # The column is NULLABLE in the schema, so this branch is reachable
+            # even though the live data does not take it. Dropped rather than
+            # written: the model reads an evidence CLASS and an empty class is
+            # not one.
+            "discarded_without_evidence": st.discards.no_evidence,
+            # A negation is "contains NOT", because the qualifier is a relation
+            # and the regime changes at release 202.
+            "negated_rows": st.negated,
+        },
+        "info",
+    )
+    return st
+
+
+def _refuse_disagreeing_windows(
+    hecho: _Computed, p: ExportTransitionsDatasetPayload, emit: EmitFn
+) -> None:
+    """Every window in ``window_terms_out`` has to appear in ``queries``.
+
+    THE LABORATORY'S LOADER JOINS THE TWO BY THAT STRING, as text. If one table
+    carried the full id and the other a name or a prefix, the negatives
+    restriction would simply not apply and **nothing would fail**. Both are
+    written from the same payload in the same pass here, so the assertion
+    should be trivially true -- which is exactly why it is cheap to make and
+    worth having the day somebody writes one table from a different list.
+    """
+    if not {"window_terms_out", "queries"} <= set(p.tables):
+        return
+    de_terminos = {r.window for r in hecho.terms}
+    de_consultas = {q.window for q in hecho.queries}
+    if de_terminos == de_consultas:
+        emit(
+            "transitions.windows_agree",
+            f"{len(de_terminos)} windows in both tables, by the same string",
+            {"windows": len(de_terminos)},
+            "info",
+        )
+        return
+    raise ValueError(
+        "window_terms_out and queries disagree about their windows: "
+        f"{sorted(de_terminos - de_consultas)[:5]} only in the terms table and "
+        f"{sorted(de_consultas - de_terminos)[:5]} only in queries. The loader joins "
+        "them by that string, so a disagreement does not fail there, it silently "
+        "stops restricting the negatives"
+    )
+
+
+def _write_all(
+    store: Any,
+    p: ExportTransitionsDatasetPayload,
+    tmp: str,
+    lote: _Bundle,
+    vector_uri: str | None,
+) -> dict[str, dict[str, Any]]:
+    """Write every requested table into ``tmp`` and publish each one.
+
+    One function per table would read better and would also mean six more
+    signatures taking the same five things. This stays one place where the set
+    of tables a run writes can be read off in order.
+    """
+    hecho, axis = lote.hecho, lote.axis
+    tablas: dict[str, dict[str, Any]] = {}
+    if "window_terms_out" in p.tables and axis is not None:
+        tablas["window_terms_out"] = _write_one(
+            store, p, tmp, "window_terms_out", lambda path: write_table(hecho.terms, path)
+        )
+    if "queries" in p.tables:
+        tablas["queries"] = _write_one(
+            store, p, tmp, "queries", lambda path: write_queries(hecho.queries, path)
+        )
+    if "gains" in p.tables:
+        tablas["gains"] = _write_one(
+            store, p, tmp, "gains", lambda path: write_gains(hecho.gain_columns, path)
+        )
+    if "terms" in p.tables and axis is not None and vector_uri is not None:
+        sha = p.term_vectors_sha256 or ""
+        tablas["terms"] = _write_one(
+            store, p, tmp, "terms", lambda path: write_terms(axis, vector_uri, sha, path)
+        )
+    if "term_ancestors" in p.tables and axis is not None:
+        tablas["term_ancestors"] = _write_one(
+            store, p, tmp, "term_ancestors", lambda path: write_ancestors(axis, path)
+        )
+    if "query_state" in p.tables:
+        # Already written row group by row group during the pass; here it is
+        # only hashed and published, like any other file.
+        tablas["query_state"] = _publish_one(store, p, tmp, "query_state")
+    if "residue_refs" in p.tables and lote.refs is not None:
+        refs = lote.refs
+        tablas["residue_refs"] = _write_one(
+            store, p, tmp, "residue_refs", lambda path: write_refs(refs, path)
+        )
+    return tablas
+
+
 class ExportTransitionsDatasetOperation(Operation):
     name = "export_transitions_dataset"
     description = (
@@ -190,91 +630,135 @@ class ExportTransitionsDatasetOperation(Operation):
     ) -> OperationResult:
         p = ExportTransitionsDatasetPayload.model_validate(contract_payload(payload))
         running = code_revision()
-        axis = axis_live_terms(session, uuid.UUID(p.cut))
-        emit(
-            "transitions.axis",
-            f"{len(axis)} live terms on the declared axis",
-            {"cut": p.cut, "cut_version": p.cut_version, "axis_live_terms": len(axis)},
-            "info",
+        # ONE read of the axis for the three tables that use it.
+        # ``window_terms_out`` used to ask for the live set on its own, which
+        # was a second query answering the same question.
+        axis = axis_of(session, uuid.UUID(p.cut)) if _NEEDS_AXIS & set(p.tables) else None
+        if axis is not None:
+            emit(
+                "transitions.axis",
+                f"{len(axis.aspect)} live terms on the declared axis",
+                {
+                    "cut": p.cut,
+                    "cut_version": p.cut_version,
+                    "axis_live_terms": len(axis.aspect),
+                    "direct_edges": len(axis.edges),
+                },
+                "info",
+            )
+        refs = (
+            refs_of(session, uuid.UUID(p.codes_config_id))
+            if "residue_refs" in p.tables and p.codes_config_id
+            else None
         )
-        resultados = self._per_window(session, p, axis, running, emit)
-        return self._publish(p, resultados, running, payload, emit)
+        if refs is not None:
+            emit(
+                "transitions.residue_refs",
+                f"{len(refs.rows)} references over {refs.shards} shards",
+                {
+                    "embedding_config_id": refs.embedding_config_id,
+                    # Emitted because the id that KEYS these rows is not the one
+                    # they are named after: the ankh config the vocabulary was
+                    # derived from has zero rows.
+                    "model_name": refs.model_name,
+                    "references": len(refs.rows),
+                    "shards": refs.shards,
+                },
+                "info",
+            )
+        # The temp dir spans the pass, because ``query_state`` is written
+        # DURING it: at 44,7 million rows the alternative is holding every
+        # column until the end. The file only becomes an artifact at the
+        # ``put``, so a pass that fails halfway publishes nothing.
+        with tempfile.TemporaryDirectory(prefix="transitions-") as tmp:
+            estado, marco = _streamed(session, p, tmp)
+            run = _Run(p=p, axis=axis, running=running, state=estado, frame=marco)
+            hecho = self._per_window(session, run, emit)
+            _refuse_disagreeing_windows(hecho, p, emit)
+            if estado is not None:
+                estado.close()
+            lote = _Bundle(hecho=hecho, axis=axis, refs=refs)
+            return self._publish(run, lote, payload, emit, tmp)
 
-    def _per_window(
-        self,
-        session: Session,
-        p: ExportTransitionsDatasetPayload,
-        axis: set[str],
-        running: str,
-        emit: EmitFn,
-    ) -> list[WindowTerms]:
-        """Check and compute every window before anything is written."""
-        resultados: list[WindowTerms] = []
+    def _per_window(self, session: Session, run: _Run, emit: EmitFn) -> _Computed:
+        """Check and compute every window, streaming the big table as it goes."""
+        p, axis, running = run.p, run.axis, run.running
+        hecho = _Computed(terms=[], queries=[], gains=[], state=[], gain_columns=new_columns())
         for raw in p.windows:
             eset = _window_or_refuse(session, raw)
             _refuse_wrong_pivot(eset, p.cut, f"window {raw}")
             _refuse_unstamped(eset, p.accept_revisions, running)
-            r = terms_out(session, eset, axis)
-            resultados.append(r)
-            emit(
-                "transitions.window_terms_out",
-                f"{raw[:8]}: {len(r.out)} of {r.axis_size} axis terms out",
-                {
-                    **window_identity(eset),
-                    "terms_out": len(r.out),
-                    "axis_live_terms": r.axis_size,
-                    "toi_terms": r.toi_size,
-                    # The TOI is NOT a subset of the axis, so this is emitted
-                    # rather than left to be inferred from the other two.
-                    "toi_terms_off_axis": r.toi_off_axis,
-                    # Whether the rule trims at all. An empty table because
-                    # the rule does not restrict and an empty table because
-                    # the intersection covered the axis look identical in the
-                    # parquet and are different facts.
-                    "toi_restricts_the_gain": r.restricts,
-                    # From the window's own sealed parquet, which is also what
-                    # the cross-table invariant was checked against.
-                    "gain_terms": r.gain_terms,
-                },
-                "info",
-            )
-        return resultados
+            # Read ONCE per window: both tables need the same truth, and two
+            # loads are two chances for one bundle's tables to be about
+            # slightly different reads.
+            facts = facts_of(session, eset)
+            refuse_after_the_cut(facts, p.cut_version)
+            if "window_terms_out" in p.tables and axis is not None:
+                hecho.terms.append(
+                    _emit_terms(terms_out(session, facts, set(axis.aspect)), eset, emit)
+                )
+            q = queries_of(session, facts, p.categories) if _NEEDS_QUERIES & set(p.tables) else None
+            if q is not None and "queries" in p.tables:
+                hecho.queries.append(_emit_queries(q, facts, emit))
+            if q is not None and run.state is not None:
+                if run.frame is None:
+                    raise ValueError(
+                        "query_state is in this run and the axis frame is not, so every "
+                        "card would be written in its own snapshot's id space. This "
+                        "cannot happen through the payload and is a refusal rather than "
+                        "a skip, because a skip here publishes a table the loader joins "
+                        "to nothing"
+                    )
+                tabla, st = state_of(session, facts, [r.query for r in q.rows], run.frame)
+                run.state.write(tabla)
+                hecho.state.append(_emit_state(st, facts, emit))
+            if q is not None and "gains" in p.tables and axis is not None:
+                poblacion = {r.query for r in q.rows}
+                hecho.gains.append(
+                    _emit_gains(gains_of(facts, axis.aspect, poblacion, hecho.gain_columns), emit)
+                )
+        return hecho
 
     def _publish(
         self,
-        p: ExportTransitionsDatasetPayload,
-        resultados: list[WindowTerms],
-        running: str,
+        run: _Run,
+        lote: _Bundle,
         payload: dict[str, Any],
         emit: EmitFn,
+        tmp: str,
     ) -> OperationResult:
-        """Write the parquet, publish it, and report its digest."""
+        """Write every requested table, publish it, and report its digest.
+
+        Takes the ``_Run`` rather than its payload and its revision loose,
+        which is the same reason that tuple exists: seven arguments is where
+        the next field gets passed in the wrong position.
+        """
+        p, running = run.p, run.running
         store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
-        with tempfile.TemporaryDirectory(prefix="transitions-") as tmp:
-            local = Path(tmp) / "window_terms_out.parquet"
-            filas = write_table(resultados, str(local))
-            raw = local.read_bytes()
-        digest = hashlib.sha256(raw).hexdigest()
-        key = f"transitions/{p.output_name}/{p.cut[:8]}/window_terms_out-{digest[:12]}.parquet"
-        uri = store.put(key, raw)
+        # Verified BEFORE anything is written: those two columns are the reason
+        # the vectors are carried by reference at all, and a sha nobody checked
+        # is worse in a table than absent from one.
+        vector_uri = (
+            verified_vectors(store, p.term_vectors_key, p.term_vectors_sha256)
+            if "terms" in p.tables and p.term_vectors_key and p.term_vectors_sha256
+            else None
+        )
+        tablas = _write_all(store, p, tmp, lote, vector_uri)
         result = {
-            "table": "window_terms_out",
-            "uri": uri,
-            "key": key,
-            "sha256": digest,
-            "rows": filas,
-            "windows": len(resultados),
+            "tables": tablas,
+            "windows": len(p.windows),
             "cut": p.cut,
             "cut_version": p.cut_version,
             "code_revision": running,
             "job_id": str(job_id_from_payload(payload) or ""),
             "dataset_row": None,
             "why_no_dataset_row": (
-                "nine of the ten D56 tables are not written yet, and a dataset row "
-                "over a partial bundle is a row that claims to be a dataset"
+                f"{len(TABLES) - len(p.tables)} of the ten D56 tables are not in this "
+                "run, and a dataset row over a partial bundle is a row that claims to "
+                "be a dataset"
             ),
         }
-        emit("transitions.published", f"{filas} rows, sha256 {digest[:12]}", result, "info")
+        emit("transitions.published", None, result, "info")
         return OperationResult(result=result)
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:

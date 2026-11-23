@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from protea_method._self_by_sequence import (
     Queries,
-    extra_neighbours_for,
-    without_own_sequence,
+    drop_self,
+    self_exclusion_margin,
 )
 from sqlalchemy.orm import Session
 
@@ -31,7 +32,15 @@ from protea.core.operations.predict_go_terms._common import (
     AspectSeparatedKnnContext,
     PredictGOTermsBatchPayload,
 )
-from protea.core.operations.predict_go_terms._reference_aspect import aspect_bank
+from protea.core.operations.predict_go_terms._reference_aspect import (
+    aspect_bank,
+    search_aspect_in_blocks,
+    uncut_aspect,
+)
+from protea.core.operations.predict_go_terms._self_exclusion import (
+    exclusion_view,
+    needs_sequence_keys,
+)
 from protea.core.operations.predict_go_terms._sequence_identity import (
     load_sequence_identities,
 )
@@ -55,6 +64,54 @@ class _AspectKnnPreSearch:
     """
 
     @staticmethod
+    def _search_aspect(
+        queries: Queries,
+        aspect_refs: dict[str, Any],
+        k: int,
+        p: PredictGOTermsBatchPayload,
+        use_cos: bool,
+    ) -> list[list[tuple[str, float]]]:
+        """One aspect's ``k`` nearest donors per query, before any self exclusion.
+
+        On the numpy backend an aspect still inside the pool is searched block by
+        block from it, with the same neighbours and no copy of the aspect
+        (``_reference_aspect``); otherwise the aspect is cut here and let go when
+        this returns, which on the serial path is one aspect's bank resident
+        instead of three.
+        """
+        from protea.config.tuning import get_tuning
+
+        block_rows = get_tuning().operation.aspect_search_block_rows
+        if p.search_backend == "numpy" and block_rows > 0:
+            uncut = uncut_aspect(aspect_refs, use_cos=use_cos)
+            if uncut is not None:
+                return search_aspect_in_blocks(
+                    queries.embeddings,
+                    uncut,
+                    k=k,
+                    block_rows=block_rows,
+                    distance_threshold=p.distance_threshold,
+                    search=partial(
+                        search_knn, backend="numpy", metric=p.metric, pre_normalized=use_cos
+                    ),
+                )
+        return search_knn(
+            queries.embeddings,
+            aspect_bank(aspect_refs, use_cos=use_cos),
+            list(aspect_refs["accessions"]),
+            k=k,
+            distance_threshold=p.distance_threshold,
+            backend=p.search_backend,
+            metric=p.metric,
+            pre_normalized=use_cos,
+            faiss_index_type=p.faiss_index_type,
+            faiss_nlist=p.faiss_nlist,
+            faiss_nprobe=p.faiss_nprobe,
+            faiss_hnsw_m=p.faiss_hnsw_m,
+            faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+        )
+
+    @staticmethod
     def _knn_one_aspect(
         aspect: str,
         queries: Queries,
@@ -67,42 +124,27 @@ class _AspectKnnPreSearch:
         aspect_refs = ref_data_by_aspect[aspect]
         if not aspect_refs["accessions"]:
             return aspect, [[] for _ in queries.accessions]
-        # Cut here and let it go when this returns: on the serial path that is
-        # one aspect's bank resident instead of three.
-        ref_f32 = aspect_bank(aspect_refs, use_cos=use_cos)
-        # Per aspect, the same rule as the unified path: ask for one more when
-        # the query may not be its own neighbour, then drop it. Aspect-separated
-        # retrieval hits this harder, because a protein present in all three
-        # aspect corpora retrieves itself three times.
-        # The SAME horizon the method will use, or it reaches past what this
-        # delivered. The method asks for k plus a margin measured from the
-        # bank and drops by sequence; a pre-search asking k+1 and dropping by
-        # accession hands back a shorter list, and the method then fills the
-        # difference from whatever else is in its bank, which is the union of
-        # this chunk's hits. The stored neighbourhood stops being a function
-        # of the query and the bank and becomes a function of who shared the
-        # batch: 264 of 14,032 queries, 887 donor slots, measured.
-        keys = sequence_keys if bool(getattr(p, "exclude_self_neighbour", False)) else None
+        # Per aspect, the same rule as the unified path: ask deeper by the margin
+        # the exclusion can cost, then drop. Aspect-separated retrieval hits this
+        # harder, because a protein present in all three aspect corpora
+        # retrieves itself three times.
+        # The SAME horizon and the SAME drop the method will use, or it reaches
+        # past what this delivered. A pre-search whose margin or drop differs
+        # from the method's hands back a different list, and the method then
+        # fills the difference from whatever else is in its bank, which is the
+        # union of this chunk's hits. The stored neighbourhood stops being a
+        # function of the query and the bank and becomes a function of who
+        # shared the batch: 264 of 14,032 queries, 887 donor slots, measured.
+        view = exclusion_view(p, sequence_keys)
         accs = list(aspect_refs["accessions"])
-        margin = extra_neighbours_for(queries.accessions, accs, keys) if keys else 0
-        result = search_knn(
-            queries.embeddings,
-            ref_f32,
-            accs,
-            k=p.limit_per_entry + margin,
-            distance_threshold=p.distance_threshold,
-            backend=p.search_backend,
-            metric=p.metric,
-            pre_normalized=use_cos,
-            faiss_index_type=p.faiss_index_type,
-            faiss_nlist=p.faiss_nlist,
-            faiss_nprobe=p.faiss_nprobe,
-            faiss_hnsw_m=p.faiss_hnsw_m,
-            faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+        result = _AspectKnnPreSearch._search_aspect(
+            queries,
+            aspect_refs,
+            p.limit_per_entry + self_exclusion_margin(view, queries, accs),
+            p,
+            use_cos,
         )
-        if keys is None:
-            return aspect, result
-        return aspect, without_own_sequence(result, queries.accessions, p.limit_per_entry, keys)
+        return aspect, drop_self(view, result, queries)
 
     @staticmethod
     def run(
@@ -241,18 +283,21 @@ def _sequence_keys_for(
 ) -> dict[str, str] | None:
     """The accession-to-sequence map, read BEFORE the pre-search.
 
-    The exclusion is by sequence, so the pre-search needs the map to know how
+    Under the by-sequence exclusion the pre-search needs the map to know how
     deep to ask, and building the map from the pre-search's own hits would be
     circular. One read covering the queries and the whole pool, reused by the
     pre-search, by the method and by the donor ledger, so all three agree by
     construction rather than by inspection.
 
-    None when the run did not ask for the exclusion, which skips the read.
+    None under any other rule, which skips the read: the method's sequence
+    ranks are then read over the queries and their neighbours.
     """
-    if not getattr(p, "exclude_self_neighbour", False):
+    if not needs_sequence_keys(p):
         return None
     return load_sequence_identities(
-        session, set(ctx.valid_accessions) | _pool_accessions(ctx.ref_data_by_aspect)
+        session,
+        set(ctx.valid_accessions) | _pool_accessions(ctx.ref_data_by_aspect),
+        p.annotation_set_id,
     )
 
 
@@ -335,7 +380,7 @@ def _build_aspect_adapter_inputs(
         # able to recognise the query's own; with only the bank mapped it
         # refuses, which is correct and useless.
         ref_sequence_identities=load_sequence_identities(
-            session, set(ctx.valid_accessions) | set(all_unique_neighbors)
+            session, set(ctx.valid_accessions) | set(all_unique_neighbors), p.annotation_set_id
         ),
     )
 

@@ -1,10 +1,11 @@
-"""A method that scores its own candidates, scored by the platform.
+"""A method that scores its own candidates, and the formula that returns that score.
 
-Every score PROTEA publishes is derived at evaluation time from the retrieval
-columns of ``go_prediction``, by a ``ScoringConfig``'s weighted average or by
-a re-ranker booster. That is the right design for neighbour transfer plus
-features and it cannot express a method that emits its own probability: there
-is no donor to measure a distance to and no feature to weight.
+A ``ScoringConfig``'s weighted average turns neighbour-transfer evidence into a
+score. It cannot express a method that emits its own probability: there is no
+donor to measure a distance to and no feature to weight. Such a method's score
+is its own column, ``method_score``, which is also what the evaluator reads of
+every set since it stopped scoring (closure, step 4); the ``method_score``
+formula returns that column unchanged wherever a configuration is applied.
 
 The arithmetic that makes the gap tempting is in this module's second test.
 ``_resolve_signal_values`` turns a distance into ``embedding_similarity =
@@ -21,7 +22,7 @@ method score RAISES instead of scoring zero, because a prediction set
 declaring its own scores and having none is a provenance error and a cell of
 zeros looks like a method performing badly; and that the vectorised path and
 the scalar path still agree, which is the invariant
-``_vectorized_scores`` promises in its own docstring and the one a new branch
+``vectorized_scores`` promises in its own docstring and the one a new branch
 is most likely to break.
 """
 
@@ -33,10 +34,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from protea.core.operations._run_cafa_artifacts import (
-    _BASE_SCORE_COLS,
-    _vectorized_scores,
-    _write_scored_base,
+from protea.core.operations import _method_score_predictions
+from protea.core.operations._candidate_scoring import (
+    BASE_SCORE_COLS,
+    candidate_select,
+    vectorized_scores,
 )
 from protea.core.scoring import (
     FORMULA_METHOD_SCORE,
@@ -151,7 +153,7 @@ class TestItRefusesRatherThanScoringZero:
 
     def test_the_vectorised_path_refuses_a_frame_with_any_gap(self) -> None:
         with pytest.raises(MethodScoreMissing, match="1 of 3"):
-            _vectorized_scores(_frame([0.5, None, 0.7]), _MethodConfig())
+            vectorized_scores(_frame([0.5, None, 0.7]), _MethodConfig())
 
     def test_the_vectorised_path_refuses_a_frame_cached_before_the_column(self) -> None:
         # The memo key names the prediction set and the depth cuts, not the
@@ -159,7 +161,7 @@ class TestItRefusesRatherThanScoringZero:
         # without it. That is a stale cache, not a method with no scores.
         stale = _frame([0.5, 0.6]).drop(columns=["method_score"])
         with pytest.raises(MethodScoreMissing, match="rebuilt"):
-            _vectorized_scores(stale, _MethodConfig())
+            vectorized_scores(stale, _MethodConfig())
 
     def test_a_method_row_under_the_default_config_scores_zero(self) -> None:
         # Why the formula has to exist. A method row has no distance, so
@@ -173,7 +175,7 @@ class TestThePathsAgreeAndTheNumberSurvivesTheWrite:
     def test_the_vectorised_path_equals_the_scalar_one(self) -> None:
         scores = list(LAB_SCORES)
         frame = _frame(scores)
-        vector = _vectorized_scores(frame, _MethodConfig())
+        vector = vectorized_scores(frame, _MethodConfig())
         scalar = [compute_score(_row(method_score=s), _MethodConfig()) for s in scores]
         # The vectorised path returns the UNROUNDED array and the caller
         # rounds, so compare after the same rounding the writer applies.
@@ -181,15 +183,19 @@ class TestThePathsAgreeAndTheNumberSurvivesTheWrite:
 
     def test_the_vectorised_path_is_exact_and_not_merely_close(self) -> None:
         scores = list(LAB_SCORES)
-        got = _vectorized_scores(_frame(scores), _MethodConfig())
+        got = vectorized_scores(_frame(scores), _MethodConfig())
         assert np.array_equal(got, np.asarray(scores, dtype=np.float64))
 
     def test_the_written_tsv_carries_the_method_score_at_four_decimals(
         self, tmp_path: Path
     ) -> None:
+        import pyarrow as pa
+
         scores = list(LAB_SCORES)
         out = tmp_path / "preds.tsv"
-        _write_scored_base(_frame(scores), _MethodConfig(), str(out))
+        frame = _frame(scores)[["protein_accession", "go_id", "method_score"]]
+        rows = pa.Table.from_pandas(frame, preserve_index=False)
+        _method_score_predictions_write(rows, out)
         written = [line.split("\t")[2] for line in out.read_text().splitlines()]
         assert written == [f"{s:.4f}" for s in scores]
 
@@ -208,11 +214,9 @@ class TestTheFrameCarriesTheColumn:
         # Selected always, like donor_count: a frame whose schema depended on
         # which formula was going to read it would make the memo key wrong in
         # a second way.
-        assert "method_score" in _BASE_SCORE_COLS
+        assert "method_score" in BASE_SCORE_COLS
 
     def test_the_columnar_select_names_it(self) -> None:
-        from protea.core.operations._run_cafa_artifacts import _base_select
-
         class _Ctx:
             pred_set_id = "11111111-1111-1111-1111-111111111111"
             delta_proteins = {"P00001"}
@@ -220,5 +224,17 @@ class TestTheFrameCarriesTheColumn:
             max_k_position = None
             max_sequence_rank = None
 
-        sql = str(_base_select(_Ctx()))
+        sql = str(candidate_select(_Ctx()))
         assert "go_prediction.method_score" in sql
+
+
+def _method_score_predictions_write(rows: object, out: Path) -> None:
+    """The evaluator's writer, over the given rows instead of a query."""
+    import uuid
+    from unittest.mock import MagicMock, patch
+
+    from protea.core.operations._run_cafa_artifacts import WritePredictionsContext
+
+    ctx = WritePredictionsContext(pred_set_id=uuid.uuid4(), delta_proteins=set(), path=str(out))
+    with patch.object(_method_score_predictions, "method_rows", return_value=rows):
+        _method_score_predictions.write_method_predictions(MagicMock(), ctx)

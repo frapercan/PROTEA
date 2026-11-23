@@ -22,34 +22,7 @@ from protea.infrastructure.orm.models.annotation.protein_go_annotation import Pr
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.protein.protein import Protein
-
-
-def _paginate_protein_rows(
-    session: Session,
-    prediction_set_id: uuid.UUID,
-    search: str | None,
-    limit: int,
-    offset: int,
-) -> tuple[int, list[Any]]:
-    """Build the GROUP-BY query and return ``(total, page_rows)``.
-
-    Each row is a ``(accession, go_count, min_distance)`` tuple.
-    """
-    q = (
-        session.query(
-            GOPrediction.protein_accession,
-            func.count(GOPrediction.id).label("go_count"),
-            func.min(GOPrediction.distance).label("min_distance"),
-        )
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-        .group_by(GOPrediction.protein_accession)
-    )
-    if search:
-        q = q.filter(GOPrediction.protein_accession.ilike(f"%{search}%"))
-
-    total = q.count()
-    rows = q.order_by(GOPrediction.protein_accession).offset(offset).limit(limit).all()
-    return total, rows
+from protea.services._prediction_set_summary import protein_page, summary_of
 
 
 def _load_protein_orm_map(
@@ -160,10 +133,10 @@ def list_proteins_in_prediction_set(
     ``match_count`` (predictions whose ``(protein, go_id)`` is in
     the known set; a precision proxy).
 
-    Decomposed into private helpers (``_paginate_protein_rows``,
-    ``_load_protein_orm_map``, ``_load_annotation_counts``,
-    ``_load_match_counts``) so this orchestrator stays under the §3
-    method-LOC ceiling.
+    The page of proteins is read from ``prediction_set_protein``, counted once on
+    the set's first read (``_prediction_set_summary``); the three per-page
+    lookups (``_load_protein_orm_map``, ``_load_annotation_counts``,
+    ``_load_match_counts``) touch only the page's accessions.
 
     Raises :class:`EntityNotFoundError` (imported lazily to avoid the
     circular dependency with ``embeddings_service``) when
@@ -175,7 +148,11 @@ def list_proteins_in_prediction_set(
     if ps is None:
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
 
-    total, rows = _paginate_protein_rows(session, prediction_set_id, search, limit, offset)
+    # The proteins are counted once, on the set's first read (_prediction_set_summary);
+    # a set still being written is read live, its proteins not kept.
+    summary = summary_of(session, ps.id, ps.summary)
+    live = bool(summary.get("provisional"))
+    total, rows = protein_page(session, ps.id, search, limit, offset, live=live)
     accessions = [r[0] for r in rows]
     protein_map = _load_protein_orm_map(session, accessions)
     ann_counts = _load_annotation_counts(session, accessions, ps.annotation_set_id)

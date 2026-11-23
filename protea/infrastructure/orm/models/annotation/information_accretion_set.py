@@ -6,12 +6,14 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -19,6 +21,11 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from protea.infrastructure.orm.base import Base
+
+#: The vocabulary of :data:`protea.core.ia_regimes.IA_COHORTS`, spelled out so
+#: the model imports nothing from core; the migration that installs it carries
+#: the same text and a test compares the three.
+COHORT_CHECK = "cohort IN ('every_protein', 'swissprot')"
 
 if TYPE_CHECKING:
     from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -58,20 +65,20 @@ class InformationAccretionSet(Base):
 
     __tablename__ = "information_accretion_set"
     __table_args__ = (
-        # The three axes together identify one IA table. A second row for the
-        # same triple is a duplicate by construction.
+        # The four axes together identify one IA table. A second row for the
+        # same four is a duplicate by construction.
         UniqueConstraint(
             "ontology_snapshot_id",
             "annotation_set_id",
             "evidence_regime",
-            name="uq_ia_set_snapshot_corpus_regime",
+            "cohort",
+            name="uq_ia_set_snapshot_corpus_regime_cohort",
         ),
+        CheckConstraint(COHORT_CHECK, name="ck_ia_set_cohort"),
         Index("ix_information_accretion_set_created_at", "created_at"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     ontology_snapshot_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("ontology_snapshot.id", ondelete="RESTRICT"),
@@ -86,6 +93,9 @@ class InformationAccretionSet(Base):
     )
     #: Regime name from ``protea.core.ia_regimes.EVIDENCE_REGIMES``.
     evidence_regime: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: Which proteins of the corpus count, from ``protea.core.ia_regimes.IA_COHORTS``.
+    #: ``every_protein`` on every row written before the column.
+    cohort: Mapped[str] = mapped_column(String(24), nullable=False, server_default="every_protein")
     #: The resolved evidence code list, or ``null`` for the unrestricted regime.
     evidence_codes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
 
@@ -111,6 +121,13 @@ class InformationAccretionSet(Base):
 
     #: Gate results and shape counters recorded at computation time.
     stats: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    #: What the row IS, in a sentence its writer derives (ADR-D58's long
+    #: descriptor); NULL on rows written before the column, which read as
+    #: "nothing says", never as a default.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The code that wrote the row (``protea.core.code_revision``); NULL on
+    #: rows written before the column.
+    code_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

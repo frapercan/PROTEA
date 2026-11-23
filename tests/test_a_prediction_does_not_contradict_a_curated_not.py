@@ -18,6 +18,11 @@ denied term and not only the term itself. And it must remove nothing else: a
 filter that quietly emptied the frame would post a perfect score on this test
 while destroying every run. The last case is therefore the positive control,
 and it is the reason a zero here cannot be vacuous.
+
+The policy is the methods' (:mod:`protea.core.denials`): the transfer methods
+and the scoring step apply it when they write, and the evaluator scores what
+they stored. These pin the policy; ``test_denials_at_prediction.py`` and
+``test_scoring_a_candidate_set.py`` pin that each writer applies it.
 """
 
 from __future__ import annotations
@@ -28,12 +33,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from protea.core.operations._denials import (
-    denied_pairs,
-    drop_contradictions,
-    drop_denied_records,
-)
-from protea.core.operations._run_cafa_artifacts import WritePredictionsContext
+from protea.core import denials
 from protea.infrastructure.orm.base import Base
 
 _PRED_SET = uuid.UUID("33333333-3333-3333-3333-333333333333")
@@ -92,13 +92,8 @@ def _seed(session: Session, *, relation: str = "is_a") -> None:
     session.flush()
 
 
-def _ctx() -> WritePredictionsContext:
-    return WritePredictionsContext(
-        pred_set_id=_PRED_SET,
-        delta_proteins={"O94526", "P00000"},
-        max_distance=None,
-        path="/dev/null",
-    )
+def _denied(session: Session) -> set[tuple[str, str]]:
+    return denials.denied_pairs(session, _BANK, _SNAP, ["O94526", "P00000"])
 
 
 @pytest.mark.integration
@@ -111,7 +106,7 @@ class TestADenialReachesTheWholeSubtree:
         Base.metadata.create_all(engine)
         with Session(engine, future=True) as session:
             _seed(session)
-            denied = denied_pairs(session, _ctx())
+            denied = _denied(session)
 
         # One curated NOT, three denied pairs. The child and grandchild are
         # denied because the protein cannot have a descendant of something it
@@ -122,9 +117,7 @@ class TestADenialReachesTheWholeSubtree:
             ("O94526", _GO[_GRANDCHILD]),
         }
 
-    def test_it_does_not_travel_a_relation_a_denial_cannot_cross(
-        self, postgres_url: str
-    ) -> None:
+    def test_it_does_not_travel_a_relation_a_denial_cannot_cross(self, postgres_url: str) -> None:
         """A regulates edge does not carry an annotation, so it carries no
         denial either. Only is_a and part_of propagate."""
         engine = create_engine(postgres_url, future=True)
@@ -132,25 +125,9 @@ class TestADenialReachesTheWholeSubtree:
         Base.metadata.create_all(engine)
         with Session(engine, future=True) as session:
             _seed(session, relation="regulates")
-            denied = denied_pairs(session, _ctx())
+            denied = _denied(session)
 
         assert denied == {("O94526", _GO[_PARENT])}
-
-    def test_it_reads_the_bank_off_the_prediction_set_with_no_help(
-        self, postgres_url: str
-    ) -> None:
-        """The depth cut spent a campaign unapplied because two construction
-        sites both had to remember to fill a field. This one reads its own
-        inputs off the row it is about, so there is nothing to forget."""
-        engine = create_engine(postgres_url, future=True)
-        Base.metadata.drop_all(engine)
-        Base.metadata.create_all(engine)
-        with Session(engine, future=True) as session:
-            _seed(session)
-            ctx = _ctx()
-            assert ctx.bank_annotation_set_id is None
-            assert ctx.denial_snapshot_id is None
-            assert len(denied_pairs(session, ctx)) == 3
 
 
 class TestTheFilterRemovesTheDeniedAndNothingElse:
@@ -164,16 +141,16 @@ class TestTheFilterRemovesTheDeniedAndNothingElse:
 
         return pd.DataFrame(
             [
-                ("O94526", _GO[_PARENT]),     # denied outright
-                ("O94526", _GO[_CHILD]),      # denied by descent
+                ("O94526", _GO[_PARENT]),  # denied outright
+                ("O94526", _GO[_CHILD]),  # denied by descent
                 ("O94526", _GO[_UNRELATED]),  # not denied: must survive
-                ("P00000", _GO[_PARENT]),     # denied for another protein only
+                ("P00000", _GO[_PARENT]),  # denied for another protein only
             ],
             columns=["protein_accession", "go_id"],
         )
 
     def test_the_denied_pairs_go(self) -> None:
-        out, removed = drop_contradictions(self._frame(), self._DENIED)
+        out, removed = denials.drop_denied_frame(self._frame(), self._DENIED)
         assert removed == 2
         assert set(zip(out.protein_accession, out.go_id, strict=True)) == {
             ("O94526", _GO[_UNRELATED]),
@@ -184,34 +161,30 @@ class TestTheFilterRemovesTheDeniedAndNothingElse:
         """THE POSITIVE CONTROL. P00000 keeps the very term O94526 is denied,
         because nobody said anything about P00000. Without this the filter
         could pass every other case by emptying the frame."""
-        out, _ = drop_contradictions(self._frame(), self._DENIED)
-        assert ("P00000", _GO[_PARENT]) in set(
-            zip(out.protein_accession, out.go_id, strict=True)
-        )
+        out, _ = denials.drop_denied_frame(self._frame(), self._DENIED)
+        assert ("P00000", _GO[_PARENT]) in set(zip(out.protein_accession, out.go_id, strict=True))
 
     def test_nothing_denied_means_nothing_touched(self) -> None:
         frame = self._frame()
-        out, removed = drop_contradictions(frame, set())
+        out, removed = denials.drop_denied_frame(frame, set())
         assert removed == 0
         assert out is frame
 
 
-@pytest.mark.integration
-class TestEveryWriterAppliesIt:
-    def test_the_reranker_path_filters_the_same_pairs(self, postgres_url: str) -> None:
-        """The campaign runs through the reranker, which never builds the
-        cached base frame. A filter some writers apply and others do not is
-        the same defect wearing a different name."""
-        engine = create_engine(postgres_url, future=True)
-        Base.metadata.drop_all(engine)
-        Base.metadata.create_all(engine)
-        with Session(engine, future=True) as session:
-            _seed(session)
-            records = [
-                {"protein_accession": "O94526", "go_id": _GO[_GRANDCHILD]},
-                {"protein_accession": "O94526", "go_id": _GO[_UNRELATED]},
-                {"protein_accession": "P00000", "go_id": _GO[_PARENT]},
-            ]
-            kept = drop_denied_records(session, _ctx(), records)
+class TestBothFormsOfTheFilterAgree:
+    def test_rows_and_frames_lose_the_same_pairs(self) -> None:
+        """The writers hold rows (the transfer methods) or frames (the scoring
+        step); one policy, so the two forms have to drop the same pairs."""
+        import pandas as pd
 
+        denied = {("O94526", _GO[_GRANDCHILD]), ("O94526", _GO[_PARENT])}
+        records = [
+            {"protein_accession": "O94526", "go_id": _GO[_GRANDCHILD]},
+            {"protein_accession": "O94526", "go_id": _GO[_UNRELATED]},
+            {"protein_accession": "P00000", "go_id": _GO[_PARENT]},
+        ]
+        kept, removed = denials.drop_denied(records, denied, lambda r: r["go_id"])
+        frame, frame_removed = denials.drop_denied_frame(pd.DataFrame(records), denied)
         assert [r["go_id"] for r in kept] == [_GO[_UNRELATED], _GO[_PARENT]]
+        assert frame.to_dict("records") == kept
+        assert removed == frame_removed == 1

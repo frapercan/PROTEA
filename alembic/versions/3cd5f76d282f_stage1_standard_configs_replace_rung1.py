@@ -156,6 +156,9 @@ _DEPENDENTS = (
     # Added with ADR-D55 (revision b2f6c3d8e154), later in the chain, and skipped on a
     # fresh database for the same reason.
     ("exploration_link", "embedding_config_id"),
+    # Added with ADR-D62 (revision b8e3f1c6d2a4), later in the chain, and skipped on a
+    # fresh database for the same reason.
+    ("embedding_bank", "embedding_config_id"),
 )
 
 

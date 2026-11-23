@@ -5,8 +5,8 @@
  * proteins each of the nine cells scores and whether cafaeval is given
  * ``-known``. Five places in this app defined them independently, and they did
  * not agree -- PK expanded to "Prior knowledge" in `lib/book.ts` and
- * `lib/strata.ts` and to "Partial Knowledge" in `components/BenchmarkHeatmap.tsx`,
- * `components/home/HomeShowcase.tsx` and the evaluation page. A reader meeting
+ * `lib/strata.ts` and to "Partial Knowledge" in the benchmark heatmap (since
+ * retired), `components/home/HomeShowcase.tsx` and the evaluation page. A reader meeting
  * both on one screen has to decide whether they are the same thing, and on the
  * page where two windows sit side by side "NK" already names populations that
  * differ by a factor of 33.

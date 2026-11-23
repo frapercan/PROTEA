@@ -8,10 +8,32 @@
 # It deliberately does NOTHING else. It does not start containers, does not run
 # docker, does not touch git, does not install anything. If infra never comes
 # up it exits non-zero and systemd retries the unit via Restart=on-failure.
+#
+# Environment:
+#   PROTEA_WAIT_DEADLINE   seconds before giving up, default 180.
+#   PROTEA_WAIT_ENDPOINTS  whitespace-separated host:port list, default
+#                          "127.0.0.1:5432 127.0.0.1:5672" (the production
+#                          Postgres and RabbitMQ). Another stack on the same
+#                          machine (deploy/dev) reuses this gate by naming its
+#                          own ports here. A malformed entry exits 78
+#                          (EX_CONFIG): it is a configuration error, and
+#                          waiting would only hide it.
 set -euo pipefail
 
 DEADLINE=${PROTEA_WAIT_DEADLINE:-180}
-declare -a PORTS=("127.0.0.1:5432" "127.0.0.1:5672")
+read -r -a PORTS <<< "${PROTEA_WAIT_ENDPOINTS:-127.0.0.1:5432 127.0.0.1:5672}"
+
+if (( ${#PORTS[@]} == 0 )); then
+  echo "protea-wait-infra: PROTEA_WAIT_ENDPOINTS names no endpoint" >&2
+  exit 78
+fi
+for hp in "${PORTS[@]}"; do
+  port=${hp##*:}
+  if [[ ! "${hp}" =~ ^[A-Za-z0-9._-]+:[0-9]{1,5}$ ]] || (( 10#${port} < 1 || 10#${port} > 65535 )); then
+    echo "protea-wait-infra: '${hp}' in PROTEA_WAIT_ENDPOINTS is not host:port" >&2
+    exit 78
+  fi
+done
 
 deadline=$(( SECONDS + DEADLINE ))
 for hp in "${PORTS[@]}"; do
@@ -23,6 +45,10 @@ for hp in "${PORTS[@]}"; do
     fi
     sleep 2
   done
-  exec 3<&- 2>/dev/null || true
+  # The probe opened its connection inside the subshell above, and it closed
+  # with it. There used to be an `exec 3<&- 2>/dev/null` here: an `exec` with
+  # nothing but redirections applies them to this shell for good, so after
+  # the first endpoint answered every later message went to /dev/null,
+  # "not answering" included.
 done
-echo "protea-wait-infra: infra ports ready"
+echo "protea-wait-infra: infra ports ready (${PORTS[*]})"

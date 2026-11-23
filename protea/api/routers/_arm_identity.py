@@ -48,6 +48,8 @@ ARM_IDENTITY_COLUMNS = """
                ELSE 'evidence-gated'
            END                                      AS donor_policy,
            CASE
+               WHEN ps.meta ->> 'self_exclusion' = 'accession'
+                   THEN 'self-excluded-by-accession'
                WHEN ps.meta ->> 'exclude_self_neighbour' IS NULL
                    THEN 'self-unrecorded'
                WHEN (ps.meta ->> 'exclude_self_neighbour')::boolean

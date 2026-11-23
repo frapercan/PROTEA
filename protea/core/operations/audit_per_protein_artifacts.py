@@ -33,8 +33,8 @@ exclusions is worse than none:
   sliced at. The producer refuses on the whole curve and on both variants, so
   this is a lower bound.
 - It cannot see the variant-population refusal (a namespace whose weighted and
-  unweighted branches scored different proteins), because the legacy file
-  carries no unweighted column at all.
+  unweighted branches scored different proteins, refused until 2026-11-21),
+  because the legacy file carries no unweighted column at all.
 - It cannot see the row-numbering refusal on the NK/LK path, because a
   mis-numbered file looks perfectly well formed.
 

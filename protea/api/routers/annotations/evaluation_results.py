@@ -1,12 +1,12 @@
-"""Evaluation-result endpoints: list / metrics TSV / artifacts ZIP / delete."""
+"""Evaluation-result endpoints: list / metrics TSV / artifacts ZIP / one artifact / delete."""
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -17,13 +17,24 @@ from protea.infrastructure.session import session_scope
 from protea.services.annotations_service import (
     EntityNotFoundError,
     delete_eval_result_collect_keys,
+    get_eval_result_artifact,
     get_eval_result_with_keys,
+    iter_evaluation_artifact,
     iter_evaluation_artifacts_zip,
     list_evaluation_results_data,
+    list_paired_comparisons_data,
     render_evaluation_metrics_tsv,
+    window_summary_data,
 )
 
 router = APIRouter()
+
+#: How each kind of file an evaluation writes is served; anything else is bytes.
+_ARTIFACT_MEDIA_TYPES = {
+    ".tsv": "text/tab-separated-values",
+    ".txt": "text/plain",
+    ".parquet": "application/vnd.apache.parquet",
+}
 
 
 @router.get(
@@ -85,6 +96,48 @@ def download_evaluation_artifacts(
 
 
 @router.get(
+    "/evaluation-sets/{eval_id}/results/{result_id}/artifacts/{relpath:path}",
+    summary="Download one file an evaluation result wrote",
+)
+def download_evaluation_artifact(
+    eval_id: UUID,
+    result_id: UUID,
+    relpath: str,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> StreamingResponse:
+    """Stream one file the result recorded, by its path under the result.
+
+    ``relpath`` is the path the evaluator wrote, such as
+    ``PK/evaluation_best_f_micro_w.tsv``, the file a cell's ``f_micro_w`` and
+    ``cov_w`` are read from. When the result recorded the file's sha256, the
+    ``X-Recorded-SHA256`` header carries it: the sha256 of the body is that
+    value, or the stored bytes are not the ones the figures were read from.
+    Returns ``404`` when the result does not belong to ``eval_id`` or recorded
+    no file at ``relpath``.
+    """
+    try:
+        with session_scope(factory) as session:
+            key, digest = get_eval_result_artifact(session, eval_id, result_id, relpath)
+    except EntityNotFoundError as exc:
+        detail = (
+            f"result {result_id} recorded no file {relpath!r}"
+            if exc.entity == "EvaluationArtifact"
+            else str(exc)
+        )
+        raise HTTPException(status_code=404, detail=detail) from exc
+
+    name = PurePosixPath(relpath)
+    headers = {"Content-Disposition": f'attachment; filename="{name.name}"'}
+    if digest is not None:
+        headers["X-Recorded-SHA256"] = digest
+    return StreamingResponse(
+        iter_evaluation_artifact(key),
+        media_type=_ARTIFACT_MEDIA_TYPES.get(name.suffix, "application/octet-stream"),
+        headers=headers,
+    )
+
+
+@router.get(
     "/evaluation-sets/{eval_id}/results",
     summary="List evaluation results for an evaluation set",
 )
@@ -102,6 +155,67 @@ def list_evaluation_results(
     try:
         with session_scope(factory) as session:
             return list_evaluation_results_data(session, eval_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/evaluation-sets/{eval_id}/paired-comparisons",
+    summary="List the paired comparisons of an evaluation set's results",
+)
+def list_paired_comparisons(
+    eval_id: UUID,
+    axis: str | None = Query(
+        None, description="With band: the stratum axis the comparisons were restricted to"
+    ),
+    band: str | None = Query(None, description="With axis: the band of that axis, e.g. >90"),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> list[dict[str, Any]]:
+    """The latest ``compare_paired_panels`` of each pair of the window's results.
+
+    Over the whole panel, or, given ``axis`` and ``band`` together, restricted to
+    that stratum. Each one names its job, the result under test and the baseline,
+    the stratum, the method axis it declared, its operating point and resampling,
+    and per panel the difference, its interval, the interval's method, the
+    verdict, the number of paired proteins, the effect of interest and the
+    smallest detectable effect. Returns ``422`` for half a stratum or one outside
+    the closed vocabularies, ``404`` if the evaluation set is missing.
+    """
+    if (axis is None) != (band is None):
+        raise HTTPException(
+            status_code=422,
+            detail="a stratum needs both its axis and its band; give neither for the whole panel",
+        )
+    stratum = {axis: band} if axis is not None and band is not None else None
+    try:
+        with session_scope(factory) as session:
+            return list_paired_comparisons_data(session, eval_id, stratum)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/evaluation-sets/{eval_id}/summary",
+    summary="A window's results as its panel reads them",
+)
+def window_summary(
+    eval_id: UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> dict[str, Any]:
+    """Each result of the window with its arm's factors, its nine cells and its profiles.
+
+    The arm is its model, scoring and method, how many neighbours it read, whether
+    a target's own sequence could vote and how its scores were read. A cell is its
+    f_micro_w, the threshold it peaks at, whether that threshold is the grid's
+    edge and its targets. The profiles are the ones the stratification left on the
+    result, ``None`` until it has run. One query for the whole window. Returns
+    ``404`` if the evaluation set is missing.
+    """
+    try:
+        with session_scope(factory) as session:
+            return window_summary_data(session, eval_id)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

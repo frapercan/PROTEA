@@ -85,23 +85,25 @@ class TestTheMarginAndTheDropAgreeBetweenTheTwoSearches:
     def test_the_depth_comes_from_the_same_function_the_method_uses(
         self, module: str, function: str
     ) -> None:
-        assert "extra_neighbours_for" in _body_of(module, function), (
+        assert "self_exclusion_margin" in _body_of(module, function), (
             f"{function} no longer takes its depth from the same function the "
             "method uses, so the two horizons can differ again"
         )
 
-    def test_the_drop_is_by_sequence(self, module: str, function: str) -> None:
-        assert "without_own_sequence" in _body_of(module, function), (
-            f"{function} no longer drops by sequence, so it hands back twins "
-            "the method will drop and then refill from the batch"
+    def test_the_drop_is_the_methods_own(self, module: str, function: str) -> None:
+        assert "drop_self" in _body_of(module, function), (
+            f"{function} no longer drops through the method's own function, so "
+            "it can hand back proteins the method will drop and then refill "
+            "from the batch"
         )
 
-    def test_the_accession_based_exclusion_is_not_back(
-        self, module: str, function: str
-    ) -> None:
+    def test_the_hand_rolled_exclusion_is_not_back(self, module: str, function: str) -> None:
+        # The k+1 search and the drop the method did not share, which is what
+        # let the batch choose the donors. Dropping by accession is a rule
+        # now, applied through the method's own functions.
         body = _body_of(module, function)
         assert "search_k_for" not in body and "without_self(" not in body, (
-            f"the accession-based exclusion is back in {function}"
+            f"the hand-rolled exclusion is back in {function}"
         )
 
 
@@ -138,8 +140,9 @@ class TestTheDropActuallyHappens:
     the paths call; this pins what goes wrong when they call the other pair,
     and it is worse than a short list: with more than one twin in the bank,
     the accession-based drop finds nothing to drop and the query is returned
-    as its own donor. That is the state the 95.0-per-cent measurement in
-    ``_self_neighbour`` says makes a depth sweep meaningless.
+    as its own donor. That is the state that makes a depth sweep meaningless:
+    measured on 2026-08-28 with self-retrieval allowed, the query was its own
+    nearest neighbour for 95.0 per cent of candidate rows at depth 1.
     """
 
     @staticmethod
@@ -239,3 +242,126 @@ class TestTheDropActuallyHappens:
             _anns, neighbours = op._unified_load_annotations(MagicMock(), ctx, keys)
 
         assert neighbours <= set(keys), f"unmapped neighbours: {neighbours - set(keys)}"
+
+
+def _by_accession(aspect_separated: bool):
+    """A payload that excludes the query by accession, its twins kept."""
+    import uuid
+
+    from protea_contracts import PredictGOTermsBatchPayload
+
+    return PredictGOTermsBatchPayload.model_validate(
+        {
+            "embedding_config_id": str(uuid.uuid4()),
+            "annotation_set_id": str(uuid.uuid4()),
+            "ontology_snapshot_id": str(uuid.uuid4()),
+            "prediction_set_id": str(uuid.uuid4()),
+            "parent_job_id": str(uuid.uuid4()),
+            "query_accessions": ["Q1"],
+            "aspect_separated_knn": aspect_separated,
+            "exclude_self_neighbour": True,
+            "self_exclusion": "accession",
+            "limit_per_entry": 2,
+            "search_backend": "numpy",
+            "metric": "l2",
+            "compute_alignments": False,
+            "compute_taxonomy": False,
+        }
+    )
+
+
+#: The query is in the bank once, and R1 carries its sequence under another name.
+_BANK_WITH_THE_QUERY = ["Q1", "R1", "R2", "R3"]
+
+
+class TestByAccessionTheTwinsStay:
+    """The query leaves its neighbourhood and nobody else does.
+
+    Its twins are other proteins, annotated by others, so under this rule they
+    are donors. The search asks one deeper because the query is in the bank
+    once, and the drop removes it by name. No sequence map is read for it.
+    """
+
+    def test_the_unified_pre_search(self) -> None:
+        import uuid
+        from unittest.mock import MagicMock, patch
+
+        import numpy as np
+
+        from protea.core.operations.predict_go_terms import _batch_op as pgt
+        from protea.core.operations.predict_go_terms._batch_op import (
+            PredictGOTermsBatchOperation,
+        )
+
+        op = PredictGOTermsBatchOperation()
+        ctx = pgt._UnifiedPredictContext(
+            p=_by_accession(aspect_separated=False),
+            annotation_set_id=uuid.uuid4(),
+            prediction_set_id=uuid.uuid4(),
+            valid_accessions=["Q1"],
+            query_embeddings=np.zeros((1, 2), dtype=np.float32),
+            ref_data={
+                "accessions": _BANK_WITH_THE_QUERY,
+                "embeddings_f32": np.zeros((4, 2), dtype=np.float32),
+                "embeddings_f32_cos": np.zeros((4, 2), dtype=np.float32),
+            },
+        )
+        asked: dict[str, int] = {}
+
+        def fake_search(_q, _refs, _accs, *, k, **_kw):
+            asked["k"] = k
+            return [[(a, float(i)) for i, a in enumerate(_BANK_WITH_THE_QUERY[:k])]]
+
+        with (
+            patch("protea.core.knn_search.search_knn", side_effect=fake_search),
+            patch.object(op, "_load_annotations_for", return_value={}),
+        ):
+            _anns, neighbours = op._unified_load_annotations(MagicMock(), ctx, None)
+
+        assert asked["k"] == 3, "the query is in the bank once, so one deeper"
+        assert neighbours == {"R1", "R2"}, f"the twin must stay and the query go: {neighbours}"
+
+    def test_the_aspect_pre_search(self) -> None:
+        from unittest.mock import patch
+
+        import numpy as np
+        from protea_method._self_by_sequence import Queries
+
+        from protea.core.operations.predict_go_terms._aspect_helpers import (
+            _AspectKnnPreSearch,
+        )
+
+        asked: dict[str, int] = {}
+
+        def fake_search(_queries, _refs, k, _p, _use_cos):
+            asked["k"] = k
+            return [[(a, float(i)) for i, a in enumerate(_BANK_WITH_THE_QUERY[:k])]]
+
+        with patch.object(_AspectKnnPreSearch, "_search_aspect", side_effect=fake_search):
+            _aspect, neighbours = _AspectKnnPreSearch._knn_one_aspect(
+                "F",
+                Queries(["Q1"], np.zeros((1, 2), dtype=np.float32)),
+                {"F": {"accessions": _BANK_WITH_THE_QUERY}},
+                _by_accession(aspect_separated=True),
+                False,
+                None,
+            )
+
+        assert asked["k"] == 3
+        assert neighbours == [[("R1", 1.0), ("R2", 2.0)]]
+
+    def test_no_sequence_map_is_read_for_it(self) -> None:
+        from protea.core.operations.predict_go_terms._self_exclusion import (
+            needs_sequence_keys,
+        )
+
+        assert needs_sequence_keys(_by_accession(aspect_separated=False)) is False
+
+
+def test_the_sequence_rule_without_its_map_refuses_rather_than_drops_nothing() -> None:
+    """protea-method drops nothing, silently, when the by-sequence rule has no map."""
+    from protea.core.operations.predict_go_terms._self_exclusion import exclusion_view
+
+    payload = TestTheDropActuallyHappens._ctx_with_two_twins()[0].p
+    with pytest.raises(RuntimeError, match="needs the bank's sequence identities"):
+        exclusion_view(payload, None)

@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from pika.adapters.blocking_connection import BlockingChannel
 
-DLX_NAME = "protea.dlx"
-DLQ_NAME = "protea.dead-letter"
+from protea.core import queues
+
+DLX_NAME = queues.DEAD_LETTER_EXCHANGE
+DLQ_NAME = queues.DEAD_LETTER_QUEUE
 
 
 def setup_dead_letter(channel: BlockingChannel) -> None:

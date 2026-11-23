@@ -70,13 +70,15 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from protea.core.code_revision import code_revision, dependency_revisions
 from protea.core.contracts.operation import (
     EmitFn,
     OperationResult,
     ProteaPayload,
 )
 from protea.core.operations._encoder_artifact import resolve_encoder_artifact
-from protea.core.utils import contract_payload
+from protea.core.query_population import population_of
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -135,13 +137,19 @@ class IngestMethodPredictionsPayload(ProteaPayload, frozen=True):
     annotation_set_id: str
     ontology_snapshot_id: str
     query_set_id: str | None = None
+    #: The proteins the producer was asked about, when they are a list rather
+    #: than a query set (a window's targets): the set records their count and
+    #: digest (protea.core.query_population), which the method seal reads as
+    #: the population declared. At most one of the two.
+    query_accessions: list[str] | None = None
 
     #: What the method capped at per protein. Omitted means "measure it".
     limit_per_entry: PositiveInt | None = None
 
     #: The producer's own record: name, page, shas, commit, band, models.
-    #: Stored verbatim under ``meta["method"]``; ``name`` is required because
-    #: it identifies the arm and is written on every row.
+    #: Stored verbatim under ``meta["producer"]``, which the method seal reads
+    #: as identity; ``name`` is required because it identifies the arm and is
+    #: written on every row.
     method: dict[str, Any] = Field(default_factory=dict)
 
     #: Share of rows whose term is absent from the snapshot that may pass.
@@ -156,6 +164,11 @@ class IngestMethodPredictionsPayload(ProteaPayload, frozen=True):
             raise ValueError(
                 "give exactly one of predictions_uri (a store key) and "
                 "predictions_path (a local file)"
+            )
+        if self.query_set_id and self.query_accessions:
+            raise ValueError(
+                "give the population once: a query set or the list of accessions, "
+                "not both, or the set would declare two populations"
             )
         return self
 
@@ -315,9 +328,28 @@ class IngestMethodPredictionsOperation:
                 ontology_snapshot_id=snapshot.id,
                 query_set_id=uuid.UUID(p.query_set_id) if p.query_set_id else None,
                 limit_per_entry=p.limit_per_entry or counters.max_terms_per_protein,
+                description=(
+                    f"The predictions of method {p.method}, ingested from a file hashing to "
+                    f"{digest[:12]}, against annotation set {corpus.id} on ontology "
+                    f"snapshot {snapshot.id}."
+                ),
+                job_id=job_id_from_payload(payload),
+                producer_git_sha=code_revision(),
                 meta={
                     "algorithm": "ingested_method",
-                    "method": p.method,
+                    # The producer's record and the bytes it published name the
+                    # method; the code and libraries that wrote the rows, and
+                    # the proteins asked about, are what any set records
+                    # (protea.core.method_seal).
+                    "producer": p.method,
+                    "predictions_sha256": digest,
+                    "code_revision": code_revision(),
+                    "dependency_revisions": dependency_revisions(),
+                    **(
+                        {"query_population": population_of(p.query_accessions)}
+                        if p.query_accessions
+                        else {}
+                    ),
                     "source": {
                         "uri": p.predictions_uri,
                         "path": p.predictions_path,

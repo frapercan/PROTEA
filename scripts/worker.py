@@ -16,7 +16,10 @@ import time
 from pathlib import Path
 
 from protea.config.tuning import WorkerTuning
+from protea.core import queues
 from protea.core.operation_catalog import build_operation_registry
+from protea.core.operation_spec import message_queues
+from protea.infrastructure.environment_check import exit_on_environment_mismatch
 from protea.infrastructure.queue.consumer import (
     ConsumerOptions,
     OperationConsumer,
@@ -45,7 +48,7 @@ def _build_reaper_config(worker_settings: WorkerTuning) -> StaleJobReaperConfig:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="PROTEA queue worker")
-    parser.add_argument("--queue", default="protea.jobs", help="Queue name to consume")
+    parser.add_argument("--queue", default=queues.JOBS, help="Queue name to consume")
     parser.add_argument("--requeue-on-failure", action="store_true")
     parser.add_argument(
         "--log-format",
@@ -73,26 +76,19 @@ def main() -> None:
 
     project_root = Path(__file__).resolve().parents[1]
     settings = load_settings(project_root)
+    # A dev worker on a database or vhost that is not dev's exits 78 here,
+    # before it opens anything (protea.infrastructure.environment_check).
+    exit_on_environment_mismatch(settings)
 
     factory = build_session_factory(settings.db_url)
 
     registry = build_operation_registry()
 
-    # Queues that carry ephemeral operation messages (no DB Job row per message)
-    # use OperationConsumer.  All other queues use the standard QueueConsumer.
-    _OPERATION_QUEUES = {
-        "protea.embeddings.batch",
-        "protea.embeddings.write",
-        # The node's own upload stage: shards a card batch spooled on this disk (ADR-D51).
-        "protea.embeddings.upload",
-        "protea.predictions.batch",
-        "protea.predictions.write",
-        # Export minijob pipeline sub-queues (PROTEA_EXPORT_MINIJOBS=1).
-        # No DB Job row per message; parent Job progress tracked by coordinator.
-        "protea.training.knn-batch",
-        "protea.training.features",
-        "protea.training.write",
-    }
+    # A queue whose operations travel as their own message, with no Job row per
+    # message (the message stages and the writes), takes an OperationConsumer;
+    # every other queue takes the standard QueueConsumer. The operation specs say
+    # which (ADR-D60, decision 6), so a new stage brings its consumer with it.
+    operation_queues = message_queues(registry.specs().values())
 
     # Special mode: stale job reaper (no queue, just periodic DB check).
     if args.queue == "reaper":
@@ -122,7 +118,7 @@ def main() -> None:
         return
 
     options = ConsumerOptions(requeue_on_failure=args.requeue_on_failure)
-    if args.queue in _OPERATION_QUEUES:
+    if args.queue in operation_queues:
         consumer: QueueConsumer | OperationConsumer = OperationConsumer(
             amqp_url=settings.amqp_url,
             queue_name=args.queue,
@@ -188,7 +184,7 @@ def main() -> None:
     )
     if skip_warmup:
         logging.info("Taxonomy DB warmup skipped: PROTEA_SKIP_TAXONOMY_WARMUP is set")
-    elif args.queue in ("protea.predictions.batch", "protea.jobs", "protea.training"):
+    elif args.queue in (queues.PREDICTIONS_BATCH, queues.JOBS, queues.TRAINING):
         try:
             from protea.core.feature_engineering import warmup_taxonomy_db
 

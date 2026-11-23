@@ -1,8 +1,8 @@
 """Showcase endpoint: aggregates platform stats and the single best evaluation
 result with full embedding attribution.
 
-Unlike :mod:`protea.api.routers.benchmark`, which exposes the full per-model
-per-stage matrix, this module is deliberately minimal: it returns **one**
+Unlike a window's panel (``GET /annotations/evaluation-sets/{id}/summary``),
+which shows every arm of a window, this module is deliberately minimal: it returns **one**
 "spotlight" result that the Home page can use for its hero card, plus the
 pipeline stage counts.
 
@@ -34,6 +34,7 @@ from protea.infrastructure.orm.models.embedding.embedding_config import Embeddin
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+from protea.infrastructure.orm.models.method.method import Method
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.session import session_scope
 
@@ -103,6 +104,52 @@ def _load_showcase_counts(session: Session) -> dict[str, int]:
     }
 
 
+def _embedding_block(cfg: EmbeddingConfig | None) -> dict[str, Any] | None:
+    """The configuration that produced the spotlight, or None when none did."""
+    if cfg is None:
+        return None
+    return {
+        "id": str(cfg.id),
+        "model_name": cfg.model_name,
+        "model_backend": cfg.model_backend,
+        "display_name": cfg.display_name or cfg.model_name,
+        "family": cfg.family or cfg.model_backend,
+        "param_count": cfg.param_count,
+    }
+
+
+def _method_block(method: Method | None) -> dict[str, Any] | None:
+    """The method that produced the spotlight, or None when no method row did."""
+    if method is None:
+        return None
+    return {
+        "id": str(method.id),
+        "family": method.family,
+        "code": method.code,
+        "instance_release": method.instance_release,
+    }
+
+
+#: Every evaluation result with what produced it. The producer is joined OUTER
+#: (ADR-D60, decision 3): a method's prediction set has no embedding
+#: configuration, and an inner join dropped its results from both the
+#: spotlight and the per-task headline while they sat in the table.
+_EVALUATIONS = (
+    select(EvaluationResult, EmbeddingConfig, Method, ScoringConfig.name)
+    .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
+    .outerjoin(EmbeddingConfig, EmbeddingConfig.id == PredictionSet.embedding_config_id)
+    .outerjoin(Method, Method.id == PredictionSet.method_id)
+    .outerjoin(ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id)
+    # Reversible query curation (slice F-METHOD-EVAL-SURFACE): diagnostic
+    # probe evaluations (ADR D40) must never become the home champion or
+    # inflate the per-task headline. ``is_distinct_from`` keeps NULL +
+    # non-probe rows (so legacy results that predate the column are
+    # untouched) and drops only the explicit "probe" role. Remove this
+    # filter to surface probes again; no data is deleted.
+    .where(EvaluationResult.leakage_role.is_distinct_from("probe"))
+)
+
+
 def _pick_best_evaluation(
     session: Session,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], int]:
@@ -117,23 +164,11 @@ def _pick_best_evaluation(
     half-width, so the dashboard leads with a calibrated central tendency
     rather than the winner's-curse maximum (FIX-METRIC-IA).
     """
-    rows = session.execute(
-        select(EvaluationResult, EmbeddingConfig, ScoringConfig.name)
-        .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
-        .join(EmbeddingConfig, EmbeddingConfig.id == PredictionSet.embedding_config_id)
-        .outerjoin(ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id)
-        # Reversible query curation (slice F-METHOD-EVAL-SURFACE): diagnostic
-        # probe evaluations (ADR D40) must never become the home champion or
-        # inflate the per-task headline. ``is_distinct_from`` keeps NULL +
-        # non-probe rows (so legacy results that predate the column are
-        # untouched) and drops only the explicit "probe" role. Remove this
-        # filter to surface probes again; no data is deleted.
-        .where(EvaluationResult.leakage_role.is_distinct_from("probe"))
-    ).all()
+    rows = session.execute(_EVALUATIONS).all()
     best: dict[str, Any] | None = None
     best_score: float = -1.0
     grouped: dict[tuple[str, str], list[float]] = {}
-    for er, cfg, scoring_name in rows:
+    for er, cfg, method, scoring_name in rows:
         results = er.results or {}
         _collect_primary_cells(results, grouped)
         score, metric = _avg_primary(results)
@@ -146,14 +181,8 @@ def _pick_best_evaluation(
             "stage": stage_of(er, scoring_name),
             "avg_primary": round(score, 4),
             "primary_metric": metric,
-            "embedding": {
-                "id": str(cfg.id),
-                "model_name": cfg.model_name,
-                "model_backend": cfg.model_backend,
-                "display_name": cfg.display_name or cfg.model_name,
-                "family": cfg.family or cfg.model_backend,
-                "param_count": cfg.param_count,
-            },
+            "embedding": _embedding_block(cfg),
+            "method": _method_block(method),
             "per_cell": _flatten_cells(results),
         }
     return best, _build_per_task(grouped), len(rows)
@@ -226,7 +255,7 @@ def get_showcase(
                 "count": int(counts["reranker_models"]),
                 "href": "/reranker",
             },
-            {"name": "evaluations", "count": total_evaluations, "href": "/benchmark"},
+            {"name": "evaluations", "count": total_evaluations, "href": "/evaluation"},
         ]
         return {
             "protein_stats": {

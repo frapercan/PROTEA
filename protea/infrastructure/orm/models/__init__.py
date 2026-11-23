@@ -1,10 +1,20 @@
 from .alignment.sequence_alignment import SequenceAlignment  # noqa: F401
 from .annotation.annotation_set import AnnotationSet  # noqa: F401
+from .annotation.cut_photo import (  # noqa: F401
+    CutPhoto,
+    CutPhotoMember,
+)
 from .annotation.evaluation_result import EvaluationResult  # noqa: F401
 from .annotation.evaluation_set import EvaluationSet  # noqa: F401
+from .annotation.evidence_channel import (  # noqa: F401
+    EvidenceChannel,
+    EvidenceChannelEmptyGoRef,
+    EvidenceChannelTable,
+)
 from .annotation.go_term import GOTerm  # noqa: F401
 from .annotation.go_term_alias import GOTermAlias  # noqa: F401
 from .annotation.go_term_relationship import GOTermRelationship  # noqa: F401
+from .annotation.homology_table import HomologyTable  # noqa: F401
 from .annotation.information_accretion_set import InformationAccretionSet  # noqa: F401
 from .annotation.interpro_annotation import InterProAnnotation  # noqa: F401
 from .annotation.interpro_go_mapping import InterProGoMapping  # noqa: F401
@@ -12,17 +22,26 @@ from .annotation.ontology_snapshot import OntologySnapshot  # noqa: F401
 from .annotation.protein_go_annotation import ProteinGOAnnotation  # noqa: F401
 from .annotation.reference_reproduction import ReferenceReproduction  # noqa: F401
 from .annotation.term_cooccurrence import TermCooccurrence, TermFrequency  # noqa: F401
+from .annotation.window_placement import (  # noqa: F401
+    WindowPlacement,
+    WindowPlacementTarget,
+)
 from .anon_quota import AnonQuota  # noqa: F401
 from .api_key import ApiKey  # noqa: F401
 from .auth_audit import AuthAudit  # noqa: F401
 from .embedding.dataset import Dataset  # noqa: F401
+from .embedding.embedding_bank import EmbeddingBank  # noqa: F401
 from .embedding.embedding_config import EmbeddingConfig  # noqa: F401
 from .embedding.go_prediction import GOPrediction  # noqa: F401
+from .embedding.lexicon_bank import LexiconBank  # noqa: F401
 from .embedding.model_weights import ModelWeights  # noqa: F401
+from .embedding.prediction_score import PredictionScore  # noqa: F401
 from .embedding.prediction_set import PredictionSet  # noqa: F401
+from .embedding.prediction_set_protein import PredictionSetProtein  # noqa: F401
 from .embedding.reranker_model import RerankerModel  # noqa: F401
 from .embedding.residue_code import ResidueCode  # noqa: F401
 from .embedding.scoring_config import ScoringConfig  # noqa: F401
+from .embedding.segment_families import SegmentFamilies  # noqa: F401
 from .embedding.sequence_embedding import SequenceEmbedding  # noqa: F401
 from .experiment_run import ExperimentRun, ExperimentRunStatus  # noqa: F401
 from .exploration.exploration import Exploration  # noqa: F401
@@ -30,6 +49,8 @@ from .exploration.exploration_event import ExplorationEvent  # noqa: F401
 from .exploration.exploration_link import ExplorationLink  # noqa: F401
 from .exploration.external_reference import ExternalReference  # noqa: F401
 from .job import Job, JobEvent  # noqa: F401
+from .method.method import Method, MethodPin, MethodTrainingWindow  # noqa: F401
+from .method.prediction_explanation import PredictionExplanation  # noqa: F401
 from .protein.protein import Protein  # noqa: F401
 from .protein.protein_metadata import ProteinUniProtMetadata  # noqa: F401
 from .protein.swissprot_release import (  # noqa: F401
