@@ -1,4 +1,4 @@
-ADR-D63: The instrument publishes the champion's predictions every night, as a file, beside an editorial news file
+ADR-D66: The instrument publishes the champion's predictions every night, as a file, beside an editorial news file
 ==================================================================================================================
 
 :Status: Proposed (2026-11-23). The author asked for it on 2026-11-23: "Que el
@@ -130,8 +130,10 @@ build time.
   - the distance is left empty.
 
 **7. The order of work.** The release comes first, and nothing is scheduled
-on the production node before it. Then the data the champion needs is loaded
-in dependency order:
+on the production node before it. Every producer today needs an evaluation set,
+so the platform also needs a population mode at a cut, without a window, for
+the champion's producer. Then the data the champion needs is loaded in
+dependency order:
 
 1. proteins and sequences;
 2. metadata;
@@ -169,3 +171,14 @@ Open questions for the author
    with the file delivered to the production inbox. The current champion is
    cheap: it reads the protein's own terms. A retrieval champion would need
    the banks.
+4. Which champion rule. The rule above compares the mean of the nine cells.
+   The alternative is per-cell dominance: in each cell (knowledge category by
+   GO branch), a challenger replaces the incumbent when its paired comparison
+   on the validation window resolves a gain of at least 0.01 there. Per-cell
+   dominance matches the benchmark, which reports each cell and no mean. It
+   also lets the published predictions come from different arms in different
+   cells. On 211->227 the ordered own annotations lead in eight of the nine
+   cells by point estimate. Transfer from the nearest neighbour (ProtT5-XL)
+   leads in one: biological process for proteins with no experimental
+   annotation (0.3034 against 0.2696, 1,477 proteins). These are point
+   estimates; the paired comparison has not been run.
