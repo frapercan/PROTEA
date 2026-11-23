@@ -63,7 +63,14 @@ What a photo says about each protein
 
 Every GOA row of a member is kept, and each row is classed by its *evidence
 channel*, a pure function of its evidence code, its reference, who assigned it
-and whether the protein is reviewed at the cut. Which channels a method may read
+and whether the protein is reviewed at the cut.
+
+A photo counts every line of the GOA file that belongs to a member, as the file
+gives it. The annotation store keeps one row per protein, term, evidence code,
+qualifier and reference, so lines that differ only in other columns (the
+*with or from* column, who assigned it, the date) become one row there. The
+store therefore holds about 3 to 5 % fewer rows than the photo counts. Those are
+the same annotations, stored once. Which channels a method may read
 is decided when it reads, not when the photo is built, so changing that
 decision changes a filter, not the data.
 
