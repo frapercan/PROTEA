@@ -55,6 +55,7 @@ from sqlalchemy.orm import Session
 from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.cut_photo.build import OUTPUTS_BY_KIND, channel_table_digest
+from protea.core.cut_photo.taxa import member_taxa
 from protea.core.operations._cut_photo_channel_table import (
     check_stored_channel_table,
     declare_channel_table,
@@ -462,16 +463,27 @@ def _annotation_set(
             "gaf_go_version": goa.get("go_version", ""),
             "gaf_date_generated": goa.get("date_generated", ""),
         },
-        description=(
-            f"GOA {sources.cut}, published {sources.cut_date}, as the photo of cut "
-            f"{sources.cut} loaded it (ADR-D59): the rows of the photo's members on the GO "
-            f"graph {sources.snapshot.obo_version}."
+        description=photo_set_description(
+            sources.cut, sources.cut_date, sources.snapshot.obo_version
         ),
         code_revision=code_revision(),
     )
     session.add(created)
     session.flush()
     return created, True
+
+
+def photo_set_description(cut: int, published: date, obo_version: str) -> str:
+    """The words an annotation set loaded by a cut photo says about itself.
+
+    In one place because migration ``e0399c98f515`` writes the same words into
+    the sets loaded before the loader wrote any, and a test holds the two to one
+    text.
+    """
+    return (
+        f"GOA {cut}, published {published}, as the photo of cut {cut} loaded it "
+        f"(ADR-D59): the rows of the photo's members on the GO graph {obo_version}."
+    )
 
 
 def _store_proteins(session: Session, path: Path, cut: int, emit: EmitFn) -> int:
@@ -609,6 +621,8 @@ def _store_members(
 ) -> dict[str, int]:
     """One ``cut_photo_member`` row per member, with the md5 of its paired sequence.
 
+    Its own taxon comes from the cut's GOA rows (:func:`member_taxa`).
+
     A superset member's md5 is in ``members.parquet`` (the canonical Swiss-Prot table);
     any other member's is the one the TrEMBL pass found, or NULL when the paired
     release does not hold the accession.
@@ -617,6 +631,8 @@ def _store_members(
     unreviewed = photo_dir / "unreviewed_sequences.parquet"
     for batch in _batches(unreviewed, ["accession", "md5"]) if unreviewed.exists() else ():
         trembl.update((row["accession"], row["md5"]) for row in batch)
+    taxa, taxon_counts = member_taxa(photo_dir / "rows.parquet")
+    emit("load_cut_photo.member_taxa", None, taxon_counts, "info")
     counts: Counter[str] = Counter()
     progress = _Progress(emit, "members")
     columns = ["accession", "superset", "truth", "curated", "neighbour", "cluster", "md5"]
@@ -624,9 +640,11 @@ def _store_members(
         values = []
         for row in batch:
             md5 = row.pop("md5") or trembl.get(row["accession"])
-            values.append({**row, "photo_id": photo_id, "sequence_md5": md5})
+            taxon = taxa.get(row["accession"])
+            values.append({**row, "photo_id": photo_id, "sequence_md5": md5, "taxon_id": taxon})
             counts["members"] += 1
             counts["members_with_paired_sequence"] += md5 is not None
+            counts["members_with_taxon"] += taxon is not None
             counts["neighbours"] += bool(row["neighbour"])
         session.execute(pg_insert(CutPhotoMember.__table__).values(values))
         progress.batch(len(values))

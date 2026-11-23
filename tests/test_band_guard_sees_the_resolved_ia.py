@@ -21,7 +21,6 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import replace
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -180,20 +179,5 @@ class TestBothCallersHandTheGuardTheSetId:
         with pytest.raises(_GuardReached):
             single.RunCafaEvaluationOperation._resolve_and_gate_ia(
                 "tmp", MagicMock(), MagicMock(**self._PAYLOAD), MagicMock(), session
-            )
-        assert seen == {"band": "v211", "ia_file": None, "session": session, "ia_set_id": _IA_211}
-
-    def test_the_batch(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        from protea.core.operations import batch_rescore_evaluation as batch
-
-        seen: dict[str, object] = {}
-        monkeypatch.setattr(batch, "resolve_obo", lambda *_a, **_k: "go.obo")
-        monkeypatch.setattr(batch, "resolve_ia_file", lambda *_a, **_k: "ia.tsv")
-        monkeypatch.setattr(batch, "refuse_if_the_band_is_foreign", _spy_guard(seen))
-        ctx = batch._StageCtx(base_payload=MagicMock(**self._PAYLOAD), inputs=MagicMock())
-        session = MagicMock()
-        with pytest.raises(_GuardReached):
-            batch.BatchRescoreEvaluationOperation()._stage_shared_inputs(
-                session, ctx, tmp_path, MagicMock()
             )
         assert seen == {"band": "v211", "ia_file": None, "session": session, "ia_set_id": _IA_211}

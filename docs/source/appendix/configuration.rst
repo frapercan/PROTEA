@@ -120,6 +120,14 @@ Environment variable overrides
        annotation matrices keyed by ``(embedding_config_id,
        annotation_set_id)``). Defaults to ``data/ref_cache``. Read by
        :mod:`protea.core.disk_cache`.
+   * - ``PROTEA_EMBEDDING_BANK_DIR``
+     - Folder holding the embedding bank's shards on this node, as the builder
+       wrote them (``bank-<config>.json`` and ``vectors/<config>/shard-*.parquet``).
+       When set, a reference pool missing from the disk cache reads its vectors
+       from these shards, each verified against the manifest the store recorded
+       in ``embedding_bank``, instead of streaming them from the store. Unset by
+       default: the store streams them. Read by
+       :mod:`protea.core.operations.predict_go_terms._bank_shards`.
    * - ``PROTEA_PCA_ARTIFACTS_DIR``
      - Directory for per-PLM PCA projection states (``.npz``) used to
        pre-compute the ``emb_pca`` feature family. Defaults to
@@ -442,8 +450,10 @@ in the thesis and papers:
 - ``EMBEDDING_PCA_DIM = 16`` (``core/reranker.py``): part of the
   feature schema contract that ``protea-contracts`` will own; it
   gates compatibility with trained boosters.
-- ``N_THRESHOLDS = 101`` (``core/metrics.py``): CAFA Fmax sweep
-  granularity. Changing it produces non-comparable Fmax numbers.
+- ``th_step = 0.01`` (``run_cafa_evaluation``, cafaeval's own default and
+  LAFA's): the threshold grid of every Fmax the platform publishes. A finer
+  grid produces non-comparable numbers. The in-house metric that swept 101
+  thresholds (``core/metrics.py``) was retired on 2026-11-20.
 
 Structural exempt
 ~~~~~~~~~~~~~~~~~

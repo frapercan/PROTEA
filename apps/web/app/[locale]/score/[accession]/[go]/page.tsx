@@ -380,8 +380,7 @@ export default async function ScorePage({
             {t("fusion.gap.body", { set: setId ?? "<set>" })}
           </p>
           <div className="mt-3 space-y-1 font-mono text-[12px] text-[var(--foreground)]">
-            <code className="block break-all">GET /scoring/prediction-sets/{setId ?? "<set>"}/rerank.tsv</code>
-            <code className="block break-all">GET /scoring/prediction-sets/{setId ?? "<set>"}/score.tsv</code>
+            <code className="block break-all">GET /embeddings/prediction-sets/{setId ?? "<set>"}/predictions-cafa.tsv</code>
           </div>
         </div>
 

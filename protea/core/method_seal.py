@@ -118,7 +118,9 @@ _IDENTITY_COLUMNS: tuple[str, ...] = (
 #: other decision is taken. ``aspect_separated_knn`` decides whether the
 #: neighbour list is retrieved once or once per aspect, so it changes which
 #: donors exist. ``exclude_self_neighbour`` decides whether a query votes for
-#: itself, which is the difference between a measurement and a leak.
+#: itself, which is the difference between a measurement and a leak, and
+#: ``self_exclusion`` decides who leaves with it: its twins (other proteins with
+#: the identical sequence) under ``"sequence"``, nobody under ``"accession"``.
 #: ``donor_policy`` decides which donors and which annotations may vote at all.
 #: ``metric`` decides which neighbours are near. ``features`` decides which
 #: channels were computed and fed forward. ``faiss`` and ``rerankers`` are
@@ -144,14 +146,38 @@ _IDENTITY_META: tuple[str, ...] = (
     "aspect_separated_knn",
     "code_revision",
     "dependency_revisions",
+    # Whether and how the method honoured the bank's denials when it predicted
+    # (protea.core.denials): it changes which candidates exist.
+    "denials",
     "donor_policy",
+    # The window a native method read its inputs from (run_own_annotations,
+    # run_count_map): its targets, its cut's state and its frame's rules, the
+    # NOT codes among them, which no other field names whole.
+    "evaluation_set_id",
     "exclude_self_neighbour",
     "expand_votes_to_ancestors",
     "faiss",
     "features",
+    # The InterPro BP graft on top of the reranker's scores: it rescores BP
+    # candidates and adds InterPro's own, so it changes the stored set.
+    "interpro_bp_graft",
     "metric",
+    # The bytes an ingested set was read from (ingest_method_predictions): two
+    # files are two sets of predictions, whatever the producer's record says.
+    "predictions_sha256",
+    # An ingested set's producer: its own record of name, commit, shas and
+    # models (ingest_method_predictions). The producing method, so identity.
+    "producer",
+    # The proteins the set was asked about, when they were handed to the run as a
+    # list rather than as a query set: their count and digest
+    # (protea.core.query_population). Two arms of one window ask about its targets.
+    "query_population",
     "rerankers",
+    # How a scored set's candidates became scores: the arithmetic, the depth
+    # cut and the code that applied them (score_prediction_set).
+    "scoring",
     "search_backend",
+    "self_exclusion",
 )
 
 #: Columns that are NOT method identity, each with why. An exclusion put wrong
@@ -185,10 +211,31 @@ _EXECUTION_COLUMNS: Mapping[str, str] = {
         "_IDENTITY_META compares; the column is not compared, so the sets written "
         "before it existed compare as they did"
     ),
+    "summary": (
+        "counts of the set's own rows (rows, proteins, totals per aspect, most "
+        "frequent terms), kept so its pages stop counting them on every visit. It "
+        "follows from the predictions and names nothing about how they were made"
+    ),
 }
 
 #: ``meta`` keys that are NOT method identity, each with why.
 _EXECUTION_META: Mapping[str, str] = {
+    "scored_from": (
+        "which candidate set a scored set was scored from. The id of a row, "
+        "like id: a method re-run and scored again has another, and the method "
+        "it ran is the candidate set's record, copied into the scored set's"
+    ),
+    "scoring_config_id": (
+        "which ScoringConfig row the arithmetic was read from. Two rows holding "
+        "the same arithmetic score alike, and the arithmetic itself is the "
+        "scoring key, which is identity"
+    ),
+    "denied_removed": (
+        "how many candidates the bank's denials removed. A consequence of the "
+        "data the method met, not a choice: two runs of the same method over "
+        "different queries remove different numbers. The choice is the "
+        "denials key, which is identity"
+    ),
     "batch_size": (
         "how many queries ride in one forward pass. The search is per query and "
         "the arithmetic does not read the batch, so the same query gets the same "
@@ -200,6 +247,36 @@ _EXECUTION_META: Mapping[str, str] = {
         "which job row ran it. Load-bearing provenance and not method: a set "
         "re-run under a new job id is the same method, and requiring it to agree "
         "would refuse every comparison for the same reason id would"
+    ),
+    # The keys a native method's set carries (protea.core.method_write). Its
+    # identity is method_id, the method row with its recipe and pins, which is
+    # an identity column; these are labels of it or counts of what it met.
+    "algorithm": (
+        "'native_method' on every set a native method writes. It follows from "
+        "method_id being set, and method_id is identity"
+    ),
+    "method": (
+        "the method's short name, read off the row method_id names. It cannot "
+        "move unless method_id does"
+    ),
+    "targets_with_a_term": (
+        "how many of the targets got a row, counted off the rows written. A "
+        "consequence of the data, like denied_removed"
+    ),
+    "targets_without_a_sequence": (
+        "how many targets had no sequence to read. Which ones follows from the "
+        "population and the cut, both identity"
+    ),
+    "aspects": (
+        "what a count map's fit found per aspect: its sizes and the strength the "
+        "bits chose. Outcomes of the method over its inputs, which are identity "
+        "(method_id with its pins, the cut, the population)"
+    ),
+    "source": (
+        "where an ingested file was read from and what its scan counted (rows, "
+        "unknown terms, aspect disagreements). The location of the same bytes "
+        "can change and the counts follow from them; the bytes are named by "
+        "predictions_sha256, which is identity"
     ),
 }
 
@@ -247,11 +324,15 @@ MUST_BE_RECORDED: tuple[str, ...] = (
 _ABSENCE_MEANS: Mapping[str, str] = {
     "code_revision": "there is no evidence about which code produced it",
     "dependency_revisions": "there is no evidence about which libraries produced it",
-    "query_set_id": "there is no evidence about which proteins it was asked to predict",
+    "query_set_id": (
+        "there is no evidence about which proteins it was asked to predict: neither a "
+        "query set nor the digest of the list it was handed (query_population)"
+    ),
 }
 
 _CLASSIFIED_COLUMNS = frozenset(_IDENTITY_COLUMNS) | frozenset(_EXECUTION_COLUMNS)
 _CLASSIFIED_META = frozenset(_IDENTITY_META) | frozenset(_EXECUTION_META)
+
 
 def _assert_the_lists_partition() -> None:
     """Refuse at import if a field is classified twice.
@@ -380,6 +461,10 @@ def _recorded(row: Mapping[str, Any], meta: Mapping[str, Any], field: str) -> An
     keeping a third list beside them, because a third list is one that can
     disagree with both and :func:`_assert_the_lists_partition` would not see it.
     """
+    if field == "query_set_id":
+        # The population is declared either way: by a query set, or by the digest
+        # of the list the run was handed (protea.core.query_population).
+        return row.get(field) or meta.get("query_population")
     return row.get(field) if field in _IDENTITY_COLUMNS else meta.get(field)
 
 

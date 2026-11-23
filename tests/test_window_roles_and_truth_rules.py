@@ -23,16 +23,21 @@ from __future__ import annotations
 import inspect
 import re
 import uuid
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from protea.core._binding_rule import BINDING_RULES
 from protea.core._truth_rules import GAIN_RULES, NOT_CODE_RULES, TRUTH_PROFILES
+from protea.core._window_population import TARGET_POPULATIONS
 from protea.core.evaluation import compute_evaluation_data
 from protea.core.window_declarations import (
     CLOSURES,
+    LAFA_FRAME,
     NAMEABLE_CLOSURES,
+    NAMED_TARGET_POPULATIONS,
     NAMED_TRUTH_RULES,
     OCTOBER_HEADLINE_FRAME,
     SAME_SNAPSHOT_RULES,
@@ -54,6 +59,7 @@ PER_SIDE_DEFAULTS = {
     "toi_rule": "pivot_terms",
     "not_codes": "any",
     "closure": "per_side",
+    "binding": "descendants_both_ends",
 }
 
 
@@ -90,6 +96,7 @@ class TestTheRuleVocabularies:
             ("toi_rule", GAIN_RULES),
             ("not_codes", NOT_CODE_RULES),
             ("closure", CLOSURES),
+            ("binding", BINDING_RULES),
         ):
             clause = re.search(rf"'{key}', ''\) IN \(([^)]*)\)", sql)
             assert clause is not None, f"no clause for {key}"
@@ -97,7 +104,7 @@ class TestTheRuleVocabularies:
 
     def test_a_missing_key_or_a_json_null_cannot_pass_the_check(self) -> None:
         # ``->>`` gives NULL for both, and a CHECK evaluating to NULL passes.
-        assert model.TRUTH_RULES_CHECK.count("COALESCE(") == 4
+        assert model.TRUTH_RULES_CHECK.count("COALESCE(") == 5
         assert "jsonb_typeof(truth_rules) = 'object'" in model.TRUTH_RULES_CHECK
 
     def test_the_column_is_nullable_jsonb_and_out_of_the_identity(self) -> None:
@@ -113,9 +120,11 @@ class TestTheRuleVocabularies:
 
     def test_an_unknown_value_is_refused_at_construction(self) -> None:
         with pytest.raises(ValueError, match="unknown closure"):
-            TruthRules("projected", "live_in_both_ends", "experimental", "graph_of_t0")
+            TruthRules("projected", "live_in_both_ends", "experimental", "graph_of_t0", "cafa")
         with pytest.raises(ValueError, match="unknown profile"):
-            TruthRules("remapped", "pivot_terms", "any", "per_side")
+            TruthRules("remapped", "pivot_terms", "any", "per_side", "cafa")
+        with pytest.raises(ValueError, match="unknown binding"):
+            TruthRules("projected", "live_in_both_ends", "experimental", "t0_graph", "democafa")
 
     def test_the_stored_shape_round_trips(self) -> None:
         stored = OCTOBER_HEADLINE_FRAME.as_json()
@@ -124,6 +133,7 @@ class TestTheRuleVocabularies:
             "toi_rule": "live_in_both_ends",
             "not_codes": "experimental",
             "closure": "t0_graph",
+            "binding": "descendants_both_ends",
         }
         assert TruthRules.from_json(stored) == OCTOBER_HEADLINE_FRAME
 
@@ -132,12 +142,15 @@ class TestTheRuleVocabularies:
         [
             {"profile": "projected", "toi_rule": "live_in_both_ends", "not_codes": "any"},
             {**PER_SIDE_DEFAULTS, "population": "superset"},
-            ["profile", "toi_rule", "not_codes", "closure"],
+            ["profile", "toi_rule", "not_codes", "closure", "binding"],
+            {key: value for key, value in PER_SIDE_DEFAULTS.items() if key != "binding"},
         ],
     )
     def test_a_stored_set_with_other_keys_is_refused(self, stored: object) -> None:
-        # A fifth key was written by code applying a rule this code does not,
-        # and reading it as these four would merge two truths under one name.
+        # A sixth key was written by code applying a rule this code does not,
+        # and reading it as these five would merge two truths under one name. A
+        # set without ``binding`` predates the rule; the migration that declared
+        # it gave every stored row its own, so none is left to read.
         with pytest.raises(ValueError, match="exactly the keys"):
             TruthRules.from_json(stored)  # type: ignore[arg-type]
 
@@ -158,9 +171,10 @@ class TestTheSameSnapshotPath:
             "ontology_snapshot_id",
         ]
 
-    def test_it_declares_the_defaults_and_no_build_time_closure(self) -> None:
+    def test_it_declares_the_defaults_no_build_time_closure_and_no_binding_rule(self) -> None:
+        # ``compute_evaluation_data`` runs no protein-binding rule at all.
         assert SAME_SNAPSHOT_RULES == TruthRules(
-            TRUTH_PROFILES[0], GAIN_RULES[0], NOT_CODE_RULES[0], "direct_terms"
+            TRUTH_PROFILES[0], GAIN_RULES[0], NOT_CODE_RULES[0], "direct_terms", "none"
         )
 
 
@@ -173,9 +187,10 @@ class TestTheClosure:
             (("T0", "T0", "T0"), "t0_graph"),
             (("T0", "T1", "T1"), "per_side"),
             (("T1", "T1", "T1"), "t1_graph"),
-            # The pivot is part of it: per side intersected with t0's universe
-            # is not the default construction.
-            (("T0", "T1", "T0"), "explicit"),
+            # The pivot is part of it: each side under its own graph and scored
+            # at t0's is LAFA's closure, not the default construction.
+            (("T0", "T1", "T0"), "per_side_t0_pivot"),
+            (("T1", "T0", "T0"), "explicit"),
             (("OTHER", "OTHER", "OTHER"), "explicit"),
             (("T0", "T0", "OTHER"), "explicit"),
         ],
@@ -204,7 +219,26 @@ class TestTheNamedRuleSet:
             toi_rule="live_in_both_ends",
             not_codes="experimental",
             closure="t0_graph",
+            binding="descendants_both_ends",
         )
+
+    def test_the_lafa_frame_is_lafas_rules_and_scores_lafas_targets(self) -> None:
+        # 2026-11-20: the benchmark, faithful to CAFA and LAFA (protea.core.lafa_frame).
+        assert NAMED_TRUTH_RULES["lafa-frame"] == LAFA_FRAME
+        assert LAFA_FRAME == TruthRules(
+            profile="own_graph",
+            toi_rule="both_ends_trimmed",
+            not_codes="experimental",
+            closure="per_side_t0_pivot",
+            binding="cafa",
+        )
+        assert NAMED_TARGET_POPULATIONS == {"lafa-frame": "swissprot_same_sequence"}
+        assert set(NAMED_TARGET_POPULATIONS) <= set(NAMED_TRUTH_RULES)
+        assert set(NAMED_TARGET_POPULATIONS.values()) <= set(TARGET_POPULATIONS)
+
+    def test_only_a_requestable_binding_rule_can_be_named(self) -> None:
+        # ``none`` is what a path applies, never what a payload asks for.
+        assert all(rules.binding != "none" for rules in NAMED_TRUTH_RULES.values())
 
     def test_every_named_closure_can_be_resolved(self) -> None:
         assert all(rules.closure in NAMEABLE_CLOSURES for rules in NAMED_TRUTH_RULES.values())
@@ -235,9 +269,20 @@ class TestOneFrameOneSetOfRules:
         assert str(october.id) in message and str(per_side.id) in message
 
     def test_one_rule_apart_is_enough(self) -> None:
-        other = TruthRules("projected", "live_in_both_ends", "any", "t0_graph")
+        other = TruthRules(
+            "projected", "live_in_both_ends", "any", "t0_graph", "descendants_both_ends"
+        )
         with pytest.raises(MixedTruthRulesError):
             common_truth_rules([_window(OCTOBER_HEADLINE_FRAME), _window(other)])
+
+    def test_the_binding_rule_alone_is_enough(self) -> None:
+        with pytest.raises(MixedTruthRulesError):
+            common_truth_rules(
+                [
+                    _window(OCTOBER_HEADLINE_FRAME),
+                    _window(replace(OCTOBER_HEADLINE_FRAME, binding="cafa")),
+                ]
+            )
 
     def test_a_legacy_window_is_refused_by_id(self) -> None:
         legacy = _window(None)
@@ -250,7 +295,7 @@ class TestOneFrameOneSetOfRules:
             common_truth_rules([_window(None), _window(None)])
 
     def test_explicit_closures_cannot_be_compared_even_when_equal(self) -> None:
-        explicit = TruthRules("projected", "live_in_both_ends", "experimental", "explicit")
+        explicit = TruthRules("projected", "live_in_both_ends", "experimental", "explicit", "cafa")
         with pytest.raises(MixedTruthRulesError, match="explicit graphs"):
             common_truth_rules([_window(explicit), _window(explicit)])
 

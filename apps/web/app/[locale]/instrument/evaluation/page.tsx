@@ -2,6 +2,7 @@
 
 import { formatCount, formatDate, formatDateTime } from "@/lib/format";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { ContextBanner } from "@/components/ContextBanner";
@@ -79,6 +80,10 @@ type EvaluationSet = {
   new_annotation_set_id: string;
   job_id: string | null;
   created_at: string;
+  /** What the window is, in a sentence its writer derives. */
+  description?: string | null;
+  /** The window that replaces this one, when it has been superseded. */
+  superseded_by_id?: string | null;
   stats: {
     delta_proteins?: number;
     nk_proteins?: number;
@@ -186,8 +191,8 @@ function ResultsTable({ results }: { results: Record<string, SettingResults> }) 
         </span>
         <span className="text-[11px] text-slate-500">
           Per-cell threshold-optimal F1 (not IA-weighted). For the
-          IA-weighted f_micro_w matrix used on the LAFA / CAFA leaderboards,
-          see <span className="font-mono">/benchmark</span>.
+          IA-weighted f_micro_w used on the LAFA / CAFA leaderboards, open the
+          window&apos;s panel.
         </span>
       </div>
       {settings.map((setting) => (
@@ -243,7 +248,7 @@ function EvaluationSetCard({
   annotationSets,
   predictionSets,
   scoringConfigs,
-  rerankers: initialRerankers,
+  rerankers,
   isSelected,
   onSelect,
   onDeleted,
@@ -252,6 +257,7 @@ function EvaluationSetCard({
   annotationSets: AnnotationSet[];
   predictionSets: PredictionSet[];
   scoringConfigs: ScoringConfig[];
+  // Only to name the reranker a result written before 2026-11-20 was scored with.
   rerankers: RerankerModel[];
   isSelected: boolean;
   onSelect: () => void;
@@ -262,16 +268,6 @@ function EvaluationSetCard({
   const [results, setResults] = useState<EvaluationResult[]>([]);
   const [loadingResults, setLoadingResults] = useState(false);
   const [predSetId, setPredSetId] = useState("");
-  const [maxDistance, setMaxDistance] = useState("");
-  const [scoringConfigId, setScoringConfigId] = useState("");
-  // 3x3 reranker grid: category × aspect
-  const [rrGrid, setRrGrid] = useState<Record<string, Record<string, string>>>({
-    nk: { bpo: "", mfo: "", cco: "" },
-    lk: { bpo: "", mfo: "", cco: "" },
-    pk: { bpo: "", mfo: "", cco: "" },
-  });
-  const setRrCell = (cat: string, asp: string, val: string) =>
-    setRrGrid((prev) => ({ ...prev, [cat]: { ...prev[cat], [asp]: val } }));
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState("");
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
@@ -330,25 +326,6 @@ function EvaluationSetCard({
     setPendingJobId(null);
     try {
       const body: Record<string, any> = { prediction_set_id: predSetId };
-      if (maxDistance) body.max_distance = parseFloat(maxDistance);
-      // Build nested rerankers mapping from the 3×3 grid
-      const rerankers: Record<string, Record<string, string>> = {};
-      let hasAnyReranker = false;
-      for (const cat of ["nk", "lk", "pk"]) {
-        const catMap: Record<string, string> = {};
-        for (const asp of ["bpo", "mfo", "cco"]) {
-          if (rrGrid[cat]?.[asp]) {
-            catMap[asp] = rrGrid[cat][asp];
-            hasAnyReranker = true;
-          }
-        }
-        if (Object.keys(catMap).length > 0) rerankers[cat] = catMap;
-      }
-      if (hasAnyReranker) {
-        body.rerankers = rerankers;
-      } else if (scoringConfigId) {
-        body.scoring_config_id = scoringConfigId;
-      }
       const res = await apiFetch<{ id: string; status: string }>(
         `/annotations/evaluation-sets/${e.id}/run`,
         {
@@ -377,7 +354,17 @@ function EvaluationSetCard({
         onClick={onSelect}
       >
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div className="text-sm font-medium text-slate-800">{evalLabel(e, annotationSets)}</div>
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-slate-800">{evalLabel(e, annotationSets)}</div>
+            {e.description ? <div className="mt-0.5 text-xs text-slate-500">{e.description}</div> : null}
+            <Link
+              href={`/${locale}/instrument/evaluation/${e.id}`}
+              onClick={(ev) => ev.stopPropagation()}
+              className="mt-1 inline-block text-xs font-medium text-blue-700 hover:underline"
+            >
+              {t("evaluationSetCard.openPanel")}
+            </Link>
+          </div>
           <button
             onClick={async (ev) => {
               ev.stopPropagation();
@@ -500,88 +487,15 @@ function EvaluationSetCard({
                   ))}
                 </select>
               </div>
-              <div>
-                <label htmlFor={`eval-max-distance-${e.id}`} className={labelClass}>{t("evaluationSetCard.maxDistanceLabel")}</label>
-                <input
-                  id={`eval-max-distance-${e.id}`}
-                  type="number" min="0" max="2" step="0.05" placeholder="no limit"
-                  value={maxDistance}
-                  onChange={(ev) => setMaxDistance(ev.target.value)}
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
             </div>
 
-            {/* Scoring method — 3×3 grid (category × aspect) */}
-            <div>
-              <p className={labelClass} id={`eval-rr-grid-label-${e.id}`}>
-                Re-ranker models
-                <InfoTooltip text="Select a trained LightGBM re-ranker for each cell (category × aspect). Cells left empty fall back to the scoring config or default 1 − distance/2. Models trained for a specific aspect are shown with their aspect badge." />
-              </p>
-              {initialRerankers.length > 0 && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs border-collapse" aria-labelledby={`eval-rr-grid-label-${e.id}`}>
-                    <thead>
-                      <tr>
-                        <th scope="col" className="px-2 py-1 text-left text-slate-500 font-medium"></th>
-                        <th scope="col" className="px-2 py-1 text-center text-slate-600 font-semibold">BPO</th>
-                        <th scope="col" className="px-2 py-1 text-center text-slate-600 font-semibold">MFO</th>
-                        <th scope="col" className="px-2 py-1 text-center text-slate-600 font-semibold">CCO</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(["nk", "lk", "pk"] as const).map((cat) => (
-                        <tr key={cat}>
-                          <th scope="row" className="px-2 py-1.5 font-semibold text-slate-700 uppercase text-left">{cat}</th>
-                          {(["bpo", "mfo", "cco"] as const).map((asp) => {
-                            // Show models matching this category+aspect, or category+null (all-aspect models)
-                            const candidates = initialRerankers.filter(
-                              (r) => r.category === cat && (r.aspect === asp || r.aspect === null)
-                            );
-                            return (
-                              <td key={asp} className="px-1 py-1">
-                                <select
-                                  aria-label={`${cat.toUpperCase()} ${asp.toUpperCase()} re-ranker`}
-                                  value={rrGrid[cat]?.[asp] ?? ""}
-                                  onChange={(ev) => { setRrCell(cat, asp, ev.target.value); if (ev.target.value) setScoringConfigId(""); }}
-                                  className="w-full rounded border border-slate-300 px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                >
-                                  <option value="">—</option>
-                                  {candidates.map((r) => (
-                                    <option key={r.id} value={r.id}>
-                                      {r.name}{r.aspect ? ` [${r.aspect.toUpperCase()}]` : " [all]"} · AUC {r.metrics.val_auc?.toFixed(3)}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              {(() => {
-                const hasAnyRr = Object.values(rrGrid).some((catMap) => Object.values(catMap).some(Boolean));
-                return scoringConfigs.length > 0 && !hasAnyRr ? (
-                  <div className="mt-2">
-                    <label htmlFor={`eval-scoring-config-${e.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Scoring config (alternative to re-ranker)</label>
-                    <select
-                      id={`eval-scoring-config-${e.id}`}
-                      value={scoringConfigId}
-                      onChange={(ev) => setScoringConfigId(ev.target.value)}
-                      className={selectClass}
-                    >
-                      <option value="">Default (1 − distance / 2)</option>
-                      {scoringConfigs.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null;
-              })()}
-            </div>
+            <p className="text-xs text-slate-500">
+              The evaluator scores the set&apos;s stored scores, as they are. A nearest-neighbour or
+              InterPro set stores candidates: score it first with{" "}
+              <code className="font-mono">score_prediction_set</code>, which names the scoring
+              configuration and the depth, and evaluate the scored set. A reranker runs when the
+              method predicts.
+            </p>
             {runError && (
               <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {runError}
@@ -641,7 +555,7 @@ function EvaluationSetCard({
                   const pred = predictionSets.find((p) => p.id === r.prediction_set_id);
                   const sc = scoringConfigs.find((c) => c.id === r.scoring_config_id);
                   const hasReranker = !!r.reranker_model_id;
-                  const rr = initialRerankers.find((m) => m.id === r.reranker_model_id);
+                  const rr = rerankers.find((m) => m.id === r.reranker_model_id);
                   return (
                     <div key={r.id} className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
                       {/* Meta header */}
@@ -761,6 +675,7 @@ function EvaluationSetCard({
 
 export default function EvaluationPage() {
   const t = useTranslations("evaluation");
+  const locale = useLocale();
   const [annotationSets, setAnnotationSets] = useState<AnnotationSet[]>([]);
   const [predictionSets, setPredictionSets] = useState<PredictionSet[]>([]);
   const [evaluationSets, setEvaluationSets] = useState<EvaluationSet[]>([]);
@@ -797,6 +712,9 @@ export default function EvaluationPage() {
   useEffect(() => { reload(); }, []);
 
   const goaSets = annotationSets.filter((s) => s.source === "goa");
+  // The live windows first; a superseded one is folded with a link to its successor.
+  const liveSets = evaluationSets.filter((e) => !e.superseded_by_id);
+  const supersededSets = evaluationSets.filter((e) => e.superseded_by_id);
   const canGenerate = oldSetId && newSetId && oldSetId !== newSetId;
 
   async function handleGenerate() {
@@ -924,10 +842,10 @@ export default function EvaluationPage() {
       </section>
 
       {/* ── Evaluation Sets ───────────────────────────────────────── */}
-      {evaluationSets.length > 0 && (
+      {liveSets.length > 0 && (
         <section className="space-y-4">
           <h2 className="text-base font-semibold text-slate-800">{t("evaluationSetsSection.heading")}</h2>
-          {evaluationSets.slice(0, visibleEvalCount).map((e) => (
+          {liveSets.slice(0, visibleEvalCount).map((e) => (
             <EvaluationSetCard
               key={e.id}
               e={e}
@@ -940,7 +858,7 @@ export default function EvaluationPage() {
               onDeleted={() => setEvaluationSets((prev) => prev.filter((x) => x.id !== e.id))}
             />
           ))}
-          {evaluationSets.length > visibleEvalCount && (
+          {liveSets.length > visibleEvalCount && (
             <div className="flex flex-col items-center gap-1.5 pt-1">
               <button
                 type="button"
@@ -950,11 +868,42 @@ export default function EvaluationPage() {
                 Load more evaluation sets
               </button>
               <span className="text-xs text-slate-500 tabular-nums">
-                Showing {Math.min(visibleEvalCount, evaluationSets.length)} of {evaluationSets.length}
+                Showing {Math.min(visibleEvalCount, liveSets.length)} of {liveSets.length}
               </span>
             </div>
           )}
         </section>
+      )}
+
+      {/* ── Superseded windows, folded ─────────────────────────────── */}
+      {supersededSets.length > 0 && (
+        <details className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium text-slate-700">
+            {t("evaluationSetsSection.superseded", { count: supersededSets.length })}
+          </summary>
+          <ul className="mt-3 space-y-2">
+            {supersededSets.map((e) => {
+              const successor = evaluationSets.find((x) => x.id === e.superseded_by_id);
+              return (
+                <li key={e.id} className="text-xs text-slate-600">
+                  <Link href={`/${locale}/instrument/evaluation/${e.id}`} className="font-medium text-slate-800 hover:underline">
+                    {evalLabel(e, annotationSets)}
+                  </Link>
+                  {e.description ? <span className="text-slate-500"> · {e.description}</span> : null}
+                  {successor ? (
+                    <>
+                      {" · "}
+                      {t("evaluationSetsSection.supersededBy")}{" "}
+                      <Link href={`/${locale}/instrument/evaluation/${successor.id}`} className="text-blue-700 hover:underline">
+                        {evalLabel(successor, annotationSets)}
+                      </Link>
+                    </>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       )}
 
       {/* ── Evaluator command reference ───────────────────────────── */}

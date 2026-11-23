@@ -314,8 +314,8 @@ _Q_RESULTS = text(
            --
            -- ALIASED BY ITS OWN NAME. This used to come out as ``frame``, so
            -- the key ``frame`` carried a digest here and the harness label at
-           -- /v1/benchmark/matrix, where the frontend tests it against the
-           -- literal "lafa". Two endpoints, one key, two meanings: the trap
+           -- /v1/benchmark/matrix (since retired), where the frontend tested it
+           -- against the literal "lafa". Two endpoints, one key, two meanings: the trap
            -- this campaign exists to avoid, and the panel query one screen
            -- down already aliased the same column correctly.
            er.frame_digest              AS frame_digest,

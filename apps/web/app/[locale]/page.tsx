@@ -409,7 +409,7 @@ export default async function ArgumentPage() {
       <footer className="mt-14 border-t border-[var(--border)] pt-6">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[14px]">
           {/* Same label, same destination as the one in the header rail.
-              It used to point at /instrument/benchmark while the rail's
+              It used to point at the benchmark page while the rail's
               pointed at the hub and the annotate panel's pointed at the
               jobs queue: three links reading "Open the instrument" and
               going to three different places. */}

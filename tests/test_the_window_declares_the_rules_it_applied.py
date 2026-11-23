@@ -23,12 +23,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from protea.core._window_population import SameSequence
 from protea.core.evaluation import EvaluationData
 from protea.core.operations.generate_evaluation_set import (
     GenerateEvaluationSetOperation,
     GenerateEvaluationSetPayload,
 )
 from protea.core.window_declarations import (
+    LAFA_FRAME,
     OCTOBER_HEADLINE_FRAME,
     SAME_SNAPSHOT_RULES,
     WINDOW_ROLES,
@@ -41,6 +43,7 @@ PER_SIDE_DEFAULTS = {
     "toi_rule": "pivot_terms",
     "not_codes": "any",
     "closure": "per_side",
+    "binding": "descendants_both_ends",
 }
 
 
@@ -100,6 +103,31 @@ class TestThePayloadNamesARuleSet:
         p = GenerateEvaluationSetPayload(**_ids())
         assert p.truth_rule_set is None
         assert (p.truth_profile, p.toi_rule, p.not_codes) == ("as_closed", "pivot_terms", "any")
+        assert p.binding_rule == "descendants_both_ends"
+
+    def test_the_lafa_frame_fills_lafas_rules_and_targets(self) -> None:
+        p = GenerateEvaluationSetPayload(**_ids(), truth_rule_set="lafa-frame")
+        assert (p.truth_profile, p.toi_rule, p.not_codes, p.binding_rule) == (
+            "own_graph",
+            "both_ends_trimmed",
+            "experimental",
+            "cafa",
+        )
+        assert p.target_population == "swissprot_same_sequence"
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("binding_rule", "descendants_both_ends"), ("target_population", "superset_at_t0")],
+    )
+    def test_the_lafa_frame_refuses_what_it_does_not_apply(self, field: str, value: str) -> None:
+        with pytest.raises(ValueError, match=f"fixes {field}"):
+            GenerateEvaluationSetPayload(**_ids(), truth_rule_set="lafa-frame", **{field: value})
+
+    @pytest.mark.parametrize("rule", ["none", "democafa", ""])
+    def test_a_payload_cannot_ask_for_a_binding_rule_it_cannot_request(self, rule: str) -> None:
+        # ``none`` is what the same-snapshot path applies, never a request.
+        with pytest.raises(ValueError, match="binding_rule"):
+            GenerateEvaluationSetPayload(**_ids(), binding_rule=rule)
 
 
 # ------------------------------------------------------ the operation stores
@@ -231,6 +259,31 @@ class TestTheOctoberRulesBuildTheOctoberWindow:
         row = added[0]
         assert row.truth_rules == OCTOBER_HEADLINE_FRAME.as_json()
         assert (row.old_native_snapshot_id, row.new_native_snapshot_id) == (t0, t0)
+
+    def test_the_lafa_frame_builds_each_side_under_its_own_graph_and_scores_at_t0(self) -> None:
+        t0, t1 = uuid.uuid4(), uuid.uuid4()
+        session, added = _session(_corpus(t0), _corpus(t1))
+        targets = SameSequence("2022_03", "2025_03", 3, frozenset({"P1", "P2"}))
+        with (
+            patch(
+                f"{_OPERATION}.compute_evaluation_data_lafa",
+                return_value=(_data(), {"lafa_workflow": "github.com/x@1"}),
+            ) as lafa,
+            patch(f"{_OPERATION}.same_sequence_at_both_ends", return_value=targets) as population,
+        ):
+            rec, same, _ = _run(session, {**_ids(), "truth_rule_set": "lafa-frame"})
+
+        assert not same.called and not rec.called
+        window = lafa.call_args.args[1]
+        assert (window.old_native, window.new_native) == (t0, t1)
+        assert population.called
+        row = added[0]
+        assert (row.old_native_snapshot_id, row.new_native_snapshot_id) == (t0, t1)
+        assert row.pivot_snapshot_id == t0
+        assert row.truth_rules == LAFA_FRAME.as_json()
+        assert row.target_population == "swissprot_same_sequence"
+        assert row.stats["lafa_workflow"] == "github.com/x@1"
+        assert row.stats["population_swissprot_releases"] == ["2022_03", "2025_03"]
 
     def test_an_override_that_moves_the_closure_is_refused_before_computing(self) -> None:
         t0, t1 = uuid.uuid4(), uuid.uuid4()

@@ -109,9 +109,10 @@ class TestTheListing:
         (
             listing.outerjoin.return_value.outerjoin.return_value.join.return_value.join.return_value.order_by.return_value.limit.return_value.all.return_value
         ) = rows
-        counts = MagicMock()
-        counts.group_by.return_value.all.return_value = []
-        session.query.side_effect = [listing, counts]
+        counts = MagicMock()  # the sets not counted yet, counted: no rows here
+        counts.filter.return_value.group_by.return_value.__iter__.return_value = iter([])
+        scored = MagicMock()  # the scored sets' pairs, none here
+        session.query.side_effect = [listing, counts, scored]
         return embeddings_service.list_prediction_sets_data(session)
 
     @staticmethod
@@ -126,6 +127,7 @@ class TestTheListing:
             "limit_per_entry": 30,
             "distance_threshold": None,
             "created_at": datetime(2026, 11, 15, tzinfo=UTC),
+            "summary": None,  # not counted yet, so the listing counts it
         }
         fields.update(over)
         return SimpleNamespace(**fields)

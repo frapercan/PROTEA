@@ -1897,93 +1897,6 @@
         "title": "RepoEntry",
         "type": "object"
       },
-      "RerankedPairResponse": {
-        "description": "Single ``(accession, go_term)`` reranked-score lookup result.\n\nField names and semantics mirror the ``rerank.tsv`` columns exactly\nso the value returned here is the same number the bulk stream emits\nfor the corresponding row. Produced by\n:func:`score_single_pair_with_reranker`, which reuses the identical\n:func:`score_predictions_with_reranker` scoring pass the bulk TSV\nuses and selects the one matching row.",
-        "properties": {
-          "aspect": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "GO aspect (``F`` / ``P`` / ``C``) of the term; empty when unknown.",
-            "title": "Aspect"
-          },
-          "distance": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "KNN embedding distance of the backing neighbour.",
-            "title": "Distance"
-          },
-          "evidence_code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "GO evidence code of the transferred annotation.",
-            "title": "Evidence Code"
-          },
-          "go_id": {
-            "description": "GO term the score was computed for.",
-            "title": "Go Id",
-            "type": "string"
-          },
-          "protein_accession": {
-            "description": "Query protein accession the score belongs to.",
-            "title": "Protein Accession",
-            "type": "string"
-          },
-          "qualifier": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "GO qualifier of the transferred annotation.",
-            "title": "Qualifier"
-          },
-          "ref_protein_accession": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Reference (neighbour) protein the annotation was transferred from.",
-            "title": "Ref Protein Accession"
-          },
-          "reranker_score": {
-            "description": "Fused/reranked probability in [0, 1] for this pair. Byte-for-byte the same value the bulk ``rerank.tsv`` produces for this row (same booster pass over the full prediction set).",
-            "title": "Reranker Score",
-            "type": "number"
-          }
-        },
-        "required": [
-          "protein_accession",
-          "go_id",
-          "reranker_score"
-        ],
-        "title": "RerankedPairResponse",
-        "type": "object"
-      },
       "RerankerModelSummary": {
         "description": "Compact view of a ``RerankerModel`` row for management responses.\n\nReturned by the activate / deactivate / delete endpoints so an\noperator can confirm which serve slot ``(category, aspect)`` was\ntouched and whether the row is the one the selector now picks.",
         "properties": {
@@ -3604,6 +3517,96 @@
         ]
       }
     },
+    "/v1/annotations/evaluation-sets/{eval_id}/paired-comparisons": {
+      "get": {
+        "description": "The latest ``compare_paired_panels`` of each pair of the window's results.\n\nOver the whole panel, or, given ``axis`` and ``band`` together, restricted to\nthat stratum. Each one names its job, the result under test and the baseline,\nthe stratum, the method axis it declared, its operating point and resampling,\nand per panel the difference, its interval, the interval's method, the\nverdict, the number of paired proteins, the effect of interest and the\nsmallest detectable effect. Returns ``422`` for half a stratum or one outside\nthe closed vocabularies, ``404`` if the evaluation set is missing.",
+        "operationId": "list_paired_comparisons_v1_annotations_evaluation_sets__eval_id__paired_comparisons_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "With band: the stratum axis the comparisons were restricted to",
+            "in": "query",
+            "name": "axis",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With band: the stratum axis the comparisons were restricted to",
+              "title": "Axis"
+            }
+          },
+          {
+            "description": "With axis: the band of that axis, e.g. >90",
+            "in": "query",
+            "name": "band",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With axis: the band of that axis, e.g. >90",
+              "title": "Band"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Paired Comparisons V1 Annotations Evaluation Sets  Eval Id  Paired Comparisons Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List the paired comparisons of an evaluation set's results",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
     "/v1/annotations/evaluation-sets/{eval_id}/results": {
       "get": {
         "description": "List every cafaeval result row attached to one evaluation set.\n\nEach row carries the prediction-set / scoring-config / reranker\ntriple used to produce it plus the cached metrics summary, so the UI\nbenchmark matrix can render without per-row drilldowns. Returns\n``404`` if the evaluation set itself is missing.",
@@ -3803,6 +3806,72 @@
         ]
       }
     },
+    "/v1/annotations/evaluation-sets/{eval_id}/results/{result_id}/artifacts/{relpath}": {
+      "get": {
+        "description": "Stream one file the result recorded, by its path under the result.\n\n``relpath`` is the path the evaluator wrote, such as\n``PK/evaluation_best_f_micro_w.tsv``, the file a cell's ``f_micro_w`` and\n``cov_w`` are read from. When the result recorded the file's sha256, the\n``X-Recorded-SHA256`` header carries it: the sha256 of the body is that\nvalue, or the stored bytes are not the ones the figures were read from.\nReturns ``404`` when the result does not belong to ``eval_id`` or recorded\nno file at ``relpath``.",
+        "operationId": "download_evaluation_artifact_v1_annotations_evaluation_sets__eval_id__results__result_id__artifacts__relpath__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "result_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Result Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "relpath",
+            "required": true,
+            "schema": {
+              "title": "Relpath",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download one file an evaluation result wrote",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
     "/v1/annotations/evaluation-sets/{eval_id}/results/{result_id}/metrics.tsv": {
       "get": {
         "description": "Stream the per-aspect metrics table for one evaluation result.\n\nRenders the cafaeval-style summary (Fmax, Smin, AUPRC) as TSV with one\nrow per CAFA aspect (``BPO``/``MFO``/``CCO``). Returns ``404`` if the\n``(eval_id, result_id)`` pair does not match.",
@@ -3862,7 +3931,7 @@
     },
     "/v1/annotations/evaluation-sets/{eval_id}/run": {
       "post": {
-        "description": "Queue a job that runs the CAFA evaluator (NK / LK / PK) for a prediction set.\n\nBody must contain ``prediction_set_id`` (required) and optionally\n``max_distance`` (float).",
+        "description": "Queue a job that runs the CAFA evaluator (NK / LK / PK) for a prediction set.\n\nBody must contain ``prediction_set_id`` and may carry the frame and label\nfields of ``RunCafaEvaluationPayload``. The evaluator scores the set's stored\nscores, so nothing here adds a scoring configuration: it used to attach the\nbenchmark's baseline config to every run that named none, which the\nevaluator now refuses, and a set of candidates is scored first with\n``score_prediction_set``.",
         "operationId": "run_cafa_evaluation_v1_annotations_evaluation_sets__eval_id__run_post",
         "parameters": [
           {
@@ -3954,6 +4023,57 @@
           }
         },
         "summary": "Queue a run_cafa_evaluation job",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/summary": {
+      "get": {
+        "description": "Each result of the window with its arm's factors, its nine cells and its profiles.\n\nThe arm is its model, scoring and method, how many neighbours it read, whether\na target's own sequence could vote and how its scores were read. A cell is its\nf_micro_w, the threshold it peaks at, whether that threshold is the grid's\nedge and its targets. The profiles are the ones the stratification left on the\nresult, ``None`` until it has run. One query for the whole window. Returns\n``404`` if the evaluation set is missing.",
+        "operationId": "window_summary_v1_annotations_evaluation_sets__eval_id__summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Window Summary V1 Annotations Evaluation Sets  Eval Id  Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "A window's results as its panel reads them",
         "tags": [
           "annotations"
         ]
@@ -5632,139 +5752,6 @@
         ]
       }
     },
-    "/v1/benchmark/embeddings": {
-      "get": {
-        "description": "Return every ``EmbeddingConfig`` with its persisted display metadata.\n\nThe metadata lives in ``embedding_config.display_name / family /\nparam_count``: filled at creation time by the seed scripts. No\nheuristic inference happens here. Configs listed in\n``benchmark.yaml: hidden_embeddings`` are suppressed. Cached for 5 min;\nthe benchmark page is the first router touch on a fresh deploy so cold\npg pages push this past several seconds without the cache.",
-        "operationId": "list_benchmark_embeddings_v1_benchmark_embeddings_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Benchmark Embeddings V1 Benchmark Embeddings Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List embedding configs with persisted display metadata",
-        "tags": [
-          "benchmark"
-        ]
-      }
-    },
-    "/v1/benchmark/matrix": {
-      "get": {
-        "description": "Return a long-format table with one row per\n``(embedding_config, evaluation_set, stage, category, aspect)`` tuple\ncontaining the best Fmax / precision / recall observed in the DB,\nplus per-eval-set metadata and a cross-model leaderboard.",
-        "operationId": "get_benchmark_matrix_v1_benchmark_matrix_get",
-        "parameters": [
-          {
-            "description": "If set, restrict rows to this evaluation set only.",
-            "in": "query",
-            "name": "evaluation_set_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "If set, restrict rows to this evaluation set only.",
-              "title": "Evaluation Set Id"
-            }
-          },
-          {
-            "description": "If set, restrict rows to this pipeline stage (any scoring_config.name, or 'reranker').",
-            "in": "query",
-            "name": "stage",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "If set, restrict rows to this pipeline stage (any scoring_config.name, or 'reranker').",
-              "title": "Stage"
-            }
-          },
-          {
-            "description": "If set, restrict rows to PredictionSets computed with this ``limit_per_entry`` (K). Typical values: 3, 5, 10.",
-            "in": "query",
-            "name": "k",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "If set, restrict rows to PredictionSets computed with this ``limit_per_entry`` (K). Typical values: 3, 5, 10.",
-              "title": "K"
-            }
-          },
-          {
-            "description": "When no stage is pinned, filter to the preferred default stage instead of returning every stage. The catalogue is unaffected, so the caller still learns which stages exist. Which one was chosen is echoed in filters.stage.",
-            "in": "query",
-            "name": "resolve_stage",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "When no stage is pinned, filter to the preferred default stage instead of returning every stage. The catalogue is unaffected, so the caller still learns which stages exist. Which one was chosen is echoed in filters.stage.",
-              "title": "Resolve Stage",
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Benchmark Matrix V1 Benchmark Matrix Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              },
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Per-embedding / per-stage Fmax matrix across all evaluation results",
-        "tags": [
-          "benchmark"
-        ]
-      }
-    },
     "/v1/datasets": {
       "get": {
         "description": "Return registered frozen datasets newest-first.\n\nThe lab's ``pull_dataset.py`` polls this endpoint to discover dump\nartefacts produced by ``export_research_dataset``. Filters narrow by\nname substring or by source ``embedding_config_id``. Pagination is\ncursor-based (``after``) plus a hard ``limit`` ceiling.",
@@ -6688,7 +6675,7 @@
         ]
       },
       "get": {
-        "description": "Retrieve a prediction set with total prediction count and per-protein GO term counts.",
+        "description": "Retrieve a prediction set with its prediction and protein counts.\n\nThe counts are the set's summary, counted on its first read and kept.\n``per_protein_counts`` is ``None`` unless ``per_protein`` asks for it.",
         "operationId": "get_prediction_set_v1_embeddings_prediction_sets__set_id__get",
         "parameters": [
           {
@@ -6699,6 +6686,18 @@
               "format": "uuid",
               "title": "Set Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Also return every protein's number of terms (``per_protein_counts``).",
+            "in": "query",
+            "name": "per_protein",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also return every protein's number of terms (``per_protein_counts``).",
+              "title": "Per Protein",
+              "type": "boolean"
             }
           }
         ],
@@ -6802,7 +6801,7 @@
     },
     "/v1/embeddings/prediction-sets/{set_id}/predictions-cafa.tsv": {
       "get": {
-        "description": "Stream predictions in CAFA format: ``protein_accession\\tgo_id\\tscore``.\n\nScore is computed as ``max(0.0, 1.0 - distance)`` so that closer neighbours\nreceive higher confidence scores in the [0, 1] range expected by the\nCAFA evaluator.  One row per (protein, GO term) pair; duplicate GO terms\nfor the same protein are deduplicated keeping the highest score (lowest distance).\n\nPass ``eval_id`` to restrict output to delta proteins only (NK + LK targets),\nwhich is required for a valid CAFA evaluation.",
+        "description": "Stream a set's stored scores in CAFA format: ``protein_accession\\tgo_id\\tscore``.\n\nThe rows are the ones the evaluator writes for the set: its stored scores,\nordered by protein and term, at four decimals, with nothing rescored on the\nway. A set of candidates without scores is refused (409): score it with\n``score_prediction_set`` first.\n\nPass ``eval_id`` to restrict the output to the window's targets, read from\nthe window's own truth as the evaluator reads them.",
         "operationId": "download_predictions_cafa_v1_embeddings_prediction_sets__set_id__predictions_cafa_tsv_get",
         "parameters": [
           {
@@ -6816,7 +6815,7 @@
             }
           },
           {
-            "description": "Filter to delta proteins from this EvaluationSet.",
+            "description": "Only the targets of this EvaluationSet (NK, LK and PK).",
             "in": "query",
             "name": "eval_id",
             "required": false,
@@ -6830,7 +6829,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to delta proteins from this EvaluationSet.",
+              "description": "Only the targets of this EvaluationSet (NK, LK and PK).",
               "title": "Eval Id"
             }
           },
@@ -6853,7 +6852,7 @@
             }
           },
           {
-            "description": "Only include predictions with distance \u2264 this value",
+            "description": "Retired: a cut is the scoring step's (score_prediction_set). A request that names one is refused.",
             "in": "query",
             "name": "max_distance",
             "required": false,
@@ -6866,7 +6865,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Only include predictions with distance \u2264 this value",
+              "description": "Retired: a cut is the scoring step's (score_prediction_set). A request that names one is refused.",
               "title": "Max Distance"
             }
           }
@@ -11793,452 +11792,6 @@
         ]
       }
     },
-    "/v1/scoring/prediction-sets/{set_id}/metrics": {
-      "get": {
-        "description": "Compute CAFA Fmax and AUC-PR for a PredictionSet under a ScoringConfig.\n\nGround truth is the NK or LK delta between the old and new annotation sets\nin ``eval_context``, following the CAFA4 protocol: only experimental\nevidence codes, NOT-qualifier annotations excluded with full DAG propagation.\n\nThe selected ``ScoringConfig`` (including any custom ``evidence_weights``)\nis applied to every ``GOPrediction`` row before computing the\nprecision-recall curve.\n\nParameters\n----------\nscoring_config_id:\n    Which stored ScoringConfig formula (and evidence weights) to apply.\neval_context:\n    Bundled ``(old_annotation_set_id, new_annotation_set_id,\n    ontology_snapshot_id)`` carried through the metrics pipeline. The\n    FastAPI dependency exposes the three fields as discrete query\n    parameters on the wire.\ncategory:\n    ``\"nk\"`` (no-knowledge) or ``\"lk\"`` (limited-knowledge) protein set.",
-        "operationId": "compute_metrics_v1_scoring_prediction_sets__set_id__metrics_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "set_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Set Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "UUID of the ``ScoringConfig`` whose formula and evidence weights are applied to every prediction before computing the curve.",
-            "in": "query",
-            "name": "scoring_config_id",
-            "required": true,
-            "schema": {
-              "description": "UUID of the ``ScoringConfig`` whose formula and evidence weights are applied to every prediction before computing the curve.",
-              "format": "uuid",
-              "title": "Scoring Config Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "CAFA category to score against: ``nk`` (no-knowledge proteins, default) or ``lk`` (limited-knowledge).",
-            "in": "query",
-            "name": "category",
-            "required": false,
-            "schema": {
-              "default": "nk",
-              "description": "CAFA category to score against: ``nk`` (no-knowledge proteins, default) or ``lk`` (limited-knowledge).",
-              "pattern": "^(nk|lk)$",
-              "title": "Category",
-              "type": "string"
-            }
-          },
-          {
-            "description": "UUID of the OLD ``AnnotationSet`` (the t0 baseline) used to derive NK / LK / PK protein partitions.",
-            "in": "query",
-            "name": "old_annotation_set_id",
-            "required": true,
-            "schema": {
-              "description": "UUID of the OLD ``AnnotationSet`` (the t0 baseline) used to derive NK / LK / PK protein partitions.",
-              "format": "uuid",
-              "title": "Old Annotation Set Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "UUID of the NEW ``AnnotationSet`` (the t1 target) used as the ground-truth delta in CAFA scoring.",
-            "in": "query",
-            "name": "new_annotation_set_id",
-            "required": true,
-            "schema": {
-              "description": "UUID of the NEW ``AnnotationSet`` (the t1 target) used as the ground-truth delta in CAFA scoring.",
-              "format": "uuid",
-              "title": "New Annotation Set Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "UUID of the ``OntologySnapshot`` to use for DAG ancestor propagation. Should be aligned with the OLD annotation set's snapshot for valid scoring.",
-            "in": "query",
-            "name": "ontology_snapshot_id",
-            "required": true,
-            "schema": {
-              "description": "UUID of the ``OntologySnapshot`` to use for DAG ancestor propagation. Should be aligned with the OLD annotation set's snapshot for valid scoring.",
-              "format": "uuid",
-              "title": "Ontology Snapshot Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              },
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Compute Metrics",
-        "tags": [
-          "scoring"
-        ]
-      }
-    },
-    "/v1/scoring/prediction-sets/{set_id}/rerank.tsv": {
-      "get": {
-        "description": "Stream predictions re-scored by a trained LightGBM model.\n\nEach row includes the original prediction data plus a ``reranker_score``\ncolumn (probability 0\u20131, higher = more likely correct).  Rows are sorted\nby descending score within each protein.",
-        "operationId": "download_reranked_predictions_v1_scoring_prediction_sets__set_id__rerank_tsv_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "set_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Set Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "UUID of the trained RerankerModel to apply",
-            "in": "query",
-            "name": "reranker_id",
-            "required": true,
-            "schema": {
-              "description": "UUID of the trained RerankerModel to apply",
-              "format": "uuid",
-              "title": "Reranker Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Minimum re-ranker score threshold",
-            "in": "query",
-            "name": "min_score",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 1.0,
-                  "minimum": 0.0,
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Minimum re-ranker score threshold",
-              "title": "Min Score"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              },
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Apply a trained re-ranker to predictions",
-        "tags": [
-          "scoring"
-        ]
-      }
-    },
-    "/v1/scoring/prediction-sets/{set_id}/reranker-metrics": {
-      "get": {
-        "description": "Compute CAFA Fmax and AUC-PR using re-ranker scores instead of ScoringConfig.\n\nApplies the trained LightGBM model to all predictions in the PredictionSet,\nthen evaluates against the temporal ground truth of the EvaluationSet.\n\nThis closes the full re-ranker loop: train \u2192 apply \u2192 evaluate.",
-        "operationId": "compute_reranker_metrics_v1_scoring_prediction_sets__set_id__reranker_metrics_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "set_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Set Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "UUID of the trained RerankerModel",
-            "in": "query",
-            "name": "reranker_id",
-            "required": true,
-            "schema": {
-              "description": "UUID of the trained RerankerModel",
-              "format": "uuid",
-              "title": "Reranker Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "UUID of the EvaluationSet",
-            "in": "query",
-            "name": "evaluation_set_id",
-            "required": true,
-            "schema": {
-              "description": "UUID of the EvaluationSet",
-              "format": "uuid",
-              "title": "Evaluation Set Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "CAFA category to score against: ``nk`` (no-knowledge, default), ``lk`` (limited-knowledge), or ``pk`` (partial-knowledge).",
-            "in": "query",
-            "name": "category",
-            "required": false,
-            "schema": {
-              "default": "nk",
-              "description": "CAFA category to score against: ``nk`` (no-knowledge, default), ``lk`` (limited-knowledge), or ``pk`` (partial-knowledge).",
-              "pattern": "^(nk|lk|pk)$",
-              "title": "Category",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              },
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Compute Reranker Metrics",
-        "tags": [
-          "scoring"
-        ]
-      }
-    },
-    "/v1/scoring/prediction-sets/{set_id}/score": {
-      "get": {
-        "description": "Return the fused/reranked probability for one prediction pair.\n\nBacks the ``/score/:accession/:go`` UI page with the same number the\nbulk ``rerank.tsv`` stream emits for the matching row. Internally\nreuses :func:`score_predictions_with_reranker` (the exact function\nbehind ``rerank.tsv``) and selects the single row for this pair, so\nthe value is byte-for-byte identical to the bulk output. Returns 404\nwhen the set, reranker, or the specific pair does not exist.",
-        "operationId": "get_reranked_pair_score_v1_scoring_prediction_sets__set_id__score_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "set_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Set Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "UUID of the trained RerankerModel to apply",
-            "in": "query",
-            "name": "reranker_id",
-            "required": true,
-            "schema": {
-              "description": "UUID of the trained RerankerModel to apply",
-              "format": "uuid",
-              "title": "Reranker Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Query protein accession to look up",
-            "in": "query",
-            "name": "accession",
-            "required": true,
-            "schema": {
-              "description": "Query protein accession to look up",
-              "title": "Accession",
-              "type": "string"
-            }
-          },
-          {
-            "description": "GO term ID (e.g. ``GO:0003674``) to look up",
-            "in": "query",
-            "name": "go_term",
-            "required": true,
-            "schema": {
-              "description": "GO term ID (e.g. ``GO:0003674``) to look up",
-              "title": "Go Term",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RerankedPairResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              },
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Reranked score for a single (accession, GO term) pair",
-        "tags": [
-          "scoring"
-        ]
-      }
-    },
-    "/v1/scoring/prediction-sets/{set_id}/score.tsv": {
-      "get": {
-        "description": "Stream a TSV of predictions with computed confidence scores.\n\nThe score is computed on-the-fly for every row using the selected\n``ScoringConfig``, including any custom evidence-weight overrides stored\nin that config.  The session is closed before the generator starts so\nthe response is streamed without holding a DB connection open.\n\nQuery parameters\n----------------\nscoring_config_id:\n    UUID of the ``ScoringConfig`` to apply.\nmin_score:\n    Optional score threshold; rows below this value are omitted.\naccession:\n    Optional protein accession filter.\n\nTSV columns\n-----------\nprotein_accession, go_id, score, distance, ref_protein_accession,\nevidence_code, qualifier, identity_nw, identity_sw, taxonomic_distance.",
-        "operationId": "download_scored_predictions_v1_scoring_prediction_sets__set_id__score_tsv_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "set_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Set Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "UUID of the ``ScoringConfig`` whose formula computes the score column.",
-            "in": "query",
-            "name": "scoring_config_id",
-            "required": true,
-            "schema": {
-              "description": "UUID of the ``ScoringConfig`` whose formula computes the score column.",
-              "format": "uuid",
-              "title": "Scoring Config Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional score threshold in [0, 1]; rows below are omitted.",
-            "in": "query",
-            "name": "min_score",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 1.0,
-                  "minimum": 0.0,
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional score threshold in [0, 1]; rows below are omitted.",
-              "title": "Min Score"
-            }
-          },
-          {
-            "description": "Optional protein accession filter; only rows for this protein streamed.",
-            "in": "query",
-            "name": "accession",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional protein accession filter; only rows for this protein streamed.",
-              "title": "Accession"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              },
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Download Scored Predictions",
-        "tags": [
-          "scoring"
-        ]
-      }
-    },
     "/v1/scoring/prediction-sets/{set_id}/training-data.tsv": {
       "get": {
         "description": "Stream labeled training data for the re-ranker model.\n\nJoins all GOPrediction feature columns with a binary ``label`` derived\nfrom the temporal ground-truth delta of the given EvaluationSet.\n\nA prediction is labeled **1** if the (protein_accession, go_id) pair\nappears in the selected category's ground truth, **0** otherwise.\n\nParameters\n----------\nevaluation_set_id:\n    UUID of the EvaluationSet (old \u2192 new annotation sets).\ncategory:\n    ``\"nk\"`` (no-knowledge), ``\"lk\"`` (limited-knowledge), or\n    ``\"pk\"`` (partial-knowledge).",
@@ -12896,7 +12449,7 @@
     },
     "/v1/stratum/{prediction_set_id}/members": {
       "get": {
-        "description": "The proteins a stratum is made of, with what put each one there.\n\nEvery row carries the identity to its nearest donor and whether that\ndonor is experimental, because that is what the band IS: a reader who\ncannot see what put a protein in a band cannot check the band, and a\nband nobody can check is a label.\n\nIt does NOT yet carry WHICH donor. ``Neighbourhood`` resolves five\nfacts about the retrieved donors and the accession is not among them,\nso naming it here would mean changing what retrieval returns. Until\nthen a reader can check the distance but not follow it, and this\ndocstring says so rather than implying otherwise.",
+        "description": "The targets a stratum is made of, with what put each one there.\n\nEvery row carries the identity that placed it, to the closest protein\nmeasured when the window opened, because that is what the band IS: a reader\nwho cannot see what put a protein in a band cannot check the band, and a\nband nobody can check is a label. Beside it, what the prediction set's own\nretrieval found, which places nothing.\n\nIt does NOT yet carry WHICH donor the arm retrieved. ``Neighbourhood``\nresolves five facts about the retrieved donors and the accession is not\namong them, so naming it here would mean changing what retrieval returns.",
         "operationId": "stratum_members_v1_stratum__prediction_set_id__members_get",
         "parameters": [
           {
@@ -12942,6 +12495,18 @@
             "schema": {
               "description": "GO aspect, asserted on the same terms as category.",
               "title": "Aspect",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The window whose placement places its targets on the length and homology axes.",
+            "in": "query",
+            "name": "evaluation_set_id",
+            "required": true,
+            "schema": {
+              "description": "The window whose placement places its targets on the length and homology axes.",
+              "format": "uuid",
+              "title": "Evaluation Set Id",
               "type": "string"
             }
           },
@@ -13150,10 +12715,6 @@
     {
       "description": "Scoring configs, scored prediction export, and CAFA metrics.",
       "name": "scoring"
-    },
-    {
-      "description": "Per-embedding / per-stage Fmax matrix across every evaluation result. Powers the /benchmark page in the UI.",
-      "name": "benchmark"
     },
     {
       "description": "Community thumbs-up and comments.",

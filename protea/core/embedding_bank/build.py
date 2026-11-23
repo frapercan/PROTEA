@@ -37,7 +37,6 @@ import argparse
 import hashlib
 import json
 import os
-import socket
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -49,7 +48,9 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from protea.core import file_stage
 from protea.core.embedding_identity import derive_embedding_config_id
+from protea.core.file_stage import file_sha256, read_record, write_record
 from protea.core.marks import MARK_RELEASE
 from protea.core.plugins import discover_plugins
 
@@ -79,22 +80,6 @@ class BankRefused(RuntimeError):
     """The inputs cannot make a bank; nothing is written past the refusal."""
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 22), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _write_record(path: Path, record: dict[str, Any]) -> None:
-    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _read_record(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 def _md5(sequence: str) -> str:
     return hashlib.md5(sequence.encode(), usedforsecurity=False).hexdigest()
 
@@ -105,7 +90,7 @@ def _md5(sequence: str) -> str:
 def checked_photo(photo: Path) -> dict[str, Any]:
     """The photo's identity, refused unless it is complete, up to the mark and unchanged."""
     manifest_path = photo / "photo.json"
-    manifest = _read_record(manifest_path)
+    manifest = read_record(manifest_path)
     cut = int(manifest.get("cut_release", 0))
     kind = manifest.get("kind", "full")
     if cut > MARK_RELEASE:
@@ -116,12 +101,12 @@ def checked_photo(photo: Path) -> dict[str, Any]:
         raise BankRefused(f"the photo of cut {cut} is of an unknown kind {kind!r}")
     outputs = manifest.get("outputs", {})
     for name in PHOTO_INPUTS[kind]:
-        if _file_sha256(photo / name) != outputs.get(name):
+        if file_sha256(photo / name) != outputs.get(name):
             raise BankRefused(f"{name} of cut {cut} no longer hashes to what the photo recorded")
     return {
         "cut_release": cut,
         "kind": kind,
-        "manifest_sha256": _file_sha256(manifest_path),
+        "manifest_sha256": file_sha256(manifest_path),
         "revision": manifest.get("revision"),
     }
 
@@ -224,7 +209,7 @@ def prepare_pass(photos: Sequence[Path], out: Path, shard_tokens: int) -> dict[s
     shards = cut_shards([length for length, _, _ in ordered], shard_tokens)
     out.mkdir(parents=True, exist_ok=True)
     _write_bank_sequences(out, ordered, shards)
-    _write_record(out / "shards.json", {"shards": shards})
+    write_record(out / "shards.json", {"shards": shards})
     record = {
         "pass": "prepare",
         "photos": sorted(sources, key=lambda s: s["cut_release"]),
@@ -233,10 +218,10 @@ def prepare_pass(photos: Sequence[Path], out: Path, shard_tokens: int) -> dict[s
         "longest": ordered[-1][0] if ordered else 0,
         "shard_tokens": shard_tokens,
         "shards": len(shards),
-        "sequences_parquet_sha256": _file_sha256(out / "sequences.parquet"),
-        "shards_json_sha256": _file_sha256(out / "shards.json"),
+        "sequences_parquet_sha256": file_sha256(out / "sequences.parquet"),
+        "shards_json_sha256": file_sha256(out / "shards.json"),
     }
-    _write_record(out / "prepare.json", record)
+    write_record(out / "prepare.json", record)
     return record
 
 
@@ -245,7 +230,7 @@ def prepare_pass(photos: Sequence[Path], out: Path, shard_tokens: int) -> dict[s
 
 def bank_recipe(bank: Path, config_id: str) -> dict[str, Any]:
     """The recipe ``recipes.json`` holds for ``config_id``, refused unless it derives that id."""
-    configs = {c["id"]: c["recipe"] for c in _read_record(bank / "recipes.json")["configs"]}
+    configs = {c["id"]: c["recipe"] for c in read_record(bank / "recipes.json")["configs"]}
     if config_id not in configs:
         raise BankRefused(f"recipes.json holds no configuration {config_id}")
     recipe = configs[config_id]
@@ -292,28 +277,7 @@ def model_revision(model: Any, model_name: str) -> str | None:
 
 def environment(device: str) -> dict[str, Any]:
     """The software and the card a pass runs with, as a record names them."""
-    from importlib.metadata import PackageNotFoundError, distribution
-
-    software: dict[str, Any] = {}
-    for name in _SOFTWARE:
-        try:
-            dist = distribution(name)
-        except PackageNotFoundError:
-            continue
-        software[name] = dist.version
-        direct = dist.read_text("direct_url.json")
-        if direct and "vcs_info" in direct:
-            software[f"{name}_commit"] = json.loads(direct)["vcs_info"].get("commit_id")
-    card = "cpu"
-    try:
-        import torch
-
-        software["cuda"] = torch.version.cuda
-        if device.startswith("cuda") and torch.cuda.is_available():
-            card = torch.cuda.get_device_name(torch.device(device))
-    except ImportError:
-        pass
-    return {"software": software, "card": card, "host": socket.gethostname()}
+    return file_stage.environment(device, _SOFTWARE)
 
 
 # Embed ---------------------------------------------------------------------------
@@ -399,11 +363,11 @@ def _embed_shard(bank: Path, shard: int, ctx: dict[str, Any], run: dict) -> dict
         "residues": sum(len(s) for s in sequences),
         "not_finite": finite.count(False),
         "not_finite_examples": [m for m, ok in zip(md5s, finite, strict=True) if not ok][:5],
-        "sha256": _file_sha256(path),
+        "sha256": file_sha256(path),
         "seconds": round(time.monotonic() - started, 1),
         "run": run["run_id"],
     }
-    _write_record(path.with_suffix(".json"), record)
+    write_record(path.with_suffix(".json"), record)
     return record
 
 
@@ -422,7 +386,7 @@ def embed_pass(bank: Path, config_id: str, run: dict[str, Any]) -> dict[str, Any
     """
     started = time.monotonic()
     recipe = bank_recipe(bank, config_id)
-    shards = _read_record(bank / "shards.json")["shards"]
+    shards = read_record(bank / "shards.json")["shards"]
     wanted = [s["shard"] for s in shards if run["first"] <= s["shard"] <= run["last"]]
     out = bank / "vectors" / config_id
     out.mkdir(parents=True, exist_ok=True)
@@ -457,7 +421,7 @@ def embed_pass(bank: Path, config_id: str, run: dict[str, Any]) -> dict[str, Any
     }
     if ctx:
         (out / "runs").mkdir(exist_ok=True)
-        _write_record(out / "runs" / f"{run['run_id']}.json", record)
+        write_record(out / "runs" / f"{run['run_id']}.json", record)
     return record
 
 
@@ -538,7 +502,7 @@ def compare_pass(bank: Path, config_id: str, run: dict[str, Any]) -> dict[str, A
         "model_revision": model_revision(model, recipe["model_name"]),
         "environment": environment(run["device"]),
     }
-    _write_record(bank / f"compare-{config_id}-{run['run_id']}.json", record)
+    write_record(bank / f"compare-{config_id}-{run['run_id']}.json", record)
     return record
 
 
@@ -549,9 +513,9 @@ def _shard_problems(out: Path, shard: dict[str, Any]) -> list[str]:
     name = f"shard-{shard['shard']:05d}"
     if not (out / f"{name}.json").exists() or not (out / f"{name}.parquet").exists():
         return [f"{name} missing"]
-    record = _read_record(out / f"{name}.json")
+    record = read_record(out / f"{name}.json")
     problems = []
-    if _file_sha256(out / f"{name}.parquet") != record["sha256"]:
+    if file_sha256(out / f"{name}.parquet") != record["sha256"]:
         problems.append(f"{name} does not hash to its record")
     if record["rows"] != shard["rows"]:
         problems.append(f"{name} holds {record['rows']} rows, the shard {shard['rows']}")
@@ -562,7 +526,7 @@ def _shard_problems(out: Path, shard: dict[str, Any]) -> list[str]:
 
 def _runs_used(out: Path, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     used = {r["run"] for r in records}
-    return [_read_record(out / "runs" / f"{run_id}.json") for run_id in sorted(used)]
+    return [read_record(out / "runs" / f"{run_id}.json") for run_id in sorted(used)]
 
 
 def _single(values: list[str]) -> str | None:
@@ -571,14 +535,14 @@ def _single(values: list[str]) -> str | None:
 
 def manifest_pass(bank: Path, config_id: str, revision: str) -> dict[str, Any]:
     """Write ``bank-<config>.json`` from the prepare record, the shard records and the runs."""
-    prepare = _read_record(bank / "prepare.json")
+    prepare = read_record(bank / "prepare.json")
     recipe = bank_recipe(bank, config_id)
-    shards = _read_record(bank / "shards.json")["shards"]
+    shards = read_record(bank / "shards.json")["shards"]
     out = bank / "vectors" / config_id
     problems = [p for shard in shards for p in _shard_problems(out, shard)]
     records = []
     if not problems:
-        records = [_read_record(out / f"shard-{s['shard']:05d}.json") for s in shards]
+        records = [read_record(out / f"shard-{s['shard']:05d}.json") for s in shards]
     runs = _runs_used(out, records) if records else []
     regime = {
         "model_revision": sorted({str(r["model_revision"]) for r in runs}),
@@ -613,7 +577,7 @@ def manifest_pass(bank: Path, config_id: str, revision: str) -> dict[str, Any]:
         "refusals": problems,
         "revision": revision,
     }
-    _write_record(bank / f"bank-{config_id}.json", manifest)
+    write_record(bank / f"bank-{config_id}.json", manifest)
     return manifest
 
 

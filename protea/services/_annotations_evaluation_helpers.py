@@ -18,15 +18,19 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
-from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 
 
-def evaluation_result_to_dict(r: EvaluationResult) -> dict[str, Any]:
+def evaluation_result_to_dict(
+    r: EvaluationResult,
+    code_revision: str | None = None,
+    score_reading: str | None = None,
+    arm: dict[str, str | None] | None = None,
+) -> dict[str, Any]:
     """Serialise an :class:`EvaluationResult` to its API dict shape.
 
     ``frame_digest`` IS SERVED, AND IT IS THE ONLY FIELD HERE THAT SAYS WHETHER
@@ -48,6 +52,16 @@ def evaluation_result_to_dict(r: EvaluationResult) -> dict[str, Any]:
         "reranker_model_id": str(r.reranker_model_id) if r.reranker_model_id else None,
         "reranker_config": r.reranker_config,
         "job_id": str(r.job_id) if r.job_id else None,
+        # The revision of the code that evaluated, as its job recorded it when it
+        # started; None for a result with no job or a job that recorded none.
+        "code_revision": code_revision,
+        # How the scores were read before cafaeval thresholded them (ADR-D55):
+        # the result's own record, else the job's payload, else None.
+        "score_reading": ((r.results or {}).get("reading") or {}).get("score_reading")
+        or score_reading,
+        # What the evaluated set is, in a reader's words: its model, the scoring
+        # it read and its method, each None where the set has none.
+        "arm": arm,
         "created_at": r.created_at.isoformat(),
         # F-METHOD-EVAL-SURFACE provenance (read-through; ``None`` on legacy
         # rows so the UI shows an "unknown" empty state).
@@ -79,7 +93,93 @@ def list_evaluation_results_data(
         .order_by(EvaluationResult.created_at.desc())
         .all()
     )
-    return [evaluation_result_to_dict(r) for r in rows]
+    jobs = [r.job_id for r in rows if r.job_id]
+    revisions = job_revisions(session, jobs)
+    readings = job_readings(session, jobs)
+    arms = prediction_set_arms(session, [r.prediction_set_id for r in rows])
+    return [
+        evaluation_result_to_dict(
+            r,
+            revisions.get(str(r.job_id)) if r.job_id else None,
+            readings.get(str(r.job_id)) if r.job_id else None,
+            arms.get(str(r.prediction_set_id)),
+        )
+        for r in rows
+    ]
+
+
+#: The revision each job recorded when it started, read by the (job_id, event)
+#: index. A job retried after a crash starts again; its latest start wins.
+_JOB_REVISIONS = text(
+    """
+    SELECT job_id::text AS job_id, fields ->> 'code_revision' AS code_revision
+    FROM job_event
+    WHERE job_id = ANY(CAST(:jobs AS uuid[])) AND event = 'job.started'
+    ORDER BY ts
+    """
+)
+
+
+def job_revisions(session: Session, job_ids: list[uuid.UUID]) -> dict[str, str]:
+    """job id -> the code revision its job recorded when it started."""
+    if not job_ids:
+        return {}
+    rows = session.execute(_JOB_REVISIONS, {"jobs": [str(j) for j in job_ids]}).mappings()
+    return {r["job_id"]: r["code_revision"] for r in rows if r["code_revision"]}
+
+
+#: The reading each evaluating job was asked for. ``raw`` is the payload's
+#: default and what every run read before the field existed (ADR-D55), so a job
+#: that names none read raw.
+_JOB_READINGS = text(
+    """
+    SELECT id::text AS job_id, COALESCE(payload ->> 'score_reading', 'raw') AS score_reading
+    FROM job
+    WHERE id = ANY(CAST(:jobs AS uuid[])) AND operation = 'run_cafa_evaluation'
+    """
+)
+
+
+def job_readings(session: Session, job_ids: list[uuid.UUID]) -> dict[str, str]:
+    """job id -> the score reading its evaluation was asked for."""
+    if not job_ids:
+        return {}
+    rows = session.execute(_JOB_READINGS, {"jobs": [str(j) for j in job_ids]}).mappings()
+    return {r["job_id"]: r["score_reading"] for r in rows}
+
+
+#: Each prediction set's model, scoring and method. A scored set carries its
+#: candidate set's configuration and method, and names its scoring in ``meta``.
+_ARMS = text(
+    """
+    SELECT ps.id::text AS prediction_set_id,
+           ec.model_name AS model,
+           sc.name AS scoring,
+           m.short_name AS method
+    FROM prediction_set ps
+    LEFT JOIN embedding_config ec ON ec.id = ps.embedding_config_id
+    LEFT JOIN scoring_config sc ON sc.id::text = ps.meta ->> 'scoring_config_id'
+    LEFT JOIN method m ON m.id = ps.method_id
+    WHERE ps.id = ANY(CAST(:sets AS uuid[]))
+    """
+)
+
+
+def prediction_set_arms(
+    session: Session, set_ids: list[uuid.UUID]
+) -> dict[str, dict[str, str | None]]:
+    """prediction set id -> its model, scoring and method, each None where it has none."""
+    if not set_ids:
+        return {}
+    rows = session.execute(_ARMS, {"sets": [str(s) for s in set_ids]}).mappings()
+    return {
+        r["prediction_set_id"]: {
+            "model": r["model"],
+            "scoring": r["scoring"],
+            "method": r["method"],
+        }
+        for r in rows
+    }
 
 
 def get_eval_result_with_keys(
@@ -101,33 +201,31 @@ def get_eval_result_with_keys(
     return result, keys
 
 
-def apply_baseline_scoring_default(
+def get_eval_result_artifact(
     session: Session,
-    body: dict[str, Any],
-    baseline_scoring_name: str | None,
-) -> dict[str, Any]:
-    """Auto-attach the baseline ``scoring_config_id`` to a CAFA evaluation
-    payload when no scoring + reranker selection is provided.
+    eval_id: uuid.UUID,
+    result_id: uuid.UUID,
+    relpath: str,
+) -> tuple[str, str | None]:
+    """The store key of one file a result recorded, and the sha256 it recorded.
 
-    Without this, eval_result rows with both ``scoring_config_id`` and
-    ``reranker_model_id`` NULL are filtered out of the benchmark matrix
-    (``_stage_of()`` excludes them). When the caller supplies any of
-    ``scoring_config_id`` / ``reranker_model_id`` / ``rerankers``, or
-    when no baseline name is configured, the body is returned unchanged.
+    ``relpath`` is the file's path under the result, as the evaluator wrote it
+    (``PK/evaluation_best_f_micro_w.tsv``). Only a recorded file resolves, so no
+    path a caller types can reach another key of the store. The digest is
+    ``None`` for a result written before results recorded digests (2026-11-21).
+
+    Raises :class:`EntityNotFoundError` when the result does not belong to
+    ``eval_id`` or recorded no file at ``relpath``.
     """
-    if (
-        body.get("scoring_config_id")
-        or body.get("reranker_model_id")
-        or body.get("rerankers")
-        or not baseline_scoring_name
-    ):
-        return body
-    baseline = session.execute(
-        select(ScoringConfig).where(ScoringConfig.name == baseline_scoring_name)
-    ).scalar_one_or_none()
-    if baseline is None:
-        return body
-    return {**body, "scoring_config_id": str(baseline.id)}
+    from protea.core.operations._run_cafa_helpers import eval_artifact_key
+    from protea.services.annotations_service import EntityNotFoundError
+
+    result, keys = get_eval_result_with_keys(session, eval_id, result_id)
+    key = eval_artifact_key(result_id, relpath)
+    if key not in keys:
+        raise EntityNotFoundError("EvaluationArtifact", result_id)
+    digests: dict[str, str] = (result.results or {}).get("artifacts", {}).get("sha256") or {}
+    return key, digests.get(key)
 
 
 def assert_evaluation_set_exists(session: Session, eval_id: uuid.UUID) -> None:
@@ -189,8 +287,14 @@ def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
         "truth_profile": e.truth_profile,
         "toi_rule": e.toi_rule,
         "not_codes": e.not_codes,
-        # Which proteins the window may score: the identity's last field.
+        # Which proteins the window may score.
         "target_population": e.target_population,
+        # Which protein-binding rule was asked for: the identity's last field.
+        "binding_rule": e.binding_rule,
+        # The window that replaced this one, when and why; all None while it stands.
+        "superseded_by_id": str(e.superseded_by_id) if e.superseded_by_id else None,
+        "superseded_at": e.superseded_at.isoformat() if e.superseded_at else None,
+        "supersession_note": e.supersession_note,
         "job_id": str(e.job_id) if e.job_id else None,
         "created_at": e.created_at.isoformat(),
         "stats": e.stats,

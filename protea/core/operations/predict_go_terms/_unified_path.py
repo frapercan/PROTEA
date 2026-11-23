@@ -28,6 +28,10 @@ from protea.core.operations._predict_go_terms_adapter import (
 from protea.core.operations.predict_go_terms._common import (
     _UnifiedPredictContext,
 )
+from protea.core.operations.predict_go_terms._self_exclusion import (
+    exclusion_view,
+    needs_sequence_keys,
+)
 from protea.core.operations.predict_go_terms._sequence_identity import (
     load_sequence_identities,
 )
@@ -136,7 +140,9 @@ def unified_predict_via_pipeline(
                 sequence_keys
                 if sequence_keys is not None
                 else load_sequence_identities(
-                    session, set(ctx.valid_accessions) | set(unique_neighbors)
+                    session,
+                    set(ctx.valid_accessions) | set(unique_neighbors),
+                    ctx.p.annotation_set_id,
                 )
             ),
         )
@@ -151,12 +157,14 @@ def _unified_sequence_keys(session: Session, ctx: _UnifiedPredictContext) -> dic
     on 2026-09-07: the pre-search dropped by accession and trimmed, the method
     dropped by sequence and reached further, and the difference had no identity.
 
-    None when the run did not ask for the exclusion, which skips the read.
+    None under any rule but the by-sequence one, which skips the read.
     """
-    if not bool(getattr(ctx.p, "exclude_self_neighbour", False)):
+    if not needs_sequence_keys(ctx.p):
         return None
     return load_sequence_identities(
-        session, set(ctx.valid_accessions) | set(ctx.ref_data["accessions"])
+        session,
+        set(ctx.valid_accessions) | set(ctx.ref_data["accessions"]),
+        ctx.p.annotation_set_id,
     )
 
 
@@ -172,8 +180,9 @@ def unified_load_annotations(
     ``sequence_keys`` covers the queries and the WHOLE bank, read before this
     runs and reused downstream; None when the run did not ask for it."""
     from protea_method._self_by_sequence import (
-        extra_neighbours_for,
-        without_own_sequence,
+        Queries,
+        drop_self,
+        self_exclusion_margin,
     )
 
     from protea.core.knn_search import search_knn
@@ -187,13 +196,13 @@ def unified_load_annotations(
     # what this delivered. protea_method._self_by_sequence says why, and
     # tests/test_the_batch_does_not_choose_the_donors.py what it cost.
     accs = list(ctx.ref_data["accessions"])
-    keys = sequence_keys
-    margin = extra_neighbours_for(ctx.valid_accessions, accs, keys) if keys else 0
+    view = exclusion_view(p, sequence_keys)
+    queries = Queries(list(ctx.valid_accessions), ctx.query_embeddings)
     neighbors = search_knn(
         ctx.query_embeddings,
         ref_embeddings_f32,
         accs,
-        k=p.limit_per_entry + margin,
+        k=p.limit_per_entry + self_exclusion_margin(view, queries, accs),
         distance_threshold=p.distance_threshold,
         backend=p.search_backend,
         metric=p.metric,
@@ -204,17 +213,16 @@ def unified_load_annotations(
         faiss_hnsw_m=p.faiss_hnsw_m,
         faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
     )
-    if keys:
-        neighbors = without_own_sequence(
-            neighbors, list(ctx.valid_accessions), p.limit_per_entry, keys
-        )
+    neighbors = drop_self(view, neighbors, queries)
     unique_neighbors: set[str] = {ref_acc for top_refs in neighbors for ref_acc, _ in top_refs}
     # The neighbours' annotations are what gets TRANSFERRED, so the donor
     # policy applies here. It used to gate only which proteins entered the
     # pool, which let a protein admitted on one experimental annotation
     # donate every annotation it had.
     annotations = op._load_annotations_for(
-        session, ctx.annotation_set_id, unique_neighbors,
+        session,
+        ctx.annotation_set_id,
+        unique_neighbors,
         donor_policy=getattr(ctx.p, "donor_policy", None),
     )
     return annotations, unique_neighbors

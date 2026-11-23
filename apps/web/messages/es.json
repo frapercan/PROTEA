@@ -12,7 +12,6 @@
     "functionalAnnotation": "Búsqueda KNN",
     "scoring": "Scoring",
     "evaluation": "Evaluación CAFA",
-    "benchmark": "Benchmark",
     "graph": "Grafo de experimentación",
     "stratum": "Dentro de un panel",
     "reranker": "Re-ranker",
@@ -46,7 +45,7 @@
     "farmCost": "Coste",
     "pipelineHint": "De secuencia a término GO",
     "dataHint": "Proteoma de referencia, ground truth, query sets",
-    "resultsHint": "Matriz de benchmark y evaluación CAFA",
+    "resultsHint": "Ventanas, sus paneles y evaluación CAFA",
     "operationsHint": "Colas, mantenimiento, salud del stack",
     "groupAnnotate": "Anotar",
     "groupAnnotateLabel": "Ejecutar el pipeline sobre tus secuencias",
@@ -88,7 +87,7 @@
     "bestResults": "Mejores Resultados",
     "bestOverall": "Mejor resultado global",
     "avgFmaxAcrossCells": "Fmax promedio sobre 9 celdas",
-    "viewBenchmark": "Ver benchmark completo",
+    "viewWindows": "Ver todas las ventanas",
     "pipelineStageBaseline": "baseline",
     "pipelineStageAlignmentWeighted": "ponderado por alineamiento",
     "pipelineStageReranker": "re-ranker",
@@ -270,20 +269,6 @@
       ]
     }
   },
-  "benchmark": {
-    "loadingTitle": "Cargando benchmark…",
-    "title": "Matriz del benchmark",
-    "awaitingTitle": "Construido, esperando datos",
-    "awaitingBody": "El benchmark está construido y funcionando. Compara modelos de lenguaje de proteínas en las nueve celdas de evaluación, tres regímenes de conocimiento cruzados con las tres ramas de la Gene Ontology, sobre una partición temporal sin fugas. Todavía no tiene nada que dibujar porque se está reconstruyendo el corpus de anotaciones contra el que puntúa.",
-    "awaitingDetail": "A fecha de {asOf} la campaña ha leído {read, number} de las {releases, number} versiones de GOA de la serie, {gigabytes, number} GB en total.",
-    "awaitingJobs": "Mira la cola de trabajos",
-    "awaitingGraph": "Mira el instrumento",
-    "loadingHint": "Resolviendo embeddings y matriz.",
-    "loadingStepMatrix": "Matriz",
-    "loadingStepEmbeddings": "Embeddings",
-    "loadingRowsPreview": "Previsualización de filas",
-    "backToHome": "Volver al inicio"
-  },
   "stratum": {
     "title": "Dentro de un panel",
     "subtitle": "Un panel imprime una población y una puntuación agrupada, y ninguna de las dos se puede abrir. Aquí se abren: las proteínas de las que está hecha la celda, qué puntuó cada una y qué la puso en su banda.",
@@ -328,7 +313,7 @@
     "tau": "tau",
     "tauHint": "El umbral de decisión que la ejecución reportó para este aspecto. Todas las puntuaciones de la tabla se toman en él.",
     "unplacedWhy": "{count} del panel no llevan banda: {noLength} no tienen longitud registrada y {offScale} llevan una identidad que no es un porcentaje. Se quedan en la tabla con las bandas vacias en vez de eliminarse, porque forman parte de la poblacion que el panel cuenta.",
-    "withoutDonorWhy": "{count} del panel llevan su banda de longitud pero no tienen ningun donante alineado, asi que los cuatro ejes del donante quedan sin leer. Estan contadas entre las situadas: no recuperar un donante cuesta esos cuatro ejes y ninguno mas.",
+    "withoutDonorWhy": "{count} del panel llevan sus bandas de longitud y homologia pero no tienen ningun donante alineado, asi que los tres ejes del donante quedan sin leer. Estan contadas entre las situadas: no recuperar un donante cuesta esos tres ejes y ninguno mas.",
     "sortLabel": "orden",
     "sort": {
       "f_asc": "peores primero",
@@ -765,7 +750,14 @@
         "evidence": "Evidencia",
         "qualifier": "Calificador",
         "source": "Fuente"
-      }
+      },
+      "currentEntry": "Entrada actual de UniProt",
+      "currentEntryNote": "Versión {release} ({date}). Conocimiento actual de la proteína: se muestra aquí y nunca se usa para predecir ni evaluar en un corte anterior.",
+      "unknownRelease": "Esta entrada no registra su versión de UniProt.",
+      "entryName": "Nombre de la entrada",
+      "proteinNames": "Nombres de la proteína",
+      "reviewedEntry": "Revisada (Swiss-Prot)",
+      "no": "No"
     },
     "notFound": {
       "title": "Proteína no encontrada",
@@ -1079,7 +1071,7 @@
         "title": "Aún no has anotado nada",
         "body": "Cada ejecución produce un PredictionSet con scores GO por proteína, descargable como TSV o exportable a cafaeval. Cuando lances la primera desde la pestaña anterior, aparecerá aquí.",
         "ctaPrimary": "Ir a Ejecutar anotación",
-        "ctaSecondary": "También puedes ver ejemplos en /benchmark"
+        "ctaSecondary": "También puedes comparar los brazos de cada ventana en su panel, en Evaluación."
       },
       "tableHeaders": {
         "id": "ID",
@@ -1133,10 +1125,13 @@
       "scoring": "Scoring:",
       "artifactsDownload": "↓ Artefactos (.zip)",
       "resultDelete": "Eliminar",
-      "deleteResultConfirm": "¿Eliminar este resultado de evaluación?"
+      "deleteResultConfirm": "¿Eliminar este resultado de evaluación?",
+      "openPanel": "Abrir el panel de la ventana"
     },
     "evaluationSetsSection": {
-      "heading": "Conjuntos de evaluación"
+      "heading": "Conjuntos de evaluación",
+      "superseded": "Ventanas superadas ({count})",
+      "supersededBy": "superada por"
     },
     "generateSection": {
       "heading": "Nuevo conjunto de evaluación",
@@ -1158,7 +1153,16 @@
     "openPredictionSet": "Abrir el conjunto de predicciones",
     "openReranker": "Abrir el modelo de reordenación",
     "proteinExamples": "Ejemplos de proteínas (conjunto de predicciones)",
+    "cellLegend": "Cada celda: la F micro ponderada por IA (f_micro_w) y, debajo, la cobertura ponderada en el umbral publicado (el cov_w de LAFA) y el tamaño de la celda en la variante ponderada. Los resultados anteriores al 21-11-2026 no registran estos dos.",
+    "edgeLegend": "Un ▴ junto a una cifra: su curva alcanza el máximo en el umbral más alto que conservó alguna predicción, así que la cifra es un borde de la rejilla y no un máximo, y no se lee ningún veredicto de ella (ADR-D55). ▾: lo mismo en el umbral más bajo.",
+    "pairedTitle": "Comparaciones pareadas",
+    "pairedLegend": "Cada celda: la f_micro_w del brazo menos la de la línea base, sobre las proteínas que ambos puntuaron, con el intervalo de un bootstrap pareado por proteínas (compare_paired_panels). Verde: el brazo es mayor; rojo: lo es la línea base; gris: ninguno se resuelve. Una marca junto a una cifra: el máximo de uno de los dos está en un borde de la rejilla de umbrales, y no se lee veredicto de él.",
+    "pairedBaseline": "Línea base",
+    "pairedNone": "Aún no se ha hecho ninguna comparación pareada en esta ventana.",
+    "resultsTitle": "Resultados ({count})",
     "provenanceLabel": "procedencia",
+    "sourcesLabel": "ficheros",
+    "sourcesHint": "El fichero del que se leen las celdas de cada categoría, servido por separado, con el sha256 que registró su resultado. El sha256 del fichero descargado es ese mismo.",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -2082,6 +2086,7 @@
       "done": "Ya la guarde",
       "copy": "Copiar",
       "copied": "Copiada",
+      "keyLabel": "Clave",
       "nameLabel": "Nombre",
       "namePlaceholder": "lab-runner-2026-05",
       "nameHelp": "Etiqueta libre que te ayuda a identificar la clave en los registros de auditoria.",
@@ -2450,6 +2455,176 @@
       "rejected": "Rechazar",
       "why": "Por qué, con tus palabras",
       "submit": "Registrar la decisión"
+    }
+  },
+  "windowPanel": {
+    "leakNote": "{count, plural, one {# brazo de los mostrados no puede} other {# brazos de los mostrados no pueden}} leerse en esta ventana: {count, plural, one {se ajustó} other {se ajustaron}} después de su t0 ({t0}) o sin corte registrado, así que sus cifras pueden medir la memoria de la respuesta. La pestaña de detalle {count, plural, one {lo marca} other {los marca}}.",
+    "leak": {
+      "not_fitted": "sí, preentrenado",
+      "clean": "sí, corte {cut}",
+      "contaminated": "no: corte {cut}, posterior a t0",
+      "undeclared": "no se sabe: sin corte registrado"
+    },
+    "title": "Panel de la ventana",
+    "loading": "Leyendo los resultados de la ventana…",
+    "error": "No se pudo leer el resumen de la ventana ({message}).",
+    "empty": "Aún no se ha evaluado ningún resultado en esta ventana.",
+    "cell": "Celda",
+    "reading": "Lectura",
+    "readingPercentile": "por percentil",
+    "readingRaw": "en crudo",
+    "reference": "Referencia",
+    "referenceShort": "referencia",
+    "superseded": "superados (la propia secuencia del objetivo podía votar)",
+    "filtersAll": "Filtros: todos los brazos",
+    "filtersActive": "Filtros · {count} activos",
+    "model": "Modelo",
+    "scoring": "Puntuación",
+    "clearFilters": "quitar filtros",
+    "focus": "Foco",
+    "focusNone": "ninguno: haz clic en un brazo de cualquier vista (hasta tres)",
+    "clearFocus": "limpiar",
+    "unfocus": "Quitar {arm} del foco",
+    "tab": {
+      "summary": "Resumen",
+      "depth": "Profundidad",
+      "trajectory": "Trayectoria",
+      "strata": "Estratos",
+      "detail": "Detalle"
+    },
+    "band": {
+      "above90": ">90 %",
+      "from60to90": "60-90 %",
+      "from30to60": "30-60 %",
+      "upTo30": "≤30 %",
+      "upTo512": "≤512",
+      "from512to1024": "512-1024",
+      "from1024to2048": "1024-2048",
+      "above2048": ">2048",
+      "none": "sin pariente"
+    },
+    "summary": {
+      "question": "¿Qué brazo gana en cada celda, y a qué distancia de la referencia?",
+      "hint": "Clic en una columna: elegir la celda y ordenar por ella. Clic en un nombre: fijar el foco. Clic en una casilla: abrir sus estratos.",
+      "rows": "Filas",
+      "rowsAll": "todas",
+      "shown": "{shown} de {total} brazos",
+      "best": "mejor en {cell}:",
+      "above": "por encima de la referencia",
+      "same": "igual",
+      "below": "por debajo",
+      "edge": "esquina: máximo en el borde de la rejilla",
+      "bestOfColumn": "contorno: el mejor de la columna",
+      "caption": "f_micro_w de cada celda; el color es la diferencia con la referencia, saturado a ±0,10. Un color no es un veredicto: eso lo da la comparación pareada.",
+      "rowTip": "resultado {id} · clic: foco",
+      "cellTip": "{delta} sobre la referencia",
+      "edgeTip": "máximo en el borde de la rejilla ({edge}): sin veredicto",
+      "openTip": "clic: abrir sus estratos"
+    },
+    "depth": {
+      "question": "¿Cuántos vecinos conviene leer, y cuánto cuesta la rejilla de umbrales?",
+      "hint": "Cada punto corta los mismos candidatos (k = 30) en sus primeros k vecinos (max_k_position). La línea discontinua es la referencia. Clic en un punto: foco.",
+      "lineBy": "Una línea por",
+      "by": {
+        "scoring": "puntuación",
+        "model": "modelo"
+      },
+      "cells": "Celdas",
+      "nine": "las nueve",
+      "title": "F frente a k · {cell}",
+      "titleNine": "F frente a k · las nueve celdas (clic en un título: elegir esa celda)",
+      "noSweep": "Esta selección aún no tiene barrido de profundidad: se hace detrás de la tanda de cada modelo.",
+      "rawOnlyAt30": "En crudo solo existe k = 30: el barrido de profundidad se lee por percentil.",
+      "gridTitle": "Lo que cuesta la rejilla · {cell}",
+      "gridRaw": "en crudo (la cifra de LAFA)",
+      "gridPercentile": "por percentil",
+      "gridEdge": "en crudo, máximo en el borde",
+      "gridCaption": "La distancia entre los dos círculos es lo que la rejilla de 0,01 esconde cuando las puntuaciones se amontonan cerca de 1.",
+      "gridNone": "Ningún brazo visible tiene las dos lecturas.",
+      "gridTip": "en crudo {raw} · por percentil {pct} · {delta}"
+    },
+    "trajectory": {
+      "question": "¿Cuándo mejoró el mejor resultado, y gracias a qué?",
+      "hint": "Cada punto es un resultado, en orden de llegada; la línea negra es el mejor hasta ese momento. Un resultado solo pasa a campeón si gana al anterior en una comparación pareada resuelta; mientras no hayan corrido, el escalón sigue al mejor valor.",
+      "measure": "Proteínas que cuentan",
+      "all": "todas (la cifra de la celda)",
+      "five": "las cinco bandas, lado a lado",
+      "nowAll": "Ahora: las {proteins} proteínas colocadas de {cell}. Elige una banda para contar solo las proteínas cuya identidad con el miembro medido más cercano en t0 cae en ella: así se ve si una mejora viene de las proteínas fáciles o de las difíciles.",
+      "nowBand": "Ahora: solo las {proteins} proteínas con identidad {band}.",
+      "nowFive": "Una trayectoria por banda de identidad, en la misma celda. Clic en el título de una banda: verla en grande.",
+      "each": "cada resultado",
+      "best": "el mejor hasta ese momento",
+      "cellTitle": "{cell} · todas sus proteínas",
+      "bandTitle": "{cell} · identidad {band}",
+      "fiveTitle": "{cell} · una trayectoria por banda de identidad",
+      "fiveCaption": "Cada panel tiene su propia escala: compara la forma (si el mejor supera la referencia, y cuándo), no la altura entre paneles.",
+      "arrival": "orden de llegada →",
+      "none": "Ningún resultado visible tiene esta medida, o la banda tiene menos de 30 proteínas.",
+      "underFloor": "menos de 30 proteínas",
+      "newBest": "Nuevo mejor",
+      "before": "Antes",
+      "now": "Ahora",
+      "overReference": "sobre la referencia",
+      "paired": "Comparación pareada (este menos el anterior)",
+      "notCompared": "aún sin comparar",
+      "loadingPaired": "leyendo las comparaciones...",
+      "pairedUnavailable": "no se pudieron leer las comparaciones",
+      "settledHigher": "mayor, resuelto",
+      "settledLower": "menor, resuelto",
+      "unsettled": "sin resolver",
+      "equivalent": "iguales dentro de {effect}",
+      "underpowered": "pocas proteínas para saberlo"
+    },
+    "strata": {
+      "question": "¿Dónde gana cada brazo?",
+      "hint": "Una cifra por celda mezcla proteínas casi idénticas a algo ya medido con proteínas sin ningún pariente medido. Las bandas son las de la colocación de la ventana, iguales para todos los brazos, y cada una se lee en el umbral de la cifra de su celda; con menos de 30 proteínas una banda no se pinta.",
+      "axis": "Eje",
+      "homology": "identidad",
+      "length": "longitud",
+      "clickBand": "clic en una banda: su detalle, su clasificación y sus proteínas",
+      "profileTitle": {
+        "homology": "Perfil por identidad · {cell}",
+        "length": "Perfil por longitud · {cell}"
+      },
+      "profileCaption": {
+        "homology": "Identidad con el miembro medido más cercano en t0, de más a menos; bajo cada banda, sus proteínas. Las masas de las bandas suman la cifra de la celda.",
+        "length": "Longitud de la secuencia; bajo cada banda, sus proteínas. Las masas de las bandas suman la cifra de la celda."
+      },
+      "automatic": "foco automático: el mejor brazo de la celda; fija otros desde cualquier vista",
+      "notYet": "La referencia aún no tiene perfiles de estratos: cada resultado los recibe al estratificarse.",
+      "proteins": "{n} proteínas",
+      "bandTitle": "{cell} · {band} · {proteins} proteínas",
+      "bandWinner": "Ganan los {family} por {margin}: {winner} ({winnerF}) frente a {rival} ({rivalF}). Un cambio de campeón en esta banda pedirá su propia comparación pareada.",
+      "bandAlone": "Gana {winner} ({winnerF}).",
+      "neighbours": "vecinos",
+      "methods": "métodos",
+      "proteinsLink": "Sus proteínas, peor puntuadas primero, con lo que puntuó cada una",
+      "setLink": "El conjunto del ganador",
+      "trajectoryLink": "La trayectoria de esta banda",
+      "arm": "Brazo",
+      "fBand": "F en la banda",
+      "vsReference": "frente a la referencia",
+      "fCell": "F en la celda",
+      "more": "y {count} brazos más; los filtros de arriba acotan la lista.",
+      "underFloor": "Menos de 30 proteínas: la banda se retiene.",
+      "winnersTitle": "Quién gana cada banda, en las nueve celdas",
+      "winnersCaption": "El brazo ganador y su ventaja sobre el mejor brazo de la otra familia. Es lo que el reranker tiene que aprender: cuándo fiarse de los vecinos y cuándo de lo que la proteína ya sabía.",
+      "close": "pálido: menos de 0,01 entre familias"
+    },
+    "detail": {
+      "question": "Todos los resultados visibles, con sus factores en columnas.",
+      "hint": "Ordena por cualquier columna con un clic en su cabecera; clic en una fila: foco. La tira son las nueve celdas frente a la referencia, con la elegida recuadrada.",
+      "search": "buscar: modelo, puntuación, id…",
+      "result": "Resultado",
+      "vsReference": "frente a ref.",
+      "edge": "Borde",
+      "edgeShort": "borde",
+      "leak": "Puede leerse",
+      "cells": "9 celdas",
+      "time": "Hora",
+      "set": "Conjunto",
+      "setLink": "conjunto",
+      "nothing": "Nada coincide con la búsqueda."
     }
   }
 }

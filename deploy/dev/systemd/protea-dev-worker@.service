@@ -42,7 +42,9 @@ Environment=PROTEA_ENVIRONMENT=dev
 # operation that asks for the card may run on the processors instead
 # (compute_embeddings does, with a warning event), which is why the GPU
 # queues stay off for dev. They get a unit of their own, with its own
-# gates, after that decision (README, "Not wired yet").
+# gates, after that decision (README, "Not wired yet"). The one exception is
+# the predictions batch queue, whose gpu.conf gives the card to the first
+# pass of the exact neighbour search (the author, 2026-11-21).
 Environment=CUDA_VISIBLE_DEVICES=
 
 # The disk gate first: development shares the system disk with production

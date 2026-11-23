@@ -22,6 +22,10 @@ from .annotation.ontology_snapshot import OntologySnapshot  # noqa: F401
 from .annotation.protein_go_annotation import ProteinGOAnnotation  # noqa: F401
 from .annotation.reference_reproduction import ReferenceReproduction  # noqa: F401
 from .annotation.term_cooccurrence import TermCooccurrence, TermFrequency  # noqa: F401
+from .annotation.window_placement import (  # noqa: F401
+    WindowPlacement,
+    WindowPlacementTarget,
+)
 from .anon_quota import AnonQuota  # noqa: F401
 from .api_key import ApiKey  # noqa: F401
 from .auth_audit import AuthAudit  # noqa: F401
@@ -29,11 +33,15 @@ from .embedding.dataset import Dataset  # noqa: F401
 from .embedding.embedding_bank import EmbeddingBank  # noqa: F401
 from .embedding.embedding_config import EmbeddingConfig  # noqa: F401
 from .embedding.go_prediction import GOPrediction  # noqa: F401
+from .embedding.lexicon_bank import LexiconBank  # noqa: F401
 from .embedding.model_weights import ModelWeights  # noqa: F401
+from .embedding.prediction_score import PredictionScore  # noqa: F401
 from .embedding.prediction_set import PredictionSet  # noqa: F401
+from .embedding.prediction_set_protein import PredictionSetProtein  # noqa: F401
 from .embedding.reranker_model import RerankerModel  # noqa: F401
 from .embedding.residue_code import ResidueCode  # noqa: F401
 from .embedding.scoring_config import ScoringConfig  # noqa: F401
+from .embedding.segment_families import SegmentFamilies  # noqa: F401
 from .embedding.sequence_embedding import SequenceEmbedding  # noqa: F401
 from .experiment_run import ExperimentRun, ExperimentRunStatus  # noqa: F401
 from .exploration.exploration import Exploration  # noqa: F401

@@ -66,9 +66,11 @@ back to a different band, OBO, or IA file.
 - **IA file:** the t0 ``IA.tsv``
   (``protea-lafa-knn/lafa_t0_Sep_2025/IA.tsv``); the IA-weighting of
   ``f_micro_w``.
-- **TOI file:** LAFA's release-specific
+- **Terms of interest:** LAFA's release-specific
   ``CAFA_forever/data/releases/Sep_2025_Mar_2026/groundtruth_terms_of_interest.txt``
-  (38649 terms).
+  (38649 terms). The evaluator no longer takes a file: it scores over the
+  window's terms, and a window of LAFA's frame derives LAFA's own
+  (:doc:`/architecture/lafa-frame`).
 - **Ground truth:** the LAFA GT ``EvaluationSet`` (``evaluation_set_id``,
   e.g. ``34a634a8`` on the native checkout), with NK / LK / PK splits and
   the PK-known exclusion list.
@@ -158,13 +160,7 @@ against the live feature schema.
         "payload": {
           "evaluation_set_id": "<lafa-gt-eval-set-uuid>",
           "prediction_set_id": "<new-native-prediction-set-uuid>",
-          "rerankers": {
-            "nk": {"bpo": "<nk-bpo-model>", "mfo": "<nk-mfo-model>", "cco": "<nk-cco-model>"},
-            "lk": {"bpo": "<lk-bpo-model>", "mfo": "<lk-mfo-model>", "cco": "<lk-cco-model>"},
-            "pk": {"bpo": "<pk-bpo-model>", "mfo": "<pk-mfo-model>", "cco": "<pk-cco-model>"}
-          },
           "ia_file": "<t0-IA.tsv-path>",
-          "toi_file": "<lafa-groundtruth_terms_of_interest.txt-path>",
           "th_step": 0.01,
           "max_terms": null,
           "frame": "lafa",
@@ -172,6 +168,10 @@ against the live feature schema.
           "leakage_role": "test"
         }
       }
+
+   The rerankers are the prediction set's own, bound in step 2, and their
+   scores are stored on its rows: the evaluator scores what a method stored
+   and takes no reranker since 2026-11-20 (:doc:`/architecture/scoring`).
 
    ``frame: "lafa"`` is what surfaces the LAFA chip and makes the row
    leaderboard-comparable on ``/benchmark``. Leaving it empty (the

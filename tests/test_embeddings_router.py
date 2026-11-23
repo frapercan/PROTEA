@@ -261,6 +261,16 @@ def _make_prediction_set(ps_id=None):
     ps.limit_per_entry = 5
     ps.distance_threshold = None
     ps.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+    # A candidate set's record: no scored_from, so its rows are its own.
+    ps.meta = {}
+    # Counted already, as a set is after its first read.
+    ps.summary = {
+        "rows": 0,
+        "proteins": 0,
+        "aspect_totals": {},
+        "top_terms": [],
+        "computed_at": "2024-01-01T00:00:00+00:00",
+    }
     return ps
 
 
@@ -783,7 +793,8 @@ class TestListPredictionSets:
            .order_by(...).limit(...).all()``, for the metadata 5-tuples. The
            producer is outer-joined, so a legacy set carries None as its method.
         2. ``query(GOPrediction.prediction_set_id, count(GOPrediction.id))
-           .group_by(...).all()`` — for the per-set counts.
+           .filter(...).group_by(...)``, iterated, for the listed sets that have
+           no stored summary; a counted set reads its rows from its summary.
 
         ``rows`` feeds the first call; ``count_pairs`` feeds the second.
         Both share ``session.query``, so we route them through ``side_effect``
@@ -793,13 +804,17 @@ class TestListPredictionSets:
         list_query.outerjoin.return_value.outerjoin.return_value.join.return_value.join.return_value.order_by.return_value.limit.return_value.all.return_value = rows
 
         count_query = MagicMock()
-        count_query.group_by.return_value.all.return_value = list(count_pairs)
+        count_query.filter.return_value.group_by.return_value.__iter__.return_value = iter(
+            list(count_pairs)
+        )
 
-        # First query() call → list_query, second → count_query.
-        session.query.side_effect = [list_query, count_query]
+        # First query() call → list_query, second → count_query, third → the
+        # scored sets' pairs, none here.
+        session.query.side_effect = [list_query, count_query, MagicMock()]
 
     def test_returns_list(self, client, session):
         ps = _make_prediction_set()
+        ps.summary = None  # not counted yet: the listing counts it
         ec = _make_config()
         ann = MagicMock()
         ann.source = "goa"
@@ -823,6 +838,22 @@ class TestListPredictionSets:
         assert data[0]["annotation_set_label"] == "goa 2024-01"
         assert data[0]["ontology_snapshot_version"] == "2024-01-01"
         assert data[0]["prediction_count"] == 100
+
+    def test_a_counted_set_reads_its_count_from_its_summary(self, client, session):
+        ps = _make_prediction_set()
+        ps.summary = {**ps.summary, "rows": 1_821_687}
+        ann = MagicMock()
+        ann.source = "goa"
+        ann.source_version = "211"
+        snap = MagicMock()
+        snap.obo_version = "releases/2022-07-01"
+
+        self._wire_list_query(session, rows=[(ps, _make_config(), None, ann, snap)])
+
+        resp = client.get("/embeddings/prediction-sets")
+        assert resp.json()[0]["prediction_count"] == 1_821_687
+        # Only the listing's own query ran: nothing was counted.
+        assert session.query.call_count == 1
 
     def test_annotation_set_without_version(self, client, session):
         ps = _make_prediction_set()
@@ -897,22 +928,32 @@ class TestListPredictionSets:
 
 class TestGetPredictionSet:
     def test_returns_details(self, client, session):
+        """The counts come from the set's summary; per-protein counts only when asked."""
         ps = _make_prediction_set()
+        ps.summary = {
+            "rows": 50,
+            "proteins": 2,
+            "aspect_totals": {"F": 50},
+            "top_terms": [],
+            "computed_at": "2026-11-21T19:00:00+00:00",
+        }
         ps_id = ps.id
         session.get.return_value = ps
-        session.query.return_value.filter.return_value.scalar.return_value = 50
-        session.query.return_value.filter.return_value.group_by.return_value.all.return_value = [
-            ("P12345", 30),
-            ("Q67890", 20),
-        ]
 
         resp = client.get(f"/embeddings/prediction-sets/{ps_id}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == str(ps_id)
         assert data["prediction_count"] == 50
-        assert data["per_protein_counts"]["P12345"] == 30
-        assert data["per_protein_counts"]["Q67890"] == 20
+        assert data["protein_count"] == 2
+        assert data["per_protein_counts"] is None
+
+        with patch(
+            "protea.services.embeddings_service.per_protein_counts",
+            return_value={"P12345": 30, "Q67890": 20},
+        ):
+            data = client.get(f"/embeddings/prediction-sets/{ps_id}?per_protein=true").json()
+        assert data["per_protein_counts"] == {"P12345": 30, "Q67890": 20}
 
     def test_not_found_returns_404(self, client, session):
         session.get.return_value = None
@@ -943,15 +984,6 @@ class TestListPredictionSetProteins:
         # The endpoint does multiple session.query(...) calls with different args.
         # Use a side_effect on session.query to return different mocks per call.
         call_idx = [0]
-        main_q = MagicMock()
-        main_q.filter.return_value = main_q
-        main_q.group_by.return_value = main_q
-        main_q.count.return_value = len(rows_data)
-        main_q.order_by.return_value = main_q
-        main_q.offset.return_value = main_q
-        main_q.limit.return_value = main_q
-        main_q.all.return_value = rows_data
-
         prot_q = MagicMock()
         prot_mock = MagicMock()
         prot_mock.accession = rows_data[0][0] if rows_data else "X"
@@ -969,7 +1001,9 @@ class TestListPredictionSetProteins:
         match_q.group_by.return_value = match_q
         match_q.all.return_value = [(rows_data[0][0], 3)] if rows_data else []
 
-        queries = [main_q, prot_q, ann_q, match_q]
+        # The page itself comes from the counted table (protein_page); the
+        # three per-page lookups still query the session in this order.
+        queries = [prot_q, ann_q, match_q]
 
         def _query_side(*args, **kwargs):
             idx = call_idx[0]
@@ -984,9 +1018,14 @@ class TestListPredictionSetProteins:
         ps = _make_prediction_set()
         ps_id = ps.id
         session.get.return_value = ps
-        self._setup_proteins_mocks(session, ps, [("P12345", 10, 0.05)])
+        rows = [("P12345", 10, 0.05)]
+        self._setup_proteins_mocks(session, ps, rows)
 
-        resp = client.get(f"/embeddings/prediction-sets/{ps_id}/proteins")
+        with patch(
+            "protea.services._embeddings_proteins_helpers.protein_page",
+            return_value=(len(rows), rows),
+        ):
+            resp = client.get(f"/embeddings/prediction-sets/{ps_id}/proteins")
         assert resp.status_code == 200
         data = resp.json()
         assert "total" in data
@@ -1007,20 +1046,11 @@ class TestListPredictionSetProteins:
         session.get.return_value = ps
 
         call_idx = [0]
-        main_q = MagicMock()
-        main_q.filter.return_value = main_q
-        main_q.group_by.return_value = main_q
-        main_q.count.return_value = 0
-        main_q.order_by.return_value = main_q
-        main_q.offset.return_value = main_q
-        main_q.limit.return_value = main_q
-        main_q.all.return_value = []
-
         prot_q = MagicMock()
         prot_q.filter.return_value = prot_q
         prot_q.all.return_value = []
 
-        queries = [main_q, prot_q]
+        queries = [prot_q]
 
         def _query_side(*args, **kwargs):
             idx = call_idx[0]
@@ -1031,11 +1061,15 @@ class TestListPredictionSetProteins:
 
         session.query.side_effect = _query_side
 
-        resp = client.get(
-            f"/embeddings/prediction-sets/{ps.id}/proteins",
-            params={"search": "P123"},
-        )
+        with patch(
+            "protea.services._embeddings_proteins_helpers.protein_page", return_value=(0, [])
+        ) as page:
+            resp = client.get(
+                f"/embeddings/prediction-sets/{ps.id}/proteins",
+                params={"search": "P123"},
+            )
         assert resp.status_code == 200
+        assert page.call_args.args[2] == "P123"
 
 
 # ---------------------------------------------------------------------------
@@ -1127,53 +1161,68 @@ class TestGoTermDistribution:
 
 
 class TestDownloadPredictionsCafa:
-    def _get_cafa(self, client, session, set_id, rows, **params):
-        """Wire mocks for the CAFA download endpoint.
+    """The CAFA export streams a set's stored scores, as the evaluator writes them.
 
-        ``rows`` should be a list of (protein_accession, go_id, distance) tuples,
-        matching the subquery-based query output.
-        """
-        ps = _make_prediction_set(set_id)
-        session.get.return_value = ps
+    The reader itself is tested against Postgres (test_scored_set_storage.py,
+    test_method_score_predictions.py); here its three entry points are doubles
+    and the endpoint's own decisions are what is pinned.
+    """
 
-        q = MagicMock()
-        q.join.return_value = q
-        q.filter.return_value = q
-        q.group_by.return_value = q
-        q.subquery.return_value = q
-        q.c = q  # subquery column access
-        q.order_by.return_value = q
-        q.yield_per.return_value = iter(rows)
-        session.query.return_value = q
+    _HELPERS = "protea.services._embeddings_cafa_helpers"
 
-        return client.get(
-            f"/embeddings/prediction-sets/{set_id}/predictions-cafa.tsv",
-            params=params,
+    @staticmethod
+    def _table(rows):
+        import pyarrow as pa
+
+        return pa.table(
+            {
+                "protein_accession": [r[0] for r in rows],
+                "go_id": [r[1] for r in rows],
+                "score": [r[2] for r in rows],
+            }
         )
 
-    def test_returns_cafa_format(self, client, session):
-        set_id = uuid4()
-        # New format: (accession, go_id, distance) tuples
-        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.3)])
+    def _get_cafa(self, client, session, set_id, rows, *, refuse=None, **params):
+        session.get.return_value = _make_prediction_set(set_id)
+        seen: dict[str, object] = {}
+
+        def table(_session, ctx):
+            seen["proteins"] = set(ctx.delta_proteins)
+            return self._table(rows)
+
+        def refuse_unless_scored(_session, _set_id):
+            if refuse is not None:
+                raise refuse
+
+        with (
+            patch(f"{self._HELPERS}.refuse_unless_scored", side_effect=refuse_unless_scored),
+            patch(f"{self._HELPERS}.proteins_of", return_value={r[0] for r in rows}),
+            patch(f"{self._HELPERS}.scored_table", side_effect=table),
+        ):
+            resp = client.get(
+                f"/embeddings/prediction-sets/{set_id}/predictions-cafa.tsv", params=params
+            )
+        return resp, seen
+
+    def test_it_streams_the_stored_scores_as_written(self, client, session):
+        rows = [("P12345", "GO:0003824", "0.8123"), ("P12345", "GO:0005737", "0.5000")]
+        resp, _ = self._get_cafa(client, session, uuid4(), rows)
         assert resp.status_code == 200
         assert "tab-separated" in resp.headers["content-type"]
-        lines = resp.text.splitlines()
-        assert len(lines) == 1
-        parts = lines[0].split("\t")
-        assert parts[0] == "P12345"
-        assert parts[1] == "GO:0003824"
-        # score = max(0, 1 - 0.3) = 0.7
-        assert float(parts[2]) == pytest.approx(0.7, abs=1e-3)
+        assert resp.text == "P12345\tGO:0003824\t0.8123\nP12345\tGO:0005737\t0.5000\n"
 
-    def test_cafa_deduplicates_go_terms(self, client, session):
-        """Deduplication now happens at DB level via GROUP BY + MIN(distance).
-        The query returns already-unique rows, so a single row is expected."""
-        set_id = uuid4()
-        # DB-level dedup means only the best (min distance) row is returned
-        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.2)])
-        assert resp.status_code == 200
-        lines = resp.text.splitlines()
-        assert len(lines) == 1
+    def test_a_set_of_candidates_is_refused_with_the_step_that_scores_it(self, client, session):
+        from protea.core.scoring import MethodScoreMissing
+
+        refusal = MethodScoreMissing("stores candidates without scores: score_prediction_set")
+        resp, _ = self._get_cafa(client, session, uuid4(), [], refuse=refusal)
+        assert resp.status_code == 409
+        assert "score_prediction_set" in resp.json()["detail"]
+
+    def test_a_cut_is_refused_because_it_is_the_scoring_steps(self, client, session):
+        resp, _ = self._get_cafa(client, session, uuid4(), [], max_distance=0.5)
+        assert resp.status_code == 422
+        assert "score_prediction_set" in resp.json()["detail"]
 
     def test_cafa_not_found_returns_404(self, client, session):
         session.get.return_value = None
@@ -1185,32 +1234,32 @@ class TestDownloadPredictionsCafa:
         assert resp.status_code == 404
 
     def test_cafa_content_disposition(self, client, session):
-        set_id = uuid4()
-        resp = self._get_cafa(client, session, set_id, [])
+        resp, _ = self._get_cafa(client, session, uuid4(), [])
         disposition = resp.headers.get("content-disposition", "")
         assert "attachment" in disposition
         assert "cafa" in disposition
 
-    def test_cafa_filter_by_aspect(self, client, session):
-        set_id = uuid4()
-        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.1)], aspect="F")
+    def test_an_aspect_keeps_only_its_terms(self, client, session):
+        session.execute.return_value = iter([("GO:0003824",)])
+        rows = [("P12345", "GO:0003824", "0.8123"), ("P12345", "GO:0005737", "0.5000")]
+        resp, _ = self._get_cafa(client, session, uuid4(), rows, aspect="F")
         assert resp.status_code == 200
+        assert resp.text == "P12345\tGO:0003824\t0.8123\n"
 
-    def test_cafa_filter_by_max_distance(self, client, session):
-        set_id = uuid4()
-        resp = self._get_cafa(
-            client, session, set_id, [("P12345", "GO:0003824", 0.05)], max_distance=0.5
+    def test_a_window_exports_its_targets_from_its_own_truth(self, client, session):
+        from protea.core.evaluation import EvaluationData
+
+        data = EvaluationData(
+            nk={"N1": {"GO:1"}}, lk={"L1": {"GO:2"}}, pk={"P1": {"GO:3"}}, known={}, pk_known={}
         )
+        with patch(
+            "protea.core.evaluation.load_evaluation_data_for_set", return_value=(data, uuid4())
+        ):
+            resp, seen = self._get_cafa(
+                client, session, uuid4(), [("P1", "GO:3", "0.5000")], eval_id=str(uuid4())
+            )
         assert resp.status_code == 200
-
-    def test_cafa_score_clamps_at_zero(self, client, session):
-        """When distance > 1.0 the score should be 0.0, not negative."""
-        set_id = uuid4()
-        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 2.5)])
-        lines = resp.text.splitlines()
-        assert len(lines) == 1
-        score = float(lines[0].split("\t")[2])
-        assert score == 0.0
+        assert seen["proteins"] == {"N1", "L1", "P1"}, "PK targets too, as the evaluator reads them"
 
 
 # ---------------------------------------------------------------------------

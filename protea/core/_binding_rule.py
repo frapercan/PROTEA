@@ -7,6 +7,8 @@ it can be tested without one.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 #: The one MFO term CAFA and LAFA refuse to score on its own.
 #:
 #: ``GO:0005515`` is "protein binding", and it is nearly content-free: curators
@@ -36,8 +38,10 @@ from __future__ import annotations
 #: module's set and timing would drop F entries LAFA keeps -- 6 of 135 in NK,
 #: 7 of 156 in LK and 38 of 1.086 in PK, for instance a protein whose only F
 #: term is ``GO:0042802``. So the two rules are different rules and must be
-#: named rather than merged; the LAFA variant is not implemented here yet, and
-#: ``tests/test_lafa_profile_acceptance.py`` pins the divergence meanwhile.
+#: named rather than merged. Both are implemented and named in
+#: :data:`BINDING_RULES`: ``descendants_both_ends`` is this module's rule and
+#: ``cafa`` is democafa's and LAFA's (:func:`drop_cafa_binding_only_f`). A window
+#: declares the one that built its truth, as ``binding`` in its ``truth_rules``.
 #:
 #: MEASURED on GOA 220 before this rule existed here: of 130.456 direct
 #: experimental F pairs, **56.199 (43,1%) are binding terms**, and **18.824 of
@@ -89,4 +93,83 @@ def drop_binding_only_mfo(
             continue
         go_ids -= f_terms
         dropped += 1
+    return dropped
+
+
+#: The protein-binding rules a window's truth can be built under, by the name a
+#: payload asks for them with and ``evaluation_set.truth_rules['binding']`` stores.
+#:
+#: * ``descendants_both_ends`` is :func:`drop_binding_only_mfo`: the descendant
+#:   closure of ``GO:0005515``, on direct annotations before propagation, at both
+#:   ends. Every window built before the rule was declared had it, so it stays
+#:   the default of a payload that names no rule set and no stored window moves.
+#: * ``cafa`` is democafa's "Remove 3 binding terms", which LAFA's published truth
+#:   follows: a ``(protein, F)`` whose PROPAGATED t1 F set is a subset of
+#:   :data:`CAFA_BINDING_TERMS` is dropped, and nothing is dropped at t0. The
+#:   author chose it for the benchmark on 2026-11-20, so that other groups compare
+#:   against the rule the community scores with.
+#: * ``none`` is no binding rule at all, which is what the same-snapshot path of
+#:   ``compute_evaluation_data`` applies. A window declares it; a payload cannot
+#:   ask for it.
+BINDING_RULES: tuple[str, ...] = ("descendants_both_ends", "cafa", "none")
+
+#: The rules a payload can ask for: all but the one only a path applies.
+REQUESTABLE_BINDING_RULES: tuple[str, ...] = BINDING_RULES[:2]
+
+#: "protein binding" and its two ancestors, "binding" and the molecular_function
+#: root: the set democafa builds with ``nx.descendants`` on an obonet graph, whose
+#: edges point from child to parent.
+CAFA_BINDING_TERMS: frozenset[str] = frozenset({"GO:0005515", "GO:0005488", "GO:0003674"})
+
+
+class BindingStep(NamedTuple):
+    """Where one side of a window applies its binding rule, if anywhere."""
+
+    #: :func:`drop_binding_only_mfo`, on the side's direct annotations.
+    on_direct_terms: bool
+    #: :func:`drop_cafa_binding_only_f`, on the side's propagated F set.
+    on_propagated_f: bool
+
+
+#: The step of ``descendants_both_ends``, the same at both ends.
+DESCENDANTS_STEP = BindingStep(on_direct_terms=True, on_propagated_f=False)
+
+
+def binding_step(rule: str, t1_side: bool) -> BindingStep:
+    """The step one side takes under ``rule``; the t0 side of ``cafa`` takes none."""
+    if rule == "descendants_both_ends":
+        return DESCENDANTS_STEP
+    if rule == "cafa":
+        return BindingStep(on_direct_terms=False, on_propagated_f=t1_side)
+    if rule == "none":
+        return BindingStep(on_direct_terms=False, on_propagated_f=False)
+    raise ValueError(f"unknown binding rule {rule!r}; expected one of {BINDING_RULES}")
+
+
+def drop_cafa_binding_only_f(
+    by_aspect: dict[str, dict[str, set[str]]],
+    step: BindingStep,
+    terms: frozenset[str] = CAFA_BINDING_TERMS,
+) -> int:
+    """CAFA's rule: drop the F side of a protein whose propagated F set is binding only.
+
+    ``by_aspect`` is ``{protein: {aspect: {go_id}}}`` AFTER propagation, which is
+    when democafa tests it, and "binding only" is a SUBSET of ``terms``, not
+    equality: a protein annotated directly to ``GO:0005488`` alone is dropped
+    too. ``terms`` is :data:`CAFA_BINDING_TERMS` unless the caller reads the set
+    from an ontology, as LAFA's frame does (:func:`protea.core.lafa_frame.binding_terms`).
+    A protein left with no aspect leaves ``by_aspect``. Mutates in place and
+    returns how many proteins lost their F side; returns 0 and touches nothing
+    unless the step applies it.
+    """
+    if not step.on_propagated_f:
+        return 0
+    dropped = 0
+    for protein in list(by_aspect):
+        aspects = by_aspect[protein]
+        if "F" in aspects and aspects["F"] <= terms:
+            del aspects["F"]
+            dropped += 1
+            if not aspects:
+                del by_aspect[protein]
     return dropped

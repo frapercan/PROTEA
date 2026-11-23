@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import field_validator, model_validator
 
+from protea.core._binding_rule import REQUESTABLE_BINDING_RULES
 from protea.core._window_population import TARGET_POPULATIONS, refuse_unknown_population
 from protea.core.contracts.operation import ProteaPayload
 from protea.core.evaluation import GAIN_RULES, NOT_CODE_RULES, TRUTH_PROFILES
@@ -39,12 +40,15 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     # ``"validation"`` and ``"test_spent"``.
     window_role: str | None = None
     # A named set of truth rules (``protea.core.window_declarations``), e.g.
-    # ``"october-headline-frame"``. It fills ``truth_profile``, ``toi_rule``
-    # and ``not_codes`` and refuses a payload that asks for others, and it
-    # fixes the closure: under the October rules both sides close under the
-    # graph the t0 corpus was loaded under, so both natives (and with them the
-    # pivot) default to that graph. A build that would apply anything else is
-    # refused before the delta is computed. None leaves every default as it was.
+    # ``"october-headline-frame"`` or ``"lafa-frame"``. It fills
+    # ``truth_profile``, ``toi_rule``, ``not_codes`` and ``binding_rule``, and the
+    # target population when it fixes one (LAFA's frame does), and refuses a
+    # payload that asks for others; and it fixes the closure: under the October
+    # rules both sides close under the graph the t0 corpus was loaded under, so
+    # both natives (and with them the pivot) default to that graph, and under
+    # LAFA's each side closes under its own graph and the pivot is t0's. A build
+    # that would apply anything else is refused before the delta is computed.
+    # None leaves every default as it was.
     truth_rule_set: str | None = None
     # How the t1 side's truth is built. ``as_closed`` (the default) is what
     # every stored window did: a term the pivot cannot name is dropped by the
@@ -66,6 +70,13 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     # decide what a gain can be and which gains count, this decides which
     # denials bind.
     not_codes: str = NOT_CODE_RULES[0]
+    # Which protein-binding rule builds the F side (``protea.core._binding_rule``).
+    # ``descendants_both_ends`` (the default) is what every stored window did:
+    # PROTEA's own rule, on direct annotations at both ends. ``cafa`` is CAFA's
+    # and LAFA's: a protein's F side is dropped at t1 when its propagated F set is
+    # binding only, and t0 is left alone. Part of the identity: it changes the
+    # delta.
+    binding_rule: str = REQUESTABLE_BINDING_RULES[0]
     # Which proteins the window may score (``protea.core._window_population``).
     # ``every_protein`` (the default) is what every stored window did: any
     # protein that gained. ``superset_at_t0`` keeps the superset of the photo
@@ -98,6 +109,15 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     def _known_not_rule(cls, value: str) -> str:
         if value not in NOT_CODE_RULES:
             raise ValueError(f"unknown not_codes {value!r}; expected one of {NOT_CODE_RULES}")
+        return value
+
+    @field_validator("binding_rule")
+    @classmethod
+    def _known_binding_rule(cls, value: str) -> str:
+        if value not in REQUESTABLE_BINDING_RULES:
+            raise ValueError(
+                f"unknown binding_rule {value!r}; expected one of {REQUESTABLE_BINDING_RULES}"
+            )
         return value
 
     #: The sentence a caller must repeat verbatim to build a window that reads
@@ -146,7 +166,7 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     @model_validator(mode="before")
     @classmethod
     def _fill_from_named_rule_set(cls, data: Any) -> Any:
-        """Fill the three rule fields from ``truth_rule_set`` before they validate.
+        """Fill the rule fields (and a fixed population) from ``truth_rule_set`` before they validate.
 
         Before and not after, because after validation a field left out and a
         field sent with its default look the same, and only the first may be

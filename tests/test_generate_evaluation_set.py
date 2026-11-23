@@ -474,13 +474,14 @@ class TestGenerateEvaluationSetExecute:
     def test_identity_lookup_filters_on_every_field_of_the_identity(self):
         """A lookup on fewer fields would serve a delta the caller did not ask for.
 
-        Nine now, not five. ``truth_profile`` decides how the t1 truth is
+        Ten now, not five. ``truth_profile`` decides how the t1 truth is
         built, ``toi_rule`` which part of it counts as a gain, ``not_codes``
-        which denials may take it away and ``target_population`` which
-        proteins it is about, so a lookup that ignored any of them would hand
-        back a delta the caller did not ask for. The literal list is the
-        point: it is what fails when a tenth field is added to the identity
-        and not to the lookup.
+        which denials may take it away, ``target_population`` which proteins
+        it is about and ``binding_rule`` which protein-binding rule shapes its
+        F side, so a lookup that ignored any of them would hand back a delta
+        the caller did not ask for. The literal list is the point: it is what
+        fails when an eleventh field is added to the identity and not to the
+        lookup.
         """
         session = MagicMock()
         old_set = _make_annotation_set(uuid.uuid4())
@@ -507,10 +508,9 @@ class TestGenerateEvaluationSetExecute:
             "toi_rule",
             "not_codes",
             "target_population",
+            "binding_rule",
         }
-        assert len(session.query.return_value.filter_by.call_args.kwargs) == len(
-            _Identity._fields
-        )
+        assert len(session.query.return_value.filter_by.call_args.kwargs) == len(_Identity._fields)
 
 
 class TestDeltaModeAndEmptyRefusal:

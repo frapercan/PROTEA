@@ -64,6 +64,7 @@ TODAY: dict[str, str] = {
     "fetch_uniprot_metadata": queues.JOBS,
     "extract_goa_universe": queues.JOBS,
     "resolve_protein_sequences": queues.JOBS,
+    "resolve_protein_metadata": queues.JOBS,
     "load_interpro_go_mapping": queues.JOBS,
     "run_interproscan_batch": queues.JOBS,
     "predict_go_terms_from_interpro": queues.JOBS,
@@ -76,15 +77,21 @@ TODAY: dict[str, str] = {
     "export_transitions_dataset": queues.TRAINING,
     "load_cut_photo": queues.JOBS,
     "load_homology_table": queues.JOBS,
+    # Its own pull request: it streams a cut's 2.5 GB of hits, which the evaluations
+    # worker's 8G holds and the general queue's 2G does not.
+    "place_window_targets": queues.EVALUATIONS,
     "load_embedding_bank": queues.JOBS,
+    "declare_member_taxa": queues.JOBS,
+    "load_lexicon_bank": queues.JOBS,
+    "load_segment_families": queues.JOBS,
+    "run_count_map": queues.TRAINING,
+    "run_own_annotations": queues.TRAINING,
     # Docs and dispatchers: the residue vocabulary's coordinator (architecture/
     # operations.rst; the weights dialog posts it), build_go_cooccurrence
-    # (runbooks/lafa-native-parity.rst), batch_rescore_evaluation
-    # (scripts/hpo_champion_score.py) and apply_learned_encoder (its pull request:
+    # (runbooks/lafa-native-parity.rst) and apply_learned_encoder (its pull request:
     # "Registered on protea.jobs").
     "encode_residue_vocabulary": queues.EMBEDDINGS,
     "build_go_cooccurrence": queues.JOBS,
-    "batch_rescore_evaluation": queues.EVALUATIONS,
     "apply_learned_encoder": queues.JOBS,
     # The plan's section C table: see ROUTED_BY_THE_PLAN.
     "encode_residue_sparse": queues.EMBEDDINGS,
@@ -99,6 +106,9 @@ TODAY: dict[str, str] = {
     "declare_exam_population": queues.JOBS,
     "declare_corpus_population": queues.JOBS,
     "retire_evaluation_sets": queues.JOBS,
+    "supersede_evaluation_sets": queues.JOBS,
+    "score_prediction_set": queues.JOBS,
+    "summarize_prediction_sets": queues.JOBS,
     "seal_evaluation_groundtruth": queues.JOBS,
     "register_ingested_method": queues.JOBS,
     "analyze_annotation_evolution": queues.JOBS,
@@ -126,6 +136,9 @@ ROUTED_BY_THE_PLAN: frozenset[str] = frozenset(
         "declare_exam_population",
         "declare_corpus_population",
         "retire_evaluation_sets",
+        "supersede_evaluation_sets",
+        "score_prediction_set",
+        "summarize_prediction_sets",
         "seal_evaluation_groundtruth",
         "register_ingested_method",
         "analyze_annotation_evolution",
@@ -278,7 +291,7 @@ def _constant(module: str, name: str) -> str:
 def test_every_registered_operation_declares_a_spec() -> None:
     registry = build_operation_registry()
     assert set(registry.specs()) == set(registry._ops)
-    assert len(CATALOG) == len(registry._ops) == 61
+    assert len(CATALOG) == len(registry._ops) == 70
 
 
 def test_each_spec_routes_where_the_code_routes_today(specs: dict[str, OperationSpec]) -> None:

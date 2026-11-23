@@ -7,8 +7,20 @@ import { useTranslations } from "next-intl";
 import { baseUrl } from "@/lib/api";
 import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import StrataPanel from "@/components/StrataPanel";
+import PairedComparisons from "@/components/PairedComparisons";
+import WindowPanel from "@/components/window-panel/WindowPanel";
 import { RunReceipt } from "@/components/RunReceipt";
+import {
+  GRID_FILE,
+  HEADLINE_FILE,
+  describeSource,
+  fileSource,
+  type ArtifactsRecord,
+  type FileSource,
+} from "@/lib/cellSource";
+import { edgeMark, headlineMaximum, maximumNote, type Maximum } from "@/lib/headlineMaximum";
 import { PRIMARY_METRIC, metricTooltip, metricValue } from "@/lib/metrics";
+import { armLabel, type Arm } from "@/lib/pairedComparison";
 
 type NsMetrics = {
   /**
@@ -19,7 +31,17 @@ type NsMetrics = {
   f_micro?: number;
   precision?: number;
   recall?: number;
+  /** The largest IA-weighted coverage over every threshold (cafaeval's cov_max). */
   coverage_w?: number;
+  /**
+   * The IA-weighted coverage at the threshold f_micro_w was reported at: LAFA's
+   * cov_w, the coverage printed beside the headline. Absent on results made
+   * before 2026-11-21.
+   */
+  coverage_w_at_tau?: number;
+  /** The cell's size, unweighted and weighted: the denominators of its coverage. */
+  n_targets?: number;
+  n_targets_w?: number;
   /**
    * Unweighted, kept for history and NOT LAFA-comparable -- the
    * EvaluationResult model says exactly that in its own docstring. This page
@@ -30,9 +52,86 @@ type NsMetrics = {
   smin?: number;
   coverage: number;
   n_proteins?: number;
+  /**
+   * Per F variant, the threshold its curve peaks at and whether that is an edge
+   * of the grid (ADR-D55). The cell's `tau` belongs to the unweighted fmax; the
+   * headline's own threshold is `maxima.f_micro_w.tau`.
+   */
+  maxima?: Record<string, Maximum | undefined>;
 };
 
 type SettingResults = Record<string, NsMetrics>;
+
+/**
+ * The two numbers LAFA prints beside the headline: its coverage at the reported
+ * threshold and the cell's size, both in the weighted variant. A non-breaking
+ * space keeps a cell from an older result, which records neither, the same height.
+ */
+function cellCompanions(cell: NsMetrics): string {
+  const cov = metricValue(cell, "coverage_w_at_tau");
+  const n = cell.n_targets_w ?? null;
+  if (cov === null && n === null) return "\u00a0";
+  const parts = [];
+  if (cov !== null) parts.push(`cov ${cov.toFixed(3)}`);
+  if (n !== null) parts.push(`n ${n.toLocaleString("en-US")}`);
+  return parts.join(" · ");
+}
+
+/** Every figure the cell holds, each named for what it is and the file it was read from. */
+function cellTooltip(cell: NsMetrics, sources: CategorySources): string {
+  const parts = [metricTooltip(PRIMARY_METRIC)];
+  const maximum = headlineMaximum(cell);
+  if (maximum) parts.push(maximumNote(maximum));
+  const cov = metricValue(cell, "coverage_w_at_tau");
+  if (cov !== null) parts.push(`coverage at the reported threshold (cov_w) = ${cov.toFixed(3)}`);
+  const largest = metricValue(cell, "coverage_w");
+  if (largest !== null) parts.push(`largest coverage over thresholds = ${largest.toFixed(3)}`);
+  if (cell.n_targets_w != null) parts.push(`cell size, weighted = ${cell.n_targets_w}`);
+  if (cell.n_targets != null) parts.push(`cell size, unweighted = ${cell.n_targets}`);
+  parts.push(`fmax = ${cell.fmax.toFixed(4)} (unweighted, not LAFA-comparable)`);
+  if (sources.headline) parts.push(`f_micro_w and cov_w read from ${describeSource(sources.headline)}`);
+  if (sources.grid) parts.push(`cell size read from ${describeSource(sources.grid)}`);
+  return parts.join(" · ");
+}
+
+/** The two files a category's cells are read from, when the result wrote them. */
+type CategorySources = { headline: FileSource | null; grid: FileSource | null };
+
+function categorySources(r: EvaluationResult, cat: Category): CategorySources {
+  const record = r.results?.artifacts;
+  const source = (file: string) =>
+    fileSource(baseUrl(), r.evaluation_set_id, r.id, record, `${cat}/${file}`);
+  return { headline: source(HEADLINE_FILE), grid: source(GRID_FILE) };
+}
+
+/** The headline file of each category, as links that name the digest. */
+function CellFiles({ r, label, hint }: { r: EvaluationResult; label: string; hint: string }) {
+  const heads = CATEGORIES.flatMap((cat) => {
+    const { headline } = categorySources(r, cat);
+    return headline ? [{ cat, headline }] : [];
+  });
+  if (heads.length === 0) return null;
+  return (
+    <>
+      <span
+        className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400"
+        title={hint}
+      >
+        {label}
+      </span>
+      {heads.map(({ cat, headline }) => (
+        <a
+          key={cat}
+          href={headline.href}
+          className="font-mono text-[10px] text-blue-600 hover:underline"
+          title={describeSource(headline)}
+        >
+          {cat} {headline.sha256 ? headline.sha256.slice(0, 8) : "no digest"}
+        </a>
+      ))}
+    </>
+  );
+}
 
 type EvaluationResult = {
   id: string;
@@ -42,6 +141,15 @@ type EvaluationResult = {
   reranker_model_id: string | null;
   reranker_config: Record<string, Record<string, string>> | null;
   job_id: string | null;
+  /** The code revision the evaluating job recorded when it started. */
+  code_revision: string | null;
+  /**
+   * How the scores were read before cafaeval thresholded them (ADR-D55): ``raw``,
+   * LAFA's reading, or ``percentile_rank``, the comparison reading.
+   */
+  score_reading: string | null;
+  /** What the evaluated set is: its model, the scoring it read and its method. */
+  arm?: Arm | null;
   created_at: string;
   // Method-surface provenance (slice F-METHOD-EVAL-SURFACE). Optional:
   // null on rows written before the columns existed; the badge strip then
@@ -51,7 +159,12 @@ type EvaluationResult = {
   temporal_window: string | null;
   arms_enabled: Record<string, boolean> | null;
   leakage_role: string | null;
-  results: Record<string, SettingResults>;
+  results: ResultsRecord;
+};
+
+/** A result's record: one entry per category, and the files it wrote. */
+type ResultsRecord = Partial<Record<Category, SettingResults>> & {
+  artifacts?: ArtifactsRecord;
 };
 
 type EvaluationSet = {
@@ -83,6 +196,7 @@ function shortId(id: string): string {
 }
 
 const CATEGORIES = ["NK", "LK", "PK"] as const;
+type Category = (typeof CATEGORIES)[number];
 const NAMESPACES = ["BPO", "MFO", "CCO"] as const;
 
 export default function EvaluationDetailPage() {
@@ -143,6 +257,20 @@ export default function EvaluationDetailPage() {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
   }, [results]);
+  // Whether any headline on the page sits at an edge of the threshold grid, so
+  // the legend explains the mark only where there is one to explain.
+  const anyEdge = useMemo(
+    () =>
+      results.some((r) =>
+        CATEGORIES.some((cat) =>
+          NAMESPACES.some((ns) => {
+            const cell = r.results?.[cat]?.[ns];
+            return cell ? edgeMark(headlineMaximum(cell)) !== "" : false;
+          }),
+        ),
+      ),
+    [results],
+  );
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6">
@@ -260,6 +388,8 @@ export default function EvaluationDetailPage() {
               );
             })()}
 
+          <WindowPanel evaluationSetId={params.id} />
+
           <section className="rounded-lg border bg-white shadow-sm">
             <header className="border-b px-4 py-3">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
@@ -269,6 +399,12 @@ export default function EvaluationDetailPage() {
                 })}
               </h2>
             </header>
+            {sortedResults.length > 0 ? (
+              <p className="border-b px-4 py-2 text-xs text-slate-600">
+                {t("cellLegend")}
+                {anyEdge ? ` ${t("edgeLegend")}` : null}
+              </p>
+            ) : null}
             {sortedResults.length === 0 ? (
               <div className="px-4 py-10 text-center text-sm text-slate-600">
                 {t("noResults", {
@@ -308,7 +444,31 @@ export default function EvaluationDetailPage() {
                             className="px-3 py-2 font-mono text-xs"
                             title={r.id}
                           >
-                            {shortId(r.id)}
+                            {/* Where the row's numbers came from: the result,
+                              the job that computed them and the code it ran. */}
+                            <div className="flex flex-col gap-0.5">
+                              <span>{shortId(r.id)}</span>
+                              {r.job_id ? (
+                                <Link
+                                  href={`/${params.locale}/instrument/jobs/${r.job_id}`}
+                                  className="text-[10px] text-blue-600 hover:underline"
+                                  title={r.job_id}
+                                >
+                                  job {shortId(r.job_id)}
+                                </Link>
+                              ) : null}
+                              {r.code_revision ? (
+                                <a
+                                  href={`https://github.com/frapercan/PROTEA/commit/${r.code_revision}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[10px] text-slate-500 hover:underline"
+                                  title={r.code_revision}
+                                >
+                                  {r.code_revision.slice(0, 7)}
+                                </a>
+                              ) : null}
+                            </div>
                           </td>
                           {/* Forward link to the prediction set so reviewers can
                             jump straight to the proteins+candidate-GO rows
@@ -322,11 +482,22 @@ export default function EvaluationDetailPage() {
                             >
                               {shortId(r.prediction_set_id)}
                             </Link>
+                            {armLabel(r.arm) ? (
+                              <div className="text-[10px] text-slate-500">{armLabel(r.arm)}</div>
+                            ) : null}
                           </td>
                           <td className="px-3 py-2 font-mono text-xs">
                             {r.scoring_config_id
                               ? shortId(r.scoring_config_id)
                               : "—"}
+                            {r.score_reading ? (
+                              <div
+                                className="text-[10px] text-slate-500"
+                                title="how the scores were read before the thresholds (ADR-D55)"
+                              >
+                                {r.score_reading === "percentile_rank" ? "read by percentile" : `read ${r.score_reading}`}
+                              </div>
+                            ) : null}
                           </td>
                           {/* Forward link to the reranker registry so reviewers
                             can inspect the booster (provenance, metrics,
@@ -348,29 +519,41 @@ export default function EvaluationDetailPage() {
                               "—"
                             )}
                           </td>
-                          {CATEGORIES.flatMap((cat) =>
-                            NAMESPACES.map((ns) => {
+                          {CATEGORIES.flatMap((cat) => {
+                            const sources = categorySources(r, cat);
+                            return NAMESPACES.map((ns) => {
                               const cell = r.results?.[cat]?.[ns];
                               return (
                                 <td
                                   key={`${r.id}-${cat}-${ns}`}
                                   className="px-2 py-2 text-right font-mono tabular-nums"
-                                  title={
-                                    cell
-                                      ? `${metricTooltip(PRIMARY_METRIC)} · fmax=${cell.fmax.toFixed(4)} (unweighted) · coverage=${cell.coverage.toFixed(3)}`
-                                      : "no data"
-                                  }
+                                  title={cell ? cellTooltip(cell, sources) : "no data"}
                                 >
-                                  {cell === undefined
-                                    ? "—"
-                                    : // metricValue returns null for an absent key rather than zero, so
-                                      // a cell scored without an IA says so instead of borrowing the
-                                      // unweighted figure and reading as the headline.
-                                      (metricValue(cell, PRIMARY_METRIC)?.toFixed(3) ?? "no IA")}
+                                  {cell === undefined ? (
+                                    "—"
+                                  ) : (
+                                    <div className="flex flex-col items-end leading-tight">
+                                      {/* metricValue returns null for an absent key rather than
+                                        zero, so a cell scored without an IA says so instead of
+                                        borrowing the unweighted figure and reading as the
+                                        headline. */}
+                                      <span>
+                                        {metricValue(cell, PRIMARY_METRIC)?.toFixed(3) ?? "no IA"}
+                                        {/* A maximum at an edge of the threshold grid is an edge,
+                                          not a maximum: marked here, said in full in the tooltip. */}
+                                        <span className="text-amber-700">
+                                          {edgeMark(headlineMaximum(cell))}
+                                        </span>
+                                      </span>
+                                      <span className="text-[10px] text-slate-500">
+                                        {cellCompanions(cell)}
+                                      </span>
+                                    </div>
+                                  )}
                                 </td>
                               );
-                            }),
-                          )}
+                            });
+                          })}
                         </tr>
                         {/* Provenance sub-row: frame / window / arms / leakage
                           badges for this result. Always rendered (with an
@@ -398,6 +581,9 @@ export default function EvaluationDetailPage() {
                                   leakage_role: r.leakage_role,
                                 }}
                               />
+                              {/* The file each category's cells are read from, served by
+                                itself, with the sha256 the result recorded for it. */}
+                              <CellFiles r={r} label={t("sourcesLabel")} hint={t("sourcesHint")} />
                               <button
                                 type="button"
                                 onClick={() =>
@@ -455,6 +641,12 @@ export default function EvaluationDetailPage() {
               </table>
             )}
           </section>
+          {/* Each arm against a baseline, per cell, with a paired interval. */}
+          <PairedComparisons
+            evaluationSetId={params.id}
+            results={sortedResults}
+            locale={params.locale}
+          />
         </>
       )}
     </main>

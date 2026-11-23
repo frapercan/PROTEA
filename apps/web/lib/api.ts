@@ -336,6 +336,24 @@ export type PredictionSet = {
   distance_threshold?: number | null;
   created_at: string;
   prediction_count?: number;
+  /** True while the job that writes the set runs: its counts are read live and will change. */
+  counts_provisional?: boolean;
+  /** A scored set's candidate set, which holds its rows; null on a candidate set. */
+  scored_from?: string | null;
+  /** The configuration a scored set read; null on a candidate set. */
+  scoring_config_id?: string | null;
+  /** That configuration's name, when its id resolves. */
+  scoring_config_name?: string | null;
+  /** A candidate set's scored sets, newest first; empty on a scored set. */
+  scored_sets?: ScoredSetSummary[];
+};
+
+/** One scored set made from a candidate set by score_prediction_set. */
+export type ScoredSetSummary = {
+  id: string;
+  scoring_config_id: string | null;
+  scoring_config_name: string | null;
+  created_at: string;
 };
 
 export type AnnotationSet = {
@@ -377,13 +395,26 @@ export type ProteinItem = {
   isoform_index?: number | null;
 };
 
+/** A protein's current UniProt entry and the release that served it: shown, never used on a cut. */
+export type CurrentEntry = {
+  uniprot_release?: string | null;
+  uniprot_release_date?: string | null;
+  entry_name?: string | null;
+  reviewed?: boolean | null;
+  protein_names?: string | null;
+  gene_names?: string | null;
+  organism_name?: string | null;
+  organism_id?: number | null;
+  length?: number | null;
+};
+
 export type ProteinDetail = ProteinItem & {
   canonical_accession: string;
   isoforms: string[];
   sequence_id?: number | null;
   embedding_count: number;
   go_annotation_count: number;
-  metadata?: {
+  metadata?: (CurrentEntry & {
     function_cc?: string | null;
     ec_number?: string | null;
     catalytic_activity?: string | null;
@@ -391,8 +422,18 @@ export type ProteinDetail = ProteinItem & {
     keywords?: string | null;
     cofactor?: string | null;
     activity_regulation?: string | null;
-    [key: string]: string | null | undefined;
-  } | null;
+    absorption?: string | null;
+    kinetics?: string | null;
+    ph_dependence?: string | null;
+    redox_potential?: string | null;
+    temperature_dependence?: string | null;
+    active_site?: string | null;
+    binding_site?: string | null;
+    dna_binding?: string | null;
+    rhea_id?: string | null;
+    site?: string | null;
+    features?: string | null;
+  }) | null;
 };
 
 export type ProteinStats = {
@@ -845,6 +886,19 @@ export type Prediction = {
   go_term_frequency: number | null;
   ref_annotation_density: number | null;
   neighbor_distance_std: number | null;
+  /** A method's own score (ADR-D60): null for a retrieval arm, read under the method_score formula. */
+  method_score: number | null;
+  /**
+   * The score a scored set stored for this candidate, the one the evaluator
+   * reads. Null on a candidate set, which holds candidates and no scores.
+   */
+  score?: number | null;
+  /**
+   * The row's explanation, when the method's spec says it explains. A count map
+   * (ADR-D65) writes `{unit, k, n, strength, base_rate}` for a row a lexicon unit
+   * gave, and `{prior: true, base_rate}` for a row floored at the base rate.
+   */
+  explanation: Record<string, unknown> | null;
 };
 
 export function getProteinPredictions(setId: string, accession: string) {
@@ -1021,17 +1075,6 @@ export function createPresetScoringConfigs() {
   });
 }
 
-export function getScoredTsvUrl(
-  setId: string,
-  scoringConfigId: string,
-  params?: { minScore?: number },
-): string {
-  const q = new URLSearchParams();
-  q.set("scoring_config_id", scoringConfigId);
-  if (params?.minScore !== undefined) q.set("min_score", String(params.minScore));
-  return `${baseUrl()}/scoring/prediction-sets/${setId}/score.tsv?${q.toString()}`;
-}
-
 // ---------------------------------------------------------------------------
 // Re-ranker
 // ---------------------------------------------------------------------------
@@ -1080,30 +1123,6 @@ export async function deleteReranker(id: string) {
     method: "DELETE",
   }));
   if (!res.ok) throw new Error(await res.text());
-}
-
-export function getRerankedTsvUrl(
-  setId: string,
-  rerankerId: string,
-  params?: { minScore?: number },
-): string {
-  const q = new URLSearchParams();
-  q.set("reranker_id", rerankerId);
-  if (params?.minScore !== undefined) q.set("min_score", String(params.minScore));
-  return `${baseUrl()}/scoring/prediction-sets/${setId}/rerank.tsv?${q.toString()}`;
-}
-
-export function getRerankerMetrics(
-  setId: string,
-  rerankerId: string,
-  evaluationSetId: string,
-  category: string = "nk",
-) {
-  const q = new URLSearchParams();
-  q.set("reranker_id", rerankerId);
-  q.set("evaluation_set_id", evaluationSetId);
-  q.set("category", category);
-  return http<Record<string, any>>(`/scoring/prediction-sets/${setId}/reranker-metrics?${q.toString()}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1333,197 +1352,6 @@ export function getShowcase(options?: { cacheable?: boolean }) {
   return http<ShowcaseData>("/showcase", {
     cacheable: options?.cacheable ?? false,
   });
-}
-
-// ─── Benchmark matrix ──────────────────────────────────────────────
-
-export type BenchmarkEmbedding = {
-  id: string;
-  model_name: string;
-  model_backend: string;
-  description: string | null;
-  pooling: string;
-  layer_agg: string;
-  family: string;
-  display_name: string;
-  param_count: number | null;
-};
-
-export type BenchmarkEmbeddingsResponse = {
-  embeddings: BenchmarkEmbedding[];
-  total: number;
-};
-
-export type BenchmarkStageKind = "scoring" | "reranker";
-
-export type BenchmarkStage = {
-  name: string;
-  label: string;
-  kind: BenchmarkStageKind;
-  is_baseline: boolean;
-};
-
-export type BenchmarkRow = {
-  embedding_config_id: string;
-  evaluation_set_id: string;
-  stage: string;
-  k: number;
-  category: string;
-  aspect: string;
-  /** IA-weighted headline score for this cell (f_micro_w, fmax fallback). The
-   *  number the matrix ranks + displays; `primary_metric` flags which one. */
-  primary: number;
-  primary_metric: "f_micro_w" | "fmax";
-  /** Raw IA-weighted metrics; null on cells that predate real-IA evaluation. */
-  f_micro_w: number | null;
-  precision_w: number | null;
-  recall_w: number | null;
-  fmax: number;
-  precision: number | null;
-  recall: number | null;
-  coverage: number | null;
-  n_proteins: number | null;
-  evaluation_result_id: string;
-  /**
-   * Multiseed dispersion + bootstrap bands. All three fields are optional
-   * and only emitted by the lab when the cell was produced from >=2
-   * seeds (see project_v27_binary_multiseed memory: 0.7291 +/- 0.0028 is
-   * the canonical publishable claim). Backends that haven't backfilled
-   * them yet keep returning the scalar shape; the UI falls back to
-   * rendering just `fmax` and skips the band/whisker silently.
-   */
-  fmax_std?: number | null;
-  fmax_ci_low?: number | null;
-  fmax_ci_high?: number | null;
-  /**
-   * Method-surface provenance (slice F-METHOD-EVAL-SURFACE). All four are
-   * optional and null on rows written before the columns existed; the UI
-   * renders an explicit "unknown" badge in that case. `frame` =
-   * lafa | internal scoring frame, `temporal_window` = rolling-origin band
-   * label (e.g. SELECT_220_227 / FINAL_227_230), `arms_enabled` = flag dict
-   * of contributing arms, `leakage_role` = select | test | probe (ADR D40).
-   */
-  frame?: string | null;
-  temporal_window?: string | null;
-  arms_enabled?: Record<string, boolean> | null;
-  leakage_role?: string | null;
-  /**
-   * Which generation of the prediction set this cell came from, and how
-   * healthy that generation was. A cell can hold several generations of one
-   * measurement; the API returns the most trusted and most recent rather than
-   * the highest-scoring, and these two fields let the reader see which.
-   * `prediction_set_status` = current | superseded | damaged | incomplete,
-   * from the self-hit audit; `self_hit_rate` is the share of queries that
-   * retrieved themselves, near 0.99 on a healthy run. Null on sets that
-   * predate the audit.
-   */
-  prediction_set_id?: string | null;
-  prediction_set_status?: string | null;
-  self_hit_rate?: number | null;
-};
-
-export type BenchmarkBestCell = {
-  category: string;
-  aspect: string;
-  /** IA-weighted best-cell score (f_micro_w, fmax fallback). This is the
-   *  per-cell MAXIMUM across models: label it "best cell", never as the
-   *  headline number (winner's-curse, FIX-METRIC-IA). */
-  primary: number;
-  primary_metric: "f_micro_w" | "fmax";
-  f_micro_w: number | null;
-  precision_w: number | null;
-  recall_w: number | null;
-  fmax: number;
-  precision: number | null;
-  recall: number | null;
-  coverage: number | null;
-  embedding_config_id: string;
-  k: number;
-  stage: string;
-  evaluation_result_id: string;
-  evaluation_set_id: string;
-  /** Method-surface provenance for the winning cell (see BenchmarkRow). */
-  frame?: string | null;
-  temporal_window?: string | null;
-  arms_enabled?: Record<string, boolean> | null;
-  leakage_role?: string | null;
-};
-
-export type BenchmarkEvalSet = {
-  id: string;
-  label: string;
-  old_source: string | null;
-  old_source_version: string | null;
-  new_source: string | null;
-  new_source_version: string | null;
-  old_obo_version: string | null;
-  new_obo_version: string | null;
-  stats: {
-    delta_proteins?: number;
-    nk_proteins?: number;
-    lk_proteins?: number;
-    pk_proteins?: number;
-    nk_annotations?: number;
-    lk_annotations?: number;
-    pk_annotations?: number;
-    known_terms_count?: number;
-  };
-};
-
-export type BenchmarkMatrixResponse = {
-  rows: BenchmarkRow[];
-  total: number;
-  /** Headline metric for the matrix: always "f_micro_w" (IA-weighted). */
-  primary_metric: "f_micro_w";
-  /** Honest per-task mean ± 95% CI across models, in the current selection.
-   *  The benchmark headline; the best-cell tables remain max-labelled. */
-  per_task: PerTaskAggregate[];
-  evaluation_sets: BenchmarkEvalSet[];
-  embedding_config_ids: string[];
-  stages: BenchmarkStage[];
-  categories: string[];
-  aspects: string[];
-  ks: number[];
-  /** The ONE window both grids are about. Null only when nothing is scored.
-   *  The per-cell maximum used to run over the rows of every stored window,
-   *  so each of the nine cells could land on a different one; the API now
-   *  decides the window once and names it here, and the grid has to print it
-   *  or a reader cannot tell nine measurements from one. */
-  grid_evaluation_set_id: string | null;
-  best_per_cell: BenchmarkBestCell[];
-  /** Same shape as best_per_cell but ignores stage and K filters. Stable
-   *  across filter changes; the absolute champion per cell within the
-   *  active evaluation_set scope. */
-  best_per_cell_global: BenchmarkBestCell[];
-  filters: {
-    evaluation_set_id: string | null;
-    stage: string | null;
-    k: number | null;
-  };
-};
-
-export function getBenchmarkEmbeddings() {
-  return http<BenchmarkEmbeddingsResponse>("/benchmark/embeddings/", { cacheable: true });
-}
-
-export function getBenchmarkMatrix(params?: {
-  evaluation_set_id?: string;
-  stage?: string;
-  k?: number;
-  /** Ask the server to pick the default stage instead of sending them all. */
-  resolve_stage?: boolean;
-}) {
-  const qs = new URLSearchParams();
-  if (params?.evaluation_set_id) qs.set("evaluation_set_id", params.evaluation_set_id);
-  if (params?.stage) qs.set("stage", params.stage);
-  if (params?.k !== undefined) qs.set("k", String(params.k));
-  if (params?.resolve_stage) qs.set("resolve_stage", "true");
-  const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  // Cacheable: the benchmark matrix only changes when a new evaluation result
-  // lands (rare, minutes-to-hours apart). A 60s revalidation window lets the
-  // first visitor warm the cache so subsequent navigations across stage / K /
-  // eval-set chips are instant instead of paying ~2-10s per round-trip.
-  return http<BenchmarkMatrixResponse>(`/benchmark/matrix/${suffix}`, { cacheable: true });
 }
 
 export type StackRepo = {

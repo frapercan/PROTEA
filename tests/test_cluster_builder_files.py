@@ -27,6 +27,10 @@ ENTRY_POINTS = {
     "protea.core.cut_photo.measure": frozenset({"pyarrow"}),
     "protea.core.homology.build": frozenset({"pyarrow"}),
     "protea.core.embedding_bank.build": frozenset({"pyarrow", "numpy", "torch"}),
+    "protea.core.lexicon_bank.build": frozenset({"pyarrow", "numpy", "torch", "triton"}),
+    # torch only through protea.core.file_stage, which asks it about the card when it is
+    # installed; the families run in the cluster's own environment, which has it.
+    "protea.core.segment_families.build": frozenset({"pyarrow", "numpy", "torch"}),
 }
 
 
@@ -85,6 +89,8 @@ def test_the_shipped_list_is_the_import_closure_and_the_job_scripts() -> None:
         "deploy/cluster/homology_build.sh",
         "deploy/cluster/embedding_bank_prepare.sh",
         "deploy/cluster/embedding_bank.sh",
+        "deploy/cluster/lexicon_bank.sh",
+        "deploy/cluster/segment_families.sh",
     }
     assert all((ROOT / name).is_file() for name in scripts)
 

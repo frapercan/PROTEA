@@ -26,7 +26,6 @@ const PUBLIC_PATHS: ReadonlyArray<{
   { path: "/pillar/4", changeFrequency: "weekly", priority: 0.9 },
   { path: "/instrument", changeFrequency: "daily", priority: 0.9 },
   { path: "/instrument/graph", changeFrequency: "daily", priority: 0.9 },
-  { path: "/instrument/benchmark", changeFrequency: "daily", priority: 0.9 },
   // Stratified evaluation, which is what a cell of the matrix opens into. It
   // was the one result surface with no entry anywhere: not here and not in the
   // sidebar, so the only way to it was a hand-typed URL.

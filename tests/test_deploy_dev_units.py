@@ -151,8 +151,32 @@ def test_the_always_on_processes_one_worker_and_the_web_fit_in_the_slice():
 
 def test_the_slice_is_the_dev_ceiling():
     keys = _keys(SYSTEMD / "protea-dev.slice")
-    assert keys["MemoryMax"] == ["9G"]
+    # 9G until 2026-11-18, when the author raised it with the two workers below; 20G
+    # until 2026-11-19, when he raised it for the all-evidence kNN ("aprovechalos").
+    assert keys["MemoryMax"] == ["50G"]
     assert keys["CPUWeight"] == ["50"]
+
+
+def test_the_training_and_evaluation_workers_have_room_and_no_swap():
+    """A count map or a whole window's evaluation fails at once rather than crawl in swap."""
+    # The evaluations worker went from 8G to 16G on 2026-11-21: one evaluation of a
+    # partial-knowledge window peaked at 9.1 GB and the worker was killed at 8G.
+    for queue, cap in (("protea.training", "8G"), ("protea.evaluations", "16G")):
+        keys = _keys(SYSTEMD / f"protea-dev-worker@{queue}.service.d" / "memory.conf")
+        assert keys["MemoryMax"] == [cap], queue
+        assert keys["MemorySwapMax"] == ["0"], queue
+
+
+def test_the_prediction_batch_worker_has_room_for_every_evidence_and_no_swap():
+    """A whole window's kNN over donors of every evidence code fails at once rather than crawl.
+
+    The aspect searches run in series, so one aspect's search holds memory at a time:
+    ESM-2 3B over 1,507,676 donors reached 36.1 GiB of anonymous memory that way.
+    """
+    keys = _keys(SYSTEMD / "protea-dev-worker@protea.predictions.batch.service.d" / "memory.conf")
+    assert keys["MemoryMax"] == ["44G"]
+    assert keys["MemorySwapMax"] == ["0"]
+    assert keys["Environment"] == ["PROTEA_TUNING__operation__aspect_knn_workers=1"]
 
 
 def test_postgres_is_sized_as_planned():

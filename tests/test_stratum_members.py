@@ -29,7 +29,7 @@ def test_the_module_says_what_it_does_not_filter_on():
     import protea.api.routers.stratum_members as mod
 
     assert "ASSERTED" in mod.__doc__
-    assert "not about the neighbourhood" in mod.__doc__
+    assert "a fact about the evaluation's ground" in " ".join(mod.__doc__.split())
 
 
 def test_truncation_is_named_rather_than_implied():

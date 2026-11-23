@@ -28,7 +28,6 @@ from protea.api.routers import auth_api_keys as auth_api_keys_router
 from protea.api.routers import auth_login as auth_login_router
 from protea.api.routers import auth_smtp as auth_smtp_router
 from protea.api.routers import auth_user as auth_user_router
-from protea.api.routers import benchmark as benchmark_router
 from protea.api.routers import datasets as datasets_router
 from protea.api.routers import embeddings as embeddings_router
 from protea.api.routers import experiment_runs as experiment_runs_router
@@ -61,12 +60,6 @@ from protea.api.routers.annotations.snapshots import (
     SNAPSHOTS_TTL_SECONDS,
     prewarm_snapshots,
 )
-from protea.api.routers.benchmark import (
-    BENCHMARK_EMBEDDINGS_TTL_SECONDS,
-    BENCHMARK_MATRIX_TTL_SECONDS,
-    prewarm_benchmark_embeddings,
-    prewarm_benchmark_matrix,
-)
 from protea.api.routers.embeddings import (
     EMBEDDING_CONFIGS_TTL_SECONDS,
     PREDICTION_SETS_TTL_SECONDS,
@@ -80,7 +73,6 @@ from protea.api.routers.proteins import (
 from protea.api.routers.proteins_stats import prewarm_all as prewarm_protein_stats_sections
 from protea.core.code_revision import code_revision, is_identifying
 from protea.core.operation_catalog import build_operation_registry
-from protea.infrastructure.benchmark_config import load_benchmark_config
 from protea.infrastructure.environment_check import exit_on_environment_mismatch
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
@@ -120,13 +112,6 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
     {
         "name": "scoring",
         "description": "Scoring configs, scored prediction export, and CAFA metrics.",
-    },
-    {
-        "name": "benchmark",
-        "description": (
-            "Per-embedding / per-stage Fmax matrix across every "
-            "evaluation result. Powers the /benchmark page in the UI."
-        ),
     },
     {"name": "support", "description": "Community thumbs-up and comments."},
     {
@@ -208,7 +193,6 @@ _ROUTER_MODULES = (
     admin_router,
     scoring_router,
     showcase_router,
-    benchmark_router,
     receipts_router,
     strata_router,
     stratum_members_router,
@@ -532,12 +516,6 @@ def _prewarm_targets():
         ("annotations:snapshots", prewarm_snapshots, SNAPSHOTS_TTL_SECONDS),
         ("annotations:sets", prewarm_annotation_sets, ANNOTATION_SETS_TTL_SECONDS),
         ("proteins:stats:sections", prewarm_protein_stats_sections, 600),
-        (
-            "benchmark:embeddings",
-            prewarm_benchmark_embeddings,
-            BENCHMARK_EMBEDDINGS_TTL_SECONDS,
-        ),
-        ("benchmark:matrix", prewarm_benchmark_matrix, BENCHMARK_MATRIX_TTL_SECONDS),
     )
 
 
@@ -619,7 +597,6 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.state.artifacts_dir = settings.artifacts_dir
     app.state.settings = settings
     app.state.operation_registry = build_operation_registry()
-    app.state.benchmark_config = load_benchmark_config(project_root)
     # FARM-AUTH.7: expose quota limits so the dependency can read them
     # without importing the full Settings object.
     app.state.user_quota_per_day = settings.user_quota_per_day

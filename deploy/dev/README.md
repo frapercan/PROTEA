@@ -21,10 +21,10 @@ containers.
 | `protea-dev-rabbitmq` (Quadlet) | RabbitMQ 4.3.5 | `127.0.0.1:26672` (AMQP), `127.0.0.1:26673` (management) | 1G |
 | `protea-dev-minio` (Quadlet) | MinIO | `127.0.0.1:26900` (API), `127.0.0.1:26901` (console) | 768M |
 | `protea-dev-wait-infra.service` | waits until the three answer | | |
-| `protea-dev-worker@<queue>.service` | one queue worker per instance | | 2G each |
+| `protea-dev-worker@<queue>.service` | one queue worker per instance | | 2G each; 8G and no swap for `protea.training` and `protea.evaluations` (drop-ins, 2026-11-18); 44G, no swap and the aspect searches in series for `protea.predictions.batch` (drop-in, 2026-11-19; 12G before) |
 | `protea-dev-api.service` | the API | `127.0.0.1:26800` | 768M |
 | `protea-dev-web` (Quadlet, with `protea-dev-web.build`) | the web front (Next.js) | `127.0.0.1:26300` | 768M |
-| `protea-dev.slice` | holds all of the above | | 9G in total, CPUWeight 50 |
+| `protea-dev.slice` | holds all of the above | | 50G in total (20G until 2026-11-19, 9G until 2026-11-18), CPUWeight 50 |
 | `protea-dev.target` | groups them | | |
 
 The images are the ones `docker-compose.yml` pins, by the same digests.
@@ -70,9 +70,13 @@ production uses, told the dev ports through `PROTEA_WAIT_ENDPOINTS`.
 - The GPU is hidden from dev workers: the worker template sets
   `CUDA_VISIBLE_DEVICES` to an empty value. The production GPU worker shares
   the single card, and two models on one 12 GB card is an out-of-memory for
-  whichever loads second. Do not enable `protea.embeddings.batch`,
-  `protea.methods` or the residue-encoding queues for dev until the author
-  decides who owns the card. Hidden is not refused: with no card in sight
+  whichever loads second. The one exception, decided by the author on
+  2026-11-21, is the predictions batch queue (`gpu.conf` beside its memory
+  drop-in): the first pass of the exact neighbour search runs on the card,
+  takes it only when it needs less than half of the free memory, releases it
+  before returning, and otherwise runs on the CPU with the same neighbours. Do
+  not enable `protea.embeddings.batch`, `protea.methods` or the
+  residue-encoding queues for dev until the author decides who owns the card. Hidden is not refused: with no card in sight
   `compute_embeddings` runs on the processors with only a warning event.
   And `protea.methods` launches containers that request the device
   directly, so the empty variable does not cover it.
@@ -100,7 +104,12 @@ production uses, told the dev ports through `PROTEA_WAIT_ENDPOINTS`.
    (`deploy/dev/protea-dev-clock-gate.sh` and
    `deploy/systemd/protea-wait-infra.sh`), so its revision must contain both.
 3. A venv at `~/protea-dev/venv` with the clone's locked dependencies. The
-   units call it directly and never through `poetry run`.
+   units call it directly and never through `poetry run`. On a node with an
+   NVIDIA card, `deploy/dev/install-cuda-torch.sh` then replaces the locked
+   CPU build of torch and torchvision with the CUDA build of the same
+   versions, so the neighbour search's first pass can use the card. The lock
+   keeps the CPU build for CI and for nodes without a card; the neighbours
+   are the same on either.
 4. Rootless podman 5.x (Quadlet), and lingering enabled for the user, so that
    user units run without a login session.
 
@@ -166,6 +175,7 @@ EOF
 {
   printf 'HF_HOME=%s\n' "$HOME/protea-dev/cache/huggingface"
   printf 'PROTEA_REF_CACHE_DIR=%s\n' "$HOME/protea-dev/cache/ref_cache"
+  printf 'PROTEA_EMBEDDING_BANK_DIR=%s\n' "$HOME/protea-dev/cache/banco"
   printf 'PROTEA_PRED_CACHE_DIR=%s\n' "$HOME/protea-dev/cache/pred_cache"
   printf 'PROTEA_ALIGN_CACHE_DIR=%s\n' "$HOME/protea-dev/cache/align_cache"
   printf 'PROTEA_PCA_ARTIFACTS_DIR=%s\n' "$HOME/protea-dev/cache/pca"
@@ -192,6 +202,10 @@ What each line is for:
 - `HF_HOME` and `HF_HUB_OFFLINE=1`: models come from the dev cache, never
   from a download at run time.
 - The cache variables keep every cache under `~/protea-dev/cache`.
+- `PROTEA_EMBEDDING_BANK_DIR` names the folder `load_embedding_bank` loaded the
+  embedding bank from, so a reference pool reads its vectors from its shards (each
+  checked against the manifest the store recorded) instead of streaming them
+  from Postgres: about 2 minutes per bank instead of 7 to 9.
 - `PROTEA_TAXONOMY_DB_PATH`: the declared taxonomy file. While it does not
   exist, a taxonomy feature refuses instead of downloading today's NCBI
   taxonomy into `~/.etetoolkit`, the file production on this machine reads.
@@ -224,7 +238,10 @@ Copy the sources into place. Copying starts nothing:
 ```bash
 mkdir -p ~/.config/containers/systemd/protea-dev
 install -m 0644 ~/protea-dev/deploy/PROTEA/deploy/dev/quadlet/* ~/.config/containers/systemd/protea-dev/
-install -m 0644 ~/protea-dev/deploy/PROTEA/deploy/dev/systemd/* ~/.config/systemd/user/
+find ~/protea-dev/deploy/PROTEA/deploy/dev/systemd -maxdepth 1 -type f -exec install -m 0644 {} ~/.config/systemd/user/ \;
+for d in ~/protea-dev/deploy/PROTEA/deploy/dev/systemd/*.service.d; do
+  install -d ~/.config/systemd/user/"$(basename "$d")" && install -m 0644 "$d"/*.conf ~/.config/systemd/user/"$(basename "$d")"/
+done
 ```
 
 `rabbitmq.conf` goes with the Quadlet files on purpose: the broker reads it
@@ -349,7 +366,8 @@ every dev worker and of the API:
   yet: dev runs on one machine, from a clone checked out at the dev revision.
   It joins them with the cluster pilots, together with a dev declaration in
   agent-farm.
-- A unit for the GPU queues, after the decision on the card.
+- The other GPU queues (embeddings, methods, residue encodings), after the
+  decision on the card. The predictions batch queue sees it since 2026-11-21.
 - CPU priority for production. `CPUWeight=50` on `protea-dev.slice` only
   weighs against the other children of `protea.slice`, and it has none.
   `protea.slice` itself competes with `app.slice`, where the production

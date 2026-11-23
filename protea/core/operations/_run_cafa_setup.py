@@ -10,6 +10,7 @@ Re-exported by ``run_cafa_evaluation`` for backwards compatibility.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import uuid
 from pathlib import Path
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from sqlalchemy.orm import Session
 
+from protea.core._truth_rules import SCORED_TERMS
 from protea.core.contracts.operation import EmitFn
 from protea.core.evaluation import EvaluationData
 from protea.core.operations._run_cafa_eval_driver import CafaEvalRunContext
@@ -26,7 +28,6 @@ from protea.infrastructure.orm.models.annotation.evaluation_set import Evaluatio
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
-from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.storage import ArtifactStore
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -39,8 +40,11 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 #: The terms-of-interest rules, by the name a payload asks for them with.
 #:
-#: ``pivot_terms`` is what the platform has always done and stays the default,
-#: so no stored result moves and no frame changes under anyone.
+#: Which of the two a run uses is the window's, through its gain rule
+#: (:data:`protea.core._truth_rules.SCORED_TERMS`); a request no longer names it.
+#:
+#: ``pivot_terms`` is what the platform did for every request until 2026-11-20
+#: that did not ask otherwise.
 #:
 #: ``live_in_both_ends`` is the rule the lab's long window uses, and it differs
 #: from the default twice over. It drops the obsolete, which the default keeps:
@@ -64,9 +68,9 @@ class _EvalInputs(NamedTuple):
     snapshot: OntologySnapshot
     pivot_snapshot_id: uuid.UUID
     toi_go_ids: list[str]
-    #: Which rule produced ``toi_go_ids``. Carried so the setup event can name
-    #: it: a term universe reported without its rule leaves two runs scoring
-    #: different quantities to be told apart by their counts.
+    #: Which rule produced ``toi_go_ids``. Carried so the setup event and the
+    #: result can name it: a term universe reported without its rule leaves two
+    #: runs scoring different quantities to be told apart by their counts.
     toi_rule: str = TOI_RULES[0]
 
 
@@ -74,8 +78,6 @@ class _PipelineCtx(NamedTuple):
     """Bundle of run-pipeline inputs threaded through the tempdir block."""
 
     inputs: _EvalInputs
-    scoring_snapshot: ScoringConfig | None
-    reranker_models: dict[str, Any]
     result_id: uuid.UUID
     artifact_store: ArtifactStore
 
@@ -160,6 +162,61 @@ def _load_terms_of_interest(
     return sorted(_live_go_ids(session, old_snapshot) & _live_go_ids(session, new_snapshot))
 
 
+def window_terms_of_interest(
+    session: Session, eval_set: EvaluationSet, pivot_snapshot_id: uuid.UUID
+) -> tuple[str, list[str]]:
+    """The terms a window is scored over, and the rule that names them.
+
+    The rule is the window's, :data:`~protea.core._truth_rules.SCORED_TERMS` of
+    its gain rule, never the request's. A window that recorded how many terms
+    of interest it has (LAFA's frame does, as ``stats["terms_of_interest"]``) is
+    refused when the rule gives another number: the window and the evaluator
+    would be describing two different measurements.
+    """
+    rule = SCORED_TERMS[eval_set.toi_rule]
+    terms = _load_terms_of_interest(session, pivot_snapshot_id, eval_set, rule)
+    recorded = (eval_set.stats or {}).get("terms_of_interest")
+    if recorded is not None and int(recorded) != len(terms):
+        raise ValueError(
+            f"evaluation set {eval_set.id} records {recorded} terms of interest, and its "
+            f"rule {rule!r} gives {len(terms)}: the window and the evaluator would score "
+            "different terms"
+        )
+    return rule, terms
+
+
+#: The population every result is scored over: all the window's targets, an
+#: unpredicted one counted as a failure, as LAFA scores (decided on 2026-11-20).
+POPULATION_RULE = "all_targets"
+
+
+def population_record(data: EvaluationData) -> dict[str, Any]:
+    """What a result records about the proteins it was scored over.
+
+    The rule, and how many targets each category holds. With every target in
+    the population, a method that predicts few of them shows it as coverage,
+    beside the number, instead of being scored over the ones it predicted.
+    """
+    return {
+        "rule": POPULATION_RULE,
+        "targets": {"NK": len(data.nk), "LK": len(data.lk), "PK": len(data.pk)},
+    }
+
+
+def terms_of_interest_record(rule: str, terms: list[str], path: str) -> dict[str, Any]:
+    """What a result records about the terms it was scored over.
+
+    The rule, how many, and the sha256 of the file cafaeval read. The frame
+    seal reads the rule from here, so a result says what it measured rather than
+    what its request asked for.
+    """
+    return {
+        "rule": rule,
+        "terms": len(terms),
+        "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
+    }
+
+
 def _emit_evaluation_setup_events(emit: EmitFn, inputs: _EvalInputs) -> None:
     """Fire the ``start`` + ``delta_done`` events the UI gates on.
 
@@ -201,7 +258,7 @@ class StagedInputs(NamedTuple):
 
     It had no name, so the function that consumes it took eleven arguments and
     the size guard was right to object: a parameter list that long is usually a
-    missing noun. These seven values are exactly what staging writes or resolves,
+    missing noun. These four values are exactly what staging writes or resolves,
     and nothing else in the pipeline produces them.
     """
 
@@ -209,9 +266,6 @@ class StagedInputs(NamedTuple):
     ia_path: str | None
     gt_paths: dict[str, str]
     toi_path: str
-    data: Any
-    delta_proteins: set[str]
-    has_rerankers: bool
 
 
 def bundle_run_context(
@@ -231,16 +285,7 @@ def bundle_run_context(
     """
     inputs = ctx.inputs
     return CafaEvalRunContext(
-        pred_set_id=inputs.pred_set_id,
-        delta_proteins=staged.delta_proteins,
-        max_distance=p.max_distance,
-        max_k_position=p.max_k_position,
-        max_sequence_rank=p.max_sequence_rank,
         artifacts_root=artifacts_root,
-        has_rerankers=staged.has_rerankers,
-        reranker_models=ctx.reranker_models,
-        scoring_config_snapshot=ctx.scoring_snapshot,
-        data=staged.data,
         obo_path=staged.obo_path,
         nk_path=staged.gt_paths["nk"],
         lk_path=staged.gt_paths["lk"],
@@ -255,9 +300,4 @@ def bundle_run_context(
         th_step=p.th_step,
         score_reading=p.score_reading,
         max_terms=p.max_terms,
-        softprop=p.softprop,
-        interpro_graft=p.interpro_graft,
-        interpro_protein2ipr_file=p.interpro_protein2ipr_file,
-        interpro_ipr2go_file=p.interpro_ipr2go_file,
-        interpro_graft_weight=p.interpro_graft_weight,
     )

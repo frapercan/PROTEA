@@ -32,24 +32,47 @@ WINDOW_ROLE_CHECK = (
     "('valid', 'test', 'training', 'validation', 'test_spent')"
 )
 
-#: The four keys of ``truth_rules`` and the values each may take: the
-#: vocabularies of :mod:`protea.core._truth_rules` and the closures of
-#: :mod:`protea.core.window_declarations`, checked against both by the same test.
+#: The five keys of ``truth_rules`` and the values each may take: the
+#: vocabularies of :mod:`protea.core._truth_rules`, the closures of
+#: :mod:`protea.core.window_declarations` and the binding rules of
+#: :mod:`protea.core._binding_rule`, checked against all three by the same test.
 TRUTH_RULES_CHECK = (
     "truth_rules IS NULL OR ("
     "jsonb_typeof(truth_rules) = 'object' "
-    "AND COALESCE(truth_rules ->> 'profile', '') IN ('as_closed', 'projected') "
-    "AND COALESCE(truth_rules ->> 'toi_rule', '') IN ('pivot_terms', 'live_in_both_ends') "
+    "AND COALESCE(truth_rules ->> 'profile', '') IN ('as_closed', 'projected', 'own_graph') "
+    "AND COALESCE(truth_rules ->> 'toi_rule', '') IN "
+    "('pivot_terms', 'live_in_both_ends', 'both_ends_trimmed') "
     "AND COALESCE(truth_rules ->> 'not_codes', '') IN ('any', 'experimental') "
     "AND COALESCE(truth_rules ->> 'closure', '') IN "
-    "('per_side', 't0_graph', 't1_graph', 'explicit', 'direct_terms'))"
+    "('per_side', 't0_graph', 't1_graph', 'per_side_t0_pivot', 'explicit', 'direct_terms') "
+    "AND COALESCE(truth_rules ->> 'binding', '') IN "
+    "('descendants_both_ends', 'cafa', 'none'))"
 )
+
+#: A supersession is all three of its fields or none, and never points at the
+#: window itself; the migration that installs it carries the same text.
+SUPERSESSION_CHECK = (
+    "(superseded_by_id IS NULL) = (superseded_at IS NULL) "
+    "AND (superseded_by_id IS NULL) = (supersession_note IS NULL) "
+    "AND (superseded_by_id IS NULL OR superseded_by_id <> id)"
+)
+
+#: The binding rules a payload can ask for, spelled out for the same reason as
+#: the checks above; the migration that installs it carries the same text.
+BINDING_RULE_CHECK = "binding_rule IN ('descendants_both_ends', 'cafa')"
 
 
 #: The vocabulary of :data:`protea.core._window_population.TARGET_POPULATIONS`,
 #: spelled out so the model imports nothing from core; the migration that
 #: installs it carries the same text and a test compares the three.
-TARGET_POPULATION_CHECK = "target_population IN ('every_protein', 'superset_at_t0')"
+TARGET_POPULATION_CHECK = (
+    "target_population IN ('every_protein', 'superset_at_t0', 'swissprot_same_sequence')"
+)
+
+#: The profiles and gain rules a row may ask for, spelled out for the same
+#: reason; the migration that installs them carries the same text.
+TRUTH_PROFILE_CHECK = "truth_profile IN ('as_closed', 'projected', 'own_graph')"
+TOI_RULE_CHECK = "toi_rule IN ('pivot_terms', 'live_in_both_ends', 'both_ends_trimmed')"
 
 
 class EvaluationSet(Base):
@@ -76,8 +99,8 @@ class EvaluationSet(Base):
     ``"training"``, ``"validation"`` and ``"test_spent"``; see
     :mod:`protea.core.window_declarations` for what each one allows.
 
-    ``truth_rules`` is what the build APPLIED, as a JSON object with four
-    keys (``profile``, ``toi_rule``, ``not_codes``, ``closure``), and it is
+    ``truth_rules`` is what the build APPLIED, as a JSON object with five
+    keys (``profile``, ``toi_rule``, ``not_codes``, ``closure``, ``binding``), and it is
     the field a frame compares across cuts. NULL on every row built before it
     existed, which reads as legacy: nothing says, never "the defaults".
 
@@ -121,6 +144,7 @@ class EvaluationSet(Base):
             "toi_rule",
             "not_codes",
             "target_population",
+            "binding_rule",
             name="uq_evaluation_set_identity",
         ),
         # ADR D40: keep the protocol-window vocabulary closed at the DB
@@ -144,11 +168,11 @@ class EvaluationSet(Base):
         # two windows with no profile declared would both be accepted and the
         # key would stop being one.
         CheckConstraint(
-            "truth_profile IN ('as_closed', 'projected')",
+            TRUTH_PROFILE_CHECK,
             name="ck_evaluation_set_truth_profile",
         ),
         CheckConstraint(
-            "toi_rule IN ('pivot_terms', 'live_in_both_ends')",
+            TOI_RULE_CHECK,
             name="ck_evaluation_set_toi_rule",
         ),
         CheckConstraint(
@@ -158,6 +182,14 @@ class EvaluationSet(Base):
         CheckConstraint(
             TARGET_POPULATION_CHECK,
             name="ck_evaluation_set_target_population",
+        ),
+        CheckConstraint(
+            BINDING_RULE_CHECK,
+            name="ck_evaluation_set_binding_rule",
+        ),
+        CheckConstraint(
+            SUPERSESSION_CHECK,
+            name="ck_evaluation_set_supersession",
         ),
     )
 
@@ -307,6 +339,15 @@ class EvaluationSet(Base):
     target_population: Mapped[str] = mapped_column(
         String(24), nullable=False, server_default="every_protein"
     )
+    #: Which protein-binding rule builds the F side
+    #: (:mod:`protea.core._binding_rule`). ``descendants_both_ends`` is what every
+    #: row written before this column was built with: PROTEA's own rule, on
+    #: direct annotations at both ends. ``cafa`` is CAFA's and LAFA's, at t1 after
+    #: propagation, which the author chose for the benchmark on 2026-11-20. In the
+    #: identity because it changes the F side of the delta.
+    binding_rule: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="descendants_both_ends"
+    )
     #: WHICH CODE BUILT THIS ROW, from :func:`protea.core.code_revision`.
     #:
     #: The three rule columns above say what the delta IS by declaration. This
@@ -347,6 +388,20 @@ class EvaluationSet(Base):
     #: descriptor); NULL on rows written before the column, which read as
     #: "nothing says", never as a default.
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The window that superseded this one, when it was marked and why, written by
+    #: ``supersede_evaluation_sets``. NULL for a window nothing has superseded. The
+    #: row stays, and so do the results computed on it: they are records of what
+    #: was measured, and the pointer says where the measurement moved to.
+    superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "evaluation_set.id", ondelete="RESTRICT", name="fk_evaluation_set_superseded_by_id"
+        ),
+        nullable=True,
+        index=True,
+    )
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    supersession_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     old_annotation_set: Mapped[AnnotationSet] = relationship(
         "AnnotationSet", foreign_keys=[old_annotation_set_id]

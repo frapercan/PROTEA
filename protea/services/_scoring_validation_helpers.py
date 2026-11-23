@@ -3,7 +3,7 @@
 These pure functions own the heavy DB introspection (per-signal NULL
 counts, temporal NK/LK/PK delta materialisation) for the scoring API.
 They return raw results; the service-layer wrappers translate them
-into domain exceptions (``SignalCoverageError``, ``EntityNotFoundError``)
+into domain exceptions (``EntityNotFoundError``) or refusals
 so the helper module stays free of those types.
 """
 
@@ -41,6 +41,11 @@ _SIGNAL_TO_COLUMN: dict[str, str] = {
     "evidence_weight": "evidence_code",
     "taxonomic_proximity": "taxonomic_distance",
     "neighbor_vote_fraction": "neighbor_vote_fraction",
+    # The rich signals: coverage needs an alignment, the others their own column.
+    "coverage": "alignment_length_nw",
+    "ref_annotation_density": "ref_annotation_density",
+    "anc2vec_neighbor_cos": "anc2vec_neighbor_cos",
+    "anc2vec_neighbor_maxcos": "anc2vec_neighbor_maxcos",
 }
 
 
@@ -55,8 +60,8 @@ def compute_missing_signals(
     (plus ``evidence_code`` when the formula is ``evidence_weighted``,
     where the multiplier is always applied), count how many rows in the
     PredictionSet have the backing column non-NULL. Empty list means
-    full coverage. The service-layer wrapper raises
-    ``SignalCoverageError`` when this list is non-empty.
+    full coverage. ``score_prediction_set`` refuses a configuration when
+    this list is non-empty.
     """
     weights = config_snap.weights or {}
     required: list[tuple[str, str]] = []

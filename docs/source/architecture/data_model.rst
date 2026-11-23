@@ -237,6 +237,15 @@ Predictions
    the two; every set written before the method tables has a configuration and
    no method.
 
+**PredictionScore**
+   The scores of a scored set (``score_prediction_set``): one row per protein,
+   with its GO term ids, ascending, and their scores as two aligned arrays
+   (``ck_prediction_score_aligned``; a protein with nothing scored has no row).
+   A scored set holds no ``GOPrediction`` rows: the candidates and their
+   evidence stay in the candidate set it was scored from, and the scores take
+   20 bytes per pair, about 29 times less than the average ``GOPrediction``
+   row (:doc:`/architecture/scoring`).
+
 **GOPrediction**
    One row per (query protein, GO term, reference protein) triple. The alignment and
    taxonomy columns are ``NULL`` unless ``compute_alignments=true`` and/or
@@ -389,8 +398,9 @@ Evaluation
    │ ontology_snapshot_id (FK)    │           │ scoring_config_id (FK, nullable)  │
    │ stats (JSONB)                │           │ reranker_model_id (FK, nullable)  │
    │ job_id (FK)                  │           │ results (JSONB)                   │
-   │ created_at                   │           │ max_distance (Float, nullable)    │
-   └──────────────────────────────┘           │ job_id (FK)                       │
+   │ created_at                   │           │ max_k_position (nullable)         │
+   └──────────────────────────────┘           │ max_sequence_rank (nullable)      │
+                                              │ job_id (FK)                       │
                                               │ created_at                        │
                                               └───────────────────────────────────┘
 
@@ -403,8 +413,17 @@ Evaluation
    Stores the output of running ``cafaeval`` against a prediction set for
    a given evaluation set. The ``results`` JSONB column contains per-category
    (NK/LK/PK) per-namespace (BPO/MFO/CCO) Fmax, precision, recall, τ, and
-   coverage. Optionally references a ``ScoringConfig`` or ``RerankerModel``
-   when predictions were scored or re-ranked before evaluation.
+   coverage. The evaluator scores the prediction set's stored scores as they
+   are; when the set was scored by ``score_prediction_set``, the result row
+   copies the ``ScoringConfig`` and the depth cut from the set's record, so a
+   result names how its scores were made. Rows written before 2026-11-20 keep
+   the ``ScoringConfig``, ``RerankerModel`` and cut the evaluator applied
+   itself. Beside the categories, ``results`` holds ``artifacts`` (the keys of
+   the files the run stored) and, since 2026-11-20, ``terms_of_interest``: the
+   rule the window named, the number of terms and the sha256 of the file
+   cafaeval read. Since 2026-11-21 it also holds ``population``: the rule
+   (``all_targets``) and how many targets each category held. The frame seal
+   reads both rules.
 
 Support
 -------

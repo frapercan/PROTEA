@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from protea.core._artifact_identity import sha256_of_file
 from protea.core._evaluation_leakage import refuse_uncertifiable_encoding
 from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.evaluation import load_evaluation_data_for_set
@@ -18,14 +19,12 @@ from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
 from protea.core.operations import _run_cafa_summary as _summary
 from protea.core.operations._band_guard import refuse_if_the_band_is_foreign
-from protea.core.operations._depth_unit_guard import (
-    assert_depth_unit_is_available,
-)
 from protea.core.operations._evaluation_artifacts import (
     resolve_ia_file,
     resolve_obo,
 )
 from protea.core.operations._holdout_guard import Claim, refuse_if_it_reads_the_holdout
+from protea.core.operations._method_score_predictions import refuse_unless_scored
 from protea.core.operations._run_cafa_eval_driver import (
     CafaEvalRunContext,
     evaluate_all_settings,
@@ -41,30 +40,33 @@ from protea.core.operations._run_cafa_helpers import (  # noqa: F401
     ResultRow,
     _patch_query_known_features,
     _record_from_pred,
+    artifacts_record,
     build_result_row,
     eval_artifact_key,
 )
 from protea.core.operations._run_cafa_payload import RunCafaEvaluationPayload
-from protea.core.operations._run_cafa_reranker_loader import (
-    load_reranker_models_for_payload,
-)
 from protea.core.operations._run_cafa_scale import read_and_report
 from protea.core.operations._run_cafa_setup import (  # noqa: F401
     StagedInputs,
     _emit_evaluation_setup_events,
     _EvalInputs,
-    _load_terms_of_interest,
     _PipelineCtx,
     bundle_run_context,
+    population_record,
+    terms_of_interest_record,
+    window_terms_of_interest,
 )
 from protea.core.operations.seal_evaluation_frames import seal_one
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
-from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import ArtifactStore, get_artifact_store
+
+#: The keys of a result that are not settings: what was uploaded, and the terms
+#: and the population the settings were scored over.
+_NOT_SETTINGS: tuple[str, ...] = ("artifacts", "terms_of_interest", "population")
 
 
 def _refuse_a_cyclic_snapshot(session: Session, snapshot: Any, emit: EmitFn) -> None:
@@ -133,6 +135,13 @@ def _parent_edges(session: Session, snapshot_id: Any) -> dict[str, set[str]]:
 class RunCafaEvaluationOperation:
     """Runs the CAFA evaluator against NK, LK and PK settings.
 
+    It scores what a method stored and nothing else: the prediction set's
+    ``method_score``, read as it is. Scoring candidates, reranking them,
+    cutting them to a depth or filtering them is the method's work, done when
+    it predicts (``score_prediction_set``, a reranker at prediction time) and
+    written in its record; a set that stores candidates without scores is
+    refused before anything is staged.
+
     Steps:
 
     1. Load ``EvaluationSet`` and ``PredictionSet`` from DB.
@@ -145,8 +154,8 @@ class RunCafaEvaluationOperation:
        file; if neither is set, cafaeval runs with uniform IC=1. IA weights
        make rare GO terms count more than common ones and are recommended
        for publishable evaluations.
-    5. Write temp files: ground-truth NK/LK, known-terms, predictions
-       (CAFA format).
+    5. Write temp files: ground-truth NK/LK, known-terms, and the method's
+       stored scores (CAFA format).
     6. Call ``cafa_eval`` for each setting (NK, LK, PK).
     7. Parse per-namespace Fmax / precision / recall / coverage from
        results.
@@ -168,42 +177,19 @@ class RunCafaEvaluationOperation:
         p = RunCafaEvaluationPayload.model_validate(contract_payload(payload))
         inputs = self._load_evaluation_inputs(session, p, emit)
         self._stamp_window_role(inputs.eval_set, p.window_role, emit)
-        scoring_snapshot = self._resolve_scoring_snapshot(session, p.scoring_config_id)
-        reranker_models, reranker_config_snapshot = load_reranker_models_for_payload(
-            session,
-            rerankers_nested=p.rerankers,
-            reranker_id_nk=p.reranker_id_nk,
-            reranker_id_lk=p.reranker_id_lk,
-            reranker_id_pk=p.reranker_id_pk,
-            emit=emit,
-        )
         # Pre-generate result_id so the artifact-store prefix matches the DB row.
         result_id = uuid.uuid4()
         artifact_store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
-        ctx = _PipelineCtx(
-            inputs=inputs,
-            scoring_snapshot=scoring_snapshot,
-            reranker_models=reranker_models,
-            result_id=result_id,
-            artifact_store=artifact_store,
-        )
+        ctx = _PipelineCtx(inputs=inputs, result_id=result_id, artifact_store=artifact_store)
         results = self._run_evaluation_pipeline(session, p, ctx, emit)
-        first_reranker_id, reranker_config_snapshot = self._finalize_reranker_config(
-            reranker_config_snapshot, reranker_models, p
-        )
-        provenance = self._build_eval_provenance(p, inputs.eval_set, bool(reranker_models))
+        provenance = self._build_eval_provenance(p, inputs.eval_set)
         eval_result = build_result_row(
             ResultRow(
                 result_id=result_id,
                 inputs=inputs,
                 payload=payload,
-                scoring_config_id=p.scoring_config_id,
-                first_reranker_id=first_reranker_id,
-                reranker_config_snapshot=reranker_config_snapshot,
                 results=results,
                 provenance=provenance,
-                max_sequence_rank=p.max_sequence_rank,
-                max_k_position=p.max_k_position,
             )
         )
         session.add(eval_result)
@@ -215,7 +201,7 @@ class RunCafaEvaluationOperation:
             {
                 "evaluation_result_id": str(result_id),
                 "frame_digest": frame_seal,
-                "settings_evaluated": [k for k in results.keys() if k != "artifacts"],
+                "settings_evaluated": [k for k in results if k not in _NOT_SETTINGS],
                 "artifacts_prefix": f"eval_artifacts/{result_id}/",
                 "artifacts_count": len((results.get("artifacts") or {}).get("keys") or []),
             },
@@ -247,22 +233,17 @@ class RunCafaEvaluationOperation:
             emit=emit,
         )
         refuse_uncertifiable_encoding(session, pred_set, eval_set)
-        # Before anything is staged or scored: a sequence depth asked of
-        # candidates that carry no sequence rank selects no rows at all,
-        # because NULL <= 2 is null and null is not true, so the run would
-        # score an empty set and report success.
-        assert_depth_unit_is_available(
-            session,
-            pred_set_id,
-            max_sequence_rank=p.max_sequence_rank,
-            max_k_position=p.max_k_position,
-        )
+        # Before anything is staged: the evaluator reads stored scores, so a
+        # set of candidates without them is refused by name, with the step
+        # that scores them, rather than failing deep in the writer.
+        refuse_unless_scored(session, pred_set_id)
 
         emit("run_cafa_evaluation.computing_delta", None, {}, "info")
         data, pivot_snapshot_id = load_evaluation_data_for_set(session, eval_set)
         snapshot = session.get(OntologySnapshot, pivot_snapshot_id)
         if snapshot is None:
             raise ValueError(f"Pivot OntologySnapshot {pivot_snapshot_id} not found")
+        toi_rule, toi_go_ids = window_terms_of_interest(session, eval_set, pivot_snapshot_id)
         inputs = _EvalInputs(
             eval_set_id=eval_set_id,
             pred_set_id=pred_set_id,
@@ -271,8 +252,8 @@ class RunCafaEvaluationOperation:
             data=data,
             snapshot=snapshot,
             pivot_snapshot_id=pivot_snapshot_id,
-            toi_go_ids=_load_terms_of_interest(session, pivot_snapshot_id, eval_set, p.toi_rule),
-            toi_rule=p.toi_rule,
+            toi_go_ids=toi_go_ids,
+            toi_rule=toi_rule,
         )
         _emit_evaluation_setup_events(emit, inputs)
         if data.delta_proteins == 0:
@@ -297,56 +278,23 @@ class RunCafaEvaluationOperation:
 
     @staticmethod
     def _build_eval_provenance(
-        p: RunCafaEvaluationPayload, eval_set: EvaluationSet, has_rerankers: bool
+        p: RunCafaEvaluationPayload, eval_set: EvaluationSet
     ) -> tuple[str | None, str | None, str | None, dict[str, bool] | None]:
         """Resolve the four EvaluationResult provenance markers (slice
-        F-METHOD-EVAL-SURFACE) from the payload, with safe derivations so a
-        caller only has to pass ``window_role`` to get a self-describing row:
+        F-METHOD-EVAL-SURFACE) from the payload:
 
         - ``leakage_role``: explicit, else derived from the (now possibly
           stamped) EvaluationSet ``window_role`` ('valid'->'select',
           'test'->'test').
-        - ``arms_enabled``: explicit, else derived from the run (KNN always on;
-          reranker on when a reranker model was supplied; ``interpro_graft`` on
-          when the payload opted into the InterPro BP graft and the run had
-          rerankers, the only path where the graft actually applies).
+        - ``arms_enabled``: as the caller labels the method, or None. It is no
+          longer derived: the evaluator runs no arm, and what the method ran is
+          in its prediction set's record.
         """
         leakage_role = p.leakage_role
         if leakage_role is None:
             leakage_role = {"valid": "select", "test": "test"}.get(eval_set.window_role or "")
             leakage_role = leakage_role or None
-        arms_enabled = p.arms_enabled
-        if arms_enabled is None:
-            arms_enabled = {
-                "knn": True,
-                "reranker": has_rerankers,
-                "mlp_tower": False,
-                "interpro": False,
-                # The InterPro BP graft (PR #700) only runs in the per-setting
-                # reranker path; without rerankers the arm is skipped with a
-                # warning. Record it as on only when the payload opted in AND the
-                # run had rerankers, so a grafted number is not mislabelled as
-                # interpro_graft:false.
-                "interpro_graft": bool(p.interpro_graft and has_rerankers),
-            }
-        return p.frame, p.temporal_window, leakage_role, arms_enabled
-
-    @staticmethod
-    def _resolve_scoring_snapshot(
-        session: Session, scoring_config_id: str | None
-    ) -> ScoringConfig | None:
-        """Materialise an in-memory snapshot of the ScoringConfig before the
-        no-op commit so cafaeval workers don't need a session."""
-        if not scoring_config_id:
-            return None
-        sc = session.get(ScoringConfig, uuid.UUID(scoring_config_id))
-        if sc is None:
-            raise ValueError(f"ScoringConfig {scoring_config_id} not found")
-        return ScoringConfig(
-            formula=sc.formula,
-            weights=dict(sc.weights),
-            params=dict(sc.params) if sc.params else None,
-        )
+        return p.frame, p.temporal_window, leakage_role, p.arms_enabled
 
     def _run_evaluation_pipeline(
         self,
@@ -368,11 +316,19 @@ class RunCafaEvaluationOperation:
             # (vs session.close()) keeps ORM objects so BaseWorker can still
             # update job.status after execute().
             session.commit()
-            results = evaluate_all_settings(session, ctx=run_data, emit=emit)
-            uploaded_keys = self._upload_artifacts(
+            results = evaluate_all_settings(ctx=run_data, emit=emit)
+            uploaded = self._upload_artifacts(
                 ctx.artifact_store, ctx.result_id, artifacts_root, emit
             )
-            results["artifacts"] = {"keys": uploaded_keys}
+            results["artifacts"] = artifacts_record(uploaded)
+            results["terms_of_interest"] = terms_of_interest_record(
+                ctx.inputs.toi_rule, ctx.inputs.toi_go_ids, run_data.toi_path
+            )
+            results["population"] = population_record(ctx.inputs.data)
+            # How the scores were read before cafaeval thresholded them (ADR-D55,
+            # section 6) and on which grid: two results of one scored set can
+            # differ in these alone, and the record has to say which is which.
+            results["reading"] = {"score_reading": p.score_reading, "th_step": p.th_step}
             return results
 
     def _stage_evaluator_inputs(
@@ -395,12 +351,8 @@ class RunCafaEvaluationOperation:
         obo_path = resolve_obo(tmpdir, inputs.snapshot, emit)
         ia_path = self._resolve_and_gate_ia(tmpdir, inputs.snapshot, p, emit, session)
         data = inputs.data
-        if p.restrict_gt_to_predicted:
-            data = _data.restrict_data_to_predicted(
-                session, prediction_set_id=inputs.pred_set_id, data=data, emit=emit
-            )
         gt_paths = _data.write_ground_truth_files(artifacts_root, data)
-        toi_path = self._resolve_toi_file(artifacts_root, p, inputs.toi_go_ids, emit)
+        toi_path = self._write_terms_of_interest(artifacts_root, inputs.toi_go_ids, emit)
 
         delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
         emit(
@@ -409,43 +361,26 @@ class RunCafaEvaluationOperation:
             {"delta_proteins": len(delta_proteins)},
             "info",
         )
-        has_rerankers = bool(ctx.reranker_models)
-        if not has_rerankers:
-            self._write_shared_prediction_file(session, p, ctx, artifacts_root, delta_proteins)
-            # Read once, here: every setting without a reranker reuses this file.
-            read_and_report(
-                os.path.join(str(artifacts_root), "predictions", "predictions.tsv"),
-                reading=p.score_reading,
-                th_step=p.th_step,
-                label="shared",
-                emit=emit,
-            )
+        self._write_shared_prediction_file(session, ctx, artifacts_root, delta_proteins)
+        # Read once, here: every setting reads this file.
+        read_and_report(
+            os.path.join(str(artifacts_root), "predictions", "predictions.tsv"),
+            reading=p.score_reading,
+            th_step=p.th_step,
+            label="shared",
+            emit=emit,
+        )
         return bundle_run_context(
             p,
             ctx,
             artifacts_root,
-            StagedInputs(
-                obo_path, ia_path, gt_paths, toi_path, data, delta_proteins, has_rerankers
-            ),
+            StagedInputs(obo_path, ia_path, gt_paths, toi_path),
             emit,
         )
 
     @staticmethod
-    def _resolve_toi_file(
-        artifacts_root: Path,
-        p: RunCafaEvaluationPayload,
-        toi_go_ids: list[str],
-        emit: EmitFn,
-    ) -> str:
-        """Resolve the cafaeval terms-of-interest path.
-
-        When ``p.toi_file`` is set, use that exact file (the LAFA-parity
-        path: score against LAFA's release-specific TOI). Otherwise write
-        the pivot-snapshot term universe. See docs/EVAL_LAFA_PARITY.md.
-        """
-        if p.toi_file:
-            emit("run_cafa_evaluation.toi_external", None, {"path": p.toi_file}, "info")
-            return p.toi_file
+    def _write_terms_of_interest(artifacts_root: Path, toi_go_ids: list[str], emit: EmitFn) -> str:
+        """Write the window's terms of interest where cafaeval and the artifacts read them."""
         toi_path = os.path.join(str(artifacts_root), "terms_of_interest.txt")
         _data.write_terms_of_interest(toi_path, toi_go_ids, emit=emit)
         return toi_path
@@ -453,12 +388,11 @@ class RunCafaEvaluationOperation:
     @staticmethod
     def _write_shared_prediction_file(
         session: Session,
-        p: RunCafaEvaluationPayload,
         ctx: _PipelineCtx,
         artifacts_root: Path,
         delta_proteins: set[str],
     ) -> None:
-        """Write the single shared predictions.tsv (no-rerankers path)."""
+        """Write the one predictions.tsv every setting reads: the stored scores."""
         pred_dir = os.path.join(str(artifacts_root), "predictions")
         os.makedirs(pred_dir, exist_ok=True)
         _artifacts.write_predictions(
@@ -466,12 +400,8 @@ class RunCafaEvaluationOperation:
             _artifacts.WritePredictionsContext(
                 pred_set_id=ctx.inputs.pred_set_id,
                 delta_proteins=delta_proteins,
-                max_distance=p.max_distance,
-                max_k_position=p.max_k_position,
-                max_sequence_rank=p.max_sequence_rank,
                 path=os.path.join(pred_dir, "predictions.tsv"),
             ),
-            scoring_config=ctx.scoring_snapshot,
         )
 
     @staticmethod
@@ -512,55 +442,27 @@ class RunCafaEvaluationOperation:
         result_id: uuid.UUID,
         artifacts_root: Path,
         emit: EmitFn,
-    ) -> list[str]:
-        """Walk ``artifacts_root``, upload every file under the
-        ``eval_artifacts/{result_id}/`` prefix, return the list of keys."""
-        uploaded_keys: list[str] = []
+    ) -> dict[str, str]:
+        """Upload every file under ``artifacts_root`` to the result's prefix.
+
+        Returns each key with the sha256 of the file uploaded under it, read
+        from the file before the upload, so the record names the bytes written.
+        """
+        uploaded: dict[str, str] = {}
         for path in sorted(artifacts_root.rglob("*")):
             if not path.is_file():
                 continue
             relpath = path.relative_to(artifacts_root).as_posix()
             key = eval_artifact_key(result_id, relpath)
+            uploaded[key] = sha256_of_file(path)
             artifact_store.put(key, path)
-            uploaded_keys.append(key)
         emit(
             "run_cafa_evaluation.artifacts_uploaded",
             None,
-            {"count": len(uploaded_keys), "prefix": f"eval_artifacts/{result_id}/"},
+            {"count": len(uploaded), "prefix": f"eval_artifacts/{result_id}/"},
             "info",
         )
-        return uploaded_keys
-
-    @staticmethod
-    def _finalize_reranker_config(
-        reranker_config_snapshot: dict[str, Any] | None,
-        reranker_models: dict[str, Any],
-        p: RunCafaEvaluationPayload,
-    ) -> tuple[uuid.UUID | None, dict[str, Any] | None]:
-        """Pick the representative ``reranker_model_id`` for backwards-compat
-        and synthesise the ``reranker_config`` snapshot from the flat
-        per-category fields when the nested mapping is empty."""
-        first_reranker_id: uuid.UUID | None = None
-        if reranker_config_snapshot:
-            for _cat_map in reranker_config_snapshot.values():
-                for _rid_str in _cat_map.values():
-                    first_reranker_id = uuid.UUID(_rid_str)
-                    break
-                if first_reranker_id:
-                    break
-            return first_reranker_id, reranker_config_snapshot
-        if reranker_models:
-            reranker_config_snapshot = {}
-            for setting, field in [
-                ("nk", p.reranker_id_nk),
-                ("lk", p.reranker_id_lk),
-                ("pk", p.reranker_id_pk),
-            ]:
-                if field:
-                    reranker_config_snapshot[setting] = {"all": field}
-                    if first_reranker_id is None:
-                        first_reranker_id = uuid.UUID(field)
-        return first_reranker_id, reranker_config_snapshot
+        return uploaded
 
     # Backwards-compat shims: tests patch and call these names. The bodies
     # live in ``_run_cafa_artifacts``; these instance methods delegate so
@@ -578,12 +480,6 @@ class RunCafaEvaluationOperation:
 
     def _write_predictions(self, *args: Any, **kwargs: Any) -> None:
         _artifacts.write_predictions(*args, **kwargs)
-
-    def _write_predictions_reranked(self, *args: Any, **kwargs: Any) -> None:
-        _artifacts.write_predictions_reranked(*args, **kwargs)
-
-    def _write_predictions_per_aspect(self, *args: Any, **kwargs: Any) -> None:
-        _artifacts.write_predictions_per_aspect(*args, **kwargs)
 
     def _parse_results(self, dfs_best: dict) -> dict[str, Any]:
         return _artifacts.parse_results(dfs_best)

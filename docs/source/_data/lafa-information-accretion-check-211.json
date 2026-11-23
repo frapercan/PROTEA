@@ -1,0 +1,20 @@
+{
+ "cut": 211,
+ "ontology": "releases/2022-07-01",
+ "swissprot": "2022_03",
+ "rows_counted": 831306,
+ "rows_dropped_not_live": 0,
+ "rows_outside_cohort": 220995,
+ "proteins": 83734,
+ "cohort": 568002,
+ "protea_commit": "aac55e99ef4c",
+ "lafa_package": "github.com/anphan0828/democafa_package@1102e34ec2cd",
+ "lafa_table_sha256": "4c640f0ea99a7b73517068d9c1bcec68dddece32dad2561ddca77a85569caf2d",
+ "terms_protea": 43558,
+ "terms_lafa": 43558,
+ "terms_in_both": 43558,
+ "max_abs_difference": 0.0,
+ "terms_equal_within_1e-9": 43558,
+ "examples_only_protea": [],
+ "examples_only_lafa": []
+}

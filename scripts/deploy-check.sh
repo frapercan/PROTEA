@@ -229,8 +229,7 @@ fi
   # be exhaustive, one per table cluster a broken migration would take out.
   echo "== api smoke =="
   for ep in \
-    /v1/benchmark/embeddings \
-    /v1/benchmark/matrix \
+    /v1/embeddings/prediction-sets \
     /v1/embeddings/configs \
     /v1/annotations/evaluation-sets \
     /v1/scoring/configs \

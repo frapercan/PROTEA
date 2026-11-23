@@ -23,20 +23,12 @@ from protea.core._evaluation_leakage import (
     refuse_uncertifiable_encoding,
 )
 from protea.core.leakage_guard import Frame, LeakageRefusal, check_training_cut
-from protea.core.operations import batch_rescore_evaluation, run_cafa_evaluation
+from protea.core.operations import run_cafa_evaluation
 
 
 def test_the_evaluation_path_calls_the_guard():
     src = inspect.getsource(run_cafa_evaluation.RunCafaEvaluationOperation._load_evaluation_inputs)
     assert "refuse_uncertifiable_encoding" in src
-
-
-def test_the_rescore_path_shares_that_loader():
-    # Both evaluation operations resolve inputs through the same method, so
-    # wiring the refusal there covers the rescore too. If that stops being
-    # true the rescore silently loses the guard, which is how it was lost
-    # in the first place.
-    assert "_load_evaluation_inputs" in inspect.getsource(batch_rescore_evaluation)
 
 
 class _Row:

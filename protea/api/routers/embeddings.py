@@ -401,12 +401,20 @@ def resolve_prediction_set(
 @router.get("/prediction-sets/{set_id}", summary="Get prediction set details")
 def get_prediction_set(
     set_id: UUID,
+    per_protein: bool = Query(
+        default=False,
+        description="Also return every protein's number of terms (``per_protein_counts``).",
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
-    """Retrieve a prediction set with total prediction count and per-protein GO term counts."""
+    """Retrieve a prediction set with its prediction and protein counts.
+
+    The counts are the set's summary, counted on its first read and kept.
+    ``per_protein_counts`` is ``None`` unless ``per_protein`` asks for it.
+    """
     try:
         with session_scope(factory) as session:
-            return get_prediction_set_data(session, set_id)
+            return get_prediction_set_data(session, set_id, per_protein=per_protein)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -539,38 +547,50 @@ def download_predictions_tsv(
 def download_predictions_cafa(
     set_id: UUID,
     eval_id: UUID | None = Query(
-        None, description="Filter to delta proteins from this EvaluationSet."
+        None, description="Only the targets of this EvaluationSet (NK, LK and PK)."
     ),
     aspect: str | None = Query(None, description="Filter by GO aspect: F, P, or C"),
     max_distance: float | None = Query(
-        None, description="Only include predictions with distance ≤ this value"
+        None,
+        description=(
+            "Retired: a cut is the scoring step's (score_prediction_set). A request "
+            "that names one is refused."
+        ),
     ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> StreamingResponse:
-    """Stream predictions in CAFA format: ``protein_accession\\tgo_id\\tscore``.
+    """Stream a set's stored scores in CAFA format: ``protein_accession\\tgo_id\\tscore``.
 
-    Score is computed as ``max(0.0, 1.0 - distance)`` so that closer neighbours
-    receive higher confidence scores in the [0, 1] range expected by the
-    CAFA evaluator.  One row per (protein, GO term) pair; duplicate GO terms
-    for the same protein are deduplicated keeping the highest score (lowest distance).
+    The rows are the ones the evaluator writes for the set: its stored scores,
+    ordered by protein and term, at four decimals, with nothing rescored on the
+    way. A set of candidates without scores is refused (409): score it with
+    ``score_prediction_set`` first.
 
-    Pass ``eval_id`` to restrict output to delta proteins only (NK + LK targets),
-    which is required for a valid CAFA evaluation.
+    Pass ``eval_id`` to restrict the output to the window's targets, read from
+    the window's own truth as the evaluator reads them.
     """
+    from protea.core.scoring import MethodScoreMissing
+
+    if max_distance is not None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "max_distance is retired here: the export streams a set's stored scores, "
+                "and a cut is taken when the candidates are scored (score_prediction_set)."
+            ),
+        )
     try:
         with session_scope(factory) as _check:
-            delta_proteins = prepare_cafa_export(_check, prediction_set_id=set_id, eval_id=eval_id)
+            proteins = prepare_cafa_export(_check, prediction_set_id=set_id, eval_id=eval_id)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except MethodScoreMissing as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     filename = f"predictions_cafa_{set_id}.tsv"
     return StreamingResponse(
         iter_predictions_cafa_tsv(
-            factory,
-            prediction_set_id=set_id,
-            aspect=aspect,
-            max_distance=max_distance,
-            delta_proteins=delta_proteins,
+            factory, prediction_set_id=set_id, proteins=proteins, aspect=aspect
         ),
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},

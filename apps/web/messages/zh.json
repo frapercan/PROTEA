@@ -12,7 +12,6 @@
     "functionalAnnotation": "KNN 检索",
     "scoring": "评分",
     "evaluation": "CAFA 评估",
-    "benchmark": "基准",
     "graph": "实验图",
     "stratum": "面板内部",
     "reranker": "重排序器",
@@ -46,7 +45,7 @@
     "farmCost": "费用",
     "pipelineHint": "从序列到 GO 术语",
     "dataHint": "参考蛋白质组、ground truth、查询集",
-    "resultsHint": "基准矩阵与 CAFA 评估",
+    "resultsHint": "窗口、其面板与 CAFA 评估",
     "operationsHint": "队列、维护、栈状态",
     "groupAnnotate": "注释",
     "groupAnnotateLabel": "在你的序列上运行流水线",
@@ -89,7 +88,7 @@
     "bestResults": "最佳结果",
     "bestOverall": "全局最佳",
     "avgFmaxAcrossCells": "9 个单元的平均 Fmax",
-    "viewBenchmark": "查看完整基准",
+    "viewWindows": "查看全部窗口",
     "pipelineStageBaseline": "baseline",
     "pipelineStageAlignmentWeighted": "对齐加权",
     "pipelineStageReranker": "重排序器",
@@ -271,20 +270,6 @@
       ]
     }
   },
-  "benchmark": {
-    "loadingTitle": "正在加载基准…",
-    "title": "基准测试矩阵",
-    "awaitingTitle": "已构建，等待数据",
-    "awaitingBody": "该基准测试已构建并在运行。它在九个评估单元上比较蛋白质语言模型，即三种知识层级与 Gene Ontology 三个分支的交叉，并基于无泄漏的时间划分。它目前还没有可绘制的内容，因为其评分所依据的注释语料库正在重建。",
-    "awaitingDetail": "截至 {asOf}，本轮运行已读取该系列 {releases, number} 个 GOA 版本中的 {read, number} 个，共 {gigabytes, number} GB。",
-    "awaitingJobs": "查看任务队列",
-    "awaitingGraph": "查看仪器",
-    "loadingHint": "正在解析嵌入向量和矩阵。",
-    "loadingStepMatrix": "矩阵",
-    "loadingStepEmbeddings": "嵌入向量",
-    "loadingRowsPreview": "行预览",
-    "backToHome": "返回首页"
-  },
   "stratum": {
     "title": "面板内部",
     "subtitle": "面板只给出一个总体规模和一个汇总分数，两者都无法展开。这里就是展开的地方：这一格由哪些蛋白质构成、每一个得了多少分，以及是什么把它放进了所在的区间。",
@@ -329,7 +314,7 @@
     "tau": "tau",
     "tauHint": "本次运行为该分支报告的判定阈值。表中所有分数都取自该阈值。",
     "unplacedWhy": "面板中有 {count} 个没有区间：{noLength} 个没有记录长度，{offScale} 个携带的一致性不是百分比。它们以空区间留在表中而不被删除，因为它们属于面板所计的总体。",
-    "withoutDonorWhy": "面板中有 {count} 个带有长度区间，但没有对齐的供体，因此四条供体轴未被读取。它们计入已定位：未检索到供体只影响这四条轴，不影响其他。",
+    "withoutDonorWhy": "面板中有 {count} 个带有长度和同源区间，但没有对齐的供体，因此三条供体轴未被读取。它们计入已定位：未检索到供体只影响这三条轴，不影响其他。",
     "sortLabel": "排序",
     "sort": {
       "f_asc": "最差在前",
@@ -766,7 +751,14 @@
         "evidence": "证据",
         "qualifier": "限定词",
         "source": "来源"
-      }
+      },
+      "currentEntry": "当前 UniProt 条目",
+      "currentEntryNote": "版本 {release}（{date}）。该蛋白质的当前知识：仅在此显示，从不用于在较早的截点上进行预测或评估。",
+      "unknownRelease": "此条目未记录 UniProt 版本。",
+      "entryName": "条目名称",
+      "proteinNames": "蛋白质名称",
+      "reviewedEntry": "已审阅（Swiss-Prot）",
+      "no": "否"
     },
     "notFound": {
       "title": "未找到蛋白质",
@@ -1080,7 +1072,7 @@
         "title": "尚未运行任何注释",
         "body": "每次运行都会生成一个 PredictionSet，包含每个蛋白的 GO 评分，可下载为 TSV 或导出到 cafaeval。在上一个标签页启动首次运行后，结果将显示在此处。",
         "ctaPrimary": "前往运行注释",
-        "ctaSecondary": "也可在 /benchmark 查看基准示例"
+        "ctaSecondary": "也可以在“评估”中，于每个窗口的面板里比较各分支。"
       },
       "tableHeaders": {
         "id": "ID",
@@ -1134,10 +1126,13 @@
       "scoring": "评分：",
       "artifactsDownload": "↓ 产物（.zip）",
       "resultDelete": "删除",
-      "deleteResultConfirm": "删除此评估结果？"
+      "deleteResultConfirm": "删除此评估结果？",
+      "openPanel": "打开该窗口的面板"
     },
     "evaluationSetsSection": {
-      "heading": "评估集"
+      "heading": "评估集",
+      "superseded": "已被取代的窗口（{count}）",
+      "supersededBy": "取代它的窗口："
     },
     "generateSection": {
       "heading": "新建评估集",
@@ -1159,7 +1154,16 @@
     "openPredictionSet": "打开预测集",
     "openReranker": "打开重排模型",
     "proteinExamples": "蛋白示例（预测集）",
+    "cellLegend": "每个单元格：IA 加权微平均 F（f_micro_w），下方是报告阈值处的 IA 加权覆盖率（LAFA 的 cov_w）以及该单元格在加权变体中的规模。2026-11-21 之前的结果不记录后两项。",
+    "edgeLegend": "数值旁的 ▴：其曲线在仍保留预测的最高阈值处达到峰值，因此该数值是阈值网格的边缘而非最大值，不据此作出判断（ADR-D55）。▾：在最低阈值处同理。",
+    "pairedTitle": "配对比较",
+    "pairedLegend": "每个单元格：该分支的 f_micro_w 减去基线的值，基于两者都评分的蛋白质，并附有按蛋白质配对自助法得到的区间（compare_paired_panels）。绿色：分支更高；红色：基线更高；灰色：两者均未分出。数值旁的标记：某一方的最大值位于阈值网格的边缘，不据此作出判断。",
+    "pairedBaseline": "基线",
+    "pairedNone": "此窗口尚未进行任何配对比较。",
+    "resultsTitle": "结果（{count}）",
     "provenanceLabel": "来源",
+    "sourcesLabel": "文件",
+    "sourcesHint": "每个类别的单元格读取自的文件，可单独下载，并附有其结果记录的 sha256。下载文件的 sha256 即为该值。",
     "resultMetrics": {
       "nk": "NK",
       "lk": "LK",
@@ -2083,6 +2087,7 @@
       "done": "已保存",
       "copy": "复制",
       "copied": "已复制",
+      "keyLabel": "密钥",
       "nameLabel": "名称",
       "namePlaceholder": "lab-runner-2026-05",
       "nameHelp": "自由填写的标签，便于在审计日志中识别该密钥。",
@@ -2451,6 +2456,176 @@
       "rejected": "拒绝",
       "why": "原因，用你自己的话",
       "submit": "记录决定"
+    }
+  },
+  "windowPanel": {
+    "leakNote": "显示的 {count} 个分支不可在此窗口读取：它们在 t0（{t0}）之后或在未记录截点的情况下拟合，其数值可能衡量的是对答案的记忆。详情页会标记它们。",
+    "leak": {
+      "not_fitted": "是，预训练",
+      "clean": "是，截点 {cut}",
+      "contaminated": "否：截点 {cut}，晚于 t0",
+      "undeclared": "未知：未记录截点"
+    },
+    "title": "窗口面板",
+    "loading": "正在读取该窗口的结果…",
+    "error": "无法读取该窗口的摘要（{message}）。",
+    "empty": "该窗口尚未评估任何结果。",
+    "cell": "单元",
+    "reading": "读法",
+    "readingPercentile": "按百分位",
+    "readingRaw": "原始",
+    "reference": "参照",
+    "referenceShort": "参照",
+    "superseded": "已被取代（目标自身的序列可以投票）",
+    "filtersAll": "筛选：全部分支",
+    "filtersActive": "筛选 · {count} 项生效",
+    "model": "模型",
+    "scoring": "评分",
+    "clearFilters": "清除筛选",
+    "focus": "焦点",
+    "focusNone": "无：在任一视图中点击一个分支（最多三个）",
+    "clearFocus": "清除",
+    "unfocus": "将 {arm} 移出焦点",
+    "tab": {
+      "summary": "概览",
+      "depth": "深度",
+      "trajectory": "轨迹",
+      "strata": "分层",
+      "detail": "详情"
+    },
+    "band": {
+      "above90": ">90 %",
+      "from60to90": "60-90 %",
+      "from30to60": "30-60 %",
+      "upTo30": "≤30 %",
+      "upTo512": "≤512",
+      "from512to1024": "512-1024",
+      "from1024to2048": "1024-2048",
+      "above2048": ">2048",
+      "none": "无亲缘"
+    },
+    "summary": {
+      "question": "每个单元由哪个分支胜出，与参照相差多少？",
+      "hint": "点击一列：选择该单元并按其排序。点击名称：设为焦点。点击方格：打开其分层。",
+      "rows": "行数",
+      "rowsAll": "全部",
+      "shown": "{total} 个分支中的 {shown} 个",
+      "best": "{cell} 中最佳：",
+      "above": "高于参照",
+      "same": "相同",
+      "below": "低于参照",
+      "edge": "角标：最大值位于阈值网格边缘",
+      "bestOfColumn": "描边：该列最佳",
+      "caption": "每个单元的 f_micro_w；颜色表示与参照的差值，在 ±0.10 处饱和。颜色不是结论：结论来自配对比较。",
+      "rowTip": "结果 {id} · 点击：设为焦点",
+      "cellTip": "比参照高 {delta}",
+      "edgeTip": "最大值位于网格边缘（{edge}）：不下结论",
+      "openTip": "点击：打开其分层"
+    },
+    "depth": {
+      "question": "应读取多少个邻居，阈值网格的代价是多少？",
+      "hint": "每个点都在前 k 个邻居处截取同一组候选（k = 30，max_k_position）。虚线为参照。点击一个点：设为焦点。",
+      "lineBy": "每条线对应",
+      "by": {
+        "scoring": "评分",
+        "model": "模型"
+      },
+      "cells": "单元",
+      "nine": "全部九个",
+      "title": "F 随 k 的变化 · {cell}",
+      "titleNine": "F 随 k 的变化 · 九个单元（点击标题：选择该单元）",
+      "noSweep": "该选择尚无深度扫描：它在每个模型的批次之后运行。",
+      "rawOnlyAt30": "按原始读法只有 k = 30：深度扫描按百分位读取。",
+      "gridTitle": "网格的代价 · {cell}",
+      "gridRaw": "原始（LAFA 的数值）",
+      "gridPercentile": "按百分位",
+      "gridEdge": "原始，最大值在边缘",
+      "gridCaption": "两个圆之间的距离，就是当分数挤在 1 附近时 0.01 网格所掩盖的部分。",
+      "gridNone": "没有可见分支同时具有两种读法。",
+      "gridTip": "原始 {raw} · 按百分位 {pct} · {delta}"
+    },
+    "trajectory": {
+      "question": "最佳结果何时提升，又因何提升？",
+      "hint": "每个点是一个结果，按到达顺序排列；黑线是截至当时的最佳。只有在配对比较中明确胜过前一个结果，才能成为冠军；在比较运行之前，阶梯跟随最佳值。",
+      "measure": "计入的蛋白",
+      "all": "全部（该单元的数值）",
+      "five": "五个区间并排",
+      "nowAll": "当前：{cell} 中已定位的 {proteins} 个蛋白。选择一个区间，只计入与 t0 时最近的已测成员的一致性落在该区间内的蛋白：由此可见提升来自容易的蛋白还是困难的蛋白。",
+      "nowBand": "当前：仅一致性为 {band} 的 {proteins} 个蛋白。",
+      "nowFive": "同一单元中，每个一致性区间一条轨迹。点击区间标题：放大查看。",
+      "each": "每个结果",
+      "best": "截至当时的最佳",
+      "cellTitle": "{cell} · 全部蛋白",
+      "bandTitle": "{cell} · 一致性 {band}",
+      "fiveTitle": "{cell} · 每个一致性区间一条轨迹",
+      "fiveCaption": "每个小图有各自的刻度：比较形状（最佳是否以及何时超过参照），而不是比较各图之间的高度。",
+      "arrival": "到达顺序 →",
+      "none": "没有可见结果具有该度量，或该区间不足 30 个蛋白。",
+      "underFloor": "不足 30 个蛋白",
+      "newBest": "新的最佳",
+      "before": "之前",
+      "now": "现在",
+      "overReference": "高于参照",
+      "paired": "配对比较（此项减去前一项）",
+      "notCompared": "尚未比较",
+      "loadingPaired": "正在读取比较...",
+      "pairedUnavailable": "无法读取比较",
+      "settledHigher": "更高，已确定",
+      "settledLower": "更低，已确定",
+      "unsettled": "未确定",
+      "equivalent": "在 {effect} 内相同",
+      "underpowered": "蛋白质太少，无法判断"
+    },
+    "strata": {
+      "question": "每个分支在哪里胜出？",
+      "hint": "每个单元的一个数值，混合了与已测对象几乎相同的蛋白和没有已测亲缘的蛋白。区间来自该窗口的定位，对所有分支相同，每个区间都在其单元数值的阈值处读取；不足 30 个蛋白的区间不绘制。",
+      "axis": "轴",
+      "homology": "一致性",
+      "length": "长度",
+      "clickBand": "点击一个区间：查看其详情、排名和蛋白",
+      "profileTitle": {
+        "homology": "按一致性的剖面 · {cell}",
+        "length": "按长度的剖面 · {cell}"
+      },
+      "profileCaption": {
+        "homology": "与 t0 时最近的已测成员的一致性，从高到低；每个区间下方为其蛋白数。各区间的质量之和等于该单元的数值。",
+        "length": "序列长度；每个区间下方为其蛋白数。各区间的质量之和等于该单元的数值。"
+      },
+      "automatic": "自动焦点：该单元的最佳分支；可在任一视图中设定其他焦点",
+      "notYet": "参照尚无分层剖面：每个结果在分层时获得剖面。",
+      "proteins": "{n} 个蛋白",
+      "bandTitle": "{cell} · {band} · {proteins} 个蛋白",
+      "bandWinner": "{family}以 {margin} 胜出：{winner}（{winnerF}）对 {rival}（{rivalF}）。该区间冠军的更替需要其自身的配对比较。",
+      "bandAlone": "{winner} 胜出（{winnerF}）。",
+      "neighbours": "邻居",
+      "methods": "方法",
+      "proteinsLink": "其蛋白，得分最差者在前，附各自的得分",
+      "setLink": "胜者的集合",
+      "trajectoryLink": "该区间的轨迹",
+      "arm": "分支",
+      "fBand": "区间内 F",
+      "vsReference": "相对参照",
+      "fCell": "单元内 F",
+      "more": "另有 {count} 个分支；可用上方的筛选缩小列表。",
+      "underFloor": "不足 30 个蛋白：该区间不予报告。",
+      "winnersTitle": "九个单元中各区间的胜者",
+      "winnersCaption": "胜出的分支及其相对另一类别最佳分支的优势。这正是重排序器要学的：何时信任邻居，何时信任蛋白已有的知识。",
+      "close": "浅色：两类之间差距小于 0.01"
+    },
+    "detail": {
+      "question": "所有可见结果，因子按列列出。",
+      "hint": "点击列标题即可按该列排序；点击一行：设为焦点。色条是九个单元相对参照的差值，所选单元带框。",
+      "search": "搜索：模型、评分、id…",
+      "result": "结果",
+      "vsReference": "相对参照",
+      "edge": "边缘",
+      "edgeShort": "边缘",
+      "leak": "可读取",
+      "cells": "9 个单元",
+      "time": "时间",
+      "set": "集合",
+      "setLink": "集合",
+      "nothing": "没有匹配的结果。"
     }
   }
 }

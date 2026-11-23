@@ -274,12 +274,21 @@ KNN search
 during GO term prediction. The single public entry point is ``search_knn()``,
 which dispatches to one of two backends based on the ``backend`` parameter.
 
-The **numpy** backend computes exact cosine or L2 distances via matrix
-multiplication. It requires no additional dependencies and is the default.
-For cosine distance, query and reference matrices are L2-normalised and the
-distance is computed as :math:`D = 1 - \cos(\theta) \in [0, 2]`. This is
-:math:`O(NQ)` and is appropriate for reference sets up to approximately
-100 000 proteins when embeddings fit in RAM as float16.
+The **numpy** backend is the exact one, and the default. For cosine distance,
+query and reference matrices are L2-normalised and the distance is
+:math:`D = 1 - \cos(\theta) \in [0, 2]`. Every distance that decides a
+neighbour is accumulated in float64, so the k-th neighbour does not depend on
+the order a machine reduces in, and equal distances are ordered by position in
+the bank. It searches in two passes (protea-method, ``_exact_two_pass``). A
+float32 pass, on a CUDA card when one is visible, keeps for each query every
+reference within :math:`t + 2\varepsilon`, where :math:`t` is its k-th float32
+distance and :math:`\varepsilon` bounds the gap between a float32 and a float64
+distance. The float64 pass then decides among those alone. The neighbours,
+their order and their distances are the single float64 pass's: on the
+development store, a batch of 1,024 queries against the 1.45 million references
+of one cut stored byte-identical predictions with the single pass, the two
+passes on the CPU and the two passes on the card, and searched in 131 to 154,
+53 to 63 and 26 to 31 seconds.
 
 The **faiss** backend wraps the FAISS library and supports three index
 types: ``Flat`` (exact), ``IVFFlat`` (approximate, Voronoi partitioning),
@@ -297,6 +306,23 @@ nearest Voronoi cells, reducing query time from :math:`O(N)` to approximately
 .. automodule:: protea.core.knn_search
    :members:
    :undoc-members:
+   :show-inheritance:
+
+Denials
+-------
+
+``protea.core.denials`` is the policy by which a transfer method honours what
+the bank explicitly denies: a protein's NOT annotations in the annotation set
+the prediction transfers from, followed down ``is_a`` and ``part_of`` of the
+prediction set's ontology. PROTEA's k-nearest-neighbour transfer and its
+InterPro mirror apply it when they predict, as their last step before writing,
+and record it: in the receipt's ``denials`` field, and for the mirror also in
+the prediction set's ``meta``. The evaluator applies no policy of its own: it
+scores what a method stored, so a set written before its method honoured
+denials is scored as it was stored.
+
+.. automodule:: protea.core.denials
+   :members:
    :show-inheritance:
 
 Feature engineering
@@ -410,19 +436,6 @@ against an evaluation set.
    :undoc-members:
    :show-inheritance:
 
-Metrics
--------
-
-``protea.core.metrics`` implements CAFA-style precision-recall evaluation.
-Provides functions for computing Fmax (maximum F-measure over all thresholds),
-weighted precision/recall, and coverage for a set of predictions against
-ground-truth annotations.
-
-.. automodule:: protea.core.metrics
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Evidence codes
 --------------
 
@@ -484,6 +497,20 @@ and ``common_truth_rules``, which refuses a list of windows whose stored rules
 differ, are legacy, or cannot be compared across cuts.
 
 .. automodule:: protea.core.window_declarations
+   :members:
+   :show-inheritance:
+
+Window placement
+----------------
+
+``protea.core.window_placement`` is the rule ``place_window_targets`` applies to
+place each target of a window on the two sequence axes of the strata, as it
+stood when the window opened: its length, and its identity to the closest other
+protein of the opening cut's photo with a truth row. The operation stores the
+result once per window (``window_placement`` and ``window_placement_target``),
+so every method evaluated on the window is stratified on the same placement.
+
+.. automodule:: protea.core.window_placement
    :members:
    :show-inheritance:
 
@@ -594,6 +621,17 @@ are documented below; the four ephemeral siblings
    sequences are needed over the union of the releases and not per release.
 
 .. automodule:: protea.core.operations.resolve_protein_sequences
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**resolve_protein_metadata**
+   Fetches each canonical protein's current UniProt entry, stamped with the
+   release that served it, for display and today's annotation. Writes
+   ``protein_uniprot_metadata`` only; nothing that predicts or evaluates on a cut
+   reads it.
+
+.. automodule:: protea.core.operations.resolve_protein_metadata
    :members:
    :undoc-members:
    :show-inheritance:
@@ -828,15 +866,16 @@ not part of the public API.
   in-process execution path used when a single worker handles both KNN
   and write phases.
 - ``protea.core.operations._run_cafa_artifacts``: artifact download and
-  staging helpers for ``run_cafa_evaluation``.
+  staging helpers for ``run_cafa_evaluation``, and the writer of the
+  prediction file: a set's stored scores, as stored.
+- ``protea.core.operations._candidate_scoring``: the arithmetic that turns a
+  candidate's evidence into a score, applied by ``score_prediction_set``.
 - ``protea.core.operations._run_cafa_data_helpers``: data-loading helpers
   for the CAFA evaluation pipeline.
 - ``protea.core.operations._run_cafa_eval_driver``: driver that calls
   ``cafaeval.cafa_eval`` and collects per-namespace results.
 - ``protea.core.operations._run_cafa_helpers``: shared helper functions
   used across the ``_run_cafa_*`` modules.
-- ``protea.core.operations._run_cafa_reranker_loader``: loads and applies
-  the reranker model to CAFA prediction TSVs.
 - ``protea.core.operations._run_cafa_setup``: environment and directory
   setup for a CAFA evaluation run.
 - ``protea.core.operations._run_cafa_summary``: summarises cafaeval
@@ -1086,11 +1125,6 @@ not part of the public API.
    :show-inheritance:
 
 .. automodule:: protea.core.operations._run_cafa_helpers
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: protea.core.operations._run_cafa_reranker_loader
    :members:
    :undoc-members:
    :show-inheritance:

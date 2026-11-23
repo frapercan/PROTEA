@@ -1,23 +1,80 @@
 """The payload of ``run_cafa_evaluation``, and nothing else.
 
 Out of ``run_cafa_evaluation.py`` because that file reached its 800-line budget
-and the payload is 254 of them: twenty-six fields, each with the prose that says
-what it decides. The budget exists to force exactly this split, and the holdout
-guard that pushed the file over it is not the change that should also carry a
-refactor.
+and the payload, each field with the prose that says what it decides, was a
+third of it. Re-exported from ``run_cafa_evaluation`` so every existing import
+keeps working.
 
-Re-exported from ``run_cafa_evaluation`` so every existing import keeps working.
+Every field names the frame a result is measured in, or labels the result. None
+names how a method's candidates become scores: the evaluator scores what a
+method stored and nothing else (the closure's question 6, 2026-11-20), and the
+fields that used to ask it to score, rerank, cut, graft or propagate are
+refused with where that work happens now (:data:`RETIRED_FIELDS`). None
+chooses the terms of interest or the population either: both are the
+window's (decided on 2026-11-20), and the fields that chose them are refused
+the same way.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import Field, field_validator, model_validator
 
 from protea.core.contracts.operation import ProteaPayload
-from protea.core.operations._depth_unit_guard import (
-    SEQUENCE_DEPTH_DESCRIPTION,
-    assert_one_depth_unit,
+
+_SCORING = (
+    "score the candidates with score_prediction_set, which takes the scoring config "
+    "and the depth cut, and evaluate the scored set"
 )
+_RERANKER = (
+    "apply the reranker when predicting (predict_go_terms with reranker_model_id or "
+    "the per-category bindings); its score is stored as the method's score"
+)
+_GRAFT = (
+    "the InterPro BP graft runs when predicting, on top of a reranker "
+    "(serve.interpro_bp_graft), and the prediction set's record says so"
+)
+_SOFTPROP = (
+    "the platform no longer propagates scores; a method that propagates its scores "
+    "stores them propagated"
+)
+_WINDOW_POPULATION = (
+    "the population is the window's: every target counts, an unpredicted one as a "
+    "failure, with coverage beside it, as LAFA scores; the result records it as "
+    "results.population"
+)
+_WINDOW_TERMS = (
+    "the terms of interest are the window's: the evaluator scores over the terms its "
+    "gain rule names (SCORED_TERMS, protea/core/_truth_rules.py) and records the rule, "
+    "the count and the file's sha256 on the result; scoring a window over other terms "
+    "would be measuring another window"
+)
+
+#: The fields the evaluator no longer takes, each with where its work happens
+#: now. A request that carries one with a value is refused with the pointer; one
+#: that carries it empty (None, False, an empty mapping) has asked for nothing,
+#: and is accepted, so a caller built before need not change to keep working.
+RETIRED_FIELDS: dict[str, str] = {
+    "scoring_config_id": _SCORING,
+    "max_distance": _SCORING,
+    "max_k_position": _SCORING,
+    "max_sequence_rank": _SCORING,
+    "reranker_id_nk": _RERANKER,
+    "reranker_id_lk": _RERANKER,
+    "reranker_id_pk": _RERANKER,
+    "rerankers": _RERANKER,
+    "interpro_graft": _GRAFT,
+    "interpro_protein2ipr_file": _GRAFT,
+    "interpro_ipr2go_file": _GRAFT,
+    "interpro_graft_weight": _GRAFT,
+    "softprop": _SOFTPROP,
+    "toi_file": _WINDOW_TERMS,
+    "toi_rule": _WINDOW_TERMS,
+    "restrict_gt_to_predicted": _WINDOW_POPULATION,
+}
+
+_EMPTY: tuple[Any, ...] = (None, False, "", {}, [])
 
 
 class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
@@ -31,39 +88,24 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
     #: straddles the band. See split_registry.PROSPECTIVE_DECLARATION.
     prospective_declaration: str | None = None
     prediction_set_id: str
-    max_distance: float | None = Field(default=None, ge=0.0, le=2.0)
-    max_k_position: int | None = Field(
-        default=None,
-        ge=1,
-        description=(
-            "Score only the first N neighbours of each query. Candidates are "
-            "written to a fixed depth and carry the rank they were retrieved at, "
-            "so every smaller depth is a truncation of a list already stored and "
-            "needs no new retrieval pass. Null scores every stored neighbour."
-        ),
-    )
-    max_sequence_rank: int | None = Field(
-        default=None, ge=1, description=SEQUENCE_DEPTH_DESCRIPTION
-    )
 
-    @model_validator(mode="after")
-    def _a_depth_is_counted_in_one_unit(self) -> RunCafaEvaluationPayload:
-        """See ``assert_one_depth_unit``; both null is the whole neighbourhood."""
-        assert_one_depth_unit(self.max_k_position, self.max_sequence_rank)
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def _the_evaluator_does_no_method_work(cls, data: Any) -> Any:
+        """Refuse a retired field that asks for something, with where it is done now."""
+        if not isinstance(data, dict):
+            return data
+        asked = sorted(
+            key for key, value in data.items() if key in RETIRED_FIELDS and value not in _EMPTY
+        )
+        if asked:
+            raise ValueError(
+                "; ".join(f"{key}: {RETIRED_FIELDS[key]}" for key in asked)
+                + ". The evaluator scores what a method stored, over the terms and the "
+                "population its window names, and nothing else (docs: architecture/scoring)."
+            )
+        return {key: value for key, value in data.items() if key not in RETIRED_FIELDS}
 
-    scoring_config_id: str | None = Field(default=None)
-    reranker_id_nk: str | None = Field(default=None)
-    reranker_id_lk: str | None = Field(default=None)
-    reranker_id_pk: str | None = Field(default=None)
-    rerankers: dict[str, dict[str, str]] | None = Field(
-        default=None,
-        description=(
-            "Nested mapping of category → aspect → reranker_model_id. "
-            'E.g. {"nk": {"bpo": "uuid", "mfo": "uuid"}, "lk": {...}}. '
-            "Overrides the flat reranker_id_* fields when present."
-        ),
-    )
     ia_file: str | None = Field(
         default=None,
         description=(
@@ -85,66 +127,6 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "fetched from the shared object store so any machine resolves the same "
             "bytes, and the stored sha256 is verified after download. A bare path "
             "records none of that. Mutually exclusive with ia_file."
-        ),
-    )
-    restrict_gt_to_predicted: bool = Field(
-        default=True,
-        description=(
-            "Standard CAFA practice: drop ground-truth proteins not present in the "
-            "PredictionSet before evaluation, so coverage / Fmax measure performance "
-            "on the actually-predicted cohort. Disable only when the eval set is "
-            "guaranteed to be a subset of the predicted query set (e.g. a re-eval "
-            "of a frozen lab dump where this filter has already been applied)."
-        ),
-    )
-    softprop: bool = Field(
-        default=False,
-        description=(
-            "Apply averaged soft Pmin/Pmax GO-DAG propagation (ProtBoost 4.5) to the "
-            "prediction frame per protein right before cafaeval, as a scorer-agnostic "
-            "post-processing step. Off by default so existing evals are bit-identical."
-        ),
-    )
-    interpro_graft: bool = Field(
-        default=False,
-        description=(
-            "Apply the InterPro2GO BP-only graft to the prediction frame per protein "
-            "right before cafaeval, as a scorer-agnostic post-reranker arm. For BP terms "
-            "the score becomes max(base, interpro_graded) (naive max) or a noisy-OR blend "
-            "when interpro_graft_weight is set; BP terms InterPro adds are grafted as new "
-            "candidates, while MF/CC terms stay untouched. Reproduces the offline "
-            "naivemax_bponly champion. The board's own 9-cell mean f_micro_w is "
-            "0.38844 for the pre-graft arm and 0.40765 for the grafted one; the "
-            "0.4063 this description used to quote was the offline projection of "
-            "the second, not a board figure. See _run_cafa_interpro_graft. "
-            "Off by default so existing evals are bit-identical. Requires per-setting "
-            "reranker predictions (same seam as softprop)."
-        ),
-    )
-    interpro_protein2ipr_file: str | None = Field(
-        default=None,
-        description=(
-            "Path to a JSON map of accession -> list of InterPro (IPR) accessions for the "
-            "evaluation proteins. Required when interpro_graft is on; the arm is skipped "
-            "with a warning (never crashes) when missing."
-        ),
-    )
-    interpro_ipr2go_file: str | None = Field(
-        default=None,
-        description=(
-            "Path to a JSON map of InterPro (IPR) accession -> list of propagated, "
-            "namespaced GO ids (the offline ipr2go_prop.json). Required when "
-            "interpro_graft is on; the arm is skipped with a warning when missing."
-        ),
-    )
-    interpro_graft_weight: float | None = Field(
-        default=None,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Optional per-aspect weight for the InterPro BP graft. None (default) uses "
-            "the parameter-free naive max max(base, graded); a value w uses the noisy-OR "
-            "blend 1 - (1 - base)(1 - w*graded) on BP terms."
         ),
     )
     th_step: float = Field(
@@ -202,37 +184,6 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "docs/IA_PROVENANCE_v227.md and docs/EVAL_LAFA_PARITY.md."
         ),
     )
-    toi_file: str | None = Field(
-        default=None,
-        description=(
-            "Path to an explicit terms-of-interest (TOI) file (one GO id per line) "
-            "passed to cafaeval's -toi flag. TOI restricts which terms count toward "
-            "precision/recall. When None, PROTEA derives the TOI from every GO term "
-            "in the pivot ontology snapshot. LAFA passes a release-specific "
-            "groundtruth_terms_of_interest.txt that is a subset of the full ontology, "
-            "so for strict LAFA parity pass that exact file here. See "
-            "docs/EVAL_LAFA_PARITY.md."
-        ),
-    )
-    toi_rule: str = Field(
-        default="pivot_terms",
-        description=(
-            "How PROTEA derives the terms of interest when no toi_file is "
-            "given. 'pivot_terms' (the default, and what the platform has "
-            "always sent) is every GO id under the pivot snapshot, obsolete "
-            "ones included. 'live_in_both_ends' is the ids non-obsolete in "
-            "the ontology of BOTH ends of the window, read from the two "
-            "annotation sets rather than from the native snapshot fields, "
-            "which collapse when a run asks for closure under one end's "
-            "graph. The two differ twice over: the default keeps obsolete "
-            "terms cafaeval's own parser excludes from the graphs it builds, "
-            "and it consults one snapshot, so a term obsolete by t1 is scored "
-            "as though it still existed. On the 211 -> 227 window they are "
-            "43,558 terms against 39,028, and the second is the lab's rule. "
-            "Ignored when toi_file is set, since that file IS the answer."
-        ),
-    )
-
     frame: str | None = Field(
         default=None,
         description=(
@@ -265,11 +216,10 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         default=None,
         description=(
             "Method-arm composition flag dict stamped onto the EvaluationResult, "
-            "e.g. {'knn': true, 'reranker': true, 'mlp_tower': false, "
-            "'interpro': false, 'interpro_graft': false}. When None it is derived "
-            "from the run (knn always on; reranker on when a reranker model is "
-            "supplied; interpro_graft on when the payload opts into the InterPro "
-            "BP graft and the run has rerankers)."
+            "e.g. {'knn': true, 'reranker': true, 'interpro_graft': false}, as the "
+            "caller labels the method. When None the result carries none: the "
+            "evaluator runs no arm, and what the method ran is in its prediction "
+            "set's record."
         ),
     )
     window_role: str | None = Field(
@@ -288,18 +238,6 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
         return v.strip()
-
-    @field_validator("toi_rule")
-    @classmethod
-    def _toi_rule_vocab(cls, v: str) -> str:
-        from protea.core.operations._run_cafa_setup import TOI_RULES
-
-        # Read from the rules themselves: a vocabulary restated here would let
-        # a rule be added that no payload can ask for, or asked for by a name
-        # the loader does not know.
-        if v not in TOI_RULES:
-            raise ValueError(f"toi_rule must be one of {TOI_RULES}")
-        return v
 
     @field_validator("score_reading")
     @classmethod

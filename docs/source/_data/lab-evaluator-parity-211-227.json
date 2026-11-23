@@ -1,0 +1,312 @@
+{
+ "what": "The lab's evaluator (sfjepa.eval.cafa.evaluate_cell) on one PROTEA evaluation result, read back through the API: per cell, the per-protein IA-weighted masses (the per-threshold grid at the float32 the platform stores, the masses at the chosen threshold at float64) and the published f_micro_w (stored to four decimals) against the platform's.",
+ "date": "2026-11-20T22:08:23+00:00",
+ "platform": {
+  "api_code_revision": "b2382b10a7931365706b82bebfce38dd7956dc15",
+  "cafaeval_protea_pinned": "203af0a28f0bb6f8cd0588c0d6d02ebf251eccce",
+  "evaluation_set": "ebf6f6ab-baec-437a-b1b9-310e1ebc1d43",
+  "evaluation_result": "c5daa26c-3c90-4e32-982c-89e3c68f2bbd",
+  "prediction_set": "f493c213-79a6-4a8d-8048-5a5cb4a5bb70",
+  "information_accretion_set": "4c77dc1e-c010-4fd3-9386-c9fc531ce65a",
+  "pivot_snapshot": "fb8fef9b-1ed6-43eb-84f7-369149285d9e",
+  "obo_url": "https://release.geneontology.org/2022-07-01/ontology/go-basic.obo",
+  "window_ends": {
+   "old": {
+    "snapshot": "fb8fef9b-1ed6-43eb-84f7-369149285d9e",
+    "obo_url": "https://release.geneontology.org/2022-07-01/ontology/go-basic.obo"
+   },
+   "new": {
+    "snapshot": "8607c328-617b-418f-be09-b44ad7975a6b",
+    "obo_url": "https://release.geneontology.org/2025-07-22/ontology/go-basic.obo"
+   }
+  }
+ },
+ "lab": {
+  "repository_revision": {
+   "commit": "305a79ad9b92a6ba7430742d86e7915af70fb168",
+   "uncommitted_changes": false
+  },
+  "cafaeval_protea_installed": "203af0a28f0bb6f8cd0588c0d6d02ebf251eccce"
+ },
+ "inputs_sha256": {
+  "gt_LK.tsv": "da91979f46119461958089e6a157bf0a64dc491502d89e57b276d5427339499d",
+  "gt_NK.tsv": "a0ddc9828137b99baa6ebfebfcfb78a6de5877ba62c5a674d5a43dc75dcfe1f1",
+  "gt_PK.tsv": "47af0e65c1cc7af7f1ea268c96cbac39d97b1c807398550197f0f411adf88471",
+  "known_terms.tsv": "0eef668d851004e17dfc4a1dc6e89bf4638493f350876a8b2e6028f8bb887103",
+  "pk_known_terms.tsv": "2ac5f1fa9aa4ec4b7f808e67e91a63782ebd523f88504efe5c752a5923402cf2",
+  "predictions/predictions.tsv": "115f2e27ba134887dfa2ed3e5b1766343433c82e06911f1337aabf0ea975315e",
+  "terms_of_interest.txt": "7f280bdbe7d41ba603af0868136982635ed6b6c961617da9ac0ff6c9f2bad898",
+  "ia.tsv": "377d248be8013e531ed038940e7097e4b206766bfa3c8ed9c013a43d94456eb9",
+  "go-basic.obo": "91eae63f06163aea5072d1d7c8d34a1f0cdf6295b23b527297bce4ac89dd022a",
+  "go-basic-new-end.obo": "d9a5670865816dd63dcdd49f76864d3a621990d8bcbb6b758e4cdfbfdb9f2982"
+ },
+ "doors": {
+  "predictions-cafa.tsv (eval_id = the window)": {
+   "door_sha256": "115f2e27ba134887dfa2ed3e5b1766343433c82e06911f1337aabf0ea975315e",
+   "evaluated_sha256": "115f2e27ba134887dfa2ed3e5b1766343433c82e06911f1337aabf0ea975315e",
+   "verdict": "identical"
+  },
+  "ground-truth-NK.tsv": {
+   "door_sha256": "a0ddc9828137b99baa6ebfebfcfb78a6de5877ba62c5a674d5a43dc75dcfe1f1",
+   "evaluated_sha256": "a0ddc9828137b99baa6ebfebfcfb78a6de5877ba62c5a674d5a43dc75dcfe1f1",
+   "verdict": "identical"
+  },
+  "ground-truth-LK.tsv": {
+   "door_sha256": "da91979f46119461958089e6a157bf0a64dc491502d89e57b276d5427339499d",
+   "evaluated_sha256": "da91979f46119461958089e6a157bf0a64dc491502d89e57b276d5427339499d",
+   "verdict": "identical"
+  },
+  "ground-truth-PK.tsv": {
+   "door_sha256": "47af0e65c1cc7af7f1ea268c96cbac39d97b1c807398550197f0f411adf88471",
+   "evaluated_sha256": "47af0e65c1cc7af7f1ea268c96cbac39d97b1c807398550197f0f411adf88471",
+   "verdict": "identical"
+  },
+  "known-terms.tsv, against known_terms.tsv": {
+   "door_sha256": "0eef668d851004e17dfc4a1dc6e89bf4638493f350876a8b2e6028f8bb887103",
+   "evaluated_sha256": "0eef668d851004e17dfc4a1dc6e89bf4638493f350876a8b2e6028f8bb887103",
+   "verdict": "identical"
+  },
+  "known-terms.tsv, against pk_known_terms.tsv (what the PK cell reads)": {
+   "door_sha256": "0eef668d851004e17dfc4a1dc6e89bf4638493f350876a8b2e6028f8bb887103",
+   "evaluated_sha256": "2ac5f1fa9aa4ec4b7f808e67e91a63782ebd523f88504efe5c752a5923402cf2",
+   "verdict": "other rows",
+   "door_rows": 3513029,
+   "evaluated_rows": 1440154,
+   "rows_only_in_the_door": 2072875,
+   "rows_only_in_the_evaluated_file": 0
+  },
+  "terms_of_interest.txt, derived from the OBOs": {
+   "verdict": "identical to live_in_both_ends",
+   "terms": 39028,
+   "terms_by_rule": {
+    "pivot_terms": 47328,
+    "live_in_both_ends": 39028
+   }
+  },
+  "known-terms.tsv as the PK cell's known terms": {
+   "verdict": "the same per-protein masses and f_micro_w in every PK cell",
+   "f_micro_w": {
+    "BPO": 0.0981037470895753,
+    "MFO": 0.1715245282636209,
+    "CCO": 0.21845346739728902
+   }
+  }
+ },
+ "every_input_has_a_door": true,
+ "cells": {
+  "NK:BPO": {
+   "grid_stored_by_the_platform": true,
+   "grid_proteins_in_both": 1934,
+   "grid_proteins_only_in_the_lab": 0,
+   "grid_proteins_only_in_the_platform": 0,
+   "grid_dtype_on_the_platform": "float32",
+   "grid_identical_at_float32": true,
+   "truth_mass_identical_at_float64": true,
+   "chosen_threshold": [
+    0.99
+   ],
+   "legacy_rows_outside_the_population": 0,
+   "legacy_rows_outside_the_population_predicted_mass": 0.0,
+   "proteins_at_the_chosen_threshold_in_both": 1934,
+   "identical_at_float64_at_the_chosen_threshold": 1934,
+   "max_abs_diff_at_the_chosen_threshold": 0.0,
+   "proteins_only_in_the_platform": 0,
+   "mass_of_the_proteins_only_in_the_platform": 0.0,
+   "proteins_only_in_the_lab": 0,
+   "mass_of_the_proteins_only_in_the_lab": 0.0,
+   "f_micro_w_lab": 0.25848418899076164,
+   "f_micro_w_platform_stored_to_4_decimals": 0.2585,
+   "stored_equals_the_lab_to_4_decimals": true,
+   "agrees": true
+  },
+  "NK:MFO": {
+   "grid_stored_by_the_platform": true,
+   "grid_proteins_in_both": 1045,
+   "grid_proteins_only_in_the_lab": 0,
+   "grid_proteins_only_in_the_platform": 0,
+   "grid_dtype_on_the_platform": "float32",
+   "grid_identical_at_float32": true,
+   "truth_mass_identical_at_float64": true,
+   "chosen_threshold": [
+    0.99
+   ],
+   "legacy_rows_outside_the_population": 0,
+   "legacy_rows_outside_the_population_predicted_mass": 0.0,
+   "proteins_at_the_chosen_threshold_in_both": 1045,
+   "identical_at_float64_at_the_chosen_threshold": 1045,
+   "max_abs_diff_at_the_chosen_threshold": 0.0,
+   "proteins_only_in_the_platform": 0,
+   "mass_of_the_proteins_only_in_the_platform": 0.0,
+   "proteins_only_in_the_lab": 0,
+   "mass_of_the_proteins_only_in_the_lab": 0.0,
+   "f_micro_w_lab": 0.47455012251415407,
+   "f_micro_w_platform_stored_to_4_decimals": 0.4746,
+   "stored_equals_the_lab_to_4_decimals": true,
+   "agrees": true
+  },
+  "NK:CCO": {
+   "grid_stored_by_the_platform": true,
+   "grid_proteins_in_both": 1469,
+   "grid_proteins_only_in_the_lab": 0,
+   "grid_proteins_only_in_the_platform": 0,
+   "grid_dtype_on_the_platform": "float32",
+   "grid_identical_at_float32": true,
+   "truth_mass_identical_at_float64": true,
+   "chosen_threshold": [
+    0.99
+   ],
+   "legacy_rows_outside_the_population": 0,
+   "legacy_rows_outside_the_population_predicted_mass": 0.0,
+   "proteins_at_the_chosen_threshold_in_both": 1469,
+   "identical_at_float64_at_the_chosen_threshold": 1469,
+   "max_abs_diff_at_the_chosen_threshold": 0.0,
+   "proteins_only_in_the_platform": 0,
+   "mass_of_the_proteins_only_in_the_platform": 0.0,
+   "proteins_only_in_the_lab": 0,
+   "mass_of_the_proteins_only_in_the_lab": 0.0,
+   "f_micro_w_lab": 0.4449890813128131,
+   "f_micro_w_platform_stored_to_4_decimals": 0.445,
+   "stored_equals_the_lab_to_4_decimals": true,
+   "agrees": true
+  },
+  "LK:BPO": {
+   "grid_stored_by_the_platform": true,
+   "grid_proteins_in_both": 1643,
+   "grid_proteins_only_in_the_lab": 0,
+   "grid_proteins_only_in_the_platform": 0,
+   "grid_dtype_on_the_platform": "float32",
+   "grid_identical_at_float32": true,
+   "truth_mass_identical_at_float64": true,
+   "chosen_threshold": [
+    0.99
+   ],
+   "legacy_rows_outside_the_population": 0,
+   "legacy_rows_outside_the_population_predicted_mass": 0.0,
+   "proteins_at_the_chosen_threshold_in_both": 1643,
+   "identical_at_float64_at_the_chosen_threshold": 1643,
+   "max_abs_diff_at_the_chosen_threshold": 0.0,
+   "proteins_only_in_the_platform": 0,
+   "mass_of_the_proteins_only_in_the_platform": 0.0,
+   "proteins_only_in_the_lab": 0,
+   "mass_of_the_proteins_only_in_the_lab": 0.0,
+   "f_micro_w_lab": 0.30033645038727935,
+   "f_micro_w_platform_stored_to_4_decimals": 0.3003,
+   "stored_equals_the_lab_to_4_decimals": true,
+   "agrees": true
+  },
+  "LK:MFO": {
+   "grid_stored_by_the_platform": true,
+   "grid_proteins_in_both": 1140,
+   "grid_proteins_only_in_the_lab": 0,
+   "grid_proteins_only_in_the_platform": 0,
+   "grid_dtype_on_the_platform": "float32",
+   "grid_identical_at_float32": true,
+   "truth_mass_identical_at_float64": true,
+   "chosen_threshold": [
+    0.99
+   ],
+   "legacy_rows_outside_the_population": 0,
+   "legacy_rows_outside_the_population_predicted_mass": 0.0,
+   "proteins_at_the_chosen_threshold_in_both": 1140,
+   "identical_at_float64_at_the_chosen_threshold": 1140,
+   "max_abs_diff_at_the_chosen_threshold": 0.0,
+   "proteins_only_in_the_platform": 0,
+   "mass_of_the_proteins_only_in_the_platform": 0.0,
+   "proteins_only_in_the_lab": 0,
+   "mass_of_the_proteins_only_in_the_lab": 0.0,
+   "f_micro_w_lab": 0.40367611254979247,
+   "f_micro_w_platform_stored_to_4_decimals": 0.4037,
+   "stored_equals_the_lab_to_4_decimals": true,
+   "agrees": true
+  },
+  "LK:CCO": {
+   "grid_stored_by_the_platform": true,
+   "grid_proteins_in_both": 1215,
+   "grid_proteins_only_in_the_lab": 0,
+   "grid_proteins_only_in_the_platform": 0,
+   "grid_dtype_on_the_platform": "float32",
+   "grid_identical_at_float32": true,
+   "truth_mass_identical_at_float64": true,
+   "chosen_threshold": [
+    0.97
+   ],
+   "legacy_rows_outside_the_population": 0,
+   "legacy_rows_outside_the_population_predicted_mass": 0.0,
+   "proteins_at_the_chosen_threshold_in_both": 1215,
+   "identical_at_float64_at_the_chosen_threshold": 1215,
+   "max_abs_diff_at_the_chosen_threshold": 0.0,
+   "proteins_only_in_the_platform": 0,
+   "mass_of_the_proteins_only_in_the_platform": 0.0,
+   "proteins_only_in_the_lab": 0,
+   "mass_of_the_proteins_only_in_the_lab": 0.0,
+   "f_micro_w_lab": 0.41482661210392247,
+   "f_micro_w_platform_stored_to_4_decimals": 0.4148,
+   "stored_equals_the_lab_to_4_decimals": true,
+   "agrees": true
+  },
+  "PK:BPO": {
+   "grid_stored_by_the_platform": false,
+   "chosen_threshold": [
+    0.99
+   ],
+   "legacy_rows_outside_the_population": 38,
+   "legacy_rows_outside_the_population_predicted_mass": 236.72307198942417,
+   "proteins_at_the_chosen_threshold_in_both": 22681,
+   "identical_at_float64_at_the_chosen_threshold": 22681,
+   "max_abs_diff_at_the_chosen_threshold": 0.0,
+   "proteins_only_in_the_platform": 0,
+   "mass_of_the_proteins_only_in_the_platform": 0.0,
+   "proteins_only_in_the_lab": 0,
+   "mass_of_the_proteins_only_in_the_lab": 0.0,
+   "f_micro_w_lab": 0.0981037470895753,
+   "f_micro_w_platform_stored_to_4_decimals": 0.0981,
+   "stored_equals_the_lab_to_4_decimals": true,
+   "agrees": true
+  },
+  "PK:MFO": {
+   "grid_stored_by_the_platform": true,
+   "grid_proteins_in_both": 13542,
+   "grid_proteins_only_in_the_lab": 0,
+   "grid_proteins_only_in_the_platform": 0,
+   "grid_dtype_on_the_platform": "float32",
+   "grid_identical_at_float32": true,
+   "truth_mass_identical_at_float64": true,
+   "chosen_threshold": [
+    0.99
+   ],
+   "legacy_rows_outside_the_population": 0,
+   "legacy_rows_outside_the_population_predicted_mass": 0.0,
+   "proteins_at_the_chosen_threshold_in_both": 13542,
+   "identical_at_float64_at_the_chosen_threshold": 13542,
+   "max_abs_diff_at_the_chosen_threshold": 0.0,
+   "proteins_only_in_the_platform": 0,
+   "mass_of_the_proteins_only_in_the_platform": 0.0,
+   "proteins_only_in_the_lab": 0,
+   "mass_of_the_proteins_only_in_the_lab": 0.0,
+   "f_micro_w_lab": 0.1715245282636209,
+   "f_micro_w_platform_stored_to_4_decimals": 0.1715,
+   "stored_equals_the_lab_to_4_decimals": true,
+   "agrees": true
+  },
+  "PK:CCO": {
+   "grid_stored_by_the_platform": false,
+   "chosen_threshold": [
+    0.99
+   ],
+   "legacy_rows_outside_the_population": 4,
+   "legacy_rows_outside_the_population_predicted_mass": 0.0,
+   "proteins_at_the_chosen_threshold_in_both": 7331,
+   "identical_at_float64_at_the_chosen_threshold": 7331,
+   "max_abs_diff_at_the_chosen_threshold": 0.0,
+   "proteins_only_in_the_platform": 0,
+   "mass_of_the_proteins_only_in_the_platform": 0.0,
+   "proteins_only_in_the_lab": 0,
+   "mass_of_the_proteins_only_in_the_lab": 0.0,
+   "f_micro_w_lab": 0.21845346739728902,
+   "f_micro_w_platform_stored_to_4_decimals": 0.2185,
+   "stored_equals_the_lab_to_4_decimals": true,
+   "agrees": true
+  }
+ },
+ "all_cells_agree": true
+}

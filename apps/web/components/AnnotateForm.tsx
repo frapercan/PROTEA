@@ -307,7 +307,7 @@ export function AnnotateForm() {
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-3">
                 <Link
-                  href={`/${locale}/instrument/benchmark`}
+                  href={`/${locale}/instrument/evaluation`}
                   className="inline-flex min-h-[40px] items-center gap-1 rounded-md bg-white px-3 py-2 text-xs font-semibold text-amber-900 ring-1 ring-inset ring-amber-200 hover:bg-amber-100 transition-colors"
                 >
                   {t("annotateQueueViewResults" as any)}

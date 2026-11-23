@@ -282,6 +282,8 @@ Single source of truth: [`docs/source/_data/stack.yaml`](https://github.com/frap
 | [protea-backends](https://github.com/frapercan/protea-backends) | Backend plugin | `active` | Protein language model embedding backends (ESM family, T5/ProstT5, Ankh, ESM3-C). Discovered via Python entry_points (esm, t5, ankh, esm3c). |
 | [protea-reranker-lab](https://github.com/frapercan/protea-reranker-lab) | Lab | `active` | LightGBM reranker training lab. Pulls datasets from PROTEA, trains boosters, publishes them back via /reranker-models/import-by-reference. |
 | [cafaeval-protea](https://github.com/frapercan/cafaeval-protea) | Evaluator | `active` | Standalone fork of cafaeval (CAFA-evaluator-PK) with the PK-coverage fix and a bit-exact parity guarantee against the upstream. |
+| [differentiable-alignment](https://github.com/frapercan/differentiable-alignment) | Library | `active` | Sequence alignment on the GPU with a gradient. Batched Needleman-Wunsch and Smith-Waterman, exact or smoothed, multi-hit alignment against profiles, and Triton kernels. Used by the laboratory code. |
+| [protein-function-prediction-semantic-model](https://github.com/frapercan/protein-function-prediction-semantic-model) | Semantic model | `beta` | The semantic model of protein function prediction. Its concepts, the components that implement or document them and the relations between them, in LinkML and SKOS; the glossary and interface labels are generated from it. Version 0 under review. |
 
 <!-- protea-stack:end -->
 

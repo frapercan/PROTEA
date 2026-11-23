@@ -35,9 +35,6 @@ from protea.core.operations.audit_evaluation_frames import (
 from protea.core.operations.audit_per_protein_artifacts import (
     AuditPerProteinArtifactsOperation,
 )
-from protea.core.operations.batch_rescore_evaluation import (
-    BatchRescoreEvaluationOperation,
-)
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrenceOperation
 from protea.core.operations.compare_paired_panels import (
     ComparePairedPanelsOperation,
@@ -59,6 +56,7 @@ from protea.core.operations.declare_corpus_population import (
 from protea.core.operations.declare_exam_population import (
     DeclareExamPopulationOperation,
 )
+from protea.core.operations.declare_member_taxa import DeclareMemberTaxaOperation
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenanceOperation,
 )
@@ -100,11 +98,13 @@ from protea.core.operations.load_homology_table import LoadHomologyTableOperatio
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingOperation,
 )
+from protea.core.operations.load_lexicon_bank import LoadLexiconBankOperation
 from protea.core.operations.load_ontology_aliases import (
     LoadOntologyAliasesOperation,
 )
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
+from protea.core.operations.load_segment_families import LoadSegmentFamiliesOperation
 from protea.core.operations.load_swissprot_release import (
     LoadSwissProtReleaseOperation,
 )
@@ -112,6 +112,7 @@ from protea.core.operations.measure_embedding_magnitude import (
     MeasureEmbeddingMagnitudeOperation,
 )
 from protea.core.operations.ping import PingOperation
+from protea.core.operations.place_window_targets import PlaceWindowTargetsOperation
 from protea.core.operations.predict_go_terms import (
     PredictGOTermsBatchOperation,
     PredictGOTermsOperation,
@@ -126,6 +127,9 @@ from protea.core.operations.refresh_goa_release_dates import (
 from protea.core.operations.register_ingested_method import (
     RegisterIngestedMethodOperation,
 )
+from protea.core.operations.resolve_protein_metadata import (
+    ResolveProteinMetadataOperation,
+)
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesOperation,
 )
@@ -133,8 +137,11 @@ from protea.core.operations.retire_evaluation_sets import (
     RetireEvaluationSetsOperation,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
+from protea.core.operations.run_count_map import RunCountMapOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
 from protea.core.operations.run_lab_method import RunLabMethodOperation
+from protea.core.operations.run_own_annotations import RunOwnAnnotationsOperation
+from protea.core.operations.score_prediction_set import ScorePredictionSetOperation
 from protea.core.operations.seal_evaluation_frames import (
     SealEvaluationFramesOperation,
 )
@@ -143,6 +150,10 @@ from protea.core.operations.seal_evaluation_groundtruth import (
 )
 from protea.core.operations.store_residue_codes import StoreResidueCodesOperation
 from protea.core.operations.stratify_evaluation import StratifyEvaluationOperation
+from protea.core.operations.summarize_prediction_sets import SummarizePredictionSetsOperation
+from protea.core.operations.supersede_evaluation_sets import (
+    SupersedeEvaluationSetsOperation,
+)
 from protea.core.operations.upload_residue_shard import UploadResidueShardOperation
 from protea.core.operations.verify_window_against_reference import (
     VerifyWindowAgainstReferenceOperation,
@@ -186,11 +197,14 @@ _UNIVERSE: tuple[_Row, ...] = (
     (LoadQuickGOAnnotationsOperation, replace(_FETCHED, status="review")),
     (ExtractGoaUniverseOperation, _FETCHED),
     (ResolveProteinSequencesOperation, _FETCHED),
+    # Today's entries, for display only: nothing on a cut reads what it writes.
+    (ResolveProteinMetadataOperation, _FETCHED),
     # Its auto-frame child is a generate_evaluation_set job on protea.jobs.
     (LoadGOAAnnotationsOperation, replace(_FETCHED, publishes_to=(queues.JOBS,))),
     (LoadSwissProtReleaseOperation, _FETCHED),
     (LoadCutPhotoOperation, _DERIVED),
     (LoadHomologyTableOperation, _DERIVED),
+    (DeclareMemberTaxaOperation, _DERIVED),
     (RefreshGoaReleaseDatesOperation, _FETCHED),
     (LoadInterProGoMappingOperation, replace(_FETCHED, status="mirror")),
     (RunInterProScanBatchOperation, replace(_DERIVED, status="mirror")),
@@ -199,6 +213,8 @@ _UNIVERSE: tuple[_Row, ...] = (
     (ComputeInformationAccretionOperation, _DERIVED),
     (GenerateEvaluationSetOperation, _DERIVED),
     (ExportEvaluationTargetsOperation, _DERIVED),
+    # Marks the windows a frame left behind, deleting nothing (closure, step 3).
+    (SupersedeEvaluationSetsOperation, _DERIVED),
     # The three repairs of production rows, kept for review (plan section C).
     (DeclareQuerySetProvenanceOperation, replace(_DERIVED, status="review")),
     (RetireEvaluationSetsOperation, replace(_DERIVED, status="review")),
@@ -291,6 +307,10 @@ _REPRESENTATION: tuple[_Row, ...] = (
     (CountBackendParametersOperation, _REPRESENTATION_JOB),
     # The bank computed on the cluster (ADR-D62), loaded where the database is.
     (LoadEmbeddingBankOperation, _REPRESENTATION_JOB),
+    # The lexicon bank decoded on the cluster (ADR-D63), for the explainable-units family.
+    (LoadLexiconBankOperation, replace(_REPRESENTATION_JOB, family="explainable-units")),
+    # The segment families built on the cluster (ADR-D65), units of the count map.
+    (LoadSegmentFamiliesOperation, replace(_REPRESENTATION_JOB, family="explainable-units")),
     (
         ExportGateBundleOperation,
         replace(_REPRESENTATION_JOB, family="world-model", status="review"),
@@ -348,6 +368,10 @@ _METHOD: tuple[_Row, ...] = (
         replace(_KNN_COORDINATOR, kind="write", queue=queues.PREDICTIONS_WRITE, publishes_to=()),
     ),
     (PredictGOTermsFromInterProOperation, replace(_METHOD_JOB, status="mirror")),
+    # A transfer method's candidates become predictions here, with a record: the
+    # evaluator scores what a method stored and nothing else (closure, step 4).
+    (ScorePredictionSetOperation, _METHOD_JOB),
+    (SummarizePredictionSetsOperation, _METHOD_JOB),
     # The offline half of the association feature the prediction path reads.
     (BuildGoCooccurrenceOperation, replace(_METHOD_JOB, family="embedding-reranker")),
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer publicly
@@ -356,6 +380,14 @@ _METHOD: tuple[_Row, ...] = (
     # TrainRerankerAutoOperation in-process to run the dump-only pipeline.
     (ExportResearchDatasetOperation, _EXPORT),
     (ExportTransitionsDatasetOperation, replace(_EXPORT, family="world-model")),
+    # The explainable-units family's count map, fitted at a window's start and read on its
+    # targets inside the platform (ADR-D64, ADR-D65).
+    (RunCountMapOperation, replace(_METHOD_JOB, queue=queues.TRAINING, family="explainable-units")),
+    # democafa's goa_nonexp baseline: a target's own non-experimental annotations at t0.
+    (
+        RunOwnAnnotationsOperation,
+        replace(_METHOD_JOB, queue=queues.TRAINING, family="explainable-units"),
+    ),
     (RegisterIngestedMethodOperation, _METHOD_JOB),
     (
         RunLabMethodOperation,
@@ -397,7 +429,7 @@ _METHOD: tuple[_Row, ...] = (
 #: Evaluation: one evaluator for every family (ADR-D60, decision 5).
 _EVALUATION: tuple[_Row, ...] = (
     (RunCafaEvaluationOperation, _EVALUATED),
-    (BatchRescoreEvaluationOperation, _EVALUATED),
+    (PlaceWindowTargetsOperation, _EVALUATED),
     (StratifyEvaluationOperation, _EVALUATED),
     (ComparePairedPanelsOperation, _EVALUATED),
     (SealEvaluationFramesOperation, _EVALUATED),

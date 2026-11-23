@@ -5,18 +5,22 @@ not say which proteins, so the chain from a published number to the thing
 it is about stops at the count. A reader who distrusts a cell, or who
 wants to see why the twilight band is hard, has nowhere to go.
 
-Membership is recomputed rather than stored, because the strata artefact
-holds cells and measures and not the population behind them. It uses the
-same two functions the stratification itself uses, so the bands here and
-the bands in the parquet cannot drift: a second implementation would.
+Membership is read from the window's placement (:mod:`protea.core.window_placement`),
+the same rows the stratification reads, so the bands here and the bands in the
+parquet cannot drift: a second implementation would.
 
-What it filters on and what it does not. Length and homology are computed
-from the retrieval and are filtered. Category and aspect are ASSERTED by
-the caller: whether a query is no-knowledge in a given aspect is a fact
-about the evaluation's ground truth, not about the neighbourhood, and this
-router does not hold it. So the count returned is the population of the
-BAND, and it will exceed the cell the strata panel reports for the same
+What it filters on and what it does not. Length and homology are the window's
+and are filtered: the population is every target of the window in that band,
+whatever the method. Category and aspect are ASSERTED by the caller: whether a
+target is no-knowledge in a given aspect is a fact about the evaluation's ground
+truth, and this router does not hold it. So the count returned is the population
+of the BAND, and it will exceed the cell the strata panel reports for the same
 coordinates. The field is named for that rather than left to be assumed.
+
+Beside each target it shows what the prediction set's own retrieval found: the
+identity of its most homologous non-self donor and that donor's evidence. Those
+place nothing; they are there so a reader can compare a method's neighbours with
+the window's closest measured protein.
 """
 
 from __future__ import annotations
@@ -26,13 +30,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
+from protea.api.routers._stratum_hoods import hoods as retrieval_neighbourhoods
 from protea.core.domain.aspect import Aspect
-from protea.core.operations._run_cafa_strata import neighbourhoods_for
-from protea.core.strata import stratum_for
+from protea.core.strata import UNREAD_NEIGHBOURHOOD, stratum_for
+from protea.core.window_placement import (
+    TargetPlacement,
+    WindowNotPlacedError,
+    placement_of_window,
+)
 
 router = APIRouter(prefix="/stratum", tags=["strata"])
 
@@ -78,17 +86,6 @@ def _aspect_code(raw: str) -> str:
     return code
 
 
-#: Sequence length per query, which the band needs and the neighbourhood
-#: does not carry.
-_LENGTHS = text(
-    """
-    SELECT p.accession AS accession, length(s.sequence) AS residues
-    FROM protein p JOIN sequence s ON s.id = p.sequence_id
-    WHERE p.accession = ANY(:accessions)
-    """
-)
-
-
 @dataclass
 class _Where:
     """The cell to open, as query parameters."""
@@ -102,47 +99,59 @@ class _Where:
         )
     )
     aspect: str = Query(description="GO aspect, asserted on the same terms as category.")
+    evaluation_set_id: uuid.UUID = Query(
+        description="The window whose placement places its targets on the length and homology axes."
+    )
     length: str | None = Query(default=None, description="Length band, or unset for any.")
     homology: str | None = Query(default=None, description="Identity band, or unset for any.")
 
 
 def _walk(
-    hoods: dict[str, Any], lengths: dict[str, int], at: _Where, aspect: str, limit: int
+    placement: dict[str, TargetPlacement],
+    hoods: dict[str, Any],
+    at: _Where,
+    aspect: str,
+    limit: int,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Place every query on the axes and keep the ones in this band.
+    """Place every target on the axes and keep the ones in this band.
 
     Returns the capped rows and the UNCAPPED count, because a caller told
     only the page size cannot tell a small cell from a truncated one.
     """
     members: list[dict[str, Any]] = []
     population = 0
-    for accession, hood in hoods.items():
-        residues = lengths.get(accession)
-        if residues is None:
-            continue
+    for accession, where in placement.items():
+        hood = hoods.get(accession)
         stratum = stratum_for(
-            category=at.category, aspect=aspect, residues=residues, neighbourhood=hood
+            category=at.category,
+            aspect=aspect,
+            residues=where.residues,
+            identity=where.identity,
+            retrieval=hood if hood is not None else UNREAD_NEIGHBOURHOOD,
         )
         if at.length is not None and str(stratum.length) != at.length:
             continue
         if at.homology is not None and str(stratum.homology) != at.homology:
             continue
         population += 1
-        if len(members) < limit:
-            members.append(
-                {
-                    "accession": accession,
-                    "residues": residues,
-                    "length_band": str(stratum.length),
-                    "homology_band": str(stratum.homology),
-                    "best_identity": hood.best_identity,
-                    "donor_is_experimental": hood.donor_is_experimental,
-                    "taxonomic_relation": hood.taxonomic_relation,
-                }
-            )
+        members.append(
+            {
+                "accession": accession,
+                "residues": where.residues,
+                "length_band": str(stratum.length),
+                "homology_band": str(stratum.homology),
+                "identity": where.identity,
+                "best_identity": None if hood is None else hood.best_identity,
+                "donor_is_experimental": None if hood is None else hood.donor_is_experimental,
+                "taxonomic_relation": None if hood is None else hood.taxonomic_relation,
+            }
+        )
     # Weakest identity first: the reason to open a cell is usually to see
     # what makes it hard, and the hardest cases are the ones to show.
-    return sorted(members, key=lambda m: m["best_identity"] or -1.0), population
+    members.sort(
+        key=lambda m: (m["identity"] if m["identity"] is not None else -1.0, m["accession"])
+    )
+    return members[:limit], population
 
 
 @router.get("/{prediction_set_id}/members", summary="Proteins in one stratum")
@@ -152,38 +161,31 @@ def stratum_members(
     limit: int = Query(default=200, ge=1, le=2000, description="Cap on rows returned."),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
-    """The proteins a stratum is made of, with what put each one there.
+    """The targets a stratum is made of, with what put each one there.
 
-    Every row carries the identity to its nearest donor and whether that
-    donor is experimental, because that is what the band IS: a reader who
-    cannot see what put a protein in a band cannot check the band, and a
-    band nobody can check is a label.
+    Every row carries the identity that placed it, to the closest protein
+    measured when the window opened, because that is what the band IS: a reader
+    who cannot see what put a protein in a band cannot check the band, and a
+    band nobody can check is a label. Beside it, what the prediction set's own
+    retrieval found, which places nothing.
 
-    It does NOT yet carry WHICH donor. ``Neighbourhood`` resolves five
-    facts about the retrieved donors and the accession is not among them,
-    so naming it here would mean changing what retrieval returns. Until
-    then a reader can check the distance but not follow it, and this
-    docstring says so rather than implying otherwise.
+    It does NOT yet carry WHICH donor the arm retrieved. ``Neighbourhood``
+    resolves five facts about the retrieved donors and the accession is not
+    among them, so naming it here would mean changing what retrieval returns.
     """
     with factory() as session:
-        hoods = neighbourhoods_for(session, str(prediction_set_id))
-        if not hoods:
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    f"prediction set {prediction_set_id} retrieved no non-self donors, "
-                    "so no query in it can be placed on the homology axis"
-                ),
-            )
-        lengths = {
-            r["accession"]: r["residues"]
-            for r in session.execute(_LENGTHS, {"accessions": list(hoods)}).mappings()
-        }
-
-    members, population = _walk(hoods, lengths, at, _aspect_code(at.aspect), limit)
+        try:
+            placement = placement_of_window(session, str(at.evaluation_set_id))
+        except WindowNotPlacedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Cached for the process, as the panel drawer caches them: a set's candidate
+    # rows are written once, and reading its neighbours costs minutes.
+    hoods = retrieval_neighbourhoods(factory, str(prediction_set_id))
+    members, population = _walk(placement, hoods, at, _aspect_code(at.aspect), limit)
 
     return {
         "prediction_set_id": str(prediction_set_id),
+        "evaluation_set_id": str(at.evaluation_set_id),
         "where": {
             "category": at.category,
             "aspect": at.aspect,
