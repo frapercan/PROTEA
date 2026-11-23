@@ -85,6 +85,7 @@ its photo, and any sequence submitted since.
 **4. Two files, two owners, two paths.**
 
 - *Editorial:* ``docs/source/_data/news.json`` in the repository.
+
   - What it holds: announcements and the status of the project, as plain
     prose.
   - How it changes: it passes through a pull request the author reviews, and
@@ -92,6 +93,7 @@ its photo, and any sequence submitted since.
   - Who reads it: the documentation renders it, and the API serves it.
 - *Generated:* the nightly record at a stable path, overwritten by the nightly
   run and by nothing else. It holds:
+
   - the date and the cut;
   - the champion, its measure and the window the measure was taken on;
   - the producer's job;
@@ -120,6 +122,7 @@ build time.
   ``READY`` file written last; nothing in it is executed.
 - Predictions that enter the store go through ``ingest_method_predictions`` and
   follow its contract:
+
   - the aspect column is checked against the ontology snapshot, and a term the
     snapshot lacks is rejected;
   - the cap per protein is declared in the payload;
