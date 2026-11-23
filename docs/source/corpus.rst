@@ -47,9 +47,13 @@ cut:
    million); the photo grows with the annotated UniRef50 neighbours, which give
    the retrieval arms donors close to the proteins being annotated.
 
-*Swiss-Prot at the cut* and *Outside Swiss-Prot* split the members in two. The
-last three rows count the other doors, and a Swiss-Prot protein can also have
-come in through truth or curation, so they overlap the first two. Cut 205 only
+The first three rows of the table are classes: *Swiss-Prot at the cut* and
+*Outside Swiss-Prot* split the members in two. The last three rows are
+admission reasons, not classes. A member can meet several of them: a Swiss-Prot
+protein with an experimental row is counted under Swiss-Prot and under truth.
+Adding them up therefore gives a number that counts some proteins twice. The
+unreviewed proteins with truth or curated rows, the middle part of the figure,
+are *Outside Swiss-Prot* minus the neighbours. Cut 205 only
 ends a window (177->205), so its photo is a truth-only photo: it holds what that
 window's truth needs, carries no neighbours, and is left out of the figures.
 

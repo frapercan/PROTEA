@@ -119,13 +119,16 @@ def write_tables(cuts: list[dict]) -> None:
     # The two count tables are written with one column per cut, so they stay narrow
     # enough to read on a page: a set or a channel per row, a cut per column.
     head = ["", *[f"{c['cut_release']} ({c['cut_date'][:4]})" for c in cuts]]
+    # The first three rows are classes (Swiss-Prot and outside it split the members);
+    # the last three are admission reasons, and one member can meet several, so they
+    # are never to be added up.
     member_rows = [
         ("Members", "members"),
         ("Swiss-Prot at the cut", "superset"),
         ("Outside Swiss-Prot", "outside_superset"),
-        ("Admitted by truth", "by_truth"),
-        ("Admitted by curation only", "by_curated_only"),
-        ("UniRef50 neighbours", "by_neighbour"),
+        ("Reason: a truth row", "by_truth"),
+        ("Reason: a curated row, no truth row", "by_curated_only"),
+        ("Reason: a UniRef50 neighbour", "by_neighbour"),
     ]
     with (DATA / "corpus-members.csv").open("w", newline="") as fh:
         out = csv.writer(fh, lineterminator="\n")
