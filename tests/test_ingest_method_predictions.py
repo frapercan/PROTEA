@@ -22,6 +22,8 @@ from typing import Any
 
 import pytest
 
+from protea.core.method_seal import method_identity
+from protea.core.operations import ingest_method_predictions as ingest
 from protea.core.operations.ingest_method_predictions import (
     DEFAULT_CHUNK,
     IngestMethodPredictionsOperation,
@@ -29,9 +31,11 @@ from protea.core.operations.ingest_method_predictions import (
     _read_rows,
     scan,
 )
+from protea.core.query_population import population_of
 from protea.infrastructure.orm.models.embedding.embedding_config import (
     INGESTED_METHOD_BACKEND,
 )
+from tests.test_a_set_records_its_population import whole_row
 
 #: aspect letters as go_term stores them, verified on the live pivot:
 #: P 30,464 / F 12,397 / C 4,467 under releases/2022-07-01.
@@ -155,6 +159,14 @@ class TestThePayloadRefusesRatherThanGuessing:
     def test_a_blank_name_is_not_a_name(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="method.name is required"):
             _payload(_write(tmp_path, GOOD), method={"name": "   "})
+
+    def test_the_population_is_declared_once(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="population once"):
+            _payload(
+                _write(tmp_path, GOOD),
+                query_set_id=str(uuid.uuid4()),
+                query_accessions=["P00001", "P00002"],
+            )
 
 
 class TestTheCountingPass:
@@ -318,16 +330,39 @@ class TestWhatItReportsWhenItWorks:
         op.execute(session, _payload(_write(tmp_path, GOOD)).model_dump(), emit=_emit)
         assert session.flushes >= 1
 
-    def test_the_provenance_lands_verbatim_under_one_meta_key(self, tmp_path: Path) -> None:
-        # One key, not eleven: method_seal._CLASSIFIED_META refuses unknown
-        # meta keys by name, which is what already happens to the
-        # meta["algorithm"] of predict_go_terms_from_interpro.
+    def test_the_producer_and_its_bytes_land_under_keys_of_their_own(self, tmp_path: Path) -> None:
+        # The producer's record verbatim, under a key the seal reads as
+        # identity; the bytes by their digest; the code that wrote the rows.
         session = _Session()
         op = IngestMethodPredictionsOperation()
         op.execute(session, _payload(_write(tmp_path, GOOD)).model_dump(), emit=_emit)
         meta = session.added[0].meta
-        assert meta["method"] == METHOD
+        assert meta["producer"] == METHOD and "method" not in meta
+        assert meta["predictions_sha256"] == hashlib.sha256(GOOD.encode()).hexdigest()
         assert meta["source"]["rows"] == 3
+        assert meta["code_revision"] and "dependency_revisions" in meta
+        assert "query_population" not in meta  # nothing was declared
+
+    def test_a_list_it_was_handed_is_the_population_it_records(self, tmp_path: Path) -> None:
+        session = _Session()
+        op = IngestMethodPredictionsOperation()
+        asked = ["P00002", "P00001", "P00003"]
+        payload = _payload(_write(tmp_path, GOOD), query_accessions=asked)
+        op.execute(session, payload.model_dump(), emit=_emit)
+        assert session.added[0].meta["query_population"] == population_of(asked)
+
+    def test_the_set_it_writes_can_be_compared(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Every key it writes is classified and nothing the seal requires is
+        # missing, whatever this environment installed its siblings from.
+        monkeypatch.setattr(ingest, "dependency_revisions", lambda: {"protea-x": "c" * 40})
+        session = _Session()
+        op = IngestMethodPredictionsOperation()
+        payload = _payload(_write(tmp_path, GOOD), query_accessions=["P00001", "P00002"])
+        op.execute(session, payload.model_dump(), emit=_emit)
+        identity = method_identity(whole_row(session.added[0]))
+        assert identity["producer"] == METHOD
 
     def test_it_says_which_formula_scores_it(self, tmp_path: Path) -> None:
         # Under any other formula a method row has no signal with a weight

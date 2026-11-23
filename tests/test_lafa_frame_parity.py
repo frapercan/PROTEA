@@ -32,12 +32,10 @@ from __future__ import annotations
 
 import os
 import shutil
-import uuid
 from pathlib import Path
 
 import pytest
 
-from protea.core.evaluation import EvaluationData
 from protea.core.operations import _run_cafa_eval_driver as driver
 
 pytest.importorskip("cafaeval")
@@ -148,14 +146,7 @@ def synthetic_frame(tmp_path: Path) -> dict[str, str]:
 
 def _make_ctx(frame: dict[str, str], **overrides):
     base = dict(
-        pred_set_id=uuid.uuid4(),
-        delta_proteins=set(),
-        max_distance=None,
         artifacts_root=Path("/tmp"),
-        has_rerankers=False,
-        reranker_models={},
-        scoring_config_snapshot=None,
-        data=EvaluationData(),
         obo_path=frame["obo"],
         nk_path=frame["gt"],
         lk_path=frame["gt"],
@@ -322,14 +313,7 @@ def test_real_lafa_leaderboard_parity(tmp_path: Path):
         known = str(_LAFA_RELEASE / known_name) if known_name else None
 
         ctx = driver.CafaEvalRunContext(
-            pred_set_id=uuid.uuid4(),
-            delta_proteins=set(),
-            max_distance=None,
             artifacts_root=tmp_path,
-            has_rerankers=False,
-            reranker_models={},
-            scoring_config_snapshot=None,
-            data=EvaluationData(),
             obo_path=obo,
             nk_path=gt,
             lk_path=gt,

@@ -225,11 +225,22 @@ def _serialise_uniprot_metadata(
     """Materialise the UniProt functional-metadata payload for a protein.
 
     Returns ``None`` when the protein has no metadata row (Swiss-Prot
-    annotation has not been ingested for this canonical accession).
+    annotation has not been ingested for this canonical accession). The entry is
+    the protein as UniProt described it in ``uniprot_release`` (null for rows
+    fetched before releases were recorded), shown as today's knowledge.
     """
     if meta is None:
         return None
     return {
+        "uniprot_release": meta.uniprot_release,
+        "uniprot_release_date": meta.uniprot_release_date,
+        "entry_name": meta.entry_name,
+        "reviewed": meta.reviewed,
+        "protein_names": meta.protein_names,
+        "gene_names": meta.gene_names,
+        "organism_name": meta.organism_name,
+        "organism_id": meta.organism_id,
+        "length": meta.length,
         "function_cc": meta.function_cc,
         "ec_number": meta.ec_number,
         "catalytic_activity": meta.catalytic_activity,

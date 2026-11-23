@@ -24,10 +24,12 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 from protea_contracts.payloads import DonorPolicy
 from sqlalchemy.orm import Session
 
 from protea.core.operations.predict_go_terms import _batch_op_reference as refmod
+from protea.core.operations.predict_go_terms import _photo_sequences as photo_sequences
 from protea.core.operations.predict_go_terms._batch_op_reference import (
     _PoolRequest,
     _ReferenceMixin,
@@ -35,6 +37,17 @@ from protea.core.operations.predict_go_terms._batch_op_reference import (
 
 CFG = uuid.UUID("11111111-1111-1111-1111-111111111111")
 ANN = uuid.UUID("22222222-2222-2222-2222-222222222222")
+
+
+@pytest.fixture(autouse=True)
+def _no_photo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These pools are over an annotation set no photo loaded, so no store is asked.
+
+    A photo's run builds its pool from the photo's members
+    (``_photo_sequences.donor_pool_base``); these tests compile the other pool,
+    with a session that has no database behind it.
+    """
+    monkeypatch.setattr(photo_sequences, "photo_of", lambda session, annotation_set_id: None)
 
 
 def _sql(request: _PoolRequest) -> str:
@@ -293,3 +306,18 @@ class TestTheCollectorActuallyPinsTheOrder:
         accset, go_map = self._collect()
         assert accset["P"] == {"A0A001", "B0B002"}
         assert set(go_map["P"]) == {"A0A001", "B0B002"}
+
+
+def test_a_photos_pool_is_ordered_by_the_members_accession(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On a photo's run the bank is the photo's members, ordered the same way."""
+    monkeypatch.setattr(
+        photo_sequences, "photo_of", lambda session, annotation_set_id: uuid.UUID(int=7)
+    )
+    sql = _sql(_PoolRequest(CFG, ANN, DonorPolicy(reviewed_only=True))).lower()
+    assert sql.count("order by") == 1
+    tail = sql.rsplit("order by", 1)[1]
+    assert "member_sequences.accession" in tail and "collate" in tail
+    assert "chunk_index_s" in tail
+    assert "cut_photo_member.sequence_md5" in sql and "protein.reviewed" in sql

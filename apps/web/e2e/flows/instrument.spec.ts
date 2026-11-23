@@ -17,8 +17,13 @@ test.describe("instrument hub + redirects", () => {
 
     // A representative tool from each group is reachable from the hub.
     await expect(page.getByRole("link", { name: /Jobs/ }).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /Benchmark/ }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /CAFA Evaluation/ }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /Proteins/ }).first()).toBeVisible();
+  });
+
+  test("the retired benchmark page lands on the list of windows", async ({ page }) => {
+    await page.goto("/en/instrument/benchmark/");
+    await expect(page).toHaveURL(/\/en\/instrument\/evaluation\/?$/);
   });
 
   test("old top-level path redirects to /instrument/*", async ({ page }) => {

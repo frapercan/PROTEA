@@ -1,0 +1,80 @@
+[Unit]
+# PROTEA dev queue worker, one instance per queue:
+#   systemctl --user enable protea-dev-worker@protea.jobs.service
+#
+# THE NAME IS LOAD-BEARING. Every dev unit is protea-dev-*. protea-node-sync
+# picks the production worker units on this machine by their template name
+# and stops and restarts them around every sync of the production tree, so a
+# dev unit must never carry that name, and a dev worker is never started
+# through the production template.
+#
+# No queue guard: the production guard matches workers by queue name across
+# the whole machine, and dev and production consume queues of the same names
+# on different brokers. systemd already refuses two instances of one name.
+#
+# No revision guard yet: today's guard reads only the production
+# declaration, which names a develop commit, so it would refuse every dev
+# start. It joins these units once it takes the declaration path from the
+# unit, so that dev can point it at a declaration of its own.
+Description=PROTEA dev worker (queue %i)
+PartOf=protea-dev.target
+After=protea-dev-wait-infra.service
+Requires=protea-dev-wait-infra.service
+AssertPathIsDirectory=%h/protea-dev
+# A refusal of the disk gate (exit 78) must not loop: at most three starts
+# in fifteen minutes.
+StartLimitIntervalSec=900
+StartLimitBurst=3
+
+[Service]
+Type=exec
+Slice=protea-dev.slice
+WorkingDirectory=%h/protea-dev/deploy/PROTEA
+# Mode 0600, never committed, plain KEY=VALUE lines. A missing file fails the
+# unit rather than starting a worker on settings defaults. Values in the file
+# override the Environment= lines below, so the file must not set them.
+EnvironmentFile=%h/.secrets/protea-dev.env
+Environment=PROTEA_ENVIRONMENT=dev
+# THE CARD IS NOT DEV'S UNTIL THE AUTHOR SAYS SO. The production GPU worker
+# shares this machine's single card, and two models on one 12 GB card is an
+# OOM for whichever loads second. An empty list hides every GPU from CUDA, so
+# a dev worker never takes the card. It does not always fail, though: an
+# operation that asks for the card may run on the processors instead
+# (compute_embeddings does, with a warning event), which is why the GPU
+# queues stay off for dev. They get a unit of their own, with its own
+# gates, after that decision (README, "Not wired yet"). The one exception is
+# the predictions batch queue, whose gpu.conf gives the card to the first
+# pass of the exact neighbour search (the author, 2026-11-21).
+Environment=CUDA_VISIBLE_DEVICES=
+
+# The disk gate first: development shares the system disk with production
+# (README, "Disk"), so it refuses to start below the free-space floor.
+ExecStartPre=/bin/bash %h/protea-dev/deploy/PROTEA/deploy/dev/protea-dev-disk-gate.sh %h/protea-dev %n
+# The clock gate. This machine dual-boots and comes up with the clock hours
+# off until chronyd steps it; leases last 120 s. The gate waits for a
+# synchronised clock for a bounded time and never refuses. It runs here, as
+# ExecStartPre, so a waiting unit shows as "activating" instead of running
+# and consuming nothing; TimeoutStartSec must stay above the gate's cap of
+# 600 s, or systemd kills the wait and restarts into it.
+ExecStartPre=/bin/bash %h/protea-dev/deploy/PROTEA/deploy/dev/protea-dev-clock-gate.sh %n
+TimeoutStartSec=660
+
+# The venv is used directly, never through poetry: a `poetry run` path can
+# reach `poetry install` and replace the torch build under a running worker.
+ExecStart=%h/protea-dev/venv/bin/python scripts/worker.py --queue %i --log-format json
+
+Restart=on-failure
+RestartSec=30
+# 78 (EX_CONFIG) is a configuration problem, or a revision this worker must
+# not run. Restarting every thirty seconds would only repeat the refusal.
+RestartPreventExitStatus=78
+
+MemoryMax=2G
+# The worker's own shutdown grace is 30 s (tuning: worker_shutdown_grace_seconds);
+# the in-flight job is requeued or failed before this runs out.
+TimeoutStopSec=120
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=protea-dev.target

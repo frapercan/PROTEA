@@ -71,9 +71,7 @@ def test_a_sequence_depth_that_was_not_applied_is_refused() -> None:
     # The cut admits 247,482 rows; the frame handed over holds all 2,441,584,
     # which is what an unapplied filter looks like.
     with pytest.raises(DepthNotApplied) as caught:
-        assert_depth_was_applied(
-            None, ctx, range(2_441_584), _counter(0, 247_482, 2_441_584)
-        )
+        assert_depth_was_applied(None, ctx, range(2_441_584), _counter(0, 247_482, 2_441_584))
     message = str(caught.value)
     assert "max_sequence_rank=2" in message
     assert "247482" in message and "2441584" in message
@@ -81,17 +79,13 @@ def test_a_sequence_depth_that_was_not_applied_is_refused() -> None:
 
 def test_a_sequence_depth_that_was_applied_passes_silently() -> None:
     ctx = _Ctx(max_sequence_rank=2)
-    assert_depth_was_applied(
-        None, ctx, range(247_482), _counter(0, 247_482, 2_441_584)
-    )
+    assert_depth_was_applied(None, ctx, range(247_482), _counter(0, 247_482, 2_441_584))
 
 
 def test_a_cut_that_admits_everything_is_not_a_failure() -> None:
     """Depth 30 of 30 restricts nothing, and must not read as unapplied."""
     ctx = _Ctx(max_sequence_rank=30)
-    assert_depth_was_applied(
-        None, ctx, range(2_441_584), _counter(0, 2_441_584, 2_441_584)
-    )
+    assert_depth_was_applied(None, ctx, range(2_441_584), _counter(0, 2_441_584, 2_441_584))
 
 
 def test_the_protein_unit_still_works() -> None:
@@ -107,21 +101,23 @@ def test_no_depth_at_all_is_not_checked() -> None:
     assert_depth_was_applied(None, _Ctx(), range(999), _counter(0, 0, 999))
 
 
-def test_both_call_sites_pass_the_sequence_depth() -> None:
+def test_the_call_site_passes_the_sequence_depth() -> None:
     """The other half, asserted on the source rather than through a run.
 
-    Building the real context needs a session, a delta-protein set and a
-    staged directory. Reading the two constructions is the cheap check that
-    they name the field at all, which is exactly what neither did.
+    The depth is the scoring step's since the evaluator stopped scoring
+    (closure, step 4): ``score_prediction_set`` builds the context the frame
+    and the guard read, and the evaluator takes no depth at all. Reading the
+    construction is the cheap check that it names the field, which is exactly
+    what the two evaluator sites once did not.
     """
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / "protea/core/operations"
-    for name in ("run_cafa_evaluation.py", "_run_cafa_eval_driver.py"):
-        text = (root / name).read_text()
-        at = text.index("WritePredictionsContext(")
-        block = text[at : text.index(")", text.index("path=", at))]
-        assert "max_sequence_rank=" in block, (
-            f"{name} builds a WritePredictionsContext without the sequence "
-            "depth, so a run counting depth in sequences scores every row"
-        )
+    text = (
+        Path(__file__).resolve().parents[1] / "protea/core/operations/score_prediction_set.py"
+    ).read_text()
+    at = text.index("_Chunk(\n")
+    block = text[at : text.index(")", text.index("max_sequence_rank=", at))]
+    assert "max_sequence_rank=p.max_sequence_rank" in block, (
+        "score_prediction_set builds its context without the sequence depth, so a "
+        "set scored at a depth counted in sequences scores every row"
+    )

@@ -1,0 +1,275 @@
+{
+ "window": "211 -> 227",
+ "t0_rows": 1056484,
+ "t0_sources": {
+  "cut": 211,
+  "ontology": "releases/2022-07-01",
+  "swissprot": "2022_03"
+ },
+ "t1_rows": 1083938,
+ "t1_sources": {
+  "cut": 227,
+  "ontology": "releases/2025-07-22",
+  "swissprot": "2025_03"
+ },
+ "protea_commit": "e437911dba4b",
+ "lafa_workflow": "github.com/anphan0828/CAFA_forever@2ce245715aa9",
+ "lafa_package": "github.com/anphan0828/democafa_package@1102e34ec2cd",
+ "inputs_sha256": {
+  "t0/go-basic.obo": "91eae63f06163aea5072d1d7c8d34a1f0cdf6295b23b527297bce4ac89dd022a",
+  "t0/goa_uniprot_all.gaf.gz": "e581df860adc4d356f4bed624ba44fdac2abb27cb71b8b3e1fac63c63d72d588",
+  "t0/uniprot_sprot.fasta.gz": "e8941da6aa307b987f990cc4615b451f44d7a24361f15ac52bf23b19baa6bb0f",
+  "t1/go-basic.obo": "d9a5670865816dd63dcdd49f76864d3a621990d8bcbb6b758e4cdfbfdb9f2982",
+  "t1/goa_uniprot_all.gaf.gz": "9aca33330cf5848d3be18781b7f05b43d5d6422af062e1249ff6c8ff4f792eeb",
+  "t1/uniprot_sprot.fasta.gz": "56d04b58ea8f65f7a2e4644cc91f289ee10ff073136171517711fe2ef11e684e"
+ },
+ "as_published": {
+  "NK": {
+   "lafa": 62357,
+   "frame": 62357,
+   "only_lafa": 0,
+   "only_frame": 0,
+   "jaccard": 1.0
+  },
+  "LK": {
+   "lafa": 52786,
+   "frame": 52786,
+   "only_lafa": 0,
+   "only_frame": 0,
+   "jaccard": 1.0
+  },
+  "PK": {
+   "lafa": 249750,
+   "frame": 249750,
+   "only_lafa": 0,
+   "only_frame": 0,
+   "jaccard": 1.0
+  },
+  "PK_known": {
+   "lafa": 1442851,
+   "frame": 1442851,
+   "only_lafa": 0,
+   "only_frame": 0,
+   "jaccard": 1.0
+  },
+  "targets": {
+   "lafa": 37677,
+   "frame": 37677,
+   "only_lafa": 0,
+   "only_frame": 0,
+   "jaccard": 1.0
+  }
+ },
+ "with_the_not_rule": {
+  "NK": {
+   "lafa": 62357,
+   "frame": 62333,
+   "only_lafa": 24,
+   "only_frame": 0,
+   "jaccard": 0.999615119,
+   "examples_only_lafa": [
+    [
+     "O65688",
+     "GO:0003674"
+    ],
+    [
+     "O65688",
+     "GO:0003824"
+    ],
+    [
+     "O65688",
+     "GO:0004659"
+    ],
+    [
+     "O65688",
+     "GO:0016740"
+    ],
+    [
+     "O65688",
+     "GO:0016765"
+    ]
+   ],
+   "examples_only_frame": []
+  },
+  "LK": {
+   "lafa": 52786,
+   "frame": 52843,
+   "only_lafa": 55,
+   "only_frame": 112,
+   "jaccard": 0.996842981,
+   "examples_only_lafa": [
+    [
+     "O94326",
+     "GO:0006139"
+    ],
+    [
+     "O94326",
+     "GO:0006401"
+    ],
+    [
+     "O94326",
+     "GO:0008152"
+    ],
+    [
+     "O94326",
+     "GO:0009056"
+    ],
+    [
+     "O94326",
+     "GO:0009057"
+    ]
+   ],
+   "examples_only_frame": [
+    [
+     "O59858",
+     "GO:0003674"
+    ],
+    [
+     "O59858",
+     "GO:0003824"
+    ],
+    [
+     "O59858",
+     "GO:0004601"
+    ],
+    [
+     "O59858",
+     "GO:0016209"
+    ],
+    [
+     "O59858",
+     "GO:0016491"
+    ]
+   ]
+  },
+  "PK": {
+   "lafa": 249750,
+   "frame": 249593,
+   "only_lafa": 345,
+   "only_frame": 188,
+   "jaccard": 0.997867471,
+   "examples_only_lafa": [
+    [
+     "A0A1P8B554",
+     "GO:0002376"
+    ],
+    [
+     "A0A1P8B554",
+     "GO:0006950"
+    ],
+    [
+     "A0A1P8B554",
+     "GO:0006952"
+    ],
+    [
+     "A0A1P8B554",
+     "GO:0006955"
+    ],
+    [
+     "A0A1P8B554",
+     "GO:0009682"
+    ]
+   ],
+   "examples_only_frame": [
+    [
+     "A1A5B4",
+     "GO:0005215"
+    ],
+    [
+     "A1A5B4",
+     "GO:0005216"
+    ],
+    [
+     "A1A5B4",
+     "GO:0005253"
+    ],
+    [
+     "A1A5B4",
+     "GO:0005254"
+    ],
+    [
+     "A1A5B4",
+     "GO:0008509"
+    ]
+   ]
+  },
+  "PK_known": {
+   "lafa": 1442851,
+   "frame": 1440154,
+   "only_lafa": 2891,
+   "only_frame": 194,
+   "jaccard": 0.99786216,
+   "examples_only_lafa": [
+    [
+     "A0A1P8B554",
+     "GO:0008150"
+    ],
+    [
+     "A0A1P8B554",
+     "GO:0009605"
+    ],
+    [
+     "A0A1P8B554",
+     "GO:0009607"
+    ],
+    [
+     "A0A1P8B554",
+     "GO:0009617"
+    ],
+    [
+     "A0A1P8B554",
+     "GO:0009719"
+    ]
+   ],
+   "examples_only_frame": [
+    [
+     "O00483",
+     "GO:0005575"
+    ],
+    [
+     "O00483",
+     "GO:0005622"
+    ],
+    [
+     "O00483",
+     "GO:0005737"
+    ],
+    [
+     "O00483",
+     "GO:0005739"
+    ],
+    [
+     "O00483",
+     "GO:0005740"
+    ]
+   ]
+  },
+  "targets": {
+   "lafa": 37677,
+   "frame": 37658,
+   "only_lafa": 23,
+   "only_frame": 4,
+   "jaccard": 0.999283459,
+   "examples_only_lafa": [
+    "A0A1P8B554",
+    "A0A6G9KHD3",
+    "C0HJF8",
+    "O14734",
+    "O65688"
+   ],
+   "examples_only_frame": [
+    "O59858",
+    "Q62425",
+    "Q93091",
+    "Q9BYT9"
+   ]
+  }
+ },
+ "terms_of_interest": {
+  "lafa": 39028,
+  "frame": 39028,
+  "only_lafa": 0,
+  "only_frame": 0,
+  "jaccard": 1.0
+ }
+}

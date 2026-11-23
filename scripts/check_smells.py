@@ -115,7 +115,7 @@ class _OffenderVisitor(ast.NodeVisitor):
             )
         args = node.args
         count = len(args.args) + len(args.kwonlyargs) + len(args.posonlyargs)
-        if count > THRESHOLDS["param_count"]:
+        if count > THRESHOLDS["param_count"] and not _is_triton_kernel(node):
             self.out.append(
                 Offender(
                     "params", self.rel, qualified, node.lineno, count, THRESHOLDS["param_count"]
@@ -128,6 +128,18 @@ class _OffenderVisitor(ast.NodeVisitor):
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
         self._visit_func(node)
+
+
+def _is_triton_kernel(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """A function decorated ``@triton.jit``: its arguments are the pointers and
+    strides its launch passes, so the parameter limit does not apply to it (the
+    author's decision for ADR-D63, 2026-11-17). The length limit still does."""
+    for deco in node.decorator_list:
+        target = deco.func if isinstance(deco, ast.Call) else deco
+        if isinstance(target, ast.Attribute) and target.attr == "jit":
+            if isinstance(target.value, ast.Name) and target.value.id == "triton":
+                return True
+    return False
 
 
 def scan_file(path: Path, root: Path) -> list[Offender]:

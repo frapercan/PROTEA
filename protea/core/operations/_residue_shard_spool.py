@@ -14,8 +14,10 @@ import os
 import shutil
 from pathlib import Path, PurePosixPath
 
+from protea.core import queues
+
 #: The queue of the node's upload worker. An operation queue: its messages have no job row.
-UPLOAD_QUEUE = "protea.embeddings.upload"
+UPLOAD_QUEUE = queues.EMBEDDINGS_UPLOAD
 #: Every shard key starts here (``encode_residue_vocabulary.shard_key``).
 SHARD_PREFIX = "residue-codes/"
 

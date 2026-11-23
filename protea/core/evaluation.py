@@ -43,6 +43,7 @@ from typing import Any, NamedTuple
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core import _binding_rule
 from protea.core._binding_rule import PROTEIN_BINDING, drop_binding_only_mfo
 from protea.core._evaluation_graph import (
     _bfs_closure,
@@ -477,6 +478,7 @@ def _reconcile_experimental_side(
     pivot_go_ids: set[str],
     pivot_aspect: dict[str, str],
     project: ProjectionRequest | None = None,
+    raw: dict[str, set[str]] | None = None,
 ) -> tuple[dict[str, dict[str, set[str]]], tuple[Projection | None, Applied | None, int]]:
     """CAFA steps 1–2 for experimental positives on one side.
 
@@ -484,9 +486,14 @@ def _reconcile_experimental_side(
     intersect with the pivot term universe, then bucket by the pivot aspect.
     Step 3 (re-propagate under pivot) is deferred to cafaeval, which applies
     ancestor propagation before scoring and produces the same closure.
+
+    ``raw`` (``{protein: {native go_id}}``) replaces the side's experimental
+    rows with other direct annotations of the same side, reconciled by the same
+    steps; None, the default, reads the experimental rows as always.
     """
     native_parents = _load_parents_by_go_id(session, side.native_snapshot_id)
-    raw = _load_experimental_raw_go_ids(session, side.annotation_set_id)
+    if raw is None:
+        raw = _load_experimental_raw_go_ids(session, side.annotation_set_id)
     projection = None
     remapped = None
     if project is not None:
@@ -504,10 +511,9 @@ def _reconcile_experimental_side(
             # snapshot is not where the landings come from.
             remapped = apply_remap(raw, side.frame.remap, side.frame.live, spare=project.graph.live)
         projection = project_direct_annotations(raw, project.graph, project.target)
-    # The return was discarded here. It is the number of proteins whose ENTIRE
-    # F side the binding rule empties, which is some 26,000 a window: computed
-    # on every build and recorded by nothing.
-    binding_dropped = _drop_binding_only(session, side.native_snapshot_id, raw)
+    binding_dropped = 0
+    if side.binding.on_direct_terms:
+        binding_dropped = _drop_binding_only(session, side.native_snapshot_id, raw)
 
     out: dict[str, dict[str, set[str]]] = {}
     for protein, go_ids in raw.items():
@@ -522,6 +528,7 @@ def _reconcile_experimental_side(
                 ns_map[aspect].add(go_id)
         if ns_map:
             out[protein] = {ns: terms for ns, terms in ns_map.items()}
+    binding_dropped += _binding_rule.drop_cafa_binding_only_f(out, side.binding)
     return out, (projection, remapped, binding_dropped)
 
 
@@ -726,9 +733,10 @@ def compute_evaluation_data_reconciled(
 
     NOT-qualifier exclusion preserves PROTEA's True Path Rule contrapositive:
     NOT terms are propagated to descendants under the native DAG, intersected
-    with pivot, then further propagated under the pivot DAG. The union across
-    both annotation sets is applied to both sides, matching same-snapshot
-    behaviour.
+    with pivot, then further propagated under the pivot DAG, and the union
+    across both annotation sets is applied to both sides. AFTER the closure,
+    unlike the same-snapshot path: an ancestor that only a negated annotation
+    supported stays in this truth (``protea.core.lafa_frame`` negates first).
     """
     refuse_unknown_rules(window)
     pivot_go_ids, pivot_aspect = _load_pivot_term_universe(session, window.pivot_snapshot_id)

@@ -2,7 +2,7 @@
 // (slice F-METHOD-EVAL-SURFACE).
 //
 // Every EvaluationResult can carry four optional provenance markers that
-// make a benchmark number self-describing on /benchmark and /evaluation:
+// make a figure self-describing on /evaluation and in each window's panel:
 //
 //   - frame:           "lafa" | "internal" | null  (scoring frame)
 //   - temporal_window: free text, e.g. "SELECT_220_227" | "FINAL_227_230"

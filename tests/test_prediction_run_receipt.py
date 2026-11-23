@@ -100,3 +100,27 @@ class TestItSurvivesTheDatabase:
 @pytest.mark.parametrize("field", ["job_id", "search_backend", "metric", "donor_policy"])
 def test_no_field_is_silently_absent(field):
     assert field in run_receipt(_payload(), uuid.uuid4())
+
+
+class TestTheSelfExclusionRuleIsRecorded:
+    """Whether the query was excluded, always; by which rule, when the payload named it."""
+
+    def test_the_flag_alone_reads_as_it_always_did(self):
+        r = run_receipt(_payload(exclude_self_neighbour=True), uuid.uuid4())
+        assert r["exclude_self_neighbour"] is True
+        assert "self_exclusion" not in r
+
+    def test_a_rule_by_accession_is_recorded_and_counts_as_an_exclusion(self):
+        # Named alone, the rule still excludes the query, so the receipt must not
+        # read as a self-vote whatever the flag said.
+        r = run_receipt(_payload(self_exclusion="accession"), uuid.uuid4())
+        assert (r["exclude_self_neighbour"], r["self_exclusion"]) == (True, "accession")
+
+    def test_a_rule_of_none_records_that_the_query_could_vote(self):
+        r = run_receipt(_payload(self_exclusion="none"), uuid.uuid4())
+        assert (r["exclude_self_neighbour"], r["self_exclusion"]) == (False, "none")
+
+    def test_neither_records_the_historical_behaviour(self):
+        r = run_receipt(_payload(), uuid.uuid4())
+        assert r["exclude_self_neighbour"] is False
+        assert "self_exclusion" not in r

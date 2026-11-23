@@ -10,6 +10,8 @@ from pydantic import Field, field_validator
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from protea.core import queues
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import (
     EmitFn,
     OperationResult,
@@ -37,7 +39,7 @@ from protea.infrastructure.orm.models.annotation.protein_go_annotation import Pr
 from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.protein.protein import Protein
 
-_AUTO_EVAL_QUEUE = "protea.jobs"
+_AUTO_EVAL_QUEUE = queues.JOBS
 
 
 def _append_attempt(annotation_set: AnnotationSet, job_id: uuid.UUID | None) -> None:
@@ -198,6 +200,12 @@ class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
     commit_every_page: bool = True
     total_limit: PositiveInt | None = None
     allow_unverified_ontology: bool = False
+    #: Enqueue a ``generate_evaluation_set`` between the latest prior ``goa``
+    #: release and this one when the load ends. Off by default: the universe of
+    #: ADR-D60 declares every frame with its role and its truth rules, and a
+    #: frame opened by every load declares neither. ``True`` does exactly what
+    #: every load did before the flag existed.
+    enqueue_evaluation_set_against_prior: bool = False
 
     @field_validator("ontology_snapshot_id", "gaf_url", "source_version", mode="before")
     @classmethod
@@ -206,6 +214,36 @@ class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
             raise ValueError("must be a non-empty string")
         return v.strip()
 
+
+def _frame_asked_for(p: LoadGOAAnnotationsPayload, emit: EmitFn) -> bool:
+    """Whether this load enqueues the frame against the prior release.
+
+    Until the flag existed every load did, so every load of the series opened a
+    frame nobody declared. ADR-D60's universe declares its frames, so the
+    default is off, and the load says it skipped one; on, it runs
+    :meth:`LoadGOAAnnotationsOperation._maybe_enqueue_atomic_eval`, which is
+    what every load used to run. Cascade cumulative deltas (V_K -> V_target)
+    remain manual via ``scripts/materialize_lab_intervals.py --mode cascade``.
+    """
+    if not p.enqueue_evaluation_set_against_prior:
+        emit("load_goa_annotations.auto_eval_skipped", None, {"reason": "not_requested"}, "info")
+    return p.enqueue_evaluation_set_against_prior
+
+
+
+def _new_goa_set(
+    p: LoadGOAAnnotationsPayload, snapshot_id: uuid.UUID, job_id: uuid.UUID | None
+) -> AnnotationSet:
+    """A new set for this release: the job that opens it, its source, what it is and the code."""
+    return AnnotationSet(
+        source="goa",
+        source_version=p.source_version,
+        ontology_snapshot_id=snapshot_id,
+        job_id=job_id,
+        meta={"gaf_url": p.gaf_url, "job_ids": [str(job_id)] if job_id else []},
+        description=f"GOA {p.source_version} as load_goa_annotations read it from {p.gaf_url}.",
+        code_revision=code_revision(),
+    )
 
 class LoadGOAAnnotationsOperation:
     """Streams a GOA GAF file (gzip or plain) and upserts ProteinGOAnnotation rows.
@@ -294,12 +332,11 @@ class LoadGOAAnnotationsOperation:
             elapsed=time.perf_counter() - t0,
         )
 
-        # Auto-trigger an atomic generate_evaluation_set against the latest
-        # prior goa AnnotationSet (numeric source_version sort).  Cascade
-        # cumulative deltas (V_K → V_target) remain manual via
-        # scripts/materialize_lab_intervals.py --mode cascade.
+        # The frame against the prior release, only when the payload asks.
         publish_after_commit: list[tuple[str, uuid.UUID]] = []
-        child_job_id = self._maybe_enqueue_atomic_eval(session, annotation_set, emit)
+        child_job_id = None
+        if _frame_asked_for(p, emit):
+            child_job_id = self._maybe_enqueue_atomic_eval(session, annotation_set, emit)
         if child_job_id is not None:
             publish_after_commit.append((_AUTO_EVAL_QUEUE, child_job_id))
             result["auto_eval_job_id"] = str(child_job_id)
@@ -388,13 +425,7 @@ class LoadGOAAnnotationsOperation:
                 "info",
             )
             return existing
-        annotation_set = AnnotationSet(
-            source="goa",
-            source_version=p.source_version,
-            ontology_snapshot_id=snapshot_id,
-            job_id=job_id,
-            meta={"gaf_url": p.gaf_url, "job_ids": [str(job_id)] if job_id else []},
-        )
+        annotation_set = _new_goa_set(p, snapshot_id, job_id)
         session.add(annotation_set)
         session.flush()
         emit(

@@ -28,6 +28,7 @@ from pydantic import Field
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from protea.core import queues
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.contracts.parent_progress import update_parent_progress
 from protea.core.operations._parent_guard import parent_cancelled
@@ -36,7 +37,7 @@ from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.residue_code import ResidueCode as ResidueCodeRow
 
 #: The queue the server's writer consumes, shared with ``store_embeddings``.
-WRITE_QUEUE = "protea.embeddings.write"
+WRITE_QUEUE = queues.EMBEDDINGS_WRITE
 
 
 class StoredSequence(ProteaPayload, frozen=True):

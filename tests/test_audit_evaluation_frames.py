@@ -136,8 +136,7 @@ def test_the_verdict_asks_for_a_declaration_not_a_recomputation() -> None:
     """Nothing computes ``frame``.
 
     It is a payload field that run_cafa_evaluation stamps as the caller passed
-    it and batch_rescore_evaluation forwards unchanged, so re-running an
-    unframed row yields another unframed row unless the dispatcher declares a
+    it, so re-running an unframed row yields another unframed row unless the dispatcher declares a
     frame. A verdict phrased as "re-framed by recomputing" sends a reader
     looking for a pipeline step that does not exist.
     """

@@ -11,11 +11,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.deps import get_amqp_url, get_benchmark_config, get_session_factory
+from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetPayload
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
-from protea.infrastructure.benchmark_config import BenchmarkConfig
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
 from protea.infrastructure.settings import load_settings
@@ -24,7 +23,6 @@ from protea.services.annotations_service import (
     AnnotationsServiceError,
     EntityNotFoundError,
     HoldoutArtifactError,
-    apply_baseline_scoring_default,
     assert_evaluation_set_exists,
     delete_evaluation_set_collect_keys,
     fetch_information_accretion_tsv,
@@ -224,23 +222,29 @@ def run_cafa_evaluation(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),
     amqp_url: str = Depends(get_amqp_url),
-    cfg: BenchmarkConfig = Depends(get_benchmark_config),
 ) -> dict[str, Any]:
     """Queue a job that runs the CAFA evaluator (NK / LK / PK) for a prediction set.
 
-    Body must contain ``prediction_set_id`` (required) and optionally
-    ``max_distance`` (float).
+    Body must contain ``prediction_set_id`` and may carry the frame and label
+    fields of ``RunCafaEvaluationPayload``. The evaluator scores the set's stored
+    scores, so nothing here adds a scoring configuration: it used to attach the
+    benchmark's baseline config to every run that named none, which the
+    evaluator now refuses, and a set of candidates is scored first with
+    ``score_prediction_set``.
     """
     body = {**body, "evaluation_set_id": str(eval_id)}
     try:
         RunCafaEvaluationPayload.model_validate(body)
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+        # Without the context: a model-level refusal carries its ValueError there,
+        # which JSON cannot hold, and the answer became a 500 instead of this 422.
+        raise HTTPException(
+            status_code=422, detail=exc.errors(include_url=False, include_context=False)
+        ) from exc
 
     try:
         with session_scope(factory) as session:
             assert_evaluation_set_exists(session, eval_id)
-            body = apply_baseline_scoring_default(session, body, cfg.baseline_scoring_name)
             job_id = enqueue_job(
                 session,
                 operation="run_cafa_evaluation",

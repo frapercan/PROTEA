@@ -21,9 +21,10 @@ return. Parametrised over both, so a third consumer inherits the requirement
 instead of the defect.
 
 Cost, 2026-09-07: four hard kills on the compute node and one on this host,
-each paying its full stop timeout first. ``_OPERATION_QUEUES`` in
-``scripts/worker.py`` is every compute queue in the system, and all of them
-ran the broken handler.
+each paying its full stop timeout first. The queues ``scripts/worker.py``
+serves with an ``OperationConsumer`` (then the hard-coded ``_OPERATION_QUEUES``,
+now derived from the operation specs) are every compute queue in the system,
+and all of them ran the broken handler.
 """
 
 from __future__ import annotations

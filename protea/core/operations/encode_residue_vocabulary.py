@@ -50,6 +50,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.config.tuning import get_tuning
+from protea.core import queues
 from protea.core.contracts.operation import (
     EmitFn,
     Operation,
@@ -92,7 +93,7 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence
 TARGET_BACKEND = "residue-vocabulary"
 
 #: The queue a worker with a card consumes, as for every other per-residue pass.
-_BATCH_QUEUE = "protea.embeddings.batch"
+_BATCH_QUEUE = queues.EMBEDDINGS_BATCH
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
@@ -298,6 +299,11 @@ def dispatched_result(
             "embedding_config_id": str(target_id),
             "vocabulary_sha256": digest,
         },
+        # Zero and not left NULL: a NULL progress reads as 'no
+        # information' where the truth is 'none done yet', and until
+        # 2026-11-08 it also meant the counter could never advance,
+        # because NULL + 1 is NULL.
+        progress_current=0,
         progress_total=len(messages),
         publish_operations=messages,
         deferred=True,

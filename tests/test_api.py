@@ -14,12 +14,15 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from protea.api.routers.jobs import router
+from protea.core.operation_catalog import build_operation_registry
 
 # ---------------------------------------------------------------------------
 # App fixture — minimal FastAPI app wired with mock state
 # ---------------------------------------------------------------------------
 
 FAKE_AMQP = "amqp://guest:guest@localhost/"
+# The real catalog: POST /jobs checks the operation and its queue against the specs.
+REGISTRY = build_operation_registry()
 
 
 def _make_job(job_id=None, operation="ping", queue_name="test.q", status="queued"):
@@ -46,7 +49,7 @@ def _make_app(session_factory, amqp_url=FAKE_AMQP):
     app = FastAPI()
     app.state.session_factory = session_factory
     app.state.amqp_url = amqp_url
-    app.state.operation_registry = MagicMock()
+    app.state.operation_registry = REGISTRY
     app.include_router(router)
     return app
 
@@ -99,7 +102,7 @@ class TestCreateJob:
             patch("protea.api.routers.jobs.Job", return_value=job),
         ):
             c = TestClient(app)
-            resp = c.post("/jobs", json={"operation": "ping", "queue_name": "test.q"})
+            resp = c.post("/jobs", json={"operation": "ping", "queue_name": "protea.ping"})
 
         assert resp.status_code == 200
         body = resp.json()
@@ -143,9 +146,9 @@ class TestCreateJob:
             patch("protea.api.routers.jobs.Job", return_value=job),
         ):
             c = TestClient(app)
-            c.post("/jobs", json={"operation": "ping", "queue_name": "test.q"})
+            c.post("/jobs", json={"operation": "ping", "queue_name": "protea.ping"})
 
-        mock_publish.assert_called_once_with(FAKE_AMQP, "test.q", job.id)
+        mock_publish.assert_called_once_with(FAKE_AMQP, "protea.ping", job.id)
 
     def test_publish_failure_returns_500(self, session):
         job = _make_job()
@@ -160,7 +163,7 @@ class TestCreateJob:
             patch("protea.api.routers.jobs.Job", return_value=job),
         ):
             c = TestClient(app, raise_server_exceptions=False)
-            resp = c.post("/jobs", json={"operation": "ping", "queue_name": "test.q"})
+            resp = c.post("/jobs", json={"operation": "ping", "queue_name": "protea.ping"})
 
         assert resp.status_code == 500
 

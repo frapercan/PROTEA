@@ -204,6 +204,182 @@ one would be the step that makes a number stop being attributable: a bundle
 whose leakage rule was evaluated against a release nobody declared cannot say
 what it is leak-free with respect to.
 
+Two tables are keyed by the cut alone, and need no windows
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Noted 2026-11-08, because it was missed. ``terms`` and ``term_ancestors``
+depend on no window: they are the vocabulary a model may name and the
+subsumption between those names. Which transitions train the model changes
+neither, so a run asking only for these two declares no window list at all.
+Demanding ids would be asking for a scope the table does not use, and the
+writer's refusal of an empty list is therefore conditional on which tables are
+requested rather than absolute.
+
+**Measured on the campaign axis**, ``releases/2022-07-01``: 43.558 live terms,
+every one with an aspect, 77.055 direct edges and **595.072 closure pairs**,
+with both ends live in every pair. ``Dag.closure``'s own docstring says 783.477
+"on GO", which is a different release: that number is quoted and this one is
+measured, and they are not the same quantity. Loading and closing the axis takes
+under a second, which is what makes the run short enough for a queue that has
+no permanent consumer yet.
+
+A closure pair reaching outside the axis is dropped rather than written, since
+the loader draws from ``terms`` and an ancestor it cannot name is a row that
+joins to nothing. On this axis there are none, and the filter is what keeps
+that a fact rather than an assumption.
+
+The closure follows the same relations that closed the gains
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Asked by the laboratory on 2026-11-08, because the model's ontology smoothing
+must use the same graph the truth was closed under or it would smooth over a
+subsumption the truth never used.
+
+It does, and by sharing the function rather than agreeing on a list.
+``_load_children_by_go_id`` filters ``relation_type IN ('is_a', 'part_of')``,
+and it is the function ``compute_evaluation_data_reconciled`` calls on the
+pivot: ``_load_children_by_go_id(session, window.pivot_snapshot_id)``, where
+``cut`` IS that pivot. A test asserts the identity of the function rather than
+re-reading the relation list, for the reason the terms-of-interest test does: a
+second copy of the filter would agree until it did not.
+
+``residue_refs`` covers the whole bank, and its key is not the name
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Noted 2026-11-08. It is a third table that depends on no window, so it joins
+the two above in needing no window list: it covers the WHOLE bank rather than a
+bundle's population, which is a superset of any selection a bundle could make,
+and the loader reads only the ``sequence_id`` values of its own batch.
+Per-window coverage is still computed when a bundle is exported, against its
+real population, because that number is about the bundle and not about the
+bank.
+
+**Not one byte of code is copied.** The 90,4 GB of shards stay where they are;
+each row names the shard key, that shard's sha256 and the sequence's position
+inside it, so a reader fetches one shard and verifies it before believing it.
+Measured: 683.887 rows over 5.344 shards, one distinct sha per shard, positions
+0 to 127.
+
+**AND THE CONFIG THAT KEYS THOSE ROWS IS NOT THE ONE THEY ARE NAMED AFTER.**
+Every row carries ``43193409-de70-526b-ae8d-43892a744049``, whose model name is
+``residue-vocabulary:06fed75ca76d17be:f3a7fe16``, while the ankh config
+``f3a7fe16-eaf5-5083-b459-7c5fa7a9a9e0`` the vocabulary was derived FROM has
+**zero** rows. A reader asking for "the f3a7fe16 bank" therefore gets nothing,
+and an empty ``residue_refs`` is indistinguishable from a bank with no
+per-residue codes at all. So the writer refuses a config with no rows and names
+the distinction in the refusal, which is the same shape as the ``window`` join
+key above: a mismatch that produces no error is worse than one that does.
+
+**THE MANIFEST DECLARES TWO CONFIG IDS, NOT ONE.** Asked by the laboratory on
+2026-11-08, before either field existed, which is the cheap moment. The CODES
+config (the vocabulary one) indexes ``residue_refs`` and ``feature_tokens``;
+the KNN config (Ankh base) gives the ``neighbourhood``. Neither derives from
+the other, so they are two fields, exactly as ``cut`` and ``cut_version`` are:
+one field named for both invites putting one where the other goes.
+
+The payload's field is therefore ``codes_config_id`` and not
+``embedding_config_id``, which is what it was called for one commit.
+``knn_config_id`` arrives with ``neighbourhood`` and not before, because a
+field that does nothing lies about what the run declared. The COLUMN inside
+``residue_refs`` stays ``embedding_config_id``: that is the loader's contract,
+and inside one table there is only one config to mean.
+
+``feature_tokens`` is NOT in this group, and the difference is the point of the
+grouping. Summarising the bank's codes means reading those 90,4 GB, which is
+computation rather than reference, so it waits on where that computation runs.
+
+The vectors are verified, never quoted
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``terms`` carries ``vector_uri`` and ``vector_sha256`` for the axis's
+text-embedding artefact, and the writer FETCHES those bytes and checks the
+digest before publishing either column. ``exists`` would answer whether
+something sits at that key, which is a different question from whether the
+digest this table is about to publish describes what is there.
+
+On 2026-11-08 that artefact was NOT in the platform's object store: 6.426
+objects over twelve prefixes and nothing matching it. So ``terms`` refuses
+until it is published, and the refusal names the key it looked for. Writing the
+sha from the message that mentioned it would have produced a locator for bytes
+nobody on this side could check, which is the defect this project has spent a
+week closing.
+
+The leakage rule is applied when the bundle is BUILT
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Added 2026-11-08, after it was needed. A window whose ``t'`` is after
+``cut_version`` cannot train a model cut there: its gain is in the model's
+future. The laboratory's loader checks that rule and refuses the whole bundle,
+so this is not the only guard. It is the one that stops the bundle existing.
+
+**It is not hypothetical.** The first run of the writer declared
+``cut_version`` 211 over 64 windows, and **fifteen of them ended after 211**:
+every transition from 211 to 212 through 225 to 226. All fifteen fall INSIDE
+the span of the long validation window, 211 to 227, so their gains are part of
+the truth that window scores. The table that run published holds ontology terms
+rather than annotations, so nothing leaked; but the bundle declared a scope
+that was not its own, and the next table written for those windows would have
+leaked the validation truth into a training set.
+
+So the writer refuses the window, the way it already refuses one on another
+pivot, and for the same reason: a manifest that is wrong about its own scope is
+worse than a run that fails.
+
+Which windows train the model is a separate question and not this record's. The
+constraint this section states is only the bound: for a bundle that must not
+leak into the long validation window, ``cut_version`` has to be at or before
+the release that window opens on.
+
+``gains`` shares the query population, and that is a guard
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Noted 2026-11-08, when the table was written. ``queries`` excludes a protein
+with no stored sequence, because the exported FASTA excludes it and the
+training rows have to be about the scored population. So a gain for a protein
+outside that set would be a gain for a query the loader does not know, and the
+two tables would disagree about who the queries are **without either being
+wrong on its own**.
+
+The writer therefore computes the query population once and refuses a gain
+outside it, rather than dropping one. Dropping would make ``gains`` quietly
+smaller than the truth it copies, and a row count is the only thing a reader
+could compare it against. Measured over the 65 admissible windows: **zero**
+delta proteins lack a sequence, so the guard changes nothing today and says so
+when that stops being true. The same shape covers a gained term the axis cannot
+name: the loader groups by aspect, so such a row is one it cannot place.
+
+**The closure is derived from the truth profile in one place.** ``projected``
+means the gain is expressed on the pivot and ``as_closed`` on each end's own
+graph, and the same window under two closures is two different truths. A
+profile with no declared closure is refused rather than guessed, and a test
+asserts that every value of ``TRUTH_PROFILES`` has one, so adding a profile
+forces someone to say which graph it closes in at the moment it is declared
+rather than at run time.
+
+**The shape, measured before the code was written.** Over those 65 windows
+``gains`` is **9.596.563 rows**, the largest window 691.553 and the mean
+147.639. Six short columns at that count is the one place in this dataset where
+building a tuple per row would hurt, so the columns are six parallel lists
+appended to per window, and the order is stable by construction rather than by
+a final sort: windows in order, strata in their declared order, queries sorted,
+terms sorted.
+
+The window is the join key, and it is the full id
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The loader joins ``window_terms_out`` to ``queries`` on ``window`` as text. If
+one table carried the full ``evaluation_set_id`` and the other a semantic name
+or an eight-character prefix, the negatives restriction would simply not apply
+and **nothing would fail**: no error, no empty result, just a model trained
+against negatives that were never excluded.
+
+So both tables write the full id, and the writer asserts that the two tables
+agree about their window set before publishing either. Both are built from one
+payload in one pass, so the assertion should be trivially true, which is
+exactly why it is cheap to keep for the day one table is written from a
+different list. The loader counts ``windows_with_terms_out`` on its side, so a
+disagreement is visible from both ends.
+
 The truth is exported, never re-derived
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -229,6 +405,21 @@ is computed rather than declared: a written value can disagree with the row it
 describes and nothing would see it. Measured over the 131 evaluation sets in
 the database, two values are enough and a third is not needed: **122 are
 ``native`` and 9 are ``pivot``**.
+
+**AND THE WRITER MADE EXACTLY THAT MISTAKE, twice, on 2026-11-08.** The first
+version of ``gains`` mapped ``projected`` to ``pivot`` and ``as_closed`` to
+``native``, in a constant named ``_CLOSURE_OF_PROFILE``, with a test that
+walked the values of ``TRUTH_PROFILES`` and therefore could not see it. The
+laboratory had made the same mapping a day earlier and withdrawn it. Both times
+the paragraph below was already in this record, written by an earlier PR of
+this same project: the warning was not missing, it was not read.
+
+So the derivation now compares the two natives against the pivot and against
+each end's corpus ontology, the way the window inventory already does, a third
+combination is refused rather than named, and the test walks combinations of
+NATIVES. The case that settles it is in the database: the twins of
+``160 -> 177`` are both ``projected`` and differ only here, so under the
+mapping the (B) one would have been written as ``pivot``.
 
 **It is NOT ``truth_profile``.** That field says how the truth is derived,
 ``projected`` or ``as_closed``; ``closure`` says which graphs the two ends

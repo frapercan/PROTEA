@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -21,6 +22,57 @@ from protea.infrastructure.orm.base import Base
 if TYPE_CHECKING:
     from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
     from protea.infrastructure.orm.models.job import Job
+
+#: ADR D40's two roles and ADR-D60's three. Spelled out rather than built from
+#: ``protea.core.window_declarations.WINDOW_ROLES`` so the model imports nothing
+#: from core; ``tests/test_window_roles_and_truth_rules.py`` fails when the two
+#: lists disagree, and the migration that installs it carries the same text.
+WINDOW_ROLE_CHECK = (
+    "window_role IS NULL OR window_role IN "
+    "('valid', 'test', 'training', 'validation', 'test_spent')"
+)
+
+#: The five keys of ``truth_rules`` and the values each may take: the
+#: vocabularies of :mod:`protea.core._truth_rules`, the closures of
+#: :mod:`protea.core.window_declarations` and the binding rules of
+#: :mod:`protea.core._binding_rule`, checked against all three by the same test.
+TRUTH_RULES_CHECK = (
+    "truth_rules IS NULL OR ("
+    "jsonb_typeof(truth_rules) = 'object' "
+    "AND COALESCE(truth_rules ->> 'profile', '') IN ('as_closed', 'projected', 'own_graph') "
+    "AND COALESCE(truth_rules ->> 'toi_rule', '') IN "
+    "('pivot_terms', 'live_in_both_ends', 'both_ends_trimmed') "
+    "AND COALESCE(truth_rules ->> 'not_codes', '') IN ('any', 'experimental') "
+    "AND COALESCE(truth_rules ->> 'closure', '') IN "
+    "('per_side', 't0_graph', 't1_graph', 'per_side_t0_pivot', 'explicit', 'direct_terms') "
+    "AND COALESCE(truth_rules ->> 'binding', '') IN "
+    "('descendants_both_ends', 'cafa', 'none'))"
+)
+
+#: A supersession is all three of its fields or none, and never points at the
+#: window itself; the migration that installs it carries the same text.
+SUPERSESSION_CHECK = (
+    "(superseded_by_id IS NULL) = (superseded_at IS NULL) "
+    "AND (superseded_by_id IS NULL) = (supersession_note IS NULL) "
+    "AND (superseded_by_id IS NULL OR superseded_by_id <> id)"
+)
+
+#: The binding rules a payload can ask for, spelled out for the same reason as
+#: the checks above; the migration that installs it carries the same text.
+BINDING_RULE_CHECK = "binding_rule IN ('descendants_both_ends', 'cafa')"
+
+
+#: The vocabulary of :data:`protea.core._window_population.TARGET_POPULATIONS`,
+#: spelled out so the model imports nothing from core; the migration that
+#: installs it carries the same text and a test compares the three.
+TARGET_POPULATION_CHECK = (
+    "target_population IN ('every_protein', 'superset_at_t0', 'swissprot_same_sequence')"
+)
+
+#: The profiles and gain rules a row may ask for, spelled out for the same
+#: reason; the migration that installs them carries the same text.
+TRUTH_PROFILE_CHECK = "truth_profile IN ('as_closed', 'projected', 'own_graph')"
+TOI_RULE_CHECK = "toi_rule IN ('pivot_terms', 'live_in_both_ends', 'both_ends_trimmed')"
 
 
 class EvaluationSet(Base):
@@ -43,7 +95,14 @@ class EvaluationSet(Base):
     scored on the VALID set first and only then on the TEST set, which is
     the structural piece that lets selection happen off the reported
     window (no winner's-curse). The field is metadata only: it does not
-    change how the delta is computed.
+    change how the delta is computed. ADR-D60 adds the roles of a frame,
+    ``"training"``, ``"validation"`` and ``"test_spent"``; see
+    :mod:`protea.core.window_declarations` for what each one allows.
+
+    ``truth_rules`` is what the build APPLIED, as a JSON object with five
+    keys (``profile``, ``toi_rule``, ``not_codes``, ``closure``, ``binding``), and it is
+    the field a frame compares across cuts. NULL on every row built before it
+    existed, which reads as legacy: nothing says, never "the defaults".
 
     ``pivot_snapshot_id``, ``old_native_snapshot_id`` and
     ``new_native_snapshot_id`` are the opposite: they change the delta, and
@@ -84,29 +143,53 @@ class EvaluationSet(Base):
             "truth_profile",
             "toi_rule",
             "not_codes",
+            "target_population",
+            "binding_rule",
             name="uq_evaluation_set_identity",
         ),
         # ADR D40: keep the protocol-window vocabulary closed at the DB
-        # level without a native enum type (cheaper to extend later).
+        # level without a native enum type (cheaper to extend later). ADR-D60
+        # extended it with the three roles of a frame; the two of D40 stay
+        # because stored rows carry them.
         CheckConstraint(
-            "window_role IS NULL OR window_role IN ('valid', 'test')",
+            WINDOW_ROLE_CHECK,
             name="ck_evaluation_set_window_role",
+        ),
+        # The declared rules close their vocabularies at the DB level too, and
+        # a missing key or a JSON null fails rather than passing: ``->>`` gives
+        # NULL for both, and a CHECK that evaluates to NULL is a CHECK that
+        # passes, hence the COALESCE.
+        CheckConstraint(
+            TRUTH_RULES_CHECK,
+            name="ck_evaluation_set_truth_rules",
         ),
         # Same reasoning, and NOT NULL rather than nullable: a NULL would be
         # distinct from every other NULL in the unique constraint above, so
         # two windows with no profile declared would both be accepted and the
         # key would stop being one.
         CheckConstraint(
-            "truth_profile IN ('as_closed', 'projected')",
+            TRUTH_PROFILE_CHECK,
             name="ck_evaluation_set_truth_profile",
         ),
         CheckConstraint(
-            "toi_rule IN ('pivot_terms', 'live_in_both_ends')",
+            TOI_RULE_CHECK,
             name="ck_evaluation_set_toi_rule",
         ),
         CheckConstraint(
             "not_codes IN ('any', 'experimental')",
             name="ck_evaluation_set_not_codes",
+        ),
+        CheckConstraint(
+            TARGET_POPULATION_CHECK,
+            name="ck_evaluation_set_target_population",
+        ),
+        CheckConstraint(
+            BINDING_RULE_CHECK,
+            name="ck_evaluation_set_binding_rule",
+        ),
+        CheckConstraint(
+            SUPERSESSION_CHECK,
+            name="ck_evaluation_set_supersession",
         ),
     )
 
@@ -170,10 +253,32 @@ class EvaluationSet(Base):
     #: case instead of passing it in silence.
     groundtruth_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # ADR D40: rolling-origin protocol window this set is bound to.
-    # ``"valid"`` | ``"test"`` | ``None`` (unbound). Nullable so legacy
+    # ``"valid"`` | ``"test"`` | ``None`` (unbound), and since ADR-D60 the
+    # frame roles ``"training"`` | ``"validation"`` | ``"test_spent"``, which
+    # is why the column is 16 wide and no longer 8. Nullable so legacy
     # rows and ad-hoc episodes carry no role; a CHECK constraint keeps
     # the value set closed without a native enum (cheaper to evolve).
-    window_role: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    window_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: The truth rules the build APPLIED, read from the path it took and the
+    #: graphs it resolved, never copied from the payload: on the
+    #: same-snapshot path the three rule columns below record a request that
+    #: ``compute_evaluation_data`` never reads. Four keys, ``profile``,
+    #: ``toi_rule``, ``not_codes`` and ``closure``, the last one saying how
+    #: the three graph ids relate to the window's own ends, which is the only
+    #: form that compares across cuts. See
+    #: :mod:`protea.core.window_declarations`.
+    #:
+    #: NOT IN THE IDENTITY, because it is a function of it: the path a build
+    #: takes and the graphs it resolves are both decided by the eight identity
+    #: columns. NULL on every row built before the column, and NULL reads as
+    #: legacy. It is not backfilled: what a past build applied is a question
+    #: about the code that ran then, and ``code_revision`` is NULL on most of
+    #: those rows.
+    #: ``none_as_null`` keeps a Python None as SQL NULL (legacy) instead of a JSON null,
+    #: which ``ck_evaluation_set_truth_rules`` would refuse.
+    truth_rules: Mapped[dict[str, str] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
     #: How this window's t1 truth was built. ``as_closed`` is what every row
     #: written before this column existed did: a term the pivot cannot name
     #: is dropped by the closure intersection and the gain goes with it.
@@ -207,9 +312,7 @@ class EvaluationSet(Base):
     #: furthest from the pivot, a version by identity would recover 3 terms
     #: over 11 proteins. See
     #: :func:`protea.core._truth_rules._terms_of_interest`.
-    toi_rule: Mapped[str] = mapped_column(
-        String(24), nullable=False, server_default="pivot_terms"
-    )
+    toi_rule: Mapped[str] = mapped_column(String(24), nullable=False, server_default="pivot_terms")
     #: Which NOT annotations may take truth away. ``any`` is what every row
     #: written before this column did: every NOT row whatever its evidence,
     #: so a ``NOT|IBA`` removes a term from a truth whose positives are
@@ -222,6 +325,29 @@ class EvaluationSet(Base):
     #: of them LK, and nine projected entries: small, and exactly the
     #: difference between reproducing the lab's truth and missing it.
     not_codes: Mapped[str] = mapped_column(String(16), nullable=False, server_default="any")
+    #: Which proteins the window may score. ``every_protein`` is what every row
+    #: written before this column did: any protein that gained between the two
+    #: ends. ``superset_at_t0`` keeps the superset of the photo of the window's
+    #: start (ADR-D59), the Swiss-Prot list of the release paired with that
+    #: cut, fixed before the window opens as CAFA fixes its targets; the author
+    #: chose it for the four windows of the frame on 2026-11-16 (ADR-D60).
+    #:
+    #: In the identity because it changes the delta, like the three rules
+    #: above, and separate from them because it answers another question:
+    #: they decide which TERMS are truth, this decides which PROTEINS are
+    #: targets. The proteins it left out are counted by bucket in ``stats``.
+    target_population: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="every_protein"
+    )
+    #: Which protein-binding rule builds the F side
+    #: (:mod:`protea.core._binding_rule`). ``descendants_both_ends`` is what every
+    #: row written before this column was built with: PROTEA's own rule, on
+    #: direct annotations at both ends. ``cafa`` is CAFA's and LAFA's, at t1 after
+    #: propagation, which the author chose for the benchmark on 2026-11-20. In the
+    #: identity because it changes the F side of the delta.
+    binding_rule: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="descendants_both_ends"
+    )
     #: WHICH CODE BUILT THIS ROW, from :func:`protea.core.code_revision`.
     #:
     #: The three rule columns above say what the delta IS by declaration. This
@@ -258,6 +384,24 @@ class EvaluationSet(Base):
     #: way to compare two of these: it refuses to conclude anything from an
     #: unidentifying value instead of reporting agreement.
     code_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: What the row IS, in a sentence its writer derives (ADR-D58's long
+    #: descriptor); NULL on rows written before the column, which read as
+    #: "nothing says", never as a default.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The window that superseded this one, when it was marked and why, written by
+    #: ``supersede_evaluation_sets``. NULL for a window nothing has superseded. The
+    #: row stays, and so do the results computed on it: they are records of what
+    #: was measured, and the pointer says where the measurement moved to.
+    superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "evaluation_set.id", ondelete="RESTRICT", name="fk_evaluation_set_superseded_by_id"
+        ),
+        nullable=True,
+        index=True,
+    )
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    supersession_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     old_annotation_set: Mapped[AnnotationSet] = relationship(
         "AnnotationSet", foreign_keys=[old_annotation_set_id]

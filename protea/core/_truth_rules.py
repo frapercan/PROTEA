@@ -25,7 +25,13 @@ from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 
-from protea.core._binding_rule import PROTEIN_BINDING
+from protea.core._binding_rule import (
+    DESCENDANTS_STEP,
+    PROTEIN_BINDING,
+    REQUESTABLE_BINDING_RULES,
+    BindingStep,
+    binding_step,
+)
 from protea.core._evaluation_graph import (
     _bfs_closure,
     _live_terms_with_aspect,
@@ -49,7 +55,14 @@ from protea.infrastructure.orm.models.annotation.annotation_set import Annotatio
 #: before the binding rule and the closure. On the 211 -> 227 window the two
 #: profiles differ by 646 proteins and 2,610 entries, which is the whole of
 #: the difference between PROTEA's truth and the lab's.
-TRUTH_PROFILES: tuple[str, ...] = ("as_closed", "projected")
+#:
+#: ``own_graph`` is LAFA's (:mod:`protea.core.lafa_frame`): each end named and
+#: closed under its OWN ontology, with no pivot in the build, and what that
+#: ontology cannot name dropped. Only LAFA's frame builds it.
+TRUTH_PROFILES: tuple[str, ...] = ("as_closed", "projected", "own_graph")
+
+#: The profiles the reconciled path builds; it refuses the third.
+RECONCILED_PROFILES: tuple[str, ...] = TRUTH_PROFILES[:2]
 
 #: Which terms the GAIN is allowed to contain, by the name a payload asks for
 #: it with. Same vocabulary as ``run_cafa_evaluation``'s ``toi_rule``, because
@@ -66,7 +79,31 @@ TRUTH_PROFILES: tuple[str, ...] = ("as_closed", "projected")
 #: COUNTS: a protein whose only gain is a term obsolete by t1 is not a target
 #: at all. Measured on 211 -> 227: one protein, ``Q9FNK4``, whose four gains
 #: were alive in 2022 and are obsolete in 2025.
-GAIN_RULES: tuple[str, ...] = ("pivot_terms", "live_in_both_ends")
+#:
+#: ``both_ends_trimmed`` is LAFA's: the same terms of interest, and BOTH ends
+#: trimmed to them before the classification, so a t0 term outside them does
+#: not make an aspect known. Only LAFA's frame builds it.
+GAIN_RULES: tuple[str, ...] = ("pivot_terms", "live_in_both_ends", "both_ends_trimmed")
+
+#: The gain rules the reconciled path builds; it refuses the third.
+RECONCILED_GAIN_RULES: tuple[str, ...] = GAIN_RULES[:2]
+
+#: The terms a window is scored over, by its gain rule: the terms its truth
+#: could hold, and no others. A gain that may hold anything the pivot names is
+#: scored over the pivot's terms; a gain restricted to the terms live at both
+#: ends, and LAFA's, trimmed to them, over those, which is the set LAFA scores
+#: with and its frame trims to.
+#:
+#: The evaluator reads this and not the request, so the results of one window
+#: are measured over one set of terms (decided on 2026-11-20). Until then a
+#: request named the rule and defaulted to ``pivot_terms``: every result on the
+#: development store, the frame's included, was scored over the pivot's 47,328
+#: terms, obsolete ones too, where the frame trims to 39,028 on 211 -> 227.
+SCORED_TERMS: dict[str, str] = {
+    "pivot_terms": "pivot_terms",
+    "live_in_both_ends": "live_in_both_ends",
+    "both_ends_trimmed": "live_in_both_ends",
+}
 
 #: Which NOT annotations may take truth away, by the name a payload asks for
 #: it with.
@@ -114,13 +151,16 @@ def refuse_unknown_rules(window: ReconciledWindow) -> None:
     separate two truths ends up merging them.
     """
     for name, rules in (
-        ("truth_profile", TRUTH_PROFILES),
-        ("toi_rule", GAIN_RULES),
+        ("truth_profile", RECONCILED_PROFILES),
+        ("toi_rule", RECONCILED_GAIN_RULES),
         ("not_codes", NOT_CODE_RULES),
+        ("binding_rule", REQUESTABLE_BINDING_RULES),
     ):
         value = getattr(window, name)
         if value not in rules:
-            raise ValueError(f"unknown {name} {value!r}; expected one of {rules}")
+            raise ValueError(
+                f"unknown {name} {value!r} for the reconciled path; expected one of {rules}"
+            )
 
 
 class ReconciledWindow(NamedTuple):
@@ -132,7 +172,8 @@ class ReconciledWindow(NamedTuple):
     four. The profile joins them because it decides what the delta IS, not
     how it is stored: two profiles over the same five ids are two different
     truths, which is why it is part of the window's identity in the database
-    too.
+    too. ``binding_rule`` is the last for the same reason: which protein-binding
+    rule runs (:mod:`protea.core._binding_rule`) changes the F side of the delta.
     """
 
     old_annotation_set_id: uuid.UUID
@@ -143,6 +184,7 @@ class ReconciledWindow(NamedTuple):
     truth_profile: str = TRUTH_PROFILES[0]
     toi_rule: str = GAIN_RULES[0]
     not_codes: str = NOT_CODE_RULES[0]
+    binding_rule: str = REQUESTABLE_BINDING_RULES[0]
 
 
 def toi_restricts_the_gain(toi_rule: str) -> bool:
@@ -306,6 +348,9 @@ class _Side(NamedTuple):
     #: that has to come from that one snapshot. ``None`` unless the profile
     #: remaps. See :mod:`protea.core._truth_remap`.
     frame: SideFrame | None = None
+    #: Where this end applies the window's protein-binding rule. The rule is the
+    #: window's, the step is the side's: ``cafa`` drops at t1 and not at t0.
+    binding: BindingStep = DESCENDANTS_STEP
 
 
 def _sides_of(
@@ -322,11 +367,13 @@ def _sides_of(
             window.old_annotation_set_id,
             window.old_native_snapshot_id,
             frames.get(window.old_native_snapshot_id),
+            binding_step(window.binding_rule, t1_side=False),
         ),
         _Side(
             window.new_annotation_set_id,
             window.new_native_snapshot_id,
             frames.get(window.new_native_snapshot_id),
+            binding_step(window.binding_rule, t1_side=True),
         ),
     )
 
@@ -451,6 +498,8 @@ def _keep_within_toi(
 
 __all__ = [
     "GAIN_RULES",
+    "RECONCILED_GAIN_RULES",
+    "RECONCILED_PROFILES",
     "TRUTH_PROFILES",
     "ProjectionRequest",
     "ReconciledWindow",

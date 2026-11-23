@@ -16,6 +16,64 @@ argument. Messages land in the DLQ when:
 The DLQ never drains automatically. It accumulates until an operator
 inspects and resolves the root cause.
 
+The depth is not the measurement
+--------------------------------
+
+**A large DLQ is not evidence that work was lost, and the depth cannot tell you
+whether it was.** Measured on 2026-11-08, when the queue held **18,816**
+messages: of the first 500 peeked through ``GET /v1/admin/dlq/summary``, 496
+were ``compute_embeddings_batch`` dead-lettered from ``protea.embeddings.batch``
+in the ``1w`` age bucket, and 4 were ``job_dispatch`` from ``protea.jobs`` a
+month old. Nothing in those numbers says whether a vector is missing.
+
+What settles it is **completeness per configuration**, which costs one indexed
+count each:
+
+.. code-block:: sql
+
+   SELECT left(c.id::text, 8), coalesce(c.display_name, c.model_name),
+          count(e.sequence_id) AS rows
+     FROM embedding_config c
+     LEFT JOIN sequence_embedding e ON e.embedding_config_id = c.id
+    GROUP BY c.id, c.display_name, c.model_name
+   HAVING count(e.sequence_id) > 0
+    ORDER BY count(e.sequence_id) DESC;
+
+On that date it answered:
+
+.. code-block:: text
+
+   d4b4c057  learned-code:mean:sfjepa-world-holes-topk:cut227:e7ba37da  684.048
+   34446081  learned-code:mean:sfjepa-world-holes-topk:cut211:e7ba37da  684.048
+   e7ba37da  ankh_base                                                 684.048
+   f3a7fe16  Ankh-base, full length, mean plus max                     683.887
+
+684,048 is not a round number taken from somewhere: it is the whole sequence
+population, 629,895 sequences carrying one accession plus 54,153 shared ones.
+**Three of the four configurations are complete**, and the fourth is short by
+exactly the 161 sequences over 8,259 residues that the eager Ankh route cannot
+compute on the node's card, which has its own fix.
+
+So those 18,816 messages are copies of batches that DID get in, most plausibly
+from a relaunch with ``skip_existing`` after the three ``compute_embeddings``
+runs of 2026-10-28 and 2026-10-29 that failed or were cancelled with their
+counters near zero. They occupy a queue and nothing else.
+
+Read the conclusion the right way round. The reason to check completeness is
+that the opposite answer is the dangerous one: a database error dead-letters a
+batch while its job stays RUNNING with no error, and the parent's counter can
+advance on a redelivered write, so **a job can report success over work that
+never landed**. The queue depth looks the same in both cases. Only the row count
+against the population distinguishes them.
+
+Two limits of the summary, so the next reader does not over-read it: the age is
+a BUCKET, so ``1w`` does not separate 2026-11-01 from 2026-11-05, and the
+endpoint peeks a sample rather than the whole queue. Neither changes the
+conclusion, and neither is worth inspecting 18,816 messages to refine.
+
+Purging is a separate decision and belongs to the researcher:
+``POST /v1/admin/dlq/purge``, never as a cleanup step.
+
 Symptoms
 --------
 

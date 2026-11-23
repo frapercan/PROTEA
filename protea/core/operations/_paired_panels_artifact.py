@@ -25,17 +25,25 @@ columns.
   superset (a protein with no ground truth adds predicted mass to ``P`` and
   nothing to ``G``, which moves the published number while passing every other
   gate) and not a subset (the pooled sums would no longer reproduce the
-  published cell). Because the row set is exactly the scored population, the
-  panel's own coverage at a threshold is recoverable from the file, which is
-  the number every published cell sits beside: the denominator is the row count
-  and the numerator is the rows predicting anything at that threshold. A footer
-  counter would say the same thing in a second place and could disagree with
-  the rows, so the row rule is the contract and there is no ``ne`` key.
+  published cell).
+- Each variant has its own population, and a reader keeps it
+  (:func:`in_variant_population`): the rows whose ground-truth mass in that
+  variant is positive. For the unweighted variant that is every row. The
+  weighted branch scores the terms of interest that carry information
+  accretion, so a protein whose ground truth carries none is outside the
+  weighted population: its row is there for the unweighted variant and carries
+  zeros in its weighted columns (``n_gt_w`` included), which the loader checks.
+  Because each population is a row set, the panel's own coverage at a threshold
+  is recoverable from the file, which is the number every published cell sits
+  beside: the denominator is the variant's population and the numerator is the
+  rows of it predicting anything at that threshold. A footer counter would say
+  the same thing in a second place and could disagree with the rows, so the row
+  rule is the contract and there is no ``ne`` key.
 - ``tp_w`` / ``pred_w`` (and ``tp`` / ``pred`` for the unweighted variant) are
   list columns holding the whole ascending tau grid on the row, one value per
   declared threshold, fixed width. Reverse-cumulative sums, so they only fall.
-- ``n_gt_w`` is the weighted ground-truth mass, a scalar per row, and may be
-  zero when a protein's whole closure carries zero information accretion.
+- ``n_gt_w`` is the weighted ground-truth mass, a scalar per row, and is zero
+  exactly when the protein is outside the weighted population.
   ``n_gt`` is the UNWEIGHTED ground-truth term count and is mandatory in every
   file whatever variants it carries: it is the eligibility marker and the
   population denominator, and it is strictly positive by the row rule above.
@@ -429,6 +437,44 @@ def _check_eligible(eligible: np.ndarray, *, where: str) -> None:
         )
 
 
+def in_variant_population(n_gt: np.ndarray) -> np.ndarray:
+    """The rows in a variant's population: those whose ground-truth mass in it is positive.
+
+    For the unweighted variant every row qualifies, since the row rule asks for
+    ground truth. For the weighted one this leaves out the proteins whose ground
+    truth carries no information accretion, which cafaeval's weighted branch does
+    not score and normalises without. They depend on the truth alone, so every
+    method evaluated on a window has the same ones: on LAFA's 211 -> 227 window,
+    38 PK proteins in biological process and 4 in cellular component.
+    """
+    return np.asarray(n_gt, dtype=np.float64) > 0.0
+
+
+def _variant_population_rows(
+    tp: np.ndarray, pred: np.ndarray, n_gt: np.ndarray, *, where: str
+) -> np.ndarray:
+    """The positions of the rows in the variant's population, refusing mass outside it.
+
+    The population is :func:`in_variant_population`, and the rows outside it are
+    left out of every panel, so a coverage or a resample over what the loader
+    returns is over the population cafaeval normalised by. The producer writes
+    zeros in a variant's columns for a protein outside its population; a row
+    with predicted mass there would add to ``P`` and nothing to ``G`` for any
+    reader that kept it, so a file carrying one is refused rather than filtered.
+    """
+    inside = in_variant_population(n_gt)
+    outside = ~inside
+    loaded = np.any(tp[outside] != 0.0, axis=1) | np.any(pred[outside] != 0.0, axis=1)
+    if loaded.any():
+        raise GridInvariantError(
+            f"{where}: {int(loaded.sum())} rows outside the variant's population (no "
+            "ground-truth mass in it) carry true-positive or predicted mass. The producer "
+            "writes zeros there; mass on such a row would add to P and nothing to G for any "
+            "reader that kept it."
+        )
+    return np.flatnonzero(inside)
+
+
 def _check_curve_varies(panels: dict[str, PanelArrays], *, where: str) -> None:
     """The pooled curve has to move along the grid, or it is not a grid.
 
@@ -512,7 +558,7 @@ def _list_matrix(table: object, column: str, n_rows: int, n_tau: int, *, where: 
 
 
 def load_setting_grid(path: Path, meta: GridMeta, *, variant: str, result_id: str) -> SettingGrid:
-    """Read one setting's file into per-namespace arrays, gating on the way in.
+    """Read one setting's file into per-namespace arrays of the variant's population.
 
     The gates are vectorised and cheap, and each one is a refusal rather than a
     warning: a producer bug that reaches the estimator arrives as a plausible
@@ -562,8 +608,10 @@ def load_setting_grid(path: Path, meta: GridMeta, *, variant: str, result_id: st
         table[ELIGIBILITY_COLUMN].to_numpy(zero_copy_only=False), dtype=np.float64
     )
     _check_eligible(eligible, where=where)
+    keep = _variant_population_rows(tp, pred, n_gt, where=where)
     _check_monotone(tp, pred, n_gt, where=where)
-    panels = _split_namespaces(accs, spaces, tp, pred, n_gt)
+    accs, spaces = [accs[int(i)] for i in keep], [spaces[int(i)] for i in keep]
+    panels = _split_namespaces(accs, spaces, tp[keep], pred[keep], n_gt[keep])
     _check_curve_varies(panels, where=where)
     return SettingGrid(meta.setting, meta, variant, panels)
 

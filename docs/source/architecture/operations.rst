@@ -511,6 +511,54 @@ Published under ``protein_resolution/<job_id>/`` in the ``ArtifactStore``:
 Annotations of a protein whose sequence never arrives are KEPT: the protein took
 part in the deltas. Queries that need a chain filter on ``sequence_id IS NOT NULL``.
 
+resolve_protein_metadata
+------------------------
+
+**Operation name:** ``resolve_protein_metadata``; queue: ``protea.jobs``
+
+| **Tables touched:** ``ProteinUniProtMetadata`` (insert and update). Never ``Protein``.
+
+Fetches each canonical protein's current UniProt entry, to SHOW it and to annotate
+today: names, organism, length, reviewed, function, catalytic activity, cofactors,
+pathways, sites, keywords. Every row is stamped with the UniProt release that
+served it (``uniprot_release``, ``uniprot_release_date``, from the
+``X-UniProt-Release`` headers), and a batch whose answer names no release is
+refused rather than stamped with a guess.
+
+What an entry says today was not known at an earlier cut, so nothing that
+predicts, builds features, exports a training set or evaluates on a cut reads
+``protein_uniprot_metadata``; ``tests/test_current_metadata_stays_out_of_experiments.py``
+pins it by reading the source. For the same reason the operation never writes the
+``Protein`` row, whose organism and taxonomy feature code reads. A protein's
+organism at a cut is in that cut's photo (``cut_photo_member.taxon_id``).
+
+Its population is a query, as in ``resolve_protein_sequences``: every canonical
+accession with no metadata row, or with a row that names no release, in order and
+through the accession grammar. Accessions UniProt no longer serves are counted as
+``absent`` in the result and get no row. Transport belongs to the
+``protea_sources`` UniProt plugin (``fetch_accessions``).
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 18 57
+
+   * - Field
+     - Default
+     - Description
+   * - ``timeout_seconds``
+     - ``120``
+     - Per-request timeout; the other transport knobs are the plugin's measured defaults.
+   * - ``max_accessions``
+     - ``null``
+     - Stop after this many candidates, for a smoke run. Reported back as
+       ``limit`` so a capped run cannot be read as a complete one.
+   * - ``dry_run``
+     - ``false``
+     - Count the candidates and write nothing.
+
 load_goa_annotations
 ---------------------
 
@@ -555,6 +603,13 @@ Payload fields
    * - ``total_limit``
      - ``null``
      - Stop after this many annotation rows (for testing).
+   * - ``enqueue_evaluation_set_against_prior``
+     - ``false``
+     - When the load ends, enqueue a ``generate_evaluation_set`` between the
+       latest prior ``goa`` release and this one, as every load did before
+       the flag existed. Off by default: the universe of ADR-D60 declares
+       every frame with its role and its truth rules, and a frame opened by
+       every load declares neither.
 
 Execution flow
 ~~~~~~~~~~~~~~
@@ -570,8 +625,10 @@ Execution flow
       d. resolve go_term_id from go_id; skip if term unknown in snapshot
       e. buffer ProteinGOAnnotation rows
       f. flush + commit every page_size rows
-   4. emit("load_goa_annotations.done", ...)
-   5. return OperationResult(result={annotation_set_id, inserted, skipped})
+   4. only with enqueue_evaluation_set_against_prior: enqueue the frame
+      (prior goa release -> this one) as a generate_evaluation_set child job
+   5. emit("load_goa_annotations.done", ...)
+   6. return OperationResult(result={annotation_set_id, inserted, skipped})
 
 load_quickgo_annotations
 -------------------------
@@ -1000,6 +1057,13 @@ for a given ``EvaluationSet`` × ``PredictionSet`` pair. Persists an
 ``EvaluationResult`` row with per-namespace Fmax, precision, recall, τ, and
 coverage for each setting.
 
+It scores what a method stored and nothing else: the prediction set's
+``method_score``, read as it is. Scoring a transfer method's candidates,
+cutting them to a depth, reranking them, grafting InterPro onto them and
+honouring the bank's denials are the method's work, done when it predicts and
+written in its prediction set's record (:doc:`/architecture/scoring`). A set
+that stores candidates without scores is refused before anything is staged.
+
 Payload fields
 ~~~~~~~~~~~~~~
 
@@ -1015,33 +1079,7 @@ Payload fields
      - UUID of the ``EvaluationSet`` to evaluate against.
    * - ``prediction_set_id``
      - *(required)*
-     - UUID of the ``PredictionSet`` containing predictions to score.
-   * - ``max_distance``
-     - ``null``
-     - Discard predictions with cosine distance above this threshold before
-       scoring (range 0 – 2). ``null`` = no threshold.
-   * - ``scoring_config_id``
-     - ``null``
-     - UUID of a ``ScoringConfig`` to apply to the prediction set before
-       evaluation. ``null`` = score with the raw KNN-distance derived
-       probability.
-   * - ``reranker_id_nk``
-     - ``null``
-     - UUID of a ``RerankerModel`` to apply to NK-category predictions
-       before evaluation. Validated against the live feature schema; falls
-       back to KNN ordering on ``feature_schema_sha`` mismatch.
-   * - ``reranker_id_lk``
-     - ``null``
-     - Same as ``reranker_id_nk`` but for the LK category.
-   * - ``reranker_id_pk``
-     - ``null``
-     - Same as ``reranker_id_nk`` but for the PK category.
-   * - ``rerankers``
-     - ``null``
-     - Nested mapping of category → aspect → reranker_model_id, e.g.
-       ``{"nk": {"bpo": "<uuid>", "mfo": "<uuid>"}, "lk": {...}}``.
-       Overrides the flat ``reranker_id_*`` fields when present and lets
-       a single run mix per-aspect boosters within a category.
+     - UUID of the ``PredictionSet`` whose stored scores are evaluated.
    * - ``ia_file``
      - ``null``
      - Path to an Information Accretion (IA) TSV file (two columns:
@@ -1050,14 +1088,28 @@ Payload fields
        easy-to-predict ones. Without this file ``cafaeval`` runs with
        uniform IC=1, which inflates Fmax. For CAFA6 evaluations use the
        ``IA_cafa6.tsv`` file shipped with the benchmark.
-   * - ``restrict_gt_to_predicted``
-     - ``true``
-     - Standard CAFA practice: drop ground-truth proteins not present in
-       the ``PredictionSet`` before evaluation, so coverage / Fmax measure
-       performance on the actually-predicted cohort. Disable only when the
-       eval set is guaranteed to be a subset of the predicted query set
-       (e.g. a re-eval of a frozen lab dump where this filter has already
-       been applied).
+
+Retired in the closure (steps 4 and 5, 2026-11-20 and 21), with where the work
+happens now. A payload that still carries one of these with a value is refused
+with the pointer; one that carries it empty asked for nothing and is accepted.
+
+- ``scoring_config_id``, ``max_distance``, ``max_k_position``,
+  ``max_sequence_rank``: ``score_prediction_set`` takes the configuration and
+  the cut, and stores the scores as a set of their own.
+- ``reranker_id_nk``, ``reranker_id_lk``, ``reranker_id_pk``, ``rerankers``:
+  a reranker runs when the method predicts, and its score is stored as the
+  row's ``method_score``.
+- ``interpro_graft`` and its files and weight: the InterPro BP graft runs when
+  predicting, on top of a reranker, and the record says so.
+- ``softprop``: the platform no longer propagates scores; a method that
+  propagates its scores stores them propagated.
+- ``toi_file``, ``toi_rule``: the terms of interest are the window's. The
+  evaluator scores over the terms its gain rule names, and records the rule,
+  the count and the file's sha256 on the result.
+- ``restrict_gt_to_predicted``: the population is the window's. Every target
+  counts, an unpredicted one as a failure, with coverage beside the number, as
+  LAFA scores, and the result records it as ``results.population``. A request
+  that passed ``false`` asked for exactly that and is accepted.
 
 Execution flow
 ~~~~~~~~~~~~~~
@@ -1067,10 +1119,11 @@ Execution flow
    1. load EvaluationSet + PredictionSet + OntologySnapshot from DB
    2. compute_evaluation_data(): same delta as generate_evaluation_set
    3. download OBO file from snapshot.obo_url to a temp directory
-   4. write ground-truth TSVs: gt_NK.tsv, gt_LK.tsv, gt_PK.tsv,
-      known_terms.tsv, pk_known_terms.tsv
-   5. write predictions in CAFA format (protein \\t go_id \\t score),
-      score = max(0, 1 - distance), filtered to delta proteins only
+   4. write ground-truth TSVs, the window's whole truth: gt_NK.tsv, gt_LK.tsv,
+      gt_PK.tsv, known_terms.tsv, pk_known_terms.tsv, and the window's terms
+      of interest
+   5. write predictions in CAFA format (protein \\t go_id \\t score): the
+      stored method_score of the delta proteins, as stored, at four decimals
    6. session.commit(): releases DB connection before cafaeval forks workers
    7. for each setting in (NK, LK, PK):
       a. NK pass: cafa_eval(obo, predictions/, gt_NK.tsv)
@@ -1080,7 +1133,8 @@ Execution flow
       e. write cafaeval outputs (PR curves, metric TSVs) into a persistent
          staging dir under ``settings.storage.artifacts_dir`` and upload them
          through the configured ``ArtifactStore``
-   8. INSERT EvaluationResult row with results dict (NK → {BPO, MFO, CCO})
+   8. INSERT EvaluationResult row with results dict (NK → {BPO, MFO, CCO}),
+      beside the terms of interest and the population it was scored over
    9. return OperationResult(result={evaluation_result_id, results})
 
 PK known-terms
@@ -1549,6 +1603,23 @@ source_version)`` means that re-running for the same release is a no-op.
    * - ``chunk_size``
      - ``1000``
      - Upsert batch size.
+   * - ``published_at``
+     - ``null``
+     - ISO date the mapping file was published. With ``cut_release`` and
+       ``cut_date`` it dates the mapping against the cut it serves.
+   * - ``cut_release``
+     - ``null``
+     - GOA release of the cut the mapping serves.
+   * - ``cut_date``
+     - ``null``
+     - ISO date that GOA release was published.
+
+The three dating fields go together: all three or none. Given, the payload
+refuses a cut after the mark (227) and a mapping published after its cut,
+before anything is downloaded (ADR-D60). Left out, the load runs as before. A
+dated load must also name its file: the default URL serves whatever file is
+current when the job runs, so nothing would tie its bytes to ``published_at``,
+and the payload refuses it.
 
 The result dict reports ``rows_parsed``, ``rows_inserted``, and
 ``rows_skipped_duplicate``.
@@ -2066,13 +2137,21 @@ Registering a new operation
 1. Create a module under ``protea/core/operations/``.
 2. Define a payload class extending ``ProteaPayload``.
 3. Implement the ``Operation`` protocol (``name`` attribute + ``execute``).
-4. Register the instance in the worker startup script:
+4. Add one row to ``CATALOG`` in ``protea/core/operation_catalog.py``: the class
+   and the ``OperationSpec`` it declares (ADR-D60, decision 6). The registry
+   refuses an operation without one.
 
    .. code-block:: python
 
-      registry.register(MyOperation())
+      (MyOperation, OperationSpec(
+          domain="method", kind="job", queue=queues.JOBS,
+          purity="database", resource="cpu",
+      )),
 
-5. Route jobs to the correct queue by setting ``queue_name`` in the ``POST /jobs``
-   request body.
+5. Route jobs to the queue the spec names by setting ``queue_name`` in the
+   ``POST /jobs`` request body. The endpoint refuses with 422 any other queue
+   (only the ``ping`` probe may go to any job queue), and any operation whose
+   kind never gets a Job row (``message_stage``, ``write`` and ``file_stage``).
+   A new queue name goes in ``protea/core/queues.py`` first.
 
 No changes to ``BaseWorker``, the API, or the infrastructure layer are required.

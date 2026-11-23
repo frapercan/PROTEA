@@ -28,10 +28,12 @@ from protea.core.disk_cache import (
     pool_fingerprint,
 )
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
+from protea.core.operations.predict_go_terms._bank_shards import fill_from_shards
 from protea.core.operations.predict_go_terms._common import (
     _REF_CACHE,
     _UNIFIED_REF_KEY,
 )
+from protea.core.operations.predict_go_terms._photo_sequences import donor_pool_base
 from protea.core.operations.predict_go_terms._reference_aspect import _ASPECT_SLICE
 from protea.core.operations.predict_go_terms._reference_binary import fill_from_binary
 from protea.core.operations.predict_go_terms._reference_needs import reference_dtype_needs
@@ -214,7 +216,7 @@ def _restrict_annotations(annotations: Any, donor_policy: Any) -> Any:
     return annotations
 
 
-def _bank_order() -> tuple[Any, ...]:
+def _bank_order(accession: Any = Protein.accession) -> tuple[Any, ...]:
     """The ORDER BY the donor-pool query carries, and why it is a result.
 
     91 per cent of queries have neighbours at distance ~0 -- themselves, or twins
@@ -248,7 +250,7 @@ def _bank_order() -> tuple[Any, ...]:
     exists for. No config in this campaign chunks today, so it costs nothing now
     and removes a trap later.
     """
-    return (Protein.accession.collate("C"), SequenceEmbedding.chunk_index_s)
+    return (accession.collate("C"), SequenceEmbedding.chunk_index_s)
 
 
 def _pin_annotation_order(
@@ -427,7 +429,7 @@ class _ReferenceMixin:
         When the cache files are fresh (mtime within
         ``ref_cache_freshness_seconds``), the COUNT(*)-over-JOIN is skipped
         so the fast path requires zero DB round-trips. ``source`` is
-        ``"disk_cache"`` on hit and ``"database"`` on miss.
+        ``"disk_cache"`` on hit, else where the vectors came from (``_stream_pool``).
 
         ``transfer`` names the route the bank took across the driver, or is
         ``None`` when a cache answered and nothing crossed. See
@@ -456,8 +458,7 @@ class _ReferenceMixin:
 
         def _db_loader() -> tuple[list[str], np.ndarray]:
             nonlocal source, transfer
-            source = "database"
-            accs, embs, transfer = self._stream_reference_pool(accession_q)
+            accs, embs, source, transfer = self._stream_pool(session, request, accession_q)
             return accs, embs
 
         fresh = freshness_sec > 0 and _is_cache_fresh(
@@ -476,6 +477,21 @@ class _ReferenceMixin:
             freshness_seconds=freshness_sec,
         )
         return accessions, embeddings, source, transfer
+
+    def _stream_pool(
+        self, session: Session, request: _PoolRequest, accession_q: Any
+    ) -> tuple[list[str], Any, str, str | None]:
+        """A pool the disk cache lacks: ``(accessions, vectors, source, transfer)``.
+
+        From the node's bank shards when they are the ones the store recorded
+        (:mod:`._bank_shards`, source ``"bank_shards"``), else streamed from the
+        store (source ``"database"``), as every run did before.
+        """
+        from_shards = fill_from_shards(session, accession_q, request.embedding_config_id)
+        if from_shards is not None:
+            return from_shards[0], from_shards[1], "bank_shards", "shards"
+        accessions, vectors, transfer = self._stream_reference_pool(accession_q)
+        return accessions, vectors, "database", transfer
 
     def _reference_pool_query(self, session: Session, request: _PoolRequest) -> Any:
         """Return the accession-only query for the reference pool.
@@ -497,14 +513,8 @@ class _ReferenceMixin:
         annotations = _restrict_annotations(annotations, policy)
         annotated_sq = annotations.distinct().subquery()
 
-        query = (
-            session.query(Protein.accession)
-            .join(
-                SequenceEmbedding,
-                (SequenceEmbedding.sequence_id == Protein.sequence_id)
-                & (SequenceEmbedding.embedding_config_id == request.embedding_config_id),
-            )
-            .join(annotated_sq, Protein.accession == annotated_sq.c.protein_accession)
+        query, accession = donor_pool_base(
+            session, request.annotation_set_id, request.embedding_config_id, annotated_sq
         )
         if policy is not None and getattr(policy, "reviewed_only", False):
             # ``reviewed`` is nullable, and an unknown review status is not a
@@ -522,7 +532,7 @@ class _ReferenceMixin:
             # donors in the full length ankh bank. On the indexed column, and a
             # NULL is not <= anything: a protein no pass admitted is no member.
             query = query.filter(Protein.first_admitted_release <= int(admitted_by))
-        return query.order_by(*_bank_order())
+        return query.order_by(*_bank_order(accession))
 
     def _stream_reference_pool(
         self,

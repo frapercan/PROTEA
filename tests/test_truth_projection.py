@@ -198,9 +198,7 @@ class TestWhatItDoesToTheDirectAnnotations:
         parents = {"GO:N1": {"GO:A"}}
         aspect = {"GO:N1": "F", "GO:A": "F"}
         graph = _graph(parents=parents, aspect=aspect, live=set(aspect))
-        report = project_direct_annotations(
-            {"P1": {"GO:N1"}, "P2": {"GO:N1"}}, graph, {"GO:A"}
-        )
+        report = project_direct_annotations({"P1": {"GO:N1"}, "P2": {"GO:N1"}}, graph, {"GO:A"})
         assert (report.entries, report.pairs, report.proteins) == (2, 2, 2)
 
     def test_the_report_names_every_counter_the_lab_publishes(self) -> None:
@@ -241,9 +239,11 @@ class TestWhereTheRuleIsAllowedToRun:
         assert source.index("project_direct_annotations") < source.index("_drop_binding_only")
 
     def test_the_profile_vocabulary_is_closed_and_defaults_to_today(self) -> None:
-        from protea.core._truth_rules import TRUTH_PROFILES, ReconciledWindow
+        from protea.core._truth_rules import RECONCILED_PROFILES, TRUTH_PROFILES, ReconciledWindow
 
-        assert TRUTH_PROFILES == ("as_closed", "projected")
+        # The third is LAFA's frame's, which the reconciled path refuses.
+        assert TRUTH_PROFILES == ("as_closed", "projected", "own_graph")
+        assert RECONCILED_PROFILES == ("as_closed", "projected")
         window = ReconciledWindow(1, 2, 3, 4, 5)  # type: ignore[arg-type]
         assert window.truth_profile == "as_closed"
 
@@ -311,7 +311,11 @@ class TestWhichGraphItClimbs:
 
         # Both native fields collapsed onto t0, as the real window's are.
         return ReconciledWindow(
-            self.T0_CORPUS, self.T1_CORPUS, self.T0_GRAPH, self.T0_GRAPH, self.T0_GRAPH,
+            self.T0_CORPUS,
+            self.T1_CORPUS,
+            self.T0_GRAPH,
+            self.T0_GRAPH,
+            self.T0_GRAPH,
             "projected",
         )
 
@@ -369,9 +373,7 @@ class TestWhichGraphItClimbs:
         import protea.core._truth_rules as ev
 
         asked: list[str] = []
-        monkeypatch.setattr(
-            ev, "_live_terms_with_aspect", lambda _s, snap: (set(), {})
-        )
+        monkeypatch.setattr(ev, "_live_terms_with_aspect", lambda _s, snap: (set(), {}))
         monkeypatch.setattr(ev, "_load_parents_by_go_id", lambda _s, _snap: {})
 
         def _children(_session, snapshot):
@@ -434,10 +436,12 @@ class TestTheGainIsRestrictedBeforeItIsClassified:
         assert kept == {"P1": {"P": {"GO:0000002"}}}
 
     def test_the_default_rule_does_not_restrict_anything(self) -> None:
-        from protea.core._truth_rules import GAIN_RULES
+        from protea.core._truth_rules import GAIN_RULES, RECONCILED_GAIN_RULES
 
         assert GAIN_RULES[0] == "pivot_terms"
-        assert GAIN_RULES == ("pivot_terms", "live_in_both_ends")
+        # The third is LAFA's frame's, which the reconciled path refuses.
+        assert GAIN_RULES == ("pivot_terms", "live_in_both_ends", "both_ends_trimmed")
+        assert RECONCILED_GAIN_RULES == ("pivot_terms", "live_in_both_ends")
 
     def test_the_rule_is_read_from_the_window_and_defaults_to_today(self) -> None:
         from protea.core._truth_rules import GAIN_RULES, ReconciledWindow
@@ -450,6 +454,6 @@ class TestTheGainIsRestrictedBeforeItIsClassified:
         # be and the restriction decides which gains COUNT. Folding them into
         # one field would be the single-field comparison this project keeps
         # paying for.
-        from protea.core._truth_rules import GAIN_RULES, TRUTH_PROFILES
+        from protea.core._truth_rules import RECONCILED_GAIN_RULES, RECONCILED_PROFILES
 
-        assert len(TRUTH_PROFILES) * len(GAIN_RULES) == 4
+        assert len(RECONCILED_PROFILES) * len(RECONCILED_GAIN_RULES) == 4

@@ -404,8 +404,6 @@ class TestCreateApp:
             patch("protea.api.app.prewarm_embedding_configs") as prewarm_configs,
             patch("protea.api.app.prewarm_snapshots") as prewarm_snapshots,
             patch("protea.api.app.prewarm_annotation_sets") as prewarm_asets,
-            patch("protea.api.app.prewarm_benchmark_embeddings") as prewarm_bench_emb,
-            patch("protea.api.app.prewarm_benchmark_matrix") as prewarm_bench_mtx,
         ):
             app = create_app(Path("/fake/root"))
             targets = [
@@ -414,18 +412,16 @@ class TestCreateApp:
                 prewarm_configs,
                 prewarm_snapshots,
                 prewarm_asets,
-                prewarm_bench_emb,
-                prewarm_bench_mtx,
             ]
             with TestClient(app):
                 # WAIT FOR THE FACT, DO NOT ASSUME A CLOCK. Each prewarm runs
                 # through ``asyncio.to_thread``, so the mock is invoked by an
                 # executor thread, not by the event loop. The lifespan yields
                 # three event-loop ticks before serving and the comment there
-                # used to claim that was "enough" for all seven to have landed.
+                # used to claim that was "enough" for all of them to have landed.
                 # It is not enough, it is usually enough: the one that loses the
                 # race is the LAST of the list, and this test failed in CI on
-                # exactly that one (``benchmark:matrix``, "Called 0 times") after
+                # exactly that one (then ``benchmark:matrix``, "Called 0 times") after
                 # passing twice locally. Polling until the fact holds makes the
                 # test deterministic without the production path owing anything
                 # to a timing guess.

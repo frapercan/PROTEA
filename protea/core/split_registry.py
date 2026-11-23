@@ -41,6 +41,8 @@ from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 
+from protea.core.marks import MARK_RELEASE
+
 __all__ = [
     "BOARD_MARK",
     "RELEASES",
@@ -150,8 +152,9 @@ RELEASES: tuple[Release, ...] = tuple(
 
 #: The release the board scored. Everything from here forward is validation and
 #: informs nothing; everything strictly earlier is available for fitting and
-#: for selection.
-BOARD_MARK = "v227"
+#: for selection. It is the mark of :mod:`protea.core.marks`, spelled the way
+#: this table names a release.
+BOARD_MARK = f"v{MARK_RELEASE}"
 
 
 def release(identifier: str) -> Release:

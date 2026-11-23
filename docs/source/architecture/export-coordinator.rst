@@ -199,8 +199,5 @@ separately.
 .. seealso::
 
    - :doc:`job_lifecycle`: two-session worker pattern and deferred completion.
-   - :doc:`multistage-pipeline`: shared coordinator / fan-out / collect
-     contract (``MultiStagePayload``, ``StageArtifactStore``,
-     ``PipelineStage``, ``Coordinator``).
    - :doc:`operations`: ``export_research_dataset`` monolithic path
      (legacy delegate target).

@@ -202,6 +202,13 @@ def test_the_fragment_separates_the_regimes_it_claims_to(postgres_url: str) -> N
             "features": ["compute_alignments", "compute_taxonomy"],
             "code_revision": "a" * 40,
         },
+        "by accession": {
+            "donor_policy": gated,
+            "exclude_self_neighbour": True,
+            "self_exclusion": "accession",
+            "features": ["compute_alignments", "compute_taxonomy"],
+            "code_revision": "a" * 40,
+        },
     }
 
     with Session(engine) as session:
@@ -212,7 +219,7 @@ def test_the_fragment_separates_the_regimes_it_claims_to(postgres_url: str) -> N
         }
         rows = _identity_rows(session, ids)
 
-        assert len({tuple(r) for r in rows.values()}) == 3, rows
+        assert len({tuple(r) for r in rows.values()}) == 4, rows
         # The pair the campaign actually has to separate.
         assert rows["old gated"][0] == rows["corrected"][0]
         assert rows["old gated"] != rows["corrected"]
@@ -221,6 +228,8 @@ def test_the_fragment_separates_the_regimes_it_claims_to(postgres_url: str) -> N
         # False and absent are different statements about the retriever.
         assert rows["old gated"][1] == "self-unrecorded"
         assert rows["corrected"][1] == "self-excluded"
+        # Its twins stay as donors, so it is not the retriever above.
+        assert rows["by accession"][1] == "self-excluded-by-accession"
         assert rows["corrected"][2] == "alignments+taxonomy"
 
         session.rollback()

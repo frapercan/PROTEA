@@ -168,3 +168,19 @@ class TestTheRegistryAndTheSchemaAgree:
     def test_every_declared_set_says_what_it_is(self, guard) -> None:
         for nombre, que_es in guard.EXPECTED.items():
             assert len(que_es) > 30, f"{nombre} no esta descrito, solo nombrado"
+
+
+def test_every_declared_set_of_the_live_schema_meets_all_four_criteria(guard) -> None:
+    # The gate runs strict in CI from phase 2 on (ADR-D60): every set table says
+    # what it is derived from, what it is, the sha256 of what it points at, and
+    # the job and code that made it.
+    import protea.infrastructure.orm.models  # noqa: F401
+    from protea.infrastructure.orm.base import Base
+
+    tables = Base.metadata.tables
+    failing = {
+        name: {k: text for k, (text, ok) in guard._audit(tables[name]).items() if not ok}
+        for name in guard.EXPECTED
+    }
+    assert {name: why for name, why in failing.items() if why} == {}
+

@@ -178,7 +178,7 @@ function SettingTable({
                   ) : null}
                 </td>
               </tr>
-              {isOpen && predictionSetId ? (
+              {isOpen && predictionSetId && evaluationSetId ? (
                 <tr>
                   <td colSpan={axes.length + 3} className="px-1 pb-2">
                     <StratumMembers
@@ -187,6 +187,7 @@ function SettingTable({
                       // previous cell's proteins.
                       key={key}
                       predictionSetId={predictionSetId}
+                      evaluationSetId={evaluationSetId}
                       category={setting}
                       aspect={String(cell.aspect ?? "")}
                       length={cell.length ? String(cell.length) : null}

@@ -30,6 +30,18 @@ def eval_artifact_key(result_id: uuid.UUID, relpath: str) -> str:
     return f"eval_artifacts/{result_id}/{relpath.lstrip('/')}"
 
 
+def artifacts_record(digests: dict[str, str]) -> dict[str, Any]:
+    """What a result records about the files it wrote: each key and its sha256.
+
+    ``keys`` is what the readers already walk (the ZIP, the strata, the
+    deletion). ``sha256`` holds the digest of each file as it was uploaded, so a
+    figure can name the file it was read from and whoever fetches that file can
+    check the bytes are the same. Results written before 2026-11-21 record keys
+    only.
+    """
+    return {"keys": list(digests), "sha256": dict(digests)}
+
+
 # Namespace labels used by cafaeval OBO parser. The full names come from
 # the obo file; we map them to PROTEA's canonical CAFA codes.
 _NS_LABELS: dict[str, str] = {
@@ -244,49 +256,62 @@ def _patch_query_known_features(
 class ResultRow(NamedTuple):
     """Everything the stored EvaluationResult row is assembled from.
 
-    A bundle rather than twelve parameters, which is the same reason
-    ``AdapterInputs`` exists: the ceiling is six and the row genuinely has
-    twelve fields.
+    A bundle rather than separate parameters, which is the same reason
+    ``AdapterInputs`` exists.
     """
 
     result_id: uuid.UUID
     inputs: Any
     payload: dict[str, Any]
-    scoring_config_id: str | None
-    first_reranker_id: Any
-    reranker_config_snapshot: Any
     results: Any
     #: ``(frame, temporal_window, leakage_role, arms_enabled)``, kept as the
     #: tuple its producer returns rather than unpacked and re-packed. Four
     #: names that always travel together are one thing.
     provenance: tuple[Any, Any, Any, Any]
-    #: The depth this result scored, in whichever unit was asked for. Both
-    #: None means the whole stored neighbourhood. These are the fields a
-    #: reader comes looking for: they say which cut produced these numbers,
-    #: and until 2026-08-30 nothing on the row said it, so a five point depth
-    #: series rendered as five results at the retrieval depth of 30.
-    max_sequence_rank: int | None = None
-    max_k_position: int | None = None
+
+
+def _scoring_record(pred_set: Any) -> tuple[uuid.UUID | None, int | None, int | None]:
+    """The scoring config and the cut a scored set records, as the result row holds them.
+
+    Read from the record ``score_prediction_set`` writes (``scoring_config_id``
+    and ``scoring.depth``); all three are None for a set it did not score.
+    """
+    meta = getattr(pred_set, "meta", None)
+    if not isinstance(meta, dict):
+        return None, None, None
+    config_id = meta.get("scoring_config_id")
+    scoring = meta.get("scoring")
+    depth = scoring.get("depth") if isinstance(scoring, dict) else None
+    depth = depth if isinstance(depth, dict) else {}
+    return (
+        uuid.UUID(config_id) if config_id else None,
+        depth.get("max_sequence_rank"),
+        depth.get("max_k_position"),
+    )
 
 
 def build_result_row(row: ResultRow) -> EvaluationResult:
-    """The stored row, assembled in one place."""
+    """The stored row, assembled in one place.
+
+    The evaluator scores what a method stored (closure, step 4), so the scoring
+    config and the depth a result was scored at are the scored set's, copied
+    from its record onto the row: the surfaces that name an arm by its config
+    and show its cut read them here, as they read the rows written before. The
+    reranker columns stay NULL: a reranker runs when the method predicts, and
+    the prediction set's record says which.
+    """
+    config_id, max_sequence_rank, max_k_position = _scoring_record(row.inputs.pred_set)
     return EvaluationResult(
         id=row.result_id,
         evaluation_set_id=row.inputs.eval_set_id,
         prediction_set_id=row.inputs.pred_set_id,
-        scoring_config_id=(
-            uuid.UUID(row.scoring_config_id) if row.scoring_config_id else None
-        ),
-        reranker_model_id=row.first_reranker_id,
-        reranker_config=row.reranker_config_snapshot,
+        scoring_config_id=config_id,
+        max_sequence_rank=max_sequence_rank,
+        max_k_position=max_k_position,
         results=row.results,
         frame=row.provenance[0],
         temporal_window=row.provenance[1],
         leakage_role=row.provenance[2],
         arms_enabled=row.provenance[3],
-        # On the result itself; job.payload is ON DELETE SET NULL.
-        max_sequence_rank=row.max_sequence_rank,
-        max_k_position=row.max_k_position,
         job_id=job_id_from_payload(row.payload),
     )

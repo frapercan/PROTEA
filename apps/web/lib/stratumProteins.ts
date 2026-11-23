@@ -27,7 +27,12 @@ export type StratumProtein = {
   length_band: string | null;
   homology_band: string | null;
   donor_evidence: string | null;
-  /** Identity to the nearest non-self donor, per cent. Null when none came back. */
+  /** Identity to the closest protein measured when the window opened, per cent:
+   *  the window's placement, which places the homology band and is the same for
+   *  every arm. Null when no measured protein is close enough to be hit. */
+  identity: number | null;
+  /** Identity to the arm's own most homologous non-self donor, per cent. Places
+   *  nothing. Null when its retrieval aligned no donor. */
   best_identity: number | null;
   donor_is_experimental: boolean | null;
   taxonomic_relation: string | null;
@@ -76,14 +81,14 @@ export type StratumProteinsResponse = {
   tau: number | null;
   /** Every protein the artefact scored in this panel. The panel's own count. */
   panel_population: number;
-  /** How many of them could be put on the axes at all. A query needs only its
-   *  own length for that; a missing donor costs it the four donor axes and
-   *  nothing else, so it is NOT in `unplaced`. */
+  /** How many of them could be put on the axes at all. A protein needs only the
+   *  window's placement for that; a missing donor costs it the three donor axes
+   *  and nothing else, so it is NOT in `unplaced`. */
   placed: number;
   unplaced: { no_length: number; off_scale: number };
-  /** How many placed rows have no aligned donor, so read `none` on homology,
-   *  donor evidence, taxonomy and propagation. A fact about the panel, not a
-   *  gap in it: adding it to `unplaced` would double-count. */
+  /** How many placed rows have no aligned donor, so read `none` on donor
+   *  evidence, taxonomy and propagation. A fact about the panel, not a gap in
+   *  it: adding it to `unplaced` would double-count. */
   without_donor: number;
   /** How many survive the bands the caller pinned. */
   matched: number;

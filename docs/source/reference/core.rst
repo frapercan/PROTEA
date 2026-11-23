@@ -59,10 +59,11 @@ re-publishes the message after a configurable delay.
    :undoc-members:
    :show-inheritance:
 
-``OperationRegistry`` is a simple dict-backed mapping from operation name
-strings to instances. Workers resolve the correct operation at message
-dispatch time; new operations are registered at process startup in
-``scripts/worker.py`` without modifying any worker code.
+``OperationRegistry`` maps each operation name to its instance and to the
+``OperationSpec`` it declared (ADR-D60, decision 6). Workers resolve the
+correct operation at message dispatch time. ``register`` refuses an operation
+without a spec, and a spec whose queue already carries the other kind of
+message, since one queue has one consumer.
 
 .. automodule:: protea.core.contracts.registry
    :members:
@@ -77,6 +78,40 @@ Extracted to its own module in F0 (T0.7) to remove duplicated copies
 across coordinators.
 
 .. automodule:: protea.core.contracts.parent_progress
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Method contract
+---------------
+
+ADR-D60 gives a method an identity of its own, so it stops passing as an
+embedding configuration. ``protea.core.contracts.method`` defines what a
+method declares: its ``Family`` (``embedding-reranker``, ``world-model`` or
+``explainable-units``), its code, the ``InstanceCut`` it lives at (a release
+and an ontology snapshot), its recipe, the ``Pin`` values it depends on (a
+role, a sha256 and the references that locate the bytes), its runtime and
+whether it explains its predictions. ``MethodSpec.method_id`` is ``uuid5``
+over the spec's canonical JSON (sorted keys, compact separators, ASCII
+escapes) in the pinned namespace ``METHOD_NAMESPACE``, so the same spec is
+the same method on any machine. A ``TrainingIdentity`` says how a method's
+fitted pins were trained: its ``TrainingWindow`` values by evaluation set id,
+with the role ``fit`` or ``holdout``, its data digests, the revisions of the
+code that trained it, whether it read no label at all and the pretrained
+weights it took as declared exceptions. The module imports nothing outside
+the standard library.
+
+.. automodule:: protea.core.contracts.method
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+The family registry gives each of the three families the two descriptors of
+ADR-D58 and a slot for its introduction, which is the author's text and stays
+empty until he writes it. ``families_without_introduction`` lists the slots
+still empty, one of the conditions of the promotion milestone.
+
+.. automodule:: protea.core.families
    :members:
    :undoc-members:
    :show-inheritance:
@@ -106,16 +141,34 @@ Operation catalogue
 -------------------
 
 ``protea.core.operation_catalog`` builds the singleton
-``OperationRegistry`` that workers consult at message dispatch. The
-public function ``build_operation_registry()`` instantiates each
-operation class and registers it under its canonical name. Adding a
-new operation is a one-line edit here plus a new module under
-``protea/core/operations/``.
+``OperationRegistry`` that workers consult at message dispatch. Its
+``CATALOG`` holds one row per operation: the class and the
+``OperationSpec`` it declares. ``build_operation_registry()`` instantiates
+each class and registers it with its spec. Adding a new operation is a new
+module under ``protea/core/operations/`` plus one row here.
 
 .. automodule:: protea.core.operation_catalog
    :members:
    :undoc-members:
    :show-inheritance:
+
+Operation descriptor
+--------------------
+
+``protea.core.operation_spec`` defines ``OperationSpec(domain, kind, queue,
+purity, resource, family, publishes_to, status)`` and what derives from it:
+the queues an ``OperationConsumer`` serves, the checks of ``POST /jobs`` and
+the stages the cluster may run as file stages. ``protea.core.queues`` holds every
+broker name, so a queue is written once.
+
+.. automodule:: protea.core.operation_spec
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.queues
+   :members:
+   :undoc-members:
 
 Plugin discovery
 ----------------
@@ -221,12 +274,21 @@ KNN search
 during GO term prediction. The single public entry point is ``search_knn()``,
 which dispatches to one of two backends based on the ``backend`` parameter.
 
-The **numpy** backend computes exact cosine or L2 distances via matrix
-multiplication. It requires no additional dependencies and is the default.
-For cosine distance, query and reference matrices are L2-normalised and the
-distance is computed as :math:`D = 1 - \cos(\theta) \in [0, 2]`. This is
-:math:`O(NQ)` and is appropriate for reference sets up to approximately
-100 000 proteins when embeddings fit in RAM as float16.
+The **numpy** backend is the exact one, and the default. For cosine distance,
+query and reference matrices are L2-normalised and the distance is
+:math:`D = 1 - \cos(\theta) \in [0, 2]`. Every distance that decides a
+neighbour is accumulated in float64, so the k-th neighbour does not depend on
+the order a machine reduces in, and equal distances are ordered by position in
+the bank. It searches in two passes (protea-method, ``_exact_two_pass``). A
+float32 pass, on a CUDA card when one is visible, keeps for each query every
+reference within :math:`t + 2\varepsilon`, where :math:`t` is its k-th float32
+distance and :math:`\varepsilon` bounds the gap between a float32 and a float64
+distance. The float64 pass then decides among those alone. The neighbours,
+their order and their distances are the single float64 pass's: on the
+development store, a batch of 1,024 queries against the 1.45 million references
+of one cut stored byte-identical predictions with the single pass, the two
+passes on the CPU and the two passes on the card, and searched in 131 to 154,
+53 to 63 and 26 to 31 seconds.
 
 The **faiss** backend wraps the FAISS library and supports three index
 types: ``Flat`` (exact), ``IVFFlat`` (approximate, Voronoi partitioning),
@@ -244,6 +306,23 @@ nearest Voronoi cells, reducing query time from :math:`O(N)` to approximately
 .. automodule:: protea.core.knn_search
    :members:
    :undoc-members:
+   :show-inheritance:
+
+Denials
+-------
+
+``protea.core.denials`` is the policy by which a transfer method honours what
+the bank explicitly denies: a protein's NOT annotations in the annotation set
+the prediction transfers from, followed down ``is_a`` and ``part_of`` of the
+prediction set's ontology. PROTEA's k-nearest-neighbour transfer and its
+InterPro mirror apply it when they predict, as their last step before writing,
+and record it: in the receipt's ``denials`` field, and for the mirror also in
+the prediction set's ``meta``. The evaluator applies no policy of its own: it
+scores what a method stored, so a set written before its method honoured
+denials is scored as it was stored.
+
+.. automodule:: protea.core.denials
+   :members:
    :show-inheritance:
 
 Feature engineering
@@ -357,19 +436,6 @@ against an evaluation set.
    :undoc-members:
    :show-inheritance:
 
-Metrics
--------
-
-``protea.core.metrics`` implements CAFA-style precision-recall evaluation.
-Provides functions for computing Fmax (maximum F-measure over all thresholds),
-weighted precision/recall, and coverage for a set of predictions against
-ground-truth annotations.
-
-.. automodule:: protea.core.metrics
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Evidence codes
 --------------
 
@@ -419,6 +485,35 @@ different namespaces simultaneously (e.g., LK in CCO and PK in BPO).
    :undoc-members:
    :show-inheritance:
 
+Window declarations
+-------------------
+
+``protea.core.window_declarations`` holds what an evaluation set declares as a
+window of a frame (ADR-D60, decision 1): its role (``training``,
+``validation``, ``test_spent``, beside ADR-D40's ``valid`` and ``test``) and
+the truth rules its build applied. It also holds the named rule sets a
+``generate_evaluation_set`` payload can select (``october-headline-frame``)
+and ``common_truth_rules``, which refuses a list of windows whose stored rules
+differ, are legacy, or cannot be compared across cuts.
+
+.. automodule:: protea.core.window_declarations
+   :members:
+   :show-inheritance:
+
+Window placement
+----------------
+
+``protea.core.window_placement`` is the rule ``place_window_targets`` applies to
+place each target of a window on the two sequence axes of the strata, as it
+stood when the window opened: its length, and its identity to the closest other
+protein of the opening cut's photo with a truth row. The operation stores the
+result once per window (``window_placement`` and ``window_placement_target``),
+so every method evaluated on the window is stratified on the same placement.
+
+.. automodule:: protea.core.window_placement
+   :members:
+   :show-inheritance:
+
 Provenance
 ----------
 
@@ -446,7 +541,8 @@ Operations
 
 PROTEA ships a curated set of registered operation instances at worker
 startup via ``protea.core.operation_catalog.build_operation_registry``,
-which is the authoritative list (read the function body for the live
+which registers every row of ``CATALOG``, the authoritative list (one row
+per operation with the spec it declares; count the rows for the live
 count).
 The catalog splits into job-backed entries (reachable through
 ``POST /jobs``) and ephemeral consumers (dispatched internally by the
@@ -525,6 +621,17 @@ are documented below; the four ephemeral siblings
    sequences are needed over the union of the releases and not per release.
 
 .. automodule:: protea.core.operations.resolve_protein_sequences
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**resolve_protein_metadata**
+   Fetches each canonical protein's current UniProt entry, stamped with the
+   release that served it, for display and today's annotation. Writes
+   ``protein_uniprot_metadata`` only; nothing that predicts or evaluates on a cut
+   reads it.
+
+.. automodule:: protea.core.operations.resolve_protein_metadata
    :members:
    :undoc-members:
    :show-inheritance:
@@ -759,15 +866,16 @@ not part of the public API.
   in-process execution path used when a single worker handles both KNN
   and write phases.
 - ``protea.core.operations._run_cafa_artifacts``: artifact download and
-  staging helpers for ``run_cafa_evaluation``.
+  staging helpers for ``run_cafa_evaluation``, and the writer of the
+  prediction file: a set's stored scores, as stored.
+- ``protea.core.operations._candidate_scoring``: the arithmetic that turns a
+  candidate's evidence into a score, applied by ``score_prediction_set``.
 - ``protea.core.operations._run_cafa_data_helpers``: data-loading helpers
   for the CAFA evaluation pipeline.
 - ``protea.core.operations._run_cafa_eval_driver``: driver that calls
   ``cafaeval.cafa_eval`` and collects per-namespace results.
 - ``protea.core.operations._run_cafa_helpers``: shared helper functions
   used across the ``_run_cafa_*`` modules.
-- ``protea.core.operations._run_cafa_reranker_loader``: loads and applies
-  the reranker model to CAFA prediction TSVs.
 - ``protea.core.operations._run_cafa_setup``: environment and directory
   setup for a CAFA evaluation run.
 - ``protea.core.operations._run_cafa_summary``: summarises cafaeval
@@ -1017,11 +1125,6 @@ not part of the public API.
    :show-inheritance:
 
 .. automodule:: protea.core.operations._run_cafa_helpers
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: protea.core.operations._run_cafa_reranker_loader
    :members:
    :undoc-members:
    :show-inheritance:

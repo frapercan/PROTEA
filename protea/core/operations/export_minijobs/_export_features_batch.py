@@ -22,6 +22,7 @@ from typing import Any, NamedTuple
 import numpy as np
 from sqlalchemy.orm import Session
 
+from protea.core import queues
 from protea.core._training_dump_loaders import (
     _load_go_maps,
     _maybe_fit_pca_state,
@@ -42,7 +43,7 @@ from protea.infrastructure.storage import get_artifact_store
 
 _LOG = logging.getLogger(__name__)
 
-_WRITE_QUEUE = "protea.training.write"
+_WRITE_QUEUE = queues.TRAINING_WRITE
 _EMPTY_SHARD_URI = "empty://no-knn-output"
 
 

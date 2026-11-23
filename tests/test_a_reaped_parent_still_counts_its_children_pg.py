@@ -40,7 +40,9 @@ def _parent(
     session: Session,
     *,
     status: JobStatus,
-    current: int,
+    #: ``None`` writes SQL NULL, which is a state a real coordinator reached:
+    #: two of the five deferred ones dispatched without initialising it.
+    current: int | None,
     total: int,
     error_code: str | None = None,
 ) -> uuid.UUID:
@@ -109,9 +111,7 @@ def test_a_reaped_parent_closes_and_says_it_was_recovered(postgres_url: str) -> 
     """
     engine = _fresh(postgres_url)
     with Session(engine) as session:
-        parent = _parent(
-            session, status=JobStatus.FAILED, current=6, total=7, error_code=REAPED
-        )
+        parent = _parent(session, status=JobStatus.FAILED, current=6, total=7, error_code=REAPED)
         emit, seen = _emit_recorder()
         update_parent_progress(session, parent, emit, event_name="x.parent_succeeded")
         session.flush()
@@ -136,9 +136,7 @@ def test_a_reaped_parent_advances_without_closing_mid_flight(postgres_url: str) 
     """
     engine = _fresh(postgres_url)
     with Session(engine) as session:
-        parent = _parent(
-            session, status=JobStatus.FAILED, current=2, total=7, error_code=REAPED
-        )
+        parent = _parent(session, status=JobStatus.FAILED, current=2, total=7, error_code=REAPED)
         emit, seen = _emit_recorder()
         update_parent_progress(session, parent, emit, event_name="x.parent_succeeded")
         session.flush()
@@ -193,3 +191,62 @@ def test_a_cancelled_parent_is_left_alone(postgres_url: str) -> None:
         assert job.status == JobStatus.CANCELLED
         assert _succeeded_event(session, parent) is None
         assert seen == []
+
+
+def test_a_parent_whose_counter_is_NULL_still_closes(postgres_url: str) -> None:
+    """The case that stayed RUNNING for ever, and that no fake could catch.
+
+    MEASURED on 2026-11-08, job ``608af098``: both children encoded and stored
+    their shards (128 and 33 sequences, 537 MB between them), every row landed,
+    and the coordinator never closed. ``encode_residue_vocabulary`` dispatched
+    with ``progress_total`` set and ``progress_current`` left NULL, and in SQL
+    **NULL + 1 is NULL**, so each child incremented nothing, the equality below
+    it was never true, and the function returned early every time.
+
+    WHY THE UNIT TEST BESIDE THIS ONE PASSES ANYWAY, which is the half worth
+    keeping: it drives a fake whose ``+ 1`` is PYTHON arithmetic, where
+    ``None + 1`` raises instead of returning None. The defect only exists in
+    the database's semantics, so only a test against the database can refute
+    it. A fake that is more forgiving than the real thing is a test that
+    certifies the wrong arithmetic.
+
+    The deferred coordinator also made it invisible: the reaper treats a job
+    with ``job.dispatched`` as alive for six hours and would then have marked
+    it FAILED, so the end state was a failed job over work that had fully
+    landed and been verified.
+    """
+    engine = _fresh(postgres_url)
+    with Session(engine) as session:
+        parent = _parent(session, status=JobStatus.RUNNING, current=None, total=2)
+        emit, _ = _emit_recorder()
+
+        update_parent_progress(session, parent, emit, event_name="x.parent_succeeded")
+        session.flush()
+        # One child in: counted from zero, and NOT closed yet.
+        assert _reload(session, parent).progress_current == 1
+        assert _reload(session, parent).status == JobStatus.RUNNING
+
+        update_parent_progress(session, parent, emit, event_name="x.parent_succeeded")
+        session.flush()
+
+        job = _reload(session, parent)
+        assert job.progress_current == 2
+        assert job.status == JobStatus.SUCCEEDED
+        assert _succeeded_event(session, parent) is not None
+
+
+def test_the_two_coordinators_that_did_not_initialise_it_now_do() -> None:
+    """Belt and braces, and the reason both halves are here.
+
+    The mechanism is fixed with ``coalesce`` so a caller that forgets cannot
+    break it. These two are fixed as well because a NULL progress on a live row
+    reads as "no information" where the truth is "none done yet", and somebody
+    reading the instrument would be wrong about it.
+    """
+    import inspect
+
+    from protea.core.operations import encode_residue_sparse, encode_residue_vocabulary
+
+    for modulo in (encode_residue_vocabulary, encode_residue_sparse):
+        fuente = inspect.getsource(modulo)
+        assert "progress_current=0" in fuente, modulo.__name__
