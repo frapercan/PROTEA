@@ -248,7 +248,7 @@ Stage 7: closure
 
 The method is frozen in a record that names every file it reads by its digest,
 the revisions of the platform that ran it, and the comparisons that will be
-made. It is then read once on a window opened after the freeze, and documented.
+made. It is then read once on the held-out test window 227->230, and documented.
 
 Where we are
 ------------

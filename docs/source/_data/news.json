@@ -15,7 +15,7 @@
    "Release the platform with the cut photos and the identity of each method.",
    "Publish the champion's predictions every night.",
    "Re-run every component of the research line at every cut and measure it by strata.",
-   "Route the best combination per stratum, freeze it, and read it once on a window opened after the freeze.",
+   "Route the best combination per stratum, freeze it, and read it once on the held-out test window 227->230.",
    "Close the thesis."
   ]
  },
