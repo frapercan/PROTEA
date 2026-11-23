@@ -46,7 +46,7 @@ What it achieves
 
 Two results, on two frames that should not be compared with each other.
 
-- **The sealed board (October 2026).** On the earlier temporal frame, PROTEA
+- **The sealed board (July 2026).** On the earlier temporal frame, PROTEA
   reached ``f_micro_w`` 0.40765 (a weighted, information-aware F-measure) and
   ranked first in seven of the nine evaluation cells. The nine cells are three
   knowledge regimes, from proteins we know nothing about to proteins we already

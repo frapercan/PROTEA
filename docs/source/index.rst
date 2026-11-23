@@ -88,7 +88,7 @@ Start here
       :shadow: md
       :text-align: left
 
-      :bdg-danger:`Evidence` The sealed board of October 2026 on the earlier
+      :bdg-danger:`Evidence` The sealed board of July 2026 on the earlier
       temporal frame, with its metric, scoring recipe and reproduction path.
 
    .. grid-item-card:: API Reference
