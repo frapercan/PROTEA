@@ -12,8 +12,10 @@ from uuid import uuid4
 
 import pytest
 
+from protea.core import queues
 from protea.core.contracts.operation import OperationResult, RetryLaterError
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.operation_spec import OperationSpec
 from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.workers.base_worker import BaseWorker, WorkerConfig
 from protea.workers.stale_job_reaper import StaleJobReaper, StaleJobReaperConfig
@@ -21,6 +23,9 @@ from protea.workers.stale_job_reaper import StaleJobReaper, StaleJobReaperConfig
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+#: The stand-in operations below all answer to ``ping``, so they declare its spec.
+_PING_SPEC = OperationSpec("infrastructure", "job", queues.PING, "database", "cpu")
 
 
 def _make_registry(op_name: str = "ping", result: OperationResult = None, raises=None):
@@ -32,7 +37,7 @@ def _make_registry(op_name: str = "ping", result: OperationResult = None, raises
         op.execute.return_value = result or OperationResult(result={"ok": True})
 
     reg = OperationRegistry()
-    reg.register(op)
+    reg.register(op, _PING_SPEC)
     return reg, op
 
 
@@ -139,7 +144,7 @@ class TestBaseWorkerHandleJob:
         op.name = "ping"
         op.execute.side_effect = _execute
         registry = OperationRegistry()
-        registry.register(op)
+        registry.register(op, _PING_SPEC)
 
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
         worker.handle_job(job.id)
@@ -224,7 +229,7 @@ class TestBaseWorkerHandleJob:
         op.name = "ping"
         op.execute.side_effect = _execute
         registry = OperationRegistry()
-        registry.register(op)
+        registry.register(op, _PING_SPEC)
 
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
         with patch("protea.core.retry.time.sleep"):
@@ -253,7 +258,7 @@ class TestBaseWorkerHandleJob:
         op.name = "ping"
         op.execute.side_effect = _always_deadlock
         registry = OperationRegistry()
-        registry.register(op)
+        registry.register(op, _PING_SPEC)
 
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
         with patch("protea.core.retry.time.sleep"):
@@ -934,7 +939,7 @@ class TestBaseWorkerEmitProgress:
         op.name = "ping"
         op.execute.side_effect = _execute
         registry = OperationRegistry()
-        registry.register(op)
+        registry.register(op, _PING_SPEC)
 
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
         worker.handle_job(job.id)
@@ -969,7 +974,7 @@ class TestBaseWorkerEmitHeartbeat:
         op.name = "ping"
         op.execute.side_effect = _execute
         registry = OperationRegistry()
-        registry.register(op)
+        registry.register(op, _PING_SPEC)
 
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
         with patch.object(worker, "extend_lease") as mock_extend:

@@ -12,7 +12,7 @@ ADRs come in two layers:
   PROTEA. They explain trade-offs of concrete code paths (KNN
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
-- **Strategic decisions** (``D1``-``D58``): plan-level decisions. The
+- **Strategic decisions** (``D1``-``D62``): plan-level decisions. The
   ``D1``-``D31`` block was taken in the master plan revision 3 (2026-05-05)
   and drives the structure of the project, the deployment story, and the
   thesis writing cadence. Later records (``D34`` onward) were added as the
@@ -205,7 +205,7 @@ later revision) or *Superseded* (a named later decision replaces it).
      - F0 (closed)
    * - D25
      - :doc:`HPC operation mode <D25-hpc-mode>`
-     - Pending
+     - Superseded by D60
      - gate at F-OPS
    * - D26
      - :doc:`Container runtime: OCI plus Apptainer <D26-container-runtime>`
@@ -331,6 +331,22 @@ later revision) or *Superseded* (a named later decision replaces it).
      - :doc:`Every cited entity carries a short descriptor and a long one <D58-every-entity-carries-a-short-and-a-long-descriptor>`
      - Proposed
      - T-PLATFORM
+   * - D59
+     - :doc:`The corpus at a cut is a photo: its Swiss-Prot, its live tiers and their annotated UniRef50 neighbours <D59-the-corpus-at-a-cut-is-a-photo>`
+     - Accepted
+     - T-PLATFORM
+   * - D60
+     - :doc:`One universe, three method families, four contracts <D60-one-universe-three-method-families>`
+     - Proposed
+     - T-PLATFORM
+   * - D61
+     - :doc:`The homology table of a cut: its superset searched against its photo with a pinned MMseqs2 <D61-the-homology-table-of-a-cut>`
+     - Accepted
+     - T-PLATFORM
+   * - D62
+     - :doc:`The embedding bank of the photos: every member sequence, eight models, padded batches on the cluster <D62-the-embedding-bank-of-the-photos>`
+     - Accepted
+     - T-PLATFORM
 
 .. toctree::
    :maxdepth: 1
@@ -401,3 +417,7 @@ later revision) or *Superseded* (a named later decision replaces it).
    D56-transitions-dataset-is-tables-keyed-by-what-they-depend-on
    D57-vocabulary-exams-inside-the-platform
    D58-every-entity-carries-a-short-and-a-long-descriptor
+   D59-the-corpus-at-a-cut-is-a-photo
+   D60-one-universe-three-method-families
+   D61-the-homology-table-of-a-cut
+   D62-the-embedding-bank-of-the-photos

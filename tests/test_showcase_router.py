@@ -80,7 +80,9 @@ def _install_mock(
       total_prediction_sets, total_rerankers (and a few more).
 
     ``approx_counts`` feeds the first pattern; ``direct_scalars`` the second.
-    ``eval_rows`` is the sequence yielded by the matrix join's ``.all()``.
+    ``eval_rows`` is the sequence yielded by the matrix join's ``.all()``:
+    ``(result, config, method, scoring name)``, the method None for a set no
+    method row produced.
     """
     direct_iter = iter(direct_scalars)
     session.scalar.side_effect = lambda *a, **kw: next(direct_iter, 0)
@@ -273,7 +275,7 @@ class TestShowcaseBestSelection:
             session,
             approx_counts=[10, 5, 4, 8],
             direct_scalars=[1, 100, 3],
-            eval_rows=[(er, cfg, "alignment_weighted")],
+            eval_rows=[(er, cfg, None, "alignment_weighted")],
         )
 
         resp = c.get("/showcase")
@@ -302,7 +304,7 @@ class TestShowcaseBestSelection:
 
         _install_mock(
             session,
-            eval_rows=[(er1, cfg1, "alignment_weighted"), (er2, cfg2, None)],
+            eval_rows=[(er1, cfg1, None, "alignment_weighted"), (er2, cfg2, None, None)],
         )
 
         resp = c.get("/showcase")
@@ -321,7 +323,10 @@ class TestShowcaseBestSelection:
 
         _install_mock(
             session,
-            eval_rows=[(er1, cfg, "alignment_weighted"), (er2, cfg, "alignment_weighted")],
+            eval_rows=[
+                (er1, cfg, None, "alignment_weighted"),
+                (er2, cfg, None, "alignment_weighted"),
+            ],
         )
 
         resp = c.get("/showcase")
@@ -335,7 +340,7 @@ class TestShowcaseBestSelection:
         c, session = client
         cfg = _make_cfg(display_name="ESMC-300M", family="esmc")
         er = _make_eval(results={})
-        _install_mock(session, eval_rows=[(er, cfg, "alignment_weighted")])
+        _install_mock(session, eval_rows=[(er, cfg, None, "alignment_weighted")])
 
         resp = c.get("/showcase")
         data = resp.json()
@@ -354,7 +359,10 @@ class TestShowcasePerTask:
 
         _install_mock(
             session,
-            eval_rows=[(er1, cfg1, "alignment_weighted"), (er2, cfg2, "alignment_weighted")],
+            eval_rows=[
+                (er1, cfg1, None, "alignment_weighted"),
+                (er2, cfg2, None, "alignment_weighted"),
+            ],
         )
 
         resp = c.get("/showcase")

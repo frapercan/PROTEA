@@ -1,7 +1,7 @@
 """Tests for the cross-repo stack endpoints.
 
 ``GET /stack`` reads ``docs/source/_data/stack.yaml`` and returns the
-eight-repo registry. ``GET /stack/pulls`` queries GitHub once per repo
+registry of repositories; the counts below come from that registry, never typed. ``GET /stack/pulls`` queries GitHub once per repo
 and aggregates open pull requests; the GitHub call is replaced here
 with a fake transport so the test never touches the real API.
 """
@@ -36,9 +36,9 @@ class TestStackEndpoint:
         resp = client.get("/stack")
         assert resp.status_code == 200
 
-    def test_returns_eight_repos(self, client: TestClient) -> None:
+    def test_returns_every_repository_of_the_registry(self, client: TestClient) -> None:
         body = client.get("/stack").json()
-        assert len(body["repos"]) == 8
+        assert len(body["repos"]) == len(stack_router._load_repos())
 
     def test_includes_protea_core(self, client: TestClient) -> None:
         body = client.get("/stack").json()
@@ -64,9 +64,7 @@ class TestStackEndpoint:
             assert repo["summary_es"] != repo["summary"]
 
 
-def _make_fake_client_builder(
-    fake_get: Any, captured_headers: dict[str, str] | None = None
-) -> Any:
+def _make_fake_client_builder(fake_get: Any, captured_headers: dict[str, str] | None = None) -> Any:
     """Build a replacement for ``stack._build_github_client`` so tests
     only intercept calls to GitHub, not the TestClient -> ASGI traffic
     (FastAPI's TestClient also runs over httpx).
@@ -119,14 +117,17 @@ class TestStackPullsEndpoint:
             ]
             return httpx.Response(200, json=payload, headers={"X-RateLimit-Remaining": "59"})
 
-        monkeypatch.setattr(stack_router, "_build_github_client", _make_fake_client_builder(fake_get))
+        monkeypatch.setattr(
+            stack_router, "_build_github_client", _make_fake_client_builder(fake_get)
+        )
 
         resp = client.get("/stack/pulls")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["repos_queried"] == 8
-        assert len(body["pulls"]) == 8
-        assert len(seen_urls) == 8
+        n = len(stack_router._load_repos())
+        assert body["repos_queried"] == n
+        assert len(body["pulls"]) == n
+        assert len(seen_urls) == n
         assert body["rate_limit_remaining"] == 59
         assert body["errors"] == {}
 
@@ -136,11 +137,13 @@ class TestStackPullsEndpoint:
         def fake_get(url: str, **kwargs: Any) -> httpx.Response:
             return httpx.Response(403, text="API rate limit exceeded")
 
-        monkeypatch.setattr(stack_router, "_build_github_client", _make_fake_client_builder(fake_get))
+        monkeypatch.setattr(
+            stack_router, "_build_github_client", _make_fake_client_builder(fake_get)
+        )
 
         body = client.get("/stack/pulls").json()
         assert body["pulls"] == []
-        assert len(body["errors"]) == 8
+        assert len(body["errors"]) == len(stack_router._load_repos())
 
     def test_uses_cache_within_ttl(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -151,11 +154,13 @@ class TestStackPullsEndpoint:
             calls["n"] += 1
             return httpx.Response(200, json=[], headers={})
 
-        monkeypatch.setattr(stack_router, "_build_github_client", _make_fake_client_builder(fake_get))
+        monkeypatch.setattr(
+            stack_router, "_build_github_client", _make_fake_client_builder(fake_get)
+        )
 
         client.get("/stack/pulls")
         client.get("/stack/pulls")
-        assert calls["n"] == 8
+        assert calls["n"] == len(stack_router._load_repos())
 
     def test_passes_token_when_set(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -182,13 +187,25 @@ class TestStackYamlFile:
         assert len(repos) >= 1
 
 
+# The platform and its family publish their docs on Read the Docs; a library or a
+# model around the stack may have none yet.
+_ROLES_WITH_PUBLIC_DOCS = {"platform", "contracts", "inference", "plugin", "lab", "tool"}
+
+
 class TestDocsUrls:
     def test_docs_url_points_at_public_readthedocs(self, client: TestClient) -> None:
         body = client.get("/stack").json()
         for repo in body["repos"]:
-            assert repo["docs_url"] is not None
+            if repo["docs_url"] is None:
+                continue
             assert repo["docs_url"].startswith("https://")
             assert ".readthedocs.io/" in repo["docs_url"]
+
+    def test_the_platform_family_publishes_its_docs(self, client: TestClient) -> None:
+        body = client.get("/stack").json()
+        for repo in body["repos"]:
+            if repo["role"] in _ROLES_WITH_PUBLIC_DOCS:
+                assert repo["docs_url"] is not None, repo["name"]
 
     def test_protea_core_docs_url(self, client: TestClient) -> None:
         body = client.get("/stack").json()

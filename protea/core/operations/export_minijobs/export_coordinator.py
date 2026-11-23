@@ -43,12 +43,13 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from protea.core import queues
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.utils import contract_payload
 
-_KNN_BATCH_QUEUE = "protea.training.knn-batch"
-_FEATURES_QUEUE = "protea.training.features"
-_WRITE_QUEUE = "protea.training.write"
+_KNN_BATCH_QUEUE = queues.TRAINING_KNN_BATCH
+_FEATURES_QUEUE = queues.TRAINING_FEATURES
+_WRITE_QUEUE = queues.TRAINING_WRITE
 
 #: Backends the export pipeline actually implements end-to-end.
 #: ``protea_method.knn_search`` ships numpy, faiss and torch backends;

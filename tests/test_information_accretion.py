@@ -84,9 +84,7 @@ def test_propagation_matches_independent_relaxation_oracle(seed: int) -> None:
     terms, parents = _random_dag(80, seed)
     rng = random.Random(5000 + seed)
     proteins = [f"prot{j}" for j in range(50)]
-    annotations = [
-        (rng.choice(proteins), rng.choice(terms)) for _ in range(400)
-    ]
+    annotations = [(rng.choice(proteins), rng.choice(terms)) for _ in range(400)]
 
     ancestors = build_ancestors(parents)
     for t in terms:
@@ -112,9 +110,7 @@ def test_propagation_is_monotone_along_every_edge(seed: int) -> None:
     """
     terms, parents = _random_dag(60, seed)
     rng = random.Random(9000 + seed)
-    annotations = [
-        (f"p{rng.randint(0, 25)}", rng.choice(terms)) for _ in range(300)
-    ]
+    annotations = [(f"p{rng.randint(0, 25)}", rng.choice(terms)) for _ in range(300)]
     ancestors = build_ancestors(parents)
     for t in terms:
         ancestors.setdefault(t, frozenset({t}))
@@ -145,9 +141,19 @@ def test_unknown_regime_raises_rather_than_defaulting() -> None:
 
 def test_lafa_regime_is_the_thirteen_scored_codes() -> None:
     assert set(LAFA_EVIDENCE) == {
-        "EXP", "IDA", "IPI", "IMP", "IGI", "IEP",
-        "HTP", "HDA", "HMP", "HGI", "HEP",
-        "IC", "TAS",
+        "EXP",
+        "IDA",
+        "IPI",
+        "IMP",
+        "IGI",
+        "IEP",
+        "HTP",
+        "HDA",
+        "HMP",
+        "HGI",
+        "HEP",
+        "IC",
+        "TAS",
     }
 
 
@@ -170,8 +176,7 @@ def test_payload_defaults_to_lafa_regime() -> None:
 def test_payload_rejects_unknown_regime() -> None:
     with pytest.raises(ValueError):
         ComputeInformationAccretionPayload.model_validate(
-            {"ontology_snapshot_id": "s", "annotation_set_id": "a",
-             "evidence_regime": "everything"}
+            {"ontology_snapshot_id": "s", "annotation_set_id": "a", "evidence_regime": "everything"}
         )
 
 
@@ -203,8 +208,11 @@ def _gate(**over):
     # accounting separately. Split the overrides the same way so every test
     # below keeps overriding whichever field it cares about, unchanged.
     dag_fields = dict(
-        terms=terms, parents=parents, ancestors=ancestors,
-        proteins_per_term=ppt, ia=ia,
+        terms=terms,
+        parents=parents,
+        ancestors=ancestors,
+        proteins_per_term=ppt,
+        ia=ia,
     )
     counts = dict(raw=100, dropped=0, max_drop_rate_pct=1.0)
     for key, value in over.items():
@@ -248,7 +256,9 @@ def test_gate_accepts_a_cycle_and_counts_it() -> None:
     parents = {"A": {"B"}, "B": {"A", "X"}}
     ancestors = build_ancestors(parents)
     stats = _gate(
-        terms=["A", "B", "X"], parents=parents, ancestors=ancestors,
+        terms=["A", "B", "X"],
+        parents=parents,
+        ancestors=ancestors,
         proteins_per_term={"A": {"p"}, "B": {"p"}, "X": {"p", "q"}},
         ia={"A": 0.25, "B": 0.25, "X": 0.0},
     )
@@ -268,7 +278,9 @@ def test_gate_rejects_a_cycle_whose_members_disagree() -> None:
     ancestors = build_ancestors(parents)
     with pytest.raises(InformationAccretionGateError, match="do not share a protein set"):
         _gate(
-            terms=["A", "B", "X"], parents=parents, ancestors=ancestors,
+            terms=["A", "B", "X"],
+            parents=parents,
+            ancestors=ancestors,
             proteins_per_term={"A": {"p", "q"}, "B": {"p"}, "X": {"p", "q"}},
             ia={"A": 0.0, "B": 0.0, "X": 0.0},
         )
@@ -319,19 +331,10 @@ class TestANotRowIsNotEvidenceFor:
     def _sql_for(evidence_codes):
         from unittest.mock import MagicMock
 
-        from protea.core.operations.compute_information_accretion import (
-            ComputeInformationAccretionOperation,
-        )
+        from protea.core.operations.compute_information_accretion import corpus_rows
 
         session = MagicMock()
-        session.execute.return_value.yield_per.return_value = []
-        ComputeInformationAccretionOperation()._propagate(
-            session,
-            annotation_set_id="a-set",
-            evidence_codes=evidence_codes,
-            ancestors={},
-            emit=lambda *a, **k: None,
-        )
+        corpus_rows(session, "a-set", evidence_codes)
         return str(session.execute.call_args[0][0])
 
     def test_the_filter_is_there_when_no_regime_is_asked_for(self):

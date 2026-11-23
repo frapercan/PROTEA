@@ -111,12 +111,20 @@ export const METRICS: MetricSpec[] = [
       "Of the terms that should have been predicted, the share that were found.",
   },
   {
-    key: "coverage_w",
+    key: "coverage_w_at_tau",
     label: "coverage, IA-weighted",
     averaging: null,
     weighting: "ia",
     meaning:
-      "The share of evaluable proteins the method predicted anything for. A high score over low coverage describes a method that answered only the easy cases.",
+      "The share of evaluable proteins the method predicted anything for at the reported threshold: LAFA's cov_w. A high score over low coverage describes a method that answered only the easy cases.",
+  },
+  {
+    key: "coverage_w",
+    label: "largest coverage, IA-weighted",
+    averaging: null,
+    weighting: "ia",
+    meaning:
+      "The largest share of evaluable proteins predicted anything for, over every threshold (cafaeval's cov_max). Not the coverage at the reported threshold; results made before 2026-11-21 carry only this one.",
   },
   {
     key: "coverage",
@@ -177,7 +185,7 @@ export function metricGroups(): { title: string; keys: string[] }[] {
       title: "precision and recall",
       keys: ["precision_w", "recall_w", "precision", "recall"],
     },
-    { title: "coverage", keys: ["coverage_w", "coverage"] },
+    { title: "coverage", keys: ["coverage_w_at_tau", "coverage_w", "coverage"] },
   ];
 }
 

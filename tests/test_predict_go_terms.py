@@ -767,23 +767,32 @@ class TestFinalizeParentProgress:
     predict_go_terms coordinator must snap progress_current up to
     progress_total so the UI never shows a stale sub-100% bar."""
 
-    def test_finalize_sql_snaps_progress_current_to_total(self) -> None:
+    def test_the_batch_stage_counts_and_never_closes_the_job(self) -> None:
+        # ADR-D60, phase 3: the parent closes in store_predictions, where the
+        # rows land, never here where they are only computed.
         op = PredictGOTermsBatchOperation()
         session = MagicMock()
-        row = MagicMock()
-        row.finalized = True
-        row.done = 26
-        row.expected = 26
+        row = MagicMock(done=26, expected=26, all_computed=True)
         session.execute.return_value.first.return_value = row
         emit = MagicMock()
 
-        op._finalize_parent_if_last(session, uuid.uuid4(), emit)
+        op._count_batch_done(session, uuid.uuid4(), emit)
 
         sql = str(session.execute.call_args[0][0]).lower()
-        # The single finalize UPDATE bumps progress_current alongside status.
-        assert "progress_current = case" in sql
-        assert "coalesce(progress_total, progress_current)" in sql
-        emit.assert_called_once()
+        assert "batches_completed" in sql
+        assert "status" not in sql.split("returning")[0]
+        assert "finished_at" not in sql and "progress_current" not in sql
+        assert emit.call_args[0][0] == "predict_go_terms.batches_computed"
+
+    def test_the_count_says_nothing_until_the_last_batch(self) -> None:
+        op = PredictGOTermsBatchOperation()
+        session = MagicMock()
+        session.execute.return_value.first.return_value = MagicMock(
+            done=3, expected=26, all_computed=False
+        )
+        emit = MagicMock()
+        op._count_batch_done(session, uuid.uuid4(), emit)
+        emit.assert_not_called()
 
 
 class TestBuildAnnoCsr:

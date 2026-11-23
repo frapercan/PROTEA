@@ -27,3 +27,4 @@ fix sequence that an operator can execute without prior context.
    reproducible-eval-frame
    release-process
    export-resume-and-minijobs
+   cut-photo-on-a-cluster

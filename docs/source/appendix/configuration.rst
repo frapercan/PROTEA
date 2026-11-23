@@ -60,6 +60,24 @@ Environment variable overrides
        string using the ``postgresql+psycopg`` driver.
    * - ``PROTEA_AMQP_URL``
      - Overrides ``queue.amqp_url``. Standard AMQP URL format.
+   * - ``PROTEA_ENVIRONMENT``
+     - The environment the process declares. ``test`` and ``dev`` relax the
+       API rate limits to 9999/hour (:mod:`protea.api.rate_limit`). ``dev``
+       also makes the API and every worker, the reaper included, refuse to
+       start unless the database in ``PROTEA_DB_URL`` and the vhost in
+       ``PROTEA_AMQP_URL`` are the two dev names below. The refusal is one
+       line on stderr and exit status 78 (``EX_CONFIG``), so a unit with
+       ``RestartPreventExitStatus=78`` stays down instead of restarting.
+       Unset, or any other value, starts as before. Read by
+       :mod:`protea.infrastructure.environment_check`.
+   * - ``PROTEA_DEV_DATABASE_NAME``
+     - The database a ``dev`` process must find in ``PROTEA_DB_URL``. A
+       ``dbname`` query parameter counts over the path, as it does for the
+       driver. Default ``protea_dev``.
+   * - ``PROTEA_DEV_AMQP_VHOST``
+     - The vhost a ``dev`` process must find in ``PROTEA_AMQP_URL``, read as
+       pika reads it: a URL with no path means ``/``. Default
+       ``protea-dev``.
    * - ``PROTEA_ARTIFACTS_DIR``
      - Overrides ``storage.artifacts_dir`` (the ``cafaeval`` artefacts
        directory used by ``run_cafa_evaluation``).
@@ -102,6 +120,14 @@ Environment variable overrides
        annotation matrices keyed by ``(embedding_config_id,
        annotation_set_id)``). Defaults to ``data/ref_cache``. Read by
        :mod:`protea.core.disk_cache`.
+   * - ``PROTEA_EMBEDDING_BANK_DIR``
+     - Folder holding the embedding bank's shards on this node, as the builder
+       wrote them (``bank-<config>.json`` and ``vectors/<config>/shard-*.parquet``).
+       When set, a reference pool missing from the disk cache reads its vectors
+       from these shards, each verified against the manifest the store recorded
+       in ``embedding_bank``, instead of streaming them from the store. Unset by
+       default: the store streams them. Read by
+       :mod:`protea.core.operations.predict_go_terms._bank_shards`.
    * - ``PROTEA_PCA_ARTIFACTS_DIR``
      - Directory for per-PLM PCA projection states (``.npz``) used to
        pre-compute the ``emb_pca`` feature family. Defaults to
@@ -139,6 +165,26 @@ Environment variable overrides
        ``protea/artifacts/align_cache`` inside the project root. Set to
        an empty string to disable caching entirely. Read by
        :mod:`protea.core._pair_feature_compute`.
+   * - ``PROTEA_SKIP_TAXONOMY_WARMUP``
+     - ``1``, ``true`` or ``yes`` keeps the NCBI taxonomy warm-up out of
+       worker startup. Without it the workers on ``protea.jobs``,
+       ``protea.predictions.batch`` and ``protea.training`` load the
+       taxonomy before they consume anything, which, with
+       ``PROTEA_TAXONOMY_DB_PATH`` unset, downloads today's NCBI dump
+       (about 100 MB) when ete3's file under ``$HOME`` is absent. Skipping
+       only moves that load to the first taxonomy feature. Read by
+       ``scripts/worker.py``.
+   * - ``PROTEA_TAXONOMY_DB_PATH``
+     - A declared ete3 taxonomy database (``taxa.sqlite``). Unset, ete3
+       opens its default under ``$HOME`` and downloads the current NCBI
+       dump when that file is absent or in a format it does not read. Set,
+       that file is loaded as it is and never downloaded or rebuilt. A
+       missing or unreadable file, or an interpreter that cannot import
+       ete3, raises ``DeclaredTaxonomyUnavailable``, so the computation that
+       asked for taxonomy fails instead of recording the pair as unrelated.
+       Pointing it at a file that does not exist yet is how a deployment
+       forbids the download before a taxonomy is declared. Read by
+       :mod:`protea.core.feature_engineering`.
 
 Frontend
 --------
@@ -172,8 +218,10 @@ The Docker-based integration test fixture is controlled by:
      - Default
      - Description
    * - ``PROTEA_PG_IMAGE``
-     - ``pgvector/pgvector:pg16``
-     - Docker image for the ephemeral Postgres container.
+     - ``pgvector/pgvector:pg18`` (pinned by digest)
+     - Docker image for the ephemeral Postgres container. The default is the
+       image ``docker-compose.yml`` pins, tag and digest, which the integration
+       workflow also runs.
    * - ``PROTEA_PG_USER``
      - ``protea``
      - Database user.
@@ -402,8 +450,10 @@ in the thesis and papers:
 - ``EMBEDDING_PCA_DIM = 16`` (``core/reranker.py``): part of the
   feature schema contract that ``protea-contracts`` will own; it
   gates compatibility with trained boosters.
-- ``N_THRESHOLDS = 101`` (``core/metrics.py``): CAFA Fmax sweep
-  granularity. Changing it produces non-comparable Fmax numbers.
+- ``th_step = 0.01`` (``run_cafa_evaluation``, cafaeval's own default and
+  LAFA's): the threshold grid of every Fmax the platform publishes. A finer
+  grid produces non-comparable numbers. The in-house metric that swept 101
+  thresholds (``core/metrics.py``) was retired on 2026-11-20.
 
 Structural exempt
 ~~~~~~~~~~~~~~~~~

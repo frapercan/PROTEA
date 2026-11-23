@@ -16,13 +16,15 @@ from sqlalchemy.orm import Session, sessionmaker
 from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.host import compute_host
 from protea.core.provenance import stamp_library_provenance
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue import _failure_aggregation as _agg
+from protea.infrastructure.queue._cancelled import record_skip
 from protea.infrastructure.queue._deadletter import DLX_NAME, setup_dead_letter
-from protea.infrastructure.queue._host import compute_host
 from protea.infrastructure.queue._job_pump import ack_when_done, run_while_pumping
 from protea.infrastructure.queue._operation_window import OperationWatchdog
+from protea.infrastructure.queue._retry import Delivery, is_connection_error, retry_or_dead_letter
 from protea.infrastructure.queue._stoppable import Stoppable
 from protea.infrastructure.queue.publisher import publish_operation, safe_republish_job
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
@@ -251,14 +253,16 @@ class QueueConsumer(Stoppable):
             return
 
         # T-INFRA.NACK: drop deliveries for jobs that the API/UI already
-        # cancelled. Without this check the message would be pre-acked and
-        # the worker would pointlessly observe the CANCELLED status inside
-        # _claim_job. Nacking with requeue=False also drains stale messages
-        # that survived a restart so prefetch=1 cannot deadlock on a queue
-        # of orphaned cancellations.
+        # cancelled, which also drains stale messages that survived a restart
+        # so prefetch=1 cannot deadlock on a queue of orphaned cancellations.
+        # ACKED WITH AN EVENT, not nacked (ADR-D60, phase 3): a nack sent them
+        # to the dead-letter queue, where a cancellation reads as a failure.
         if self._is_job_cancelled(job_id):
             logger.info("Skipping cancelled job. job_id=%s queue=%s", job_id, self._queue_name)
-            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            record_skip(
+                self._worker._factory, job_id, "job.cancelled_message_acked", self._queue_name
+            )
+            channel.basic_ack(delivery_tag=method.delivery_tag)
             return
 
         logger.info("Dispatching job. job_id=%s queue=%s", job_id, self._queue_name)
@@ -473,18 +477,20 @@ class OperationConsumer(Stoppable):
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
 
-        # T-INFRA.NACK: short-circuit cancelled parent jobs. Without this
-        # the operation would run, commit half-results, then write a
-        # child.failed event. Nacking with requeue=False evicts the
-        # message from the queue so prefetch=1 cannot deadlock on a
-        # backlog of cancelled-job deliveries.
+        # T-INFRA.NACK: short-circuit cancelled parent jobs, which would
+        # otherwise run, commit half-results and write a child.failed event.
+        # ACKED WITH AN EVENT, not nacked (ADR-D60, phase 3), so the message
+        # leaves the queue without landing in the dead-letter queue.
         if self._is_parent_job_cancelled(decoded.parent_job_id):
             logger.info(
                 "Skipping operation for cancelled parent job. operation=%s parent_job_id=%s",
                 decoded.operation_name,
                 decoded.parent_job_id,
             )
-            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            record_skip(
+                self._factory, decoded.parent_job_id, "child.cancelled_skipped", self._queue_name
+            )
+            channel.basic_ack(delivery_tag=method.delivery_tag)
             return
 
         logger.info(
@@ -504,10 +510,11 @@ class OperationConsumer(Stoppable):
     ) -> None:
         """Execute the operation inside a CONSUMER span and route the result.
 
-        ACKs on success, nacks with requeue=True on ``RetryLaterError``
-        (T-INFRA.NACK: the broker retries instead of an in-process sleep),
-        delegates CUDA OOM to the backoff handler, and routes other
-        exceptions to ``_handle_general_failure`` (which nacks with the
+        ACKs on success. ``RetryLaterError`` and a lost connection are
+        transient: republished after a wait with the count raised, and
+        dead-lettered at the cap (:mod:`protea.infrastructure.queue._retry`,
+        ADR-D60 phase 3). CUDA OOM keeps its own backoff handler, and other
+        exceptions go to ``_handle_general_failure`` (which nacks with the
         configured requeue flag).
         """
         # T5.1b: open a CONSUMER span using the inbound traceparent so
@@ -535,48 +542,22 @@ class OperationConsumer(Stoppable):
                     publish_operation(self._amqp_url, queue_name, op_payload)
                 channel.basic_ack(delivery_tag=method.delivery_tag)
                 logger.info("Operation acked. operation=%s", decoded.operation_name)
-            except RetryLaterError as exc:
-                self._handle_retry_later(channel, method, session, decoded, span, exc)
             except Exception as exc:
                 span.record_exception(exc)
                 try:
                     session.rollback()
                 except Exception:
                     pass
-                if "CUDA out of memory" in str(exc):
+                delivery = Delivery(channel, method, body, self._queue_name)
+                if isinstance(exc, RetryLaterError) or is_connection_error(exc):
+                    kind = "retry_later" if isinstance(exc, RetryLaterError) else "connection"
+                    retry_or_dead_letter(delivery, decoded, exc, kind, self._emit_parent_event)
+                elif "CUDA out of memory" in str(exc):
                     self._handle_cuda_oom(channel, method, body, decoded, exc)
                 else:
                     self._handle_general_failure(channel, method, decoded, exc)
             finally:
                 session.close()
-
-    @staticmethod
-    def _handle_retry_later(
-        channel: BlockingChannel,
-        method: Basic.Deliver,
-        session: Session,
-        decoded: _DecodedMessage,
-        span: Any,
-        exc: RetryLaterError,
-    ) -> None:
-        """Nack with requeue=True on ``RetryLaterError``.
-
-        T-INFRA.NACK: an operation raising ``RetryLaterError`` is an
-        explicit retry signal (e.g. GPU temporarily busy), not a failure.
-        The broker is asked to redeliver instead of running an
-        in-process sleep/republish that would hold the prefetch slot.
-        """
-        span.record_exception(exc)
-        try:
-            session.rollback()
-        except Exception:
-            pass
-        logger.info(
-            "Operation requested retry. operation=%s reason=%s",
-            decoded.operation_name,
-            exc,
-        )
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
     @staticmethod
     def _decode_message(body: bytes, properties: BasicProperties) -> _DecodedMessage | None:

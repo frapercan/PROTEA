@@ -50,6 +50,23 @@ class _DumpOutcome(NamedTuple):
     uploaded: dict[str, str]
     manifest_data: dict[str, Any]
     manifest_sha: str
+    #: The sha256 of each staged parquet, hashed before upload; empty when the
+    #: stage held none (a test double, or a dump that wrote no split).
+    digests: dict[str, str] | None = None
+
+
+def staged_digests(stage_dir: Path) -> dict[str, str]:
+    """The sha256 of ``train.parquet`` and ``eval.parquet`` in ``stage_dir``, when present."""
+    digests: dict[str, str] = {}
+    for fname in ("train.parquet", "eval.parquet"):
+        path = stage_dir / fname
+        if path.exists():
+            digest = hashlib.sha256()
+            with open(path, "rb") as handle:
+                for block in iter(lambda: handle.read(1 << 22), b""):
+                    digest.update(block)
+            digests[fname] = digest.hexdigest()
+    return digests
 
 
 class ExportResearchDatasetPayload(ProteaPayload, frozen=True):
@@ -230,6 +247,7 @@ class ExportResearchDatasetOperation:
             else:
                 with session_scope(factory) as compute_session:
                     auto_result = self._dump_to_stage(compute_session, p, stage_dir, emit)
+            digests = staged_digests(stage_dir)
             uploaded, manifest_data, manifest_sha = self._upload_outputs(
                 stage_dir, store, key_prefix
             )
@@ -251,6 +269,7 @@ class ExportResearchDatasetOperation:
             uploaded=uploaded,
             manifest_data=manifest_data,
             manifest_sha=manifest_sha,
+            digests=digests,
         )
         return outcome, auto_result
 
@@ -429,6 +448,14 @@ class ExportResearchDatasetOperation:
             producer_version=manifest_data.get("producer_version"),
             producer_git_sha=manifest_data.get("producer_git_sha"),
             meta={},
+            description=(
+                f"Re-ranker dataset {p.output_name}: nearest-neighbour features from "
+                f"embedding configuration {p.embedding_config_id}, train pairs "
+                f"{list(manifest_data.get('train_snapshot_pairs', []))}, eval pair "
+                f"{manifest_data.get('eval_snapshot_pair')}."
+            ),
+            train_sha256=(outcome.digests or {}).get("train.parquet"),
+            eval_sha256=(outcome.digests or {}).get("eval.parquet"),
         )
         session.add(dataset)
         session.flush()

@@ -1,13 +1,20 @@
 """The four axes every result is reported along, and the refusal to pool them.
 
 No number in this campaign is reported for a population as a whole. Results are
-reported per stratum, and a stratum is a point on four axes:
+reported per stratum, and a stratum is a point on four axes, the same for every
+method evaluated on a window:
 
 1. **category**, the prior-knowledge partition, from :mod:`protea.core.domain.category`
 2. **aspect**, the sub-ontology, from :mod:`protea.core.domain.aspect`
 3. **length band**, from the model context limits, see :class:`LengthBand`
-4. **homology band crossed with donor provenance**, see :class:`HomologyBand`
-   and :class:`DonorEvidence`
+4. **homology band**, the identity to the closest protein measured when the
+   window opened, see :class:`HomologyBand`
+
+The length and the identity are the window's placement of the target
+(:mod:`protea.core.window_placement`), read once per window. Three more axes,
+:class:`DonorEvidence`, :class:`TaxonomyBand` and :class:`PropagationBand`,
+describe one method's retrieval rather than the target, and are read from that
+method's neighbours when asked for.
 
 The first two are imported rather than restated, because they already exist as
 typed enums and a second spelling of a closed set is a second thing to keep in
@@ -51,7 +58,7 @@ __all__ = [
     "reportable_strata",
     "stratum_for",
     "NEIGHBOURHOOD_AXES",
-    "SEQUENCE_AXES",
+    "WINDOW_AXES",
     "taxonomy_band_for",
 ]
 
@@ -108,7 +115,10 @@ def length_band_for(residues: int) -> LengthBand:
 
 
 class HomologyBand(StrEnum):
-    """How close the nearest annotated donor is, by sequence identity.
+    """How close the closest protein measured when the window opened is, by sequence identity.
+
+    Read from the window's placement (:mod:`protea.core.window_placement`), so it
+    is a property of the target and the window and the same for every method.
 
     The boundaries mark where transfer by similarity is known to change
     character rather than where the corpus happens to split. Below about thirty
@@ -117,9 +127,9 @@ class HomologyBand(StrEnum):
     and says little about whether a method generalises. The middle is where
     the interesting decisions live, so it is split once.
 
-    ``NONE`` is a band, not a missing value. A query with no donor at all is a
-    real and reportable population, and folding it into the lowest identity
-    band would hide the retrieval failures inside the modelling results.
+    ``NONE`` is a band, not a missing value. A target with no measured homolog at
+    all is a real and reportable population, and folding it into the lowest
+    identity band would hide the hardest proteins inside an easier band.
 
     Every band is half-open, ``(lower, upper]``, and the labels say so: an
     identity of exactly thirty falls in the twilight band and exactly ninety
@@ -143,10 +153,10 @@ _HOMOLOGY_BANDS: tuple[tuple[HomologyBand, _Band], ...] = (
 
 
 def homology_band_for(best_identity: float | None) -> HomologyBand:
-    """Return the band for the best donor identity, as a percentage.
+    """Return the band for an identity, as a percentage.
 
-    ``None`` means no donor was retrieved at all, which is
-    :attr:`HomologyBand.NONE` rather than an identity of zero.
+    ``None`` means no homolog at all, which is :attr:`HomologyBand.NONE` rather
+    than an identity of zero.
     """
     if best_identity is None:
         return HomologyBand.NONE
@@ -159,13 +169,16 @@ def homology_band_for(best_identity: float | None) -> HomologyBand:
 
 
 class DonorEvidence(StrEnum):
-    """Whether the nearest donor's annotation rests on experiment.
+    """Whether one method's most homologous donor rests on experiment.
 
-    The fourth axis is the homology band **crossed with this**, because the two
-    together are what a homology threshold actually means. A close donor whose
-    own annotation was itself inferred computationally transfers a guess, and
-    reporting it beside a close donor with experimental support would average
-    two different claims into one number.
+    A property of that method's retrieval, read from its neighbours, and
+    ``NONE`` when it aligned no donor. A close donor whose own annotation was
+    itself inferred computationally transfers a guess, and this axis separates it
+    from a close donor with experimental support.
+
+    It used to be coupled to the homology band, when that band was read from the
+    same retrieval. The band is now the window's, the same for every method, so
+    the two are crossed like any other pair of axes.
     """
 
     EXPERIMENTAL = "exp"
@@ -313,13 +326,15 @@ def propagation_band_for(
 
 
 class Neighbourhood(NamedTuple):
-    """What the retrieved neighbourhood looks like for one query.
+    """What one method's retrieved neighbourhood looks like for one query.
 
     Five facts about the donors, bundled because they are read from the same
-    retrieval and are only meaningful together: a homology band without the
-    donor's evidence describes a transfer whose provenance is unknown, and a
-    propagation gap without the taxonomy says how far the annotation travelled
-    but not through what.
+    retrieval and are only meaningful together: a propagation gap without the
+    taxonomy says how far the annotation travelled but not through what.
+    ``best_identity`` is the identity of the most homologous donor the method
+    retrieved. It places nothing, since the homology axis is the window's; it
+    says whether a donor exists, and the stratum pages show it beside the
+    window's identity.
 
     All of it is resolved over donors whose sequence differs from the query's.
     Under the temporal protocol the query retrieves itself at distance zero,
@@ -343,9 +358,10 @@ class Stratum(NamedTuple):
     this class exists to prevent applied to the class itself.
 
     The seven are not interchangeable, and :data:`NEIGHBOURHOOD_AXES` records the
-    split that matters: ``category``, ``aspect`` and ``length`` are properties of
-    the query, and the other four are properties of a RETRIEVAL, so they need an
-    aligned donor before they can be read.
+    split that matters: the four :data:`WINDOW_AXES` are properties of the target
+    in its window, the same for every method, and the other three are properties
+    of one method's RETRIEVAL, so they need an aligned donor before they can be
+    read.
     """
 
     category: Category
@@ -364,9 +380,9 @@ class Stratum(NamedTuple):
         )
 
 
-#: The :class:`Stratum` fields that are read off the donor neighbourhood.
+#: The :class:`Stratum` fields that are read off one method's donor neighbourhood.
 #: Reporting on any of them needs a donor that was actually aligned; reporting
-#: on the other three does not.
+#: on the other four does not.
 #:
 #: This distinction is load-bearing rather than cosmetic. Placing a query used
 #: to require a neighbourhood whatever was being crossed, so a run asking only
@@ -374,19 +390,17 @@ class Stratum(NamedTuple):
 #: this campaign, most of them -- and reported the survivors as if they were
 #: the population. The axes a caller asks for decide what it needs, and this
 #: set is where that is written down.
-NEIGHBOURHOOD_AXES = frozenset(
-    {"homology", "donor_evidence", "taxonomy", "propagation"}
-)
+NEIGHBOURHOOD_AXES = frozenset({"donor_evidence", "taxonomy", "propagation"})
 
-#: The other three, kept as a name so the split is checkable against
-#: ``Stratum._fields`` rather than trusted.
-SEQUENCE_AXES = frozenset({"category", "aspect", "length"})
+#: The other four, read off the window: the category and the aspect from its
+#: truth, the length and the homology from its placement. Kept as a name so the
+#: split is checkable against ``Stratum._fields`` rather than trusted.
+WINDOW_AXES = frozenset({"category", "aspect", "length", "homology"})
 
 #: The neighbourhood of a query whose donors were never aligned, as opposed to
 #: one whose donors were aligned and turned out to be distant. Every field is
-#: ``None``, which :func:`stratum_for` reads as ``HomologyBand.NONE`` plus
-#: ``DonorEvidence.NONE``: the donor axes say "not read", and the three
-#: sequence axes still place.
+#: ``None``, which :func:`stratum_for` reads as the ``none`` band of each
+#: retrieval axis: they say "not read", and the four window axes still place.
 #:
 #: It lives here, beside the split it depends on, because two callers need the
 #: same sentinel and a second copy of it is the defect this campaign exists to
@@ -400,40 +414,48 @@ def stratum_for(
     category: Category | str,
     aspect: Aspect | str,
     residues: int,
-    neighbourhood: Neighbourhood,
+    identity: float | None,
+    retrieval: Neighbourhood,
 ) -> Stratum:
-    """Place one observation on the six axes.
+    """Place one observation on the seven axes.
 
-    ``donor_is_experimental`` is ``None`` when there is no donor, which pairs
-    with :attr:`HomologyBand.NONE`. Passing a verdict alongside no donor is a
+    ``residues`` and ``identity`` are the target's placement in its window
+    (:mod:`protea.core.window_placement`): its length when the window opened, and
+    its identity, as a percentage, to the closest protein measured then, or
+    ``None`` when there is none. They are the same for every method evaluated on
+    the window. ``retrieval`` is one method's donor neighbourhood, which places
+    the observation on the three retrieval axes; :data:`UNREAD_NEIGHBOURHOOD` when
+    none was read, which places it in their ``none`` bands.
+
+    Within the retrieval, a donor's identity and its evidence must agree about
+    whether a donor exists. Passing a verdict alongside no donor is a
     contradiction and is refused rather than silently resolved.
 
-    The three donor-neighbourhood arguments are all resolved over donors whose
-    sequence differs from the query's. Under the temporal protocol the query is
-    present in the earlier annotation bank and retrieves itself at a distance of
-    approximately zero, so a caller that passes distances including the self hit
-    will place almost every protein in the same two bands and the axes will
-    report the protocol rather than the neighbourhood.
+    The retrieval's donors are resolved over donors whose sequence differs from
+    the query's. Under the temporal protocol the query is present in the earlier
+    annotation bank and retrieves itself at a distance of approximately zero, so a
+    caller that passes distances including the self hit places almost every
+    protein in the same bands, and the axes report the protocol rather than the
+    neighbourhood.
     """
-    n = neighbourhood
-    homology = homology_band_for(n.best_identity)
-    if (homology is HomologyBand.NONE) != (n.donor_is_experimental is None):
+    r = retrieval
+    if (r.best_identity is None) != (r.donor_is_experimental is None):
         raise ValueError(
-            "the donor band and the donor evidence disagree about whether a "
-            f"donor exists: band={homology.value}, evidence={n.donor_is_experimental!r}"
+            "the retrieval's donor identity and its evidence disagree about whether a "
+            f"donor exists: identity={r.best_identity!r}, evidence={r.donor_is_experimental!r}"
         )
-    if n.donor_is_experimental is None:
+    if r.donor_is_experimental is None:
         evidence = DonorEvidence.NONE
     else:
-        evidence = DonorEvidence.EXPERIMENTAL if n.donor_is_experimental else DonorEvidence.OTHER
+        evidence = DonorEvidence.EXPERIMENTAL if r.donor_is_experimental else DonorEvidence.OTHER
     return Stratum(
         category=Category.from_code(category) if isinstance(category, str) else category,
         aspect=Aspect.from_code(aspect) if isinstance(aspect, str) else aspect,
         length=length_band_for(residues),
-        homology=homology,
+        homology=homology_band_for(identity),
         donor_evidence=evidence,
-        taxonomy=taxonomy_band_for(n.taxonomic_relation),
-        propagation=propagation_band_for(n.nearest_any, n.nearest_experimental),
+        taxonomy=taxonomy_band_for(r.taxonomic_relation),
+        propagation=propagation_band_for(r.nearest_any, r.nearest_experimental),
     )
 
 
@@ -443,39 +465,21 @@ def all_strata() -> tuple[Stratum, ...]:
     Derived from the axes rather than written out, so adding a band cannot
     leave a report silently covering fewer strata than it claims to.
 
-    This is an ordering key and not a reporting frame. The six axes cross to
-    9,720 strata, and the evaluation set holds 6,216 proteins, so most of these
-    can never be occupied and the cross is not a claim that they should be.
-
-    The five protein-level axes admit 1,080 combinations, not the 1,800 a free
-    product of the enums would give, because homology and donor evidence are
-    coupled here rather than crossed: :attr:`HomologyBand.NONE` admits only
-    :attr:`DonorEvidence.NONE`, and each of the four bands that do have a donor
-    admits only EXPERIMENTAL or OTHER, never all three. That pair therefore
-    contributes 1 + 4x2 = 9 states rather than 15, and the protein-level count
-    is 4 lengths x 9 donor states x 6 taxonomy bands x 5 propagation bands =
-    1,080. The 9,720 above already implies it: 9 category-aspect pairs x 1,080.
-
-    Of those 1,080, exactly 77 were populated when this was last measured, on
-    prot_t5 at K=30, because length, homology, taxonomy and propagation covary
-    strongly. That measurement predates the campaign wipe of 2026-08-27 and no
-    result now in the database is older than the wipe, so the 77 describes a
-    window that no longer exists and has not been re-measured on the current
-    one. Read it as evidence that the populated fraction is small, not as a
-    current count. Report from :func:`reportable_strata`, which enumerates what
-    the data actually holds, and use this only to sort what that returns.
+    This is an ordering key and not a reporting frame. The seven axes cross to
+    16,200 strata: 9 category-aspect pairs times 4 lengths, 5 homology bands,
+    3 donor-evidence values, 6 taxonomy bands and 5 propagation bands. A window
+    holds some tens of thousands of targets, and length, homology, taxonomy and
+    propagation covary strongly, so most of these can never be occupied and the
+    cross is not a claim that they should be. Report from
+    :func:`reportable_strata`, which enumerates what the data actually holds, and
+    use this only to sort what that returns.
     """
     out: list[Stratum] = []
     for category in Category:
         for aspect in Aspect:
             for length in LengthBand:
                 for homology in HomologyBand:
-                    evidences = (
-                        (DonorEvidence.NONE,)
-                        if homology is HomologyBand.NONE
-                        else (DonorEvidence.EXPERIMENTAL, DonorEvidence.OTHER)
-                    )
-                    for evidence in evidences:
+                    for evidence in DonorEvidence:
                         for taxonomy in TaxonomyBand:
                             for propagation in PropagationBand:
                                 out.append(
@@ -506,7 +510,7 @@ def reportable_strata(
     thin ones are named as withheld rather than printed at the same weight, and
     both halves are returned so a caller can say how much of the population it
     is not showing. Dropping them silently is the failure this replaces: with
-    six axes most of the cross is empty, and a frame that only prints what
+    seven axes most of the cross is empty, and a frame that only prints what
     survived looks identical to a frame that covered everything.
     """
     if min_population < 1:

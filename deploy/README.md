@@ -17,7 +17,6 @@ This README is the operator-facing quick reference for the files under
 | - | - | - |
 | `deploy/swarm/`             | `stack.yml` + README for `docker stack deploy` | Docker Swarm |
 | `deploy/helm/protea/`       | Helm chart (Chart.yaml, values.yaml, templates) | Kubernetes |
-| `deploy/slurm/`             | `*.sbatch` scripts, `env.sh`, `submit_all.sh` | HPC / SLURM |
 | `deploy/grafana/`           | Provisioned dashboards + alert rules (mounted by `docker-compose.monitoring.yml`) | All |
 | `deploy/loki/`              | `loki-config.yml` (mounted by `docker-compose.monitoring.yml`) | All |
 
@@ -40,12 +39,10 @@ The compose files referenced below live at the repo root:
 | Compose + monitoring  | Local dev with Grafana dashboards and Loki logs     | `docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d` |
 | Docker Swarm          | Multi-host production cluster without Kubernetes    | `docker stack deploy -c deploy/swarm/stack.yml protea` |
 | Helm / Kubernetes     | Existing K8s cluster, GitOps-style rollouts         | `helm install protea deploy/helm/protea/` |
-| SLURM                 | HPC batch site, worker fleet on a scheduler         | `sbatch deploy/slurm/<worker>.sbatch` |
 
 A single-host operator who just wants the stack running locally should
 follow the [Compose section](#compose-single-host). Multi-host operators
 should choose between Swarm and Kubernetes per their existing tooling.
-HPC operators with no docker daemon on compute nodes should use SLURM.
 
 ## Compose (single host)
 
@@ -246,67 +243,9 @@ The migrations Job runs as a `pre-install` / `pre-upgrade` hook and
 completes before the api and workers start, mirroring the compose
 `migrate` service.
 
-## SLURM (HPC batch)
-
-`deploy/slurm/` ships `sbatch` templates for the PROTEA worker fleet on
-sites that have no docker daemon on compute nodes. Each template
-matches one of the compose worker services 1:1.
-
-| File | Queue | Partition | GPU |
-| - | - | - | - |
-| `worker_jobs.sbatch`              | `protea.jobs`              | cpu | no  |
-| `worker_embeddings.sbatch`        | `protea.embeddings`        | cpu | no  |
-| `worker_embeddings_batch.sbatch`  | `protea.embeddings.batch`  | gpu | yes |
-| `worker_embeddings_write.sbatch`  | `protea.embeddings.write`  | cpu | no  |
-| `worker_predictions_batch.sbatch` | `protea.predictions.batch` | gpu | yes |
-| `worker_predictions_write.sbatch` | `protea.predictions.write` | cpu | no  |
-| `worker_reaper.sbatch`            | (DB poll, no queue)        | cpu | no  |
-| `example.sbatch`                  | env-var smoke test         | cpu | no  |
-
-### Prerequisites
-
-1. A shared filesystem visible from every compute node holding a PROTEA
-   checkout and a python venv with `poetry install --no-root` plus the
-   root package installed (so `import protea` resolves).
-2. Postgres and RabbitMQ reachable from compute nodes. The head node
-   typically hosts both; opening 5432 and 5672 to the compute subnet is
-   enough.
-3. A `logs/` directory in the PROTEA checkout (the sbatch headers write
-   stdout / stderr there). Create it with `mkdir -p logs`.
-
-### Worked example
-
-1. Set the four required env vars in the submitting shell:
-   - `export PROTEA_REPO_DIR=/lustre/protea/PROTEA`
-   - `export PROTEA_VENV=/lustre/protea/.venv`
-   - `export PROTEA_DB_URL=postgresql+psycopg://protea:protea@head:5432/protea`
-   - `export PROTEA_AMQP_URL=amqp://guest:guest@head:5672/`
-2. Smoke test the env wiring on a cpu node:
-   `sbatch --export=ALL deploy/slurm/example.sbatch`, then read the
-   output at `logs/protea-env-check-*.out`.
-3. Submit one of every worker via the convenience script:
-   `deploy/slurm/submit_all.sh --partition-gpu gpu_short`.
-4. Or submit a single GPU embeddings batch worker:
-   `sbatch --export=ALL deploy/slurm/worker_embeddings_batch.sbatch`.
-
-To run more than one worker on a queue, submit the same sbatch file N
-times: each submission becomes its own SLURM job id and attaches to the
-queue independently. RabbitMQ load-balances messages across consumers.
-The full template reference is in
-[`deploy/slurm/README.md`](slurm/README.md).
-
-### Tuning
-
-The `#SBATCH --time`, `#SBATCH --mem`, and `#SBATCH --cpus-per-task`
-headers default to match the compose resource limits in
-`docker-compose.yml` plus a small headroom for cgroup overhead. Tweak
-per site policy. GPU sbatch files request `#SBATCH --gres=gpu:1`; only
-bump to `gpu:2` if the configured PLM backend is GPU parallel (the
-bundled backends use a single device per worker).
-
 ## Cross references
 
-- [`docs/source/runbooks/deployment.rst`](../docs/source/runbooks/deployment.rst): canonical narrative deployment guide for all five modes.
+- [`docs/source/runbooks/deployment.rst`](../docs/source/runbooks/deployment.rst): canonical narrative deployment guide for all four modes.
 - [`docs/source/runbooks/observability.rst`](../docs/source/runbooks/observability.rst): `PROTEA_OTEL_*` telemetry variables that apply across modes.
 - [`docs/source/runbooks/secrets-management.rst`](../docs/source/runbooks/secrets-management.rst): sops + age workflow for the encrypted production secrets file.
 - [`docs/source/runbooks/loki.rst`](../docs/source/runbooks/loki.rst): wiring the `loki-docker-driver` so api / worker containers ship logs to Loki.
@@ -316,15 +255,13 @@ bundled backends use a single device per worker).
 - [`docs/source/runbooks/embedding-worker-oom.rst`](../docs/source/runbooks/embedding-worker-oom.rst): playbook for the GPU embedding worker hitting OOM.
 - [`docs/source/runbooks/stale-job-reaper.rst`](../docs/source/runbooks/stale-job-reaper.rst): reaper behaviour and force-fail policy.
 - [`deploy/swarm/README.md`](swarm/README.md): Swarm-specific prerequisites, secret rotation, scaling.
-- [`deploy/slurm/README.md`](slurm/README.md): SLURM template reference and submission patterns.
 - [`deploy/helm/protea/values.yaml`](helm/protea/values.yaml): full Helm value reference with defaults.
 
 ## Notes on health checks and migrations
 
 The api exposes `GET /health` returning `{"status": "ok"}`. Every
 deployment mode wires a probe against this endpoint (compose
-`healthcheck`, Swarm `healthcheck`, Helm readiness and liveness probes,
-SLURM operator-driven `curl`).
+`healthcheck`, Swarm `healthcheck`, Helm readiness and liveness probes).
 
 Migrations (`alembic upgrade head`) run before the api and workers
 boot in every mode:
@@ -332,9 +269,6 @@ boot in every mode:
 - Compose: the `migrate` service runs once and exits 0 if up to date.
 - Swarm: the `migrate` task re-runs on every `docker stack deploy`.
 - Helm: a `pre-install` / `pre-upgrade` Job (`templates/migrations-job.yaml`).
-- SLURM: run `poetry run alembic upgrade head` from the head node before
-  launching workers, or submit a one-off sbatch wrapping the same
-  command.
 
 Never start the api against an un-migrated schema; the
 [`disaster-recovery.rst`](../docs/source/runbooks/disaster-recovery.rst)

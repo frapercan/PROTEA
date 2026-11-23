@@ -124,9 +124,11 @@ def _panel_coverage(
     number is missing.
 
     Both halves of that distinction are load-bearing, and each one alone is
-    wrong. ``PK:BPO`` cannot be written at all while the weighted and
-    unweighted branches score two populations out of one row per protein, so a
-    rule that blocked on absence would block that exploration for ever. And
+    wrong. ``PK:BPO`` could not be written at all while the weighted and
+    unweighted branches scored two populations out of one row per protein (until
+    2026-11-21, when each variant got its own population in the grid), so a
+    rule that blocked on absence would have blocked that exploration for ever,
+    and still would for the results made before. And
     :func:`verdict` reads the deciding panels through a comprehension that
     simply skips the ones that never arrived, so a rule that ignored absence
     publishes a verdict over part of its declared evidence without saying

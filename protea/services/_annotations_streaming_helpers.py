@@ -17,6 +17,20 @@ from typing import Any
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 
 
+def _artifact_store() -> Any:
+    """The artifact store from settings; callers do not thread it through."""
+    from protea.infrastructure.settings import load_settings
+    from protea.infrastructure.storage import get_artifact_store
+
+    project_root = __import__("pathlib").Path(__file__).resolve().parents[2]
+    return get_artifact_store(load_settings(project_root))
+
+
+def iter_evaluation_artifact(key: str) -> Iterator[bytes]:
+    """Stream one stored evaluation artefact in chunks, as it was uploaded."""
+    yield from _artifact_store().iter_chunks(key)
+
+
 def iter_evaluation_artifacts_zip(
     keys: list[str],
     result_id: uuid.UUID,
@@ -28,11 +42,7 @@ def iter_evaluation_artifacts_zip(
     rewritten to drop the ``eval_artifacts/<result_id>/`` prefix so
     the zip entries are the relative file names cafaeval emitted.
     """
-    from protea.infrastructure.settings import load_settings
-    from protea.infrastructure.storage import get_artifact_store
-
-    project_root = __import__("pathlib").Path(__file__).resolve().parents[2]
-    store = get_artifact_store(load_settings(project_root))
+    store = _artifact_store()
     prefix = f"eval_artifacts/{result_id}/"
 
     buf = io.BytesIO()

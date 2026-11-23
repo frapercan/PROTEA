@@ -31,6 +31,18 @@ concern and links to the others where they intersect.
    end-to-end evaluation workflow used to produce the figures in
    :doc:`/results`.
 
+:doc:`lafa-frame`
+   The benchmark's ground truth, built the way LAFA builds its own windows:
+   where each rule comes from, the one departure, and the known flaws.
+
+:doc:`benchmark`
+   The four windows methods are compared on, their information accretion, how
+   a method is scored on them, and the held-out test.
+
+:doc:`scoring`
+   How a transfer method's candidates become scores: the scoring step, what a
+   scored set records, and the check that it is the evaluator's reading.
+
 :doc:`orchestration`
    How PROTEA relates to the rest of the working tree: the satellite
    repositories, the optional ``agent-farm`` orchestration system, and
@@ -41,11 +53,6 @@ concern and links to the others where they intersect.
    Four-role authentication system (guest/researcher/operator/admin) shipped in
    FARM-AUTH.1-11 (ADR D37). Human email+password login, API-key programmatic
    access, session revocation, per-user quota, optional SMTP, and audit log.
-
-:doc:`multistage-pipeline`
-   Shared coordinator/fan-out/collect contract (``MultiStagePayload``,
-   ``StageArtifactStore``, ``PipelineStage``, ``Coordinator``) that the three
-   production pipelines will converge onto.
 
 :doc:`export-coordinator`
    The minijob-based dataset export pipeline: ``PROTEA_EXPORT_MINIJOBS`` env gate,
@@ -100,8 +107,10 @@ The full ADR index lives at :doc:`/adr/index`.
    data_model
    operations
    evaluation
+   lafa-frame
+   benchmark
+   scoring
    orchestration
    auth
-   multistage-pipeline
    export-coordinator
    /adr/index

@@ -385,7 +385,7 @@ function ProteinTable({ data }: { data: StratumProteinsResponse }) {
               <td className="px-3 py-1.5 text-right font-mono text-xs text-slate-700">{num(p.recall)}</td>
               <td className="px-3 py-1.5 text-right font-mono text-xs text-slate-700">{num(p.n_gt, 2)}</td>
               <td className="px-3 py-1.5 text-right font-mono text-xs text-slate-700">
-                {p.best_identity == null ? "∅" : `${p.best_identity.toFixed(1)}%`}
+                {p.identity == null ? "∅" : `${p.identity.toFixed(1)}%`}
               </td>
               <td className="px-3 py-1.5">
                 {p.homology_band == null ? (

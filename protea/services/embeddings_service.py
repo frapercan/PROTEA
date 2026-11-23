@@ -27,7 +27,10 @@ from protea.infrastructure.orm.models.annotation.annotation_set import Annotatio
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.embedding.prediction_score import PredictionScore
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+from protea.infrastructure.orm.models.method.method import Method
 
 # VALID_* sets canonically defined in _embeddings_validation_helpers; re-exported
 # here so existing callers and ``__all__`` consumers keep working.
@@ -35,6 +38,12 @@ from protea.services._embeddings_validation_helpers import (  # noqa: E402,F401
     VALID_BACKENDS,
     VALID_LAYER_AGG,
     VALID_POOLING,
+)
+from protea.services._prediction_set_summary import (
+    TOP_TERMS,
+    go_term_distribution,
+    per_protein_counts,
+    summary_of,
 )
 
 
@@ -97,9 +106,7 @@ _PREDICT_ENTITY_MAP: tuple[tuple[str, str, type], ...] = (
 )
 
 
-def validate_predict_request(
-    session: Session, body: dict[str, Any]
-) -> dict[str, uuid.UUID]:
+def validate_predict_request(session: Session, body: dict[str, Any]) -> dict[str, uuid.UUID]:
     """Parse + validate the three required UUID fields of a predict request.
 
     Returns a dict mapping field name to its parsed :class:`uuid.UUID`.
@@ -155,9 +162,7 @@ def config_to_dict(c: EmbeddingConfig, embedding_count: int | None = None) -> di
         "family": c.family,
         "kind": c.kind,
         "derived_from_embedding_config_id": (
-            str(c.derived_from_embedding_config_id)
-            if c.derived_from_embedding_config_id
-            else None
+            str(c.derived_from_embedding_config_id) if c.derived_from_embedding_config_id else None
         ),
         # The cut, read by the leakage guard. Serialised because a field that
         # decides whether a configuration may be scored at all should be
@@ -197,48 +202,73 @@ def assert_prediction_set_exists(session: Session, prediction_set_id: uuid.UUID)
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
 
 
+def _id_text(value: uuid.UUID | None) -> str | None:
+    """A nullable id as text, without turning an absent one into the word None."""
+    return None if value is None else str(value)
+
+
+def _prediction_sets_query(session: Session) -> Any:
+    """The 100 most recent prediction sets with their producer and references.
+
+    The producer is joined OUTER, both halves of it: a method's prediction set
+    has no embedding configuration (ADR-D60, decision 3), and an inner join
+    would drop it from the listing while the row sat in the table. The corpus
+    and the ontology stay inner joins, because both columns are NOT NULL and
+    restricted, so they cannot lose a row.
+    """
+    return (
+        session.query(PredictionSet, EmbeddingConfig, Method, AnnotationSet, OntologySnapshot)
+        .outerjoin(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
+        .outerjoin(Method, PredictionSet.method_id == Method.id)
+        .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
+        .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
+        .order_by(PredictionSet.created_at.desc())
+        .limit(100)
+    )
+
+
 def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
     """Top 100 most-recent ``PredictionSet`` rows joined with their context.
 
     Returns a list of dicts each carrying the embedding-config name,
     annotation-set label, ontology version, plus the per-set
-    ``prediction_count``. The per-set count comes from a single
-    ``GROUP BY`` over GOPrediction (one index-only scan) rather than a
-    correlated subquery; for ~10⁷-row tables Postgres' planner falls
-    into a per-row index probe with the correlated form (~30s per
-    outer row). The grouped form returns all 100 counts at once.
-    """
-    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-    from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
+    ``prediction_count``. A set counted once (``prediction_set.summary``,
+    #1279) gives its count from there; only the listed sets not counted yet
+    are counted, by one ``GROUP BY`` restricted to them. The listing used to
+    group every row of ``go_prediction``, every set's and not only the 100
+    listed: 7.7 s on dev with 110 sets, measured 2026-11-21.
 
-    rows = (
-        session.query(
-            PredictionSet,
-            EmbeddingConfig,
-            AnnotationSet,
-            OntologySnapshot,
-        )
-        .join(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
-        .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
-        .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
-        .order_by(PredictionSet.created_at.desc())
-        .limit(100)
-        .all()
-    )
-    counts = {
-        set_id: cnt
-        for set_id, cnt in session.query(
-            GOPrediction.prediction_set_id,
-            func.count(GOPrediction.id),
-        )
-        .group_by(GOPrediction.prediction_set_id)
-        .all()
-    }
+    A set produced by a method carries ``method_id`` and ``method_code``;
+    one with no embedding configuration carries None in both configuration
+    fields rather than being left out (:func:`_prediction_sets_query`).
+    """
+    rows = _prediction_sets_query(session).all()
+    counts = {ps.id: int(ps.summary["rows"]) for ps, *_ in rows if ps.summary}
+    pending = [ps.id for ps, *_ in rows if not ps.summary]
+    if pending:
+        for set_id, cnt in (
+            session.query(GOPrediction.prediction_set_id, func.count(GOPrediction.id))
+            .filter(GOPrediction.prediction_set_id.in_(pending))
+            .group_by(GOPrediction.prediction_set_id)
+        ):
+            counts[set_id] = int(cnt)
+        # A scored set holds its pairs as arrays, one row per protein.
+        for set_id, pairs in (
+            session.query(
+                PredictionScore.prediction_set_id,
+                func.sum(func.cardinality(PredictionScore.go_term_ids)),
+            )
+            .filter(PredictionScore.prediction_set_id.in_(pending))
+            .group_by(PredictionScore.prediction_set_id)
+        ):
+            counts[set_id] = counts.get(set_id, 0) + int(pairs or 0)
     return [
         {
             "id": str(ps.id),
-            "embedding_config_id": str(ps.embedding_config_id),
-            "embedding_config_name": ec.model_name,
+            "embedding_config_id": _id_text(ps.embedding_config_id),
+            "embedding_config_name": ec.model_name if ec is not None else None,
+            "method_id": _id_text(ps.method_id),
+            "method_code": method.code if method is not None else None,
             "annotation_set_id": str(ps.annotation_set_id),
             "annotation_set_label": (
                 f"{ann.source} {ann.source_version}" if ann.source_version else ann.source
@@ -251,15 +281,23 @@ def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
             "created_at": ps.created_at.isoformat(),
             "prediction_count": int(counts.get(ps.id, 0)),
         }
-        for ps, ec, ann, snap in rows
+        for ps, ec, method, ann, snap in rows
     ]
 
 
 def get_prediction_set_data(
     session: Session,
     prediction_set_id: uuid.UUID,
+    *,
+    per_protein: bool = False,
 ) -> dict[str, Any]:
-    """Retrieve a prediction set with total + per-protein GO term counts.
+    """Retrieve a prediction set with its counts, read from its summary.
+
+    The counts are the set's summary (``_prediction_set_summary``), counted on
+    the first read and kept: a set does not change after it is written.
+    ``per_protein_counts`` (every protein's number of terms, some 37,000 entries
+    on a window's set) is returned only when asked for; the set's page reads the
+    total and pages through the proteins instead.
 
     Raises :class:`EntityNotFoundError` when the UUID does not resolve.
     """
@@ -267,31 +305,80 @@ def get_prediction_set_data(
     if ps is None:
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
 
-    prediction_count = (
-        session.query(func.count(GOPrediction.id))
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-        .scalar()
-    )
-
-    per_protein = (
-        session.query(GOPrediction.protein_accession, func.count(GOPrediction.id))
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-        .group_by(GOPrediction.protein_accession)
-        .all()
-    )
+    summary = summary_of(session, ps.id, ps.summary)
+    config_id = (ps.meta or {}).get("scoring_config_id")
 
     return {
         "id": str(ps.id),
-        "embedding_config_id": str(ps.embedding_config_id),
+        "embedding_config_id": _id_text(ps.embedding_config_id),
+        "method_id": _id_text(ps.method_id),
         "annotation_set_id": str(ps.annotation_set_id),
         "ontology_snapshot_id": str(ps.ontology_snapshot_id),
         "query_set_id": str(ps.query_set_id) if ps.query_set_id else None,
         "limit_per_entry": ps.limit_per_entry,
         "distance_threshold": ps.distance_threshold,
         "created_at": ps.created_at.isoformat(),
-        "prediction_count": prediction_count or 0,
-        "per_protein_counts": {acc: cnt for acc, cnt in per_protein},
+        "prediction_count": summary["rows"],
+        "protein_count": summary["proteins"],
+        # True while the job that writes the set runs: the counts are read live
+        # and will change, and nothing is kept until the set is complete.
+        "counts_provisional": bool(summary.get("provisional")),
+        "per_protein_counts": (
+            per_protein_counts(session, ps.id, live=bool(summary.get("provisional")))
+            if per_protein
+            else None
+        ),
+        # A scored set names the candidate set it scored and the configuration
+        # it read; both None on a candidate set.
+        "scored_from": (ps.meta or {}).get("scored_from"),
+        "scoring_config_id": config_id,
+        "scoring_config_name": _scoring_config_names(session, [config_id]).get(config_id or ""),
+        # A candidate set is scored by score_prediction_set, one set per scoring.
+        "scored_sets": scored_sets_of(session, ps.id),
     }
+
+
+def scored_sets_of(session: Session, candidate_set_id: uuid.UUID) -> list[dict[str, Any]]:
+    """The scored sets made from a candidate set, newest first, with their configuration.
+
+    Empty for a scored set, since nothing is scored from one. The configuration is
+    named when its id resolves; a set whose record names none keeps the id it has.
+    """
+    rows = (
+        session.query(PredictionSet.id, PredictionSet.meta, PredictionSet.created_at)
+        .filter(PredictionSet.meta["scored_from"].astext == str(candidate_set_id))
+        .order_by(PredictionSet.created_at.desc())
+        .all()
+    )
+    names = _scoring_config_names(
+        session, [(meta or {}).get("scoring_config_id") for _, meta, _ in rows]
+    )
+    return [
+        {
+            "id": str(set_id),
+            "scoring_config_id": (meta or {}).get("scoring_config_id"),
+            "scoring_config_name": names.get((meta or {}).get("scoring_config_id") or ""),
+            "created_at": created_at.isoformat(),
+        }
+        for set_id, meta, created_at in rows
+    ]
+
+
+def _scoring_config_names(session: Session, config_ids: list[str | None]) -> dict[str, str]:
+    """The name of each scoring configuration id that resolves; the rest are left out."""
+    known = {uuid.UUID(c) for c in config_ids if c and _is_uuid(c)}
+    if not known:
+        return {}
+    query = session.query(ScoringConfig.id, ScoringConfig.name)
+    return {str(i): n for i, n in query.filter(ScoringConfig.id.in_(known))}
+
+
+def _is_uuid(text: str) -> bool:
+    try:
+        uuid.UUID(text)
+    except ValueError:
+        return False
+    return True
 
 
 # prepare_cafa_export + iter_predictions_cafa_tsv live in
@@ -382,8 +469,11 @@ def get_go_term_distribution_data(
     not resolve. Body lives in
     :func:`_embeddings_admin_helpers.compute_go_term_distribution`.
     """
-    if session.get(PredictionSet, prediction_set_id) is None:
+    ps = session.get(PredictionSet, prediction_set_id)
+    if ps is None:
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
+    if limit <= TOP_TERMS:
+        return go_term_distribution(summary_of(session, ps.id, ps.summary), limit)
     return compute_go_term_distribution(
         session,
         prediction_set_id=prediction_set_id,

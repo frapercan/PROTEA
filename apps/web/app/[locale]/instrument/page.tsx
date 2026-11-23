@@ -9,7 +9,6 @@ import {
   Dna,
   Tag,
   FolderOpen,
-  BarChart3,
   Gauge,
   Inbox,
   Boxes,
@@ -68,9 +67,8 @@ const GROUPS: ToolGroup[] = [
     titleKey: "results",
     hintKey: "resultsHint",
     tools: [
-      { href: "/instrument/benchmark", labelKey: "benchmark", hint: "The nine-cell benchmark matrix", icon: BarChart3 },
       { href: "/instrument/graph", labelKey: "graph", hint: "Nodes, edge strength and the nine panels, read off the record", icon: Workflow },
-      { href: "/instrument/evaluation", labelKey: "evaluation", hint: "CAFA-style delta evaluation", icon: Gauge },
+      { href: "/instrument/evaluation", labelKey: "evaluation", hint: "Each window and its panel of arms", icon: Gauge },
     ],
   },
   {

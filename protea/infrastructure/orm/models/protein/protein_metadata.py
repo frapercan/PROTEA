@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from protea.infrastructure.orm.base import Base
@@ -19,6 +19,12 @@ class ProteinUniProtMetadata(Base):
     - Primary key: canonical_accession (e.g., X6R8D5)
     - Isoforms reuse the same metadata via Protein.canonical_accession.
     - Relationship to Protein is view-only (no FK required).
+
+    It is the entry as UniProt published it in ``uniprot_release``: today's
+    knowledge of the protein, kept to SHOW it. Nothing that predicts or
+    evaluates on a cut reads this table, because what an entry says now was
+    not known at an earlier cut
+    (tests/test_current_metadata_stays_out_of_experiments.py).
     """
 
     __tablename__ = "protein_uniprot_metadata"
@@ -43,6 +49,20 @@ class ProteinUniProtMetadata(Base):
     temperature_dependence: Mapped[str | None] = mapped_column(Text, nullable=True)
     keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
     features: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: The UniProt release that served the row (``X-UniProt-Release``, e.g.
+    #: ``2026_04``) and its date as UniProt writes it. Null for rows written
+    #: before releases were recorded: their release is unknown, not current.
+    uniprot_release: Mapped[str | None] = mapped_column(String, nullable=True)
+    uniprot_release_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    #: The entry's descriptive fields in that release, for display.
+    entry_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    protein_names: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gene_names: Mapped[str | None] = mapped_column(Text, nullable=True)
+    organism_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    organism_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    length: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()

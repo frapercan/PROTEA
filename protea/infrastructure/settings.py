@@ -58,6 +58,10 @@ _DEFAULT_AMQP_URL = "amqp://guest:guest@localhost:5672/"
 _DEFAULT_ARTIFACTS_DIR = "storage/evaluation_artifacts"
 _DEFAULT_STORAGE_BACKEND = "local"
 _DEFAULT_MINIO_BUCKET = "protea"
+# The names a process that declares PROTEA_ENVIRONMENT=dev must find in its
+# own URLs before it starts (protea.infrastructure.environment_check).
+_DEFAULT_DEV_DATABASE_NAME = "protea_dev"
+_DEFAULT_DEV_AMQP_VHOST = "protea-dev"
 
 # Legacy env aliases (no PROTEA_ prefix) honoured for one deprecation
 # cycle. Keys are the modern PROTEA_* names, values are the legacy ones
@@ -123,6 +127,16 @@ class Settings:
     smtp_user: str | None = None
     smtp_password: str | None = None
     smtp_from_addr: str | None = None
+
+    # The environment this process declares (PROTEA_ENVIRONMENT). Only "dev"
+    # changes startup: the API and every worker then refuse to start unless
+    # the database and the AMQP vhost in their URLs carry the two dev names
+    # below (PROTEA_DEV_DATABASE_NAME, PROTEA_DEV_AMQP_VHOST). Unset, or any
+    # other value, starts exactly as before. See
+    # protea.infrastructure.environment_check.
+    environment: str | None = None
+    dev_database_name: str = _DEFAULT_DEV_DATABASE_NAME
+    dev_amqp_vhost: str = _DEFAULT_DEV_AMQP_VHOST
 
 
 class _YamlConfigSource(PydanticBaseSettingsSource):
@@ -253,6 +267,9 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
         smtp_password: str | None = None
         smtp_from_addr: str | None = None
         allowed_origins: list[str] | None = Field(default=None)
+        environment: str | None = None
+        dev_database_name: str = _DEFAULT_DEV_DATABASE_NAME
+        dev_amqp_vhost: str = _DEFAULT_DEV_AMQP_VHOST
 
         _v_backend = field_validator("storage_backend", mode="before")(
             classmethod(lambda cls, v: _normalise_storage_backend(v))
@@ -381,6 +398,9 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
         smtp_user=raw.smtp_user,
         smtp_password=raw.smtp_password,
         smtp_from_addr=raw.smtp_from_addr,
+        environment=raw.environment,
+        dev_database_name=raw.dev_database_name,
+        dev_amqp_vhost=raw.dev_amqp_vhost,
     )
 
 

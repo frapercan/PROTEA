@@ -330,6 +330,7 @@ class TestTheDryRunAndTheTombstone:
             "toi_rule",
             "not_codes",
             "window_role",
+            "truth_rules",
             "code_revision",
             "groundtruth_uri",
             "created_at",
@@ -343,6 +344,31 @@ class TestTheDryRunAndTheTombstone:
         assert lapida["groundtruth_sha256"] == hashlib.sha256(BLOB).hexdigest()
         assert lapida["groundtruth_bytes"] == len(BLOB)
         assert lapida["stats"] == {"delta_proteins": 1646}
+
+    def test_the_tombstone_keeps_the_truth_rules_the_build_applied(self, monkeypatch) -> None:
+        # ADR-D60: a window stores the rules its build applied. Retiring it must
+        # not be where that declaration is lost, and a legacy row says None.
+        declared = _Eset()
+        declared.truth_rules = {
+            "profile": "as_closed",
+            "toi_rule": "pivot_terms",
+            "not_codes": "any",
+            "closure": "per_side",
+        }
+        legacy = _Eset()
+        _, events = _run(
+            _Session([declared, legacy]),
+            _Store(),
+            [str(declared.id), str(legacy.id)],
+            monkeypatch,
+        )
+        archived = {
+            fields["evaluation_set_id"]: fields
+            for name, fields in events
+            if name == "retire_evaluation_sets.archived"
+        }
+        assert archived[str(declared.id)]["truth_rules"] == declared.truth_rules
+        assert archived[str(legacy.id)]["truth_rules"] is None
 
 
 class TestEveryRefusalInOnePass:

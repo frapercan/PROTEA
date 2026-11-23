@@ -18,6 +18,7 @@ Choose a backend through :func:`get_artifact_store` which reads
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -46,6 +47,14 @@ class ArtifactStore(Protocol):
         sentence. A URI from a DIFFERENT backend or bucket is refused rather
         than read as a key. The same holds for :meth:`exists` and
         :meth:`delete`.
+        """
+        ...
+
+    def iter_chunks(self, key: str, chunk_size: int = 8 << 20) -> Iterator[bytes]:
+        """The bytes at ``key`` (or at a URI this store returned), in chunks.
+
+        For objects too large to hold whole: a cut's homology hits are about
+        2.5 GB, and the worker that reads them is capped at 8.
         """
         ...
 

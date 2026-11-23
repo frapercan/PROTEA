@@ -85,7 +85,6 @@ def _make_app() -> Any:
     with (
         patch("protea.api.app.load_settings", return_value=fake_settings),
         patch("protea.api.app.build_session_factory", return_value=MagicMock()),
-        patch("protea.api.app.load_benchmark_config", return_value=MagicMock()),
         patch("protea.api.app.build_operation_registry", return_value=MagicMock()),
         patch("protea.api.app.assert_bearer_config"),
     ):

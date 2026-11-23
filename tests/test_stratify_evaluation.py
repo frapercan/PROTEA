@@ -17,6 +17,7 @@ producer's rather than this file's.
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pandas as pd
@@ -31,25 +32,32 @@ from protea.core.operations._run_cafa_grid_artifact import (
 from protea.core.operations._run_cafa_strata import VARIANT_COLUMNS, project
 from protea.core.operations.stratify_evaluation import (
     _ASPECT_FOR_NAMESPACE,
-    BEST_F_FILENAME,
     StratifyEvaluationOperation,
     StratifyEvaluationPayload,
     _category_for,
     _strata_for_rows,
+    best_table_for,
 )
 from protea.core.strata import (
     NEIGHBOURHOOD_AXES,
-    SEQUENCE_AXES,
+    WINDOW_AXES,
     Aspect,
     Category,
     Neighbourhood,
     Stratum,
     length_band_for,
 )
+from protea.core.window_placement import TargetPlacement
 
 _NB = Neighbourhood(best_identity=45.0, donor_is_experimental=True, taxonomic_relation="close")
 
-#: What the operation crosses by default, donor axis included.
+#: A target's placement in its window: 300 residues, 45 % to the closest measured protein.
+_AT = TargetPlacement(residues=300, identity=45.0)
+
+#: The window a local artifacts_root is stratified on.
+_WINDOW = str(uuid.uuid4())
+
+#: What the operation crosses by default: the four window axes.
 _ALL_AXES = ["category", "aspect", "length", "homology"]
 
 
@@ -87,13 +95,19 @@ def _row(
 
 
 def _grid(root, rows: list[dict], *, setting: str = "NK", variant: str = "unweighted"):
-    """Write one setting through the producer, with the best-F table beside it.
+    """Write one setting through the producer, with its best tables beside it.
 
     `write_grid_parquet` decides the filename, the footer and the column
     layout. `information_accretion_set_id` is the string "null" because that is
     what the stored grids on this deployment carry: every evaluation here ran
     without an accretion table, which is why the unweighted variant is the one
     these tests pool.
+
+    Two best tables, as cafaeval writes them: the variant's micro F at the
+    reported threshold, and the protein-centric F at another one. The second
+    is a decoy that every slice in this file would read as a wrong number: the
+    strata used to be cut there, at an operating point no published figure
+    used.
     """
     frame = GridFrame(
         setting=setting,
@@ -110,10 +124,16 @@ def _grid(root, rows: list[dict], *, setting: str = "NK", variant: str = "unweig
     artifact = GridArtifact(rows=rows, variants=(variant,), n_tau=len(_TAUS), dropped=[])
     write_grid_parquet(root / setting / GRID_FILENAME, artifact, frame.stamp((variant,)))
     namespaces = sorted({r["namespace"] for r in rows})
-    lines = ["filename\tns\ttau\tf"]
-    lines += [f"predictions.tsv\t{ns}\t{_REPORTED_TAU}\t0.5" for ns in namespaces]
-    (root / setting / BEST_F_FILENAME).write_text("\n".join(lines) + "\n")
+    for table, tau in ((best_table_for(variant), _REPORTED_TAU), (_PROTEIN_CENTRIC, _TAUS[0])):
+        lines = ["filename\tns\ttau\tf"]
+        lines += [f"predictions.tsv\t{ns}\t{tau}\t0.5" for ns in namespaces]
+        (root / setting / table).write_text("\n".join(lines) + "\n")
     return root
+
+
+#: cafaeval's best table for the protein-centric F, which peaks at its own
+#: threshold. Written by ``_grid`` as a decoy, never read by the operation.
+_PROTEIN_CENTRIC = "evaluation_best_f.tsv"
 
 
 class TestTheSettingNamesTheCategory:
@@ -146,83 +166,97 @@ class TestPlacingRows:
         placed = _strata_for_rows(
             [_row("Q1", "molecular_function")],
             category=Category.NO_KNOWLEDGE,
-            lengths={"Q1": 300},
+            placement={"Q1": _AT},
             neighbourhoods={"Q1": _NB},
             axes=_ALL_AXES,
         )
         assert placed[0].aspect is Aspect.MOLECULAR_FUNCTION
         assert placed[0].category is Category.NO_KNOWLEDGE
+        assert str(placed[0].homology) == "30-60"
 
     @pytest.mark.parametrize(
-        ("lengths", "neighbourhoods", "namespace"),
+        ("neighbourhoods", "namespace", "axes"),
         [
-            ({}, {"Q1": _NB}, "molecular_function"),               # no length
-            ({"Q1": 300}, {}, "molecular_function"),               # no non-self donor
-            ({"Q1": 300}, {"Q1": _NB}, "not_a_namespace"),         # unknown aspect
+            ({}, "molecular_function", ["length", "donor_evidence"]),  # no donor, asked for
+            ({"Q1": _NB}, "not_a_namespace", _ALL_AXES),  # unknown aspect
         ],
     )
     def test_rows_that_cannot_be_placed_are_skipped(
-        self, lengths: dict, neighbourhoods: dict, namespace: str
+        self, neighbourhoods: dict, namespace: str, axes: list[str]
     ) -> None:
         """Skipped, never defaulted: every default here would move a number by
-        an amount nobody chose.
+        an amount nobody chose."""
+        assert (
+            _strata_for_rows(
+                [_row("Q1", namespace)],
+                category=Category.NO_KNOWLEDGE,
+                placement={"Q1": _AT},
+                neighbourhoods=neighbourhoods,
+                axes=axes,
+            )
+            == {}
+        )
 
-        Every case here crosses a donor axis, which is what makes the missing
-        neighbourhood disqualifying. :class:`TestAxesDecideWhatAPlacementNeeds`
-        covers the run that asks for no donor axis and must not skip it.
-        """
-        assert _strata_for_rows(
-            [_row("Q1", namespace)],
-            category=Category.NO_KNOWLEDGE, lengths=lengths, neighbourhoods=neighbourhoods,
-            axes=_ALL_AXES,
-        ) == {}
+    def test_a_scored_protein_the_placement_does_not_hold_is_refused(self) -> None:
+        """Every protein the evaluation scored is a target of its window."""
+        with pytest.raises(ValueError, match="not a target of the window's placement"):
+            _strata_for_rows(
+                [_row("Q1", "molecular_function")],
+                category=Category.NO_KNOWLEDGE,
+                placement={},
+                neighbourhoods={"Q1": _NB},
+                axes=_ALL_AXES,
+            )
 
 
 class TestAxesDecideWhatAPlacementNeeds:
     """A donor neighbourhood is a cost, so only a run that reads one should pay it.
 
-    Placing a query used to require an aligned donor whatever was being
-    crossed. Category, aspect and length are three facts about the query's own
-    sequence and need no alignment, so that requirement discarded most of the
-    campaign from tables that never asked about homology, and reported the
-    surviving minority as though it were the population.
+    The four window axes come from the window's truth and its placement and need
+    no alignment of the arm's. Requiring an aligned donor whatever was being
+    crossed discarded most of the campaign from tables that never asked about a
+    retrieval, and reported the surviving minority as though it were the
+    population.
     """
 
-    def test_the_sequence_axes_place_a_query_with_no_donor_at_all(self) -> None:
+    def test_the_window_axes_place_a_query_with_no_donor_at_all(self) -> None:
         """Can act: the whole point of the change."""
         placed = _strata_for_rows(
             [_row("Q1", "molecular_function")],
             category=Category.NO_KNOWLEDGE,
-            lengths={"Q1": 300},
+            placement={"Q1": _AT},
             neighbourhoods={},
-            axes=["category", "aspect", "length"],
+            axes=_ALL_AXES,
         )
         assert list(placed) == [0]
         assert placed[0].length is length_band_for(300)
+        assert str(placed[0].homology) == "30-60"
 
     @pytest.mark.parametrize("axis", sorted(NEIGHBOURHOOD_AXES))
     def test_any_donor_axis_still_refuses_a_query_with_no_donor(self, axis: str) -> None:
-        """Can refuse, once per donor axis: a table that reports homology,
-        donor evidence, taxonomy or propagation for a query whose donors were
-        never aligned is reporting an empty neighbourhood as a measurement."""
-        assert _strata_for_rows(
-            [_row("Q1", "molecular_function")],
-            category=Category.NO_KNOWLEDGE,
-            lengths={"Q1": 300},
-            neighbourhoods={},
-            axes=["length", axis],
-        ) == {}
+        """Can refuse, once per retrieval axis: a table that reports donor
+        evidence, taxonomy or propagation for a query whose donors were never
+        aligned is reporting an empty neighbourhood as a measurement."""
+        assert (
+            _strata_for_rows(
+                [_row("Q1", "molecular_function")],
+                category=Category.NO_KNOWLEDGE,
+                placement={"Q1": _AT},
+                neighbourhoods={},
+                axes=["length", axis],
+            )
+            == {}
+        )
 
-    def test_dropping_the_donor_does_not_move_the_length_band(self) -> None:
+    def test_dropping_the_donor_does_not_move_the_window_bands(self) -> None:
         """The placement path is shared, so this pins that taking it without a
-        neighbourhood answers the sequence axes identically. If it did not, the
+        neighbourhood answers the window axes identically. If it did not, the
         change would have bought coverage by moving numbers."""
-        args = dict(category=Category.NO_KNOWLEDGE, lengths={"Q1": 300},
-                    axes=["category", "aspect", "length"])
-        with_donor = _strata_for_rows([_row("Q1", "molecular_function")],
-                                      neighbourhoods={"Q1": _NB}, **args)
-        without = _strata_for_rows([_row("Q1", "molecular_function")],
-                                   neighbourhoods={}, **args)
+        args = dict(category=Category.NO_KNOWLEDGE, placement={"Q1": _AT}, axes=_ALL_AXES)
+        with_donor = _strata_for_rows(
+            [_row("Q1", "molecular_function")], neighbourhoods={"Q1": _NB}, **args
+        )
+        without = _strata_for_rows([_row("Q1", "molecular_function")], neighbourhoods={}, **args)
         assert project(with_donor[0], args["axes"]) == project(without[0], args["axes"])
 
 
@@ -231,8 +265,8 @@ class TestTheSplitIsCheckedAgainstTheStratum:
         """A seventh axis added to Stratum without deciding which side it falls
         on would silently join the sequence axes and be reported for queries
         that cannot support it. This makes that a failing test instead."""
-        assert NEIGHBOURHOOD_AXES | SEQUENCE_AXES == set(Stratum._fields)
-        assert not (NEIGHBOURHOOD_AXES & SEQUENCE_AXES)
+        assert NEIGHBOURHOOD_AXES | WINDOW_AXES == set(Stratum._fields)
+        assert not (NEIGHBOURHOOD_AXES & WINDOW_AXES)
 
 
 class _FakeResult:
@@ -242,13 +276,23 @@ class _FakeResult:
 
 
 class _FakeSession:
-    """Answers the two queries the operation makes, in order."""
+    """Answers the operation's reads by what they ask, not by their order.
 
-    def __init__(self, neighbourhood_rows, length_rows):
-        self._answers = [neighbourhood_rows, length_rows]
+    The window's placement is always read; the neighbourhoods only when a
+    retrieval axis is asked for.
+    """
 
-    def execute(self, *_a, **_k):
-        return _FakeResult(self._answers.pop(0))
+    def __init__(self, neighbourhood_rows, placement_rows):
+        self._neighbourhoods = neighbourhood_rows
+        self._placement = placement_rows
+
+    def execute(self, statement, *_a, **_k):
+        sql = str(statement)
+        if "window_placement" in sql:
+            return _FakeResult(self._placement)
+        if "go_prediction" in sql:
+            return _FakeResult(self._neighbourhoods)
+        raise AssertionError(f"unexpected query: {sql[:80]}")
 
 
 class TestTheOperationEndToEnd:
@@ -259,6 +303,7 @@ class TestTheOperationEndToEnd:
     def _payload(root, **extra):
         base = {
             "prediction_set_id": str(uuid.uuid4()),
+            "evaluation_set_id": _WINDOW,
             "artifacts_root": str(root),
             "variant": "unweighted",
         }
@@ -272,7 +317,7 @@ class TestTheOperationEndToEnd:
              {"acc": "Q2", "best_identity": 20.0, "evidence_code": "IEA",
               "taxonomic_relation": "close", "nearest_any": 0.3,
               "nearest_experimental": None}],
-            [("Q1", 300), ("Q2", 300)],
+            [("Q1", 300, 45.0), ("Q2", 300, 20.0)],
         )
 
     def test_it_writes_one_row_per_cell(self, tmp_path) -> None:
@@ -316,6 +361,58 @@ class TestTheOperationEndToEnd:
         frame = pd.read_parquet(root / "NK" / "strata.parquet")
         assert len(frame) == 1
         assert frame.reportable.tolist() == [False]
+
+    def test_each_cell_carries_the_masses_its_ratios_are_divided_from(self, tmp_path) -> None:
+        """Ratios do not add; masses do. A cell's tp, pred and n_gt are the sums
+        over its proteins at the reported threshold, so any coarser pool of this
+        table is exact by addition."""
+        root = self._artifacts(
+            tmp_path,
+            [
+                _row("Q1", "molecular_function", tp=1.0, pred=2.0, n_gt=4.0),
+                _row("Q2", "molecular_function", tp=3.0, pred=5.0, n_gt=6.0),
+            ],
+        )
+        StratifyEvaluationOperation().execute(
+            self._session(),
+            self._payload(root, axes=["aspect"], min_population=1),
+            emit=lambda *a, **k: None,
+        )
+        frame = pd.read_parquet(root / "NK" / "strata.parquet")
+        assert frame[["tp", "pred", "n_gt"]].values.tolist() == [[4.0, 7.0, 10.0]]
+        assert frame.precision.tolist() == [pytest.approx(4.0 / 7.0)]
+
+    def test_the_profiles_pool_every_placed_protein_by_band(self, tmp_path) -> None:
+        """Per aspect: all of it, then one pool per homology band and per length
+        band, each [proteins, tp, pred, n_gt, f_micro], with no floor: the
+        protein count travels beside the number."""
+        root = self._artifacts(
+            tmp_path,
+            [
+                _row("Q1", "molecular_function", tp=1.0, pred=2.0, n_gt=4.0),
+                _row("Q2", "molecular_function", tp=3.0, pred=5.0, n_gt=6.0),
+            ],
+        )
+        out = StratifyEvaluationOperation().execute(
+            self._session(),
+            self._payload(root, axes=["aspect", "length", "homology"], min_population=99),
+            emit=lambda *a, **k: None,
+        )
+        f = out.result["settings"]["NK"]["profiles"]["F"]
+        assert f["placed"][:4] == [2, 4.0, 7.0, 10.0]
+        assert set(f["homology"]) == {"30-60", "<=30"}
+        assert f["homology"]["30-60"][:4] == [1, 1.0, 2.0, 4.0]
+        assert f["length"]["<=512"][:4] == [2, 4.0, 7.0, 10.0]
+        assert f["homology"]["<=30"][4] == pytest.approx(2 * (3 / 5) * (3 / 6) / (3 / 5 + 3 / 6))
+
+    def test_a_local_run_records_nothing_on_a_result(self, tmp_path) -> None:
+        """No result id, no row to write on: the fake session refuses any other query."""
+        root = self._artifacts(tmp_path, [_row("Q1", "molecular_function")])
+        StratifyEvaluationOperation().execute(
+            self._session(),
+            self._payload(root, axes=["homology"], min_population=1),
+            emit=lambda *a, **k: None,
+        )
 
     def test_the_pooled_score_is_micro(self, tmp_path) -> None:
         """Two proteins in one cell: sums then divides, not the mean of F."""
@@ -406,7 +503,7 @@ class TestReadingFromTheArtifactStore:
 
         store = _Store()
         rid = str(uuid.uuid4())
-        found = _settings_from_store(store, rid, tmp_path)
+        found = _settings_from_store(store, rid, tmp_path, "unweighted")
 
         assert found == ["NK"]
         assert (tmp_path / "NK" / GRID_FILENAME).read_bytes() == b"parquet-bytes"
@@ -414,7 +511,9 @@ class TestReadingFromTheArtifactStore:
         # which the producer stopped writing, and an absent file reads as a
         # setting that was not evaluated: the operation found nothing on every
         # result in the store and reported success.
-        assert all(GRID_FILENAME in key or BEST_F_FILENAME in key for key in store.asked)
+        assert all(
+            GRID_FILENAME in key or best_table_for("unweighted") in key for key in store.asked
+        )
         assert not any("per_protein.parquet" in key for key in store.asked)
         # three categories probed for the grid, and the best-F table fetched
         # only for the one that had one
@@ -453,7 +552,7 @@ class TestItReadsTheFileTheProducerWrites:
                     "nearest_experimental": 0.1,
                 }
             ],
-            [("Q1", 300)],
+            [("Q1", 300, 45.0)],
         )
 
     def test_the_slice_is_at_the_published_threshold(self, tmp_path) -> None:
@@ -468,6 +567,7 @@ class TestItReadsTheFileTheProducerWrites:
             self._session(),
             {
                 "prediction_set_id": str(uuid.uuid4()),
+                "evaluation_set_id": _WINDOW,
                 "artifacts_root": str(root),
                 "variant": "unweighted",
                 "axes": ["aspect"],
@@ -478,6 +578,52 @@ class TestItReadsTheFileTheProducerWrites:
         frame = pd.read_parquet(root / "NK" / "strata.parquet")
         assert frame.precision.tolist() == [pytest.approx(0.5)]
         assert frame.recall.tolist() == [pytest.approx(0.5)]
+
+    def test_the_slice_is_at_the_micro_maximum_not_the_protein_centric_one(self, tmp_path) -> None:
+        """A stratum pools micro F, so it is cut where micro F peaks.
+
+        cafaeval writes one best table per measure. The protein-centric one
+        peaks elsewhere: on 211->227 it said tau 0.31 where the cell's
+        ``f_micro_w`` peaks at 0.57, and the strata of that cell summed to 0.390
+        while the cell publishes 0.4405. Here the decoy names 0.25 and the
+        variant's table 0.5, and the slice must report 0.5.
+        """
+        root = _grid(tmp_path, [_row("Q1", "molecular_function")])
+        events: list[tuple] = []
+        StratifyEvaluationOperation().execute(
+            self._session(),
+            {
+                "prediction_set_id": str(uuid.uuid4()),
+                "evaluation_set_id": _WINDOW,
+                "artifacts_root": str(root),
+                "variant": "unweighted",
+                "axes": ["aspect"],
+                "min_population": 1,
+            },
+            emit=lambda *a, **k: events.append(a),
+        )
+        sliced = [fields for name, _, fields, *_ in events if name == "stratify_evaluation.sliced"]
+        assert sliced[0]["taus"] == {"molecular_function": _REPORTED_TAU}
+
+    def test_a_weighted_stratification_reads_the_weighted_micro_table(self, tmp_path) -> None:
+        """``f_micro_w`` is the headline, and its own table holds its maximum."""
+        from protea.core.operations.stratify_evaluation import _settings_from_store
+
+        class _Store:
+            def __init__(self):
+                self.asked: list[str] = []
+
+            def exists(self, key: str) -> bool:
+                self.asked.append(key)
+                return "/NK/" in key
+
+            def get(self, key: str) -> bytes:
+                return b"bytes"
+
+        store = _Store()
+        _settings_from_store(store, str(uuid.uuid4()), tmp_path, "weighted")
+        assert (tmp_path / "NK" / "evaluation_best_f_micro_w.tsv").exists()
+        assert not any(key.endswith("/evaluation_best_f.tsv") for key in store.asked)
 
     def test_a_result_with_no_grid_is_refused_not_reported_as_success(self, tmp_path) -> None:
         """The whole defect in one assertion.
@@ -492,6 +638,7 @@ class TestItReadsTheFileTheProducerWrites:
                 self._session(),
                 {
                     "prediction_set_id": str(uuid.uuid4()),
+                    "evaluation_set_id": _WINDOW,
                     "artifacts_root": str(tmp_path),
                     "variant": "unweighted",
                     "axes": ["aspect"],
@@ -516,6 +663,7 @@ class TestItReadsTheFileTheProducerWrites:
                 self._session(),
                 {
                     "prediction_set_id": str(uuid.uuid4()),
+                    "evaluation_set_id": _WINDOW,
                     "artifacts_root": str(tmp_path),
                     "variant": "unweighted",
                     "axes": ["aspect"],
@@ -535,6 +683,7 @@ class TestItReadsTheFileTheProducerWrites:
                 self._session(),
                 {
                     "prediction_set_id": str(uuid.uuid4()),
+                    "evaluation_set_id": _WINDOW,
                     "artifacts_root": str(root),
                     "variant": "weighted",
                     "axes": ["aspect"],
@@ -549,12 +698,13 @@ class TestItReadsTheFileTheProducerWrites:
         published. Every column is a defensible number and only one is the one
         already reported."""
         root = _grid(tmp_path, [_row("Q1", "molecular_function")])
-        (root / "NK" / BEST_F_FILENAME).unlink()
+        (root / "NK" / best_table_for("unweighted")).unlink()
         with pytest.raises(ValueError, match="nothing says which column"):
             StratifyEvaluationOperation().execute(
                 self._session(),
                 {
                     "prediction_set_id": str(uuid.uuid4()),
+                    "evaluation_set_id": _WINDOW,
                     "artifacts_root": str(root),
                     "variant": "unweighted",
                     "axes": ["aspect"],
@@ -570,6 +720,7 @@ class TestItReadsTheFileTheProducerWrites:
             self._session(),
             {
                 "prediction_set_id": str(uuid.uuid4()),
+                "evaluation_set_id": _WINDOW,
                 "artifacts_root": str(root),
                 "variant": "unweighted",
                 "axes": ["aspect"],
@@ -596,7 +747,7 @@ class TestASettingThatPooledNothingIsNotSuccess:
     """
 
     def _session(self):
-        return _FakeSession([], [("Q1", 300)])
+        return _FakeSession([], [("Q1", 300, 45.0)])
 
     def test_three_settings_and_no_cells_is_refused(self, tmp_path) -> None:
         root = _grid(tmp_path, [_row("Q1", "molecular_function")])
@@ -605,10 +756,11 @@ class TestASettingThatPooledNothingIsNotSuccess:
                 self._session(),
                 {
                     "prediction_set_id": str(uuid.uuid4()),
+                    "evaluation_set_id": _WINDOW,
                     "artifacts_root": str(root),
                     "variant": "unweighted",
-                    # the donor axis, over a set with no donors
-                    "axes": ["category", "aspect", "homology"],
+                    # a retrieval axis, over a set with no donors
+                    "axes": ["category", "aspect", "donor_evidence"],
                     "min_population": 1,
                 },
                 emit=lambda *a, **k: None,
@@ -622,6 +774,7 @@ class TestASettingThatPooledNothingIsNotSuccess:
             self._session(),
             {
                 "prediction_set_id": str(uuid.uuid4()),
+                "evaluation_set_id": _WINDOW,
                 "artifacts_root": str(root),
                 "variant": "unweighted",
                 "axes": ["category", "aspect"],
@@ -630,3 +783,47 @@ class TestASettingThatPooledNothingIsNotSuccess:
             emit=lambda *a, **k: None,
         )
         assert out.result["settings"]["NK"]["cells"] == 1
+
+
+class TestTheProfilesAreKeptOnTheResult:
+    """The window panel reads every result in one query, so the profiles ride on it."""
+
+    def test_they_go_under_results_strata_with_the_job_that_pooled_them(self) -> None:
+        from protea.core.operations.stratify_evaluation import record_profiles
+
+        class _Recorder:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict]] = []
+
+            def execute(self, statement, params=None):
+                self.calls.append((str(statement), params or {}))
+
+        rid, job = str(uuid.uuid4()), uuid.uuid4()
+        payload = StratifyEvaluationPayload.model_validate(
+            {
+                "prediction_set_id": str(uuid.uuid4()),
+                "evaluation_result_id": rid,
+                "variant": "weighted",
+                "axes": ["category", "aspect", "length", "homology"],
+                "min_population": 30,
+            }
+        )
+        summary = {
+            "settings": {"NK": {"cells": 3, "profiles": {"F": {"placed": [1, 1.0, 1.0, 1.0, 1.0]}}}}
+        }
+        session = _Recorder()
+        record_profiles(session, payload, job, summary)  # type: ignore[arg-type]
+
+        ((sql, params),) = session.calls
+        assert sql.startswith(
+            "UPDATE evaluation_result SET results = results || jsonb_build_object('strata'"
+        )
+        assert params["r"] == rid
+        record = json.loads(params["record"])
+        assert record == {
+            "job_id": str(job),
+            "variant": "weighted",
+            "axes": ["category", "aspect", "length", "homology"],
+            "min_population": 30,
+            "profiles": {"NK": {"F": {"placed": [1, 1.0, 1.0, 1.0, 1.0]}}},
+        }

@@ -15,242 +15,26 @@ import {
   getProteinAnnotations,
   getGoSubgraph,
   getGoTermDistribution,
-  listScoringConfigs,
-  getScoredTsvUrl,
-  createScoringConfig,
   ApiError,
   Prediction,
   ProteinAnnotation,
   GoSubgraph,
-  ScoringConfig,
+  ScoredSetSummary,
 } from "@/lib/api";
-
-// ── Scoring engine (mirrors protea/core/scoring.py) ──────────────────────────
-//
-// Evidence-code quality weights: same default table as the Python backend.
-// When a ScoringConfig carries custom `evidence_weights`, those overrides take
-// precedence; codes absent from the override still resolve via this table.
-
-const DEFAULT_EVIDENCE_WEIGHTS: Record<string, number> = {
-  // Experimental — direct biological evidence
-  EXP: 1.0, IDA: 1.0, IPI: 1.0, IMP: 1.0, IGI: 1.0, IEP: 1.0,
-  HTP: 1.0, HDA: 1.0, HMP: 1.0, HGI: 1.0, HEP: 1.0,
-  IC:  1.0, TAS: 1.0,
-  // Computational / Phylogenetic
-  ISS: 0.7, ISO: 0.7, ISA: 0.7, ISM: 0.7, IGC: 0.7,
-  IBA: 0.7, IBD: 0.7, IKR: 0.7, IRD: 0.7, RCA: 0.7,
-  // Electronic / author statement
-  NAS: 0.5,
-  IEA: 0.3,
-  // No biological data
-  ND: 0.1,
-};
-
-/** Fallback weight for codes not found in any lookup table. */
-const DEFAULT_EVIDENCE_WEIGHT_FALLBACK = 0.5;
-
-/**
- * Resolve the quality weight for a single GO evidence code.
- *
- * Resolution order:
- * 1. Config-level override (config.evidence_weights), if present.
- * 2. Module-level DEFAULT_EVIDENCE_WEIGHTS table.
- * 3. DEFAULT_EVIDENCE_WEIGHT_FALLBACK (0.5).
- */
-function resolveEvidenceWeight(
-  code: string | null | undefined,
-  overrides: Record<string, number> | null | undefined,
-): number {
-  if (!code) return DEFAULT_EVIDENCE_WEIGHT_FALLBACK;
-  if (overrides && code in overrides) return overrides[code];
-  return DEFAULT_EVIDENCE_WEIGHTS[code] ?? DEFAULT_EVIDENCE_WEIGHT_FALLBACK;
-}
-
-/**
- * Compute a [0, 1] confidence score for a prediction row.
- *
- * Mirrors the logic in `protea/core/scoring.py::compute_score()`, including
- * the two-level evidence weight resolution so the UI score always matches
- * the backend TSV export exactly.
- */
-export function computeScore(pred: Prediction, config: ScoringConfig): number {
-  const evWeight = resolveEvidenceWeight(pred.evidence_code, config.evidence_weights);
-
-  const signals: Record<string, number | null> = {
-    // null, not NaN, when the set came from an ingested method: there was no
-    // retrieval, so there is no distance to turn into a similarity. The loop
-    // below already skips a null signal and renormalises the weights.
-    embedding_similarity: pred.distance != null ? 1 - pred.distance / 2 : null,
-    identity_nw: pred.identity_nw,
-    identity_sw: pred.identity_sw,
-    evidence_weight: pred.evidence_code != null ? evWeight : null,
-    taxonomic_proximity:
-      pred.taxonomic_distance != null ? 1 / (1 + pred.taxonomic_distance) : null,
-  };
-
-  let weightedSum = 0;
-  let totalWeight = 0;
-  for (const [signal, weight] of Object.entries(config.weights)) {
-    if (weight <= 0) continue;
-    const val = signals[signal];
-    if (val == null) continue;
-    weightedSum += weight * Math.max(0, Math.min(1, val));
-    totalWeight += weight;
-  }
-
-  if (totalWeight === 0) return 0;
-  let score = weightedSum / totalWeight;
-
-  if (config.formula === "evidence_weighted") {
-    score *= evWeight;
-  }
-
-  return score;
-}
-// ── Scoring signals ───────────────────────────────────────────────────────────
-
-const SIGNALS: { key: string; label: string; hint: string }[] = [
-  { key: "embedding_similarity", label: "Emb. similarity", hint: "1 − cosine_distance / 2 (requires a retrieval arm)" },
-  { key: "identity_nw",          label: "Identity NW",     hint: "Global identity Needleman-Wunsch (requires compute_alignments)" },
-  { key: "identity_sw",          label: "Identity SW",     hint: "Local identity Smith-Waterman (requires compute_alignments)" },
-  { key: "evidence_weight",      label: "Evidence",        hint: "GO evidence code quality (EXP→1.0, IEA→0.3)" },
-  { key: "taxonomic_proximity",  label: "Tax. proximity",  hint: "1/(1+tax_dist) (requires compute_taxonomy)" },
-];
-
-const DEFAULT_CUSTOM_WEIGHTS: Record<string, number> = {
-  embedding_similarity: 1.0,
-  identity_nw: 0.0,
-  identity_sw: 0.0,
-  evidence_weight: 0.0,
-  taxonomic_proximity: 0.0,
-};
-
-export const CUSTOM_ID = "__custom__";
-
-// ── WeightPanel ───────────────────────────────────────────────────────────────
-
-function WeightPanel({
-  config,
-  isCustom,
-  customWeights,
-  customFormula,
-  onWeightChange,
-  onFormulaChange,
-  onSave,
-  saving,
-}: {
-  config?: ScoringConfig;
-  isCustom: boolean;
-  customWeights: Record<string, number>;
-  customFormula: string;
-  onWeightChange: (key: string, val: number) => void;
-  onFormulaChange: (f: string) => void;
-  onSave: (name: string) => void;
-  saving: boolean;
-}) {
-  const [saveName, setSaveName] = useState("");
-  const [showSaveForm, setShowSaveForm] = useState(false);
-
-  if (!isCustom && config) {
-    return (
-      <div className="flex flex-wrap items-center gap-1.5 text-xs max-w-sm">
-        <span className="rounded bg-blue-50 px-1.5 py-0.5 font-mono text-blue-700 border border-blue-100">
-          {config.formula}
-        </span>
-        {SIGNALS.map(({ key, label }) => {
-          const w = config.weights[key] ?? 0;
-          return (
-            <span
-              key={key}
-              title={`${label}: ${w}`}
-              className={`rounded px-1.5 py-0.5 font-mono ${w > 0 ? "bg-slate-100 text-slate-700" : "text-slate-300"}`}
-            >
-              {label} {w}
-            </span>
-          );
-        })}
-        {config.description && (
-          <span className="text-slate-600 italic ml-1">{config.description}</span>
-        )}
-      </div>
-    );
-  }
-
-  if (isCustom) {
-    return (
-      <div className="rounded-lg border bg-white p-3 shadow-sm w-72">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Custom weights</span>
-          <select
-            value={customFormula}
-            onChange={(e) => onFormulaChange(e.target.value)}
-            className="rounded border px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-          >
-            <option value="linear">linear</option>
-            <option value="evidence_weighted">evidence_weighted</option>
-          </select>
-        </div>
-        <div className="space-y-2">
-          {SIGNALS.map(({ key, label, hint }) => {
-            const val = customWeights[key] ?? 0;
-            return (
-              <div key={key} className="flex items-center gap-2" title={hint}>
-                <span className="text-xs text-slate-600 w-32 shrink-0">{label}</span>
-                <input
-                  type="range" min="0" max="1" step="0.05"
-                  value={val}
-                  onChange={(e) => onWeightChange(key, parseFloat(e.target.value))}
-                  className="flex-1 accent-blue-500"
-                />
-                <span className="font-mono text-xs text-slate-700 w-8 text-right">{val.toFixed(2)}</span>
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-3 border-t pt-2.5">
-          {!showSaveForm ? (
-            <button
-              onClick={() => setShowSaveForm(true)}
-              className="text-xs text-blue-600 hover:underline"
-            >
-              Save as named config…
-            </button>
-          ) : (
-            <div className="flex gap-1">
-              <input
-                type="text"
-                value={saveName}
-                onChange={(e) => setSaveName(e.target.value)}
-                placeholder="Config name"
-                className="flex-1 rounded border px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              <button
-                onClick={() => { onSave(saveName); setShowSaveForm(false); setSaveName(""); }}
-                disabled={!saveName.trim() || saving}
-                className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-40"
-              >
-                {saving ? "…" : "OK"}
-              </button>
-              <button
-                onClick={() => { setShowSaveForm(false); setSaveName(""); }}
-                className="text-xs text-slate-600 hover:text-slate-600 px-1"
-              >
-                ✕
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  return null;
-}
 
 import dynamic from "next/dynamic";
 const GoGraph = dynamic(() => import("@/components/GoGraph"), { ssr: false });
 
 type Tab = "proteins" | "distribution";
+
+/** What the page says while a set's counts are read: a set is counted on its
+ *  first visit and kept, which on a set of a few million rows takes a while once. */
+const LOADING_NOTE =
+  "Loading\u2026 A set is counted on its first visit and the counts are kept: on a set of a few million rows that first visit takes up to a minute.";
+
+/** What the page says of a set whose job is still writing it. */
+const PROVISIONAL_NOTE =
+  "This set is still being written: its counts are read as they stand and will change, and none is kept until its job ends.";
 
 const ASPECT_LABELS: Record<string, string> = {
   F: "Molecular Function",
@@ -303,13 +87,49 @@ function scoreColor(score: number): string {
   return "text-red-500";
 }
 
-// Evidence code quality tier colours
+/**
+ * The witness of a native method's row (ADR-D65): which unit gave the score and
+ * how many of its donors hold the term, or the base rate the row was floored at.
+ * A method that wrote no explanation shows its name, as before.
+ */
+function MethodWitness({ pred }: { pred: Prediction }) {
+  const why = pred.explanation;
+  const num = (v: unknown) => (typeof v === "number" ? v : null);
+  if (why && num(why.unit) != null) {
+    const k = num(why.k), n = num(why.n);
+    return (
+      <span className="font-mono text-slate-700" title={`m ${num(why.strength)?.toFixed(2) ?? "?"}, base rate ${num(why.base_rate)?.toFixed(4) ?? "?"}`}>
+        theme {num(why.unit)}
+        {k != null && n != null && <span className="text-slate-500"> · {k} of {n} donors</span>}
+      </span>
+    );
+  }
+  if (why && why.prior) {
+    return (
+      <span className="text-slate-500" title="no unit of the protein scores the term above its base rate">
+        prior · base rate {num(why.base_rate)?.toFixed(4) ?? "?"}
+      </span>
+    );
+  }
+  return <span className="font-mono text-slate-500">{pred.ref_protein_accession}</span>;
+}
+
+// Evidence code tiers, for the colour of a badge and nothing else: experimental,
+// curated computational or phylogenetic, electronic or none, and the rest (an
+// author statement, or a code no tier names).
+const EXPERIMENTAL_CODES = new Set([
+  "EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "HTP", "HDA", "HMP", "HGI", "HEP", "IC", "TAS",
+]);
+const CURATED_CODES = new Set([
+  "ISS", "ISO", "ISA", "ISM", "IGC", "IBA", "IBD", "IKR", "IRD", "RCA",
+]);
+const UNSUPPORTED_CODES = new Set(["IEA", "ND"]);
+
 function evidenceBadgeClass(code: string): string {
-  const w = DEFAULT_EVIDENCE_WEIGHTS[code] ?? DEFAULT_EVIDENCE_WEIGHT_FALLBACK;
-  if (w >= 1.0) return "bg-green-100 text-green-700 border-green-200";
-  if (w >= 0.7) return "bg-blue-100 text-blue-700 border-blue-200";
-  if (w >= 0.5) return "bg-yellow-100 text-yellow-700 border-yellow-200";
-  return "bg-slate-100 text-slate-500 border-slate-200";
+  if (EXPERIMENTAL_CODES.has(code)) return "bg-green-100 text-green-700 border-green-200";
+  if (CURATED_CODES.has(code)) return "bg-blue-100 text-blue-700 border-blue-200";
+  if (UNSUPPORTED_CODES.has(code)) return "bg-slate-100 text-slate-500 border-slate-200";
+  return "bg-yellow-100 text-yellow-700 border-yellow-200";
 }
 
 type AnnotationSource = { source: string; version: string | null };
@@ -349,10 +169,9 @@ function groupAnnotations(anns: ProteinAnnotation[]): Map<string, GroupedAnnotat
   return map;
 }
 
-export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
+export function PredictionTable({ preds, knownByGoId }: {
   preds: Prediction[];
   knownByGoId: Map<string, GroupedAnnotation>;
-  scoringConfig?: ScoringConfig;
 }) {
   const locale = useLocale();
   // Every candidate of a retrieval arm has one; a set written by
@@ -362,36 +181,46 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
   const hasAlignment = preds.some((p) => p.identity_nw != null);
   const hasTaxonomy = preds.some((p) => p.taxonomic_relation != null);
   const hasReranker = preds.some((p) => p.vote_count != null);
-  const hasScore = !!scoringConfig;
+  // A scored set's rows carry the score it stored, the one the evaluator reads.
+  // A candidate set has none: it is scored by a job, never in the browser.
+  const hasScore = preds.some((p) => p.score != null);
+  const scoreOf = (p: Prediction) => p.score ?? 0;
+  // A native method (ADR-D60): its own score and a witness instead of a donor and a distance.
+  const isMethod = !hasDistance && preds.some((p) => p.method_score != null);
   const hasDetail = hasAlignment || hasTaxonomy || hasReranker;
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  // Sort: by score desc if config active, else by distance asc. With no
+  // Sort: by stored score desc on a scored set, else by distance asc. With no
   // distance the comparator returned NaN for every pair, which leaves the
   // order up to the sort implementation: by GO id instead, so the same set
   // reads the same way twice.
   const sorted = hasScore
-    ? [...preds].sort((a, b) => computeScore(b, scoringConfig!) - computeScore(a, scoringConfig!))
+    ? [...preds].sort((a, b) => scoreOf(b) - scoreOf(a) || a.go_id.localeCompare(b.go_id))
+    : isMethod
+    ? [...preds].sort((a, b) => (b.method_score ?? 0) - (a.method_score ?? 0) || a.go_id.localeCompare(b.go_id))
     : hasDistance
       ? [...preds].sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
       : [...preds].sort((a, b) => a.go_id.localeCompare(b.go_id));
 
   // Tailwind requires complete class strings — no dynamic construction
-  const gridClass = hasScore
+  const gridClass = isMethod
+    ? "grid-cols-[60px_90px_1fr_210px_65px]"
+    : hasScore
     ? "grid-cols-[60px_90px_1fr_110px_60px_60px_65px]"
     : "grid-cols-[90px_1fr_110px_60px_60px_65px]";
+  const methodScore = (p: Prediction) => p.method_score ?? 0;
 
   return (
     <div className="rounded-md border bg-white text-xs">
       {/* Desktop header */}
       <div className={`hidden lg:grid ${gridClass} gap-x-3 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-600`}>
-        {hasScore && <div>Score</div>}
+        {(hasScore || isMethod) && <div>Score</div>}
         <div>GO ID</div>
         <div>Name</div>
-        <div>Via (ref)</div>
-        <div>Pred. ev.</div>
+        {isMethod ? <div>Witness</div> : <div>Via (ref)</div>}
+        {!isMethod && <div>Pred. ev.</div>}
         <div>Known ev.</div>
-        <div>Dist</div>
+        {!isMethod && <div>Dist</div>}
       </div>
 
       {sorted.length === 0 ? (
@@ -411,22 +240,27 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                 <span className="font-mono text-blue-600">{pred.go_id}</span>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {hasScore && (
-                    <span className={`font-mono text-[10px] ${scoreColor(computeScore(pred, scoringConfig!))}`}>
-                      {computeScore(pred, scoringConfig!).toFixed(3)}
+                    <span className={`font-mono text-[10px] ${scoreColor(scoreOf(pred))}`}>
+                      {scoreOf(pred).toFixed(3)}
                     </span>
                   )}
-                  <span className="font-mono text-slate-500 text-[10px]">{pred.distance != null ? pred.distance.toFixed(4) : "—"}</span>
+                  {isMethod && !hasScore && (
+                    <span className={`font-mono text-[10px] ${scoreColor(methodScore(pred))}`}>
+                      {methodScore(pred).toFixed(3)}
+                    </span>
+                  )}
+                  {!isMethod && <span className="font-mono text-slate-500 text-[10px]">{pred.distance != null ? pred.distance.toFixed(4) : "—"}</span>}
                   {hasDetail && <span className="text-slate-300 text-[10px]">{isExpanded ? "▲" : "▼"}</span>}
                 </div>
               </div>
               <p className="text-slate-700 leading-snug text-xs mb-1">{pred.name ?? "—"}</p>
               <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                <span className="text-slate-600">via</span>
-                <Link
+                {isMethod ? <MethodWitness pred={pred} /> : <span className="text-slate-600">via</span>}
+                {!isMethod && <Link
                   href={`/${locale}/instrument/proteins/${pred.ref_protein_accession}`}
                   className="font-mono text-blue-500 hover:underline"
                   onClick={(e) => e.stopPropagation()}
-                >{pred.ref_protein_accession}</Link>
+                >{pred.ref_protein_accession}</Link>}
                 {pred.evidence_code && (
                   <span className={`rounded border px-1 py-0.5 font-mono font-medium ${evidenceBadgeClass(pred.evidence_code)}`}>
                     {pred.evidence_code}
@@ -448,12 +282,18 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
               onClick={() => hasDetail ? setExpanded(isExpanded ? null : pred.go_id) : undefined}
             >
               {hasScore && (
-                <span className={`font-mono ${scoreColor(computeScore(pred, scoringConfig!))}`}>
-                  {computeScore(pred, scoringConfig!).toFixed(3)}
+                <span className={`font-mono ${scoreColor(scoreOf(pred))}`}>
+                  {scoreOf(pred).toFixed(3)}
                 </span>
+              )}
+              {isMethod && !hasScore && (
+                <span className={`font-mono ${scoreColor(methodScore(pred))}`}>{methodScore(pred).toFixed(3)}</span>
               )}
               <span className="font-mono text-blue-600">{pred.go_id}</span>
               <span className="text-slate-700 leading-snug">{pred.name ?? "—"}</span>
+              {isMethod ? (
+                <MethodWitness pred={pred} />
+              ) : (
               <div className="flex items-start gap-1">
                 <Link
                   href={`/${locale}/instrument/proteins/${pred.ref_protein_accession}`}
@@ -462,13 +302,16 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                 >{pred.ref_protein_accession}</Link>
                 {hasDetail && <span className="text-slate-300 text-[10px] mt-0.5">{isExpanded ? "▲" : "▼"}</span>}
               </div>
-              <div>
-                {pred.evidence_code ? (
-                  <span className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(pred.evidence_code)}`}>
-                    {pred.evidence_code}
-                  </span>
-                ) : <span className="text-slate-300">—</span>}
-              </div>
+              )}
+              {!isMethod && (
+                <div>
+                  {pred.evidence_code ? (
+                    <span className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(pred.evidence_code)}`}>
+                      {pred.evidence_code}
+                    </span>
+                  ) : <span className="text-slate-300">—</span>}
+                </div>
+              )}
               <div className="flex flex-wrap gap-0.5">
                 {knownAnn ? knownAnn.evidence_codes.map((ec) => (
                   <span key={ec} className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(ec)}`}>
@@ -476,7 +319,9 @@ export function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                   </span>
                 )) : <span className="text-slate-300">—</span>}
               </div>
-              <span className="font-mono text-slate-500">{pred.distance != null ? pred.distance.toFixed(4) : "—"}</span>
+              {!isMethod && (
+                <span className="font-mono text-slate-500">{pred.distance != null ? pred.distance.toFixed(4) : "—"}</span>
+              )}
             </div>
 
             {/* Expanded: alignment + taxonomy + reranker detail */}
@@ -557,7 +402,6 @@ function ProteinDetail({
   loading,
   onClose,
   ontologySnapshotId,
-  scoringConfig,
 }: {
   accession: string;
   inDb: boolean;
@@ -566,7 +410,6 @@ function ProteinDetail({
   loading: boolean;
   onClose: () => void;
   ontologySnapshotId: string | null;
-  scoringConfig?: ScoringConfig;
 }) {
   const locale = useLocale();
   const [subgraph, setSubgraph] = useState<GoSubgraph | null>(null);
@@ -657,7 +500,7 @@ function ProteinDetail({
               <span className="text-xs font-semibold text-slate-600">{ASPECT_LABELS[asp]}</span>
               <span className="text-xs text-slate-600 ml-1">{uniquePredCount} predicted · {knownInAspect.length} known</span>
             </div>
-            <PredictionTable preds={preds} knownByGoId={knownByGoId} scoringConfig={scoringConfig} />
+            <PredictionTable preds={preds} knownByGoId={knownByGoId} />
           </div>
         );
       })}
@@ -701,11 +544,10 @@ function ProteinDetail({
   );
 }
 
-function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: string; scoringConfigId?: string; customBlocked?: boolean }) {
+function DownloadButton({ setId }: { setId: string }) {
   const [open, setOpen] = useState(false);
   const [aspect, setAspect] = useState("");
   const [maxDist, setMaxDist] = useState("");
-  const [minScore, setMinScore] = useState("");
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -717,17 +559,10 @@ function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: stri
     return `${apiBase}/embeddings/prediction-sets/${setId}/predictions.tsv${qs ? `?${qs}` : ""}`;
   }
 
-  function buildScoredUrl() {
-    return getScoredTsvUrl(setId, scoringConfigId!, minScore ? { minScore: parseFloat(minScore) } : undefined);
-  }
-
-  const isScored = !!scoringConfigId;
-
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        title={customBlocked ? "Guarda el config custom para descargar scored TSV" : undefined}
         className="flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
       >
         ↓ Download TSV
@@ -736,63 +571,37 @@ function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: stri
       {open && (
         <div className="absolute right-0 top-10 z-20 w-64 rounded-lg border bg-white p-4 shadow-lg">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">Download options</p>
+          <label className="block text-xs text-slate-600 mb-1">GO Aspect</label>
+          <select
+            value={aspect}
+            onChange={(e) => setAspect(e.target.value)}
+            className="w-full rounded border px-2 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All aspects</option>
+            <option value="F">F — Molecular Function</option>
+            <option value="P">P — Biological Process</option>
+            <option value="C">C — Cellular Component</option>
+          </select>
 
-          {!isScored && (
-            <>
-              <label className="block text-xs text-slate-600 mb-1">GO Aspect</label>
-              <select
-                value={aspect}
-                onChange={(e) => setAspect(e.target.value)}
-                className="w-full rounded border px-2 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">All aspects</option>
-                <option value="F">F — Molecular Function</option>
-                <option value="P">P — Biological Process</option>
-                <option value="C">C — Cellular Component</option>
-              </select>
-
-              <label className="block text-xs text-slate-600 mb-1">Max distance</label>
-              <input
-                type="number"
-                min="0"
-                max="2"
-                step="0.01"
-                placeholder="e.g. 0.3 (no limit)"
-                value={maxDist}
-                onChange={(e) => setMaxDist(e.target.value)}
-                className="w-full rounded border px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </>
-          )}
-
-          {customBlocked && (
-            <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1.5 mb-3">
-              Guarda el config custom para habilitar scored TSV
-            </p>
-          )}
-
-          {isScored && (
-            <>
-              <p className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1.5 mb-3">
-                Scored TSV — includes computed score column
-              </p>
-              <label className="block text-xs text-slate-600 mb-1">Min score</label>
-              <input
-                type="number"
-                min="0"
-                max="1"
-                step="0.01"
-                placeholder="e.g. 0.5 (no limit)"
-                value={minScore}
-                onChange={(e) => setMinScore(e.target.value)}
-                className="w-full rounded border px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </>
-          )}
+          <label className="block text-xs text-slate-600 mb-1">Max distance</label>
+          <input
+            type="number"
+            min="0"
+            max="2"
+            step="0.01"
+            placeholder="e.g. 0.3 (no limit)"
+            value={maxDist}
+            onChange={(e) => setMaxDist(e.target.value)}
+            className="w-full rounded border px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <p className="text-[11px] text-slate-500 mb-3">
+            The candidates with their evidence. A set&apos;s stored scores, in CAFA format, are at{" "}
+            <code className="font-mono">predictions-cafa.tsv</code>.
+          </p>
 
           <a
-            href={isScored ? buildScoredUrl() : buildRawUrl()}
-            download={isScored ? `scored_${setId.slice(0, 8)}.tsv` : `predictions_${setId.slice(0, 8)}.tsv`}
+            href={buildRawUrl()}
+            download={`predictions_${setId.slice(0, 8)}.tsv`}
             onClick={() => setOpen(false)}
             className="block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
           >
@@ -814,6 +623,16 @@ const tToast = useTranslations("toasts");
   const [annotationSetId, setAnnotationSetId] = useState<string | null>(null);
   const [ontologySnapshotId, setOntologySnapshotId] = useState<string | null>(null);
   const [limitPerEntry, setLimitPerEntry] = useState<number | null>(null);
+  // A scored set: the candidate set holding its rows, and the configuration it read.
+  const [scoredFrom, setScoredFrom] = useState<string | null>(null);
+  const [setScoringConfigId, setSetScoringConfigId] = useState<string | null>(null);
+  const [setScoringConfigName, setSetScoringConfigName] = useState<string | null>(null);
+  // A candidate set: the scored sets made from it, one per scoring job.
+  const [scoredSets, setScoredSets] = useState<ScoredSetSummary[]>([]);
+  // Until the set's record arrives, the page says it is loading rather than
+  // stating anything about the set: on a large set the record takes seconds.
+  const [setLoaded, setSetLoaded] = useState(false);
+  const [countsProvisional, setCountsProvisional] = useState(false);
   // A failure loading the prediction set means this whole page has no
   // subject to render. A missing id resolves to the not-found boundary;
   // any other failure is re-thrown to the route error boundary. Both
@@ -824,20 +643,15 @@ const tToast = useTranslations("toasts");
   if (notFoundFlag) notFound();
   if (fatalError) throw fatalError;
 
-  // Scoring
-  const [scoringConfigs, setScoringConfigs] = useState<ScoringConfig[]>([]);
-  const [selectedConfigId, setSelectedConfigId] = useState<string>("");
-  const [customWeights, setCustomWeights] = useState<Record<string, number>>(DEFAULT_CUSTOM_WEIGHTS);
-  const [customFormula, setCustomFormula] = useState("linear");
-  const [savingCustom, setSavingCustom] = useState(false);
-
   // Proteins tab
   const [proteins, setProteins] = useState<{ accession: string; go_count: number; min_distance: number | null; annotation_count: number; match_count: number; in_db: boolean }[]>([]);
   const [proteinTotal, setProteinTotal] = useState(0);
   const [proteinOffset, setProteinOffset] = useState(0);
   const [proteinSearch, setProteinSearch] = useState("");
   const [proteinSearchInput, setProteinSearchInput] = useState("");
-  const [loadingProteins, setLoadingProteins] = useState(false);
+  // True from the first render: the first page of proteins is being counted, and
+  // "0 proteins" before it arrives would read as a fact about the set.
+  const [loadingProteins, setLoadingProteins] = useState(true);
 
   // Inline detail
   const [selectedAccession, setSelectedAccession] = useState<string | null>(null);
@@ -860,6 +674,12 @@ const tToast = useTranslations("toasts");
         setAnnotationSetId(ps.annotation_set_id);
         setOntologySnapshotId(ps.ontology_snapshot_id);
         setLimitPerEntry(ps.limit_per_entry);
+        setScoredFrom(ps.scored_from ?? null);
+        setSetScoringConfigId(ps.scoring_config_id ?? null);
+        setSetScoringConfigName(ps.scoring_config_name ?? null);
+        setScoredSets(ps.scored_sets ?? []);
+        setCountsProvisional(Boolean(ps.counts_provisional));
+        setSetLoaded(true);
       })
       .catch((e: unknown) => {
         // A missing id is a 404: hand it to not-found, not the generic
@@ -871,22 +691,7 @@ const tToast = useTranslations("toasts");
         }
         setFatalError(e instanceof Error ? e : new Error(String(e)));
       });
-    // Scoring presets are an optional side panel: a failure here must not
-    // sink the page, but it must not vanish either. Surface it as a toast.
-    listScoringConfigs()
-      .then(setScoringConfigs)
-      .catch((e: unknown) => {
-        toast(
-          (e instanceof Error && e.message) || tToast("loadScoringConfigsFailed"),
-          "error",
-        );
-      });
   }, [setId]);
-
-  const selectedConfig: ScoringConfig | undefined =
-    selectedConfigId === CUSTOM_ID
-      ? { id: CUSTOM_ID, name: "Custom", formula: customFormula, weights: customWeights, evidence_weights: null, created_at: "" }
-      : scoringConfigs.find((c) => c.id === selectedConfigId);
 
   async function loadProteins(offset = 0, search = proteinSearch) {
     setLoadingProteins(true);
@@ -970,52 +775,68 @@ const tToast = useTranslations("toasts");
             <p className="text-xs text-slate-600 mt-0.5">k = {limitPerEntry}</p>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <label className="text-xs text-slate-500 whitespace-nowrap">Scoring</label>
-            <select
-              value={selectedConfigId}
-              onChange={(e) => setSelectedConfigId(e.target.value)}
-              className="rounded-md border bg-white px-2 py-1.5 text-sm text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Raw distance</option>
-              {scoringConfigs.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-              <option value={CUSTOM_ID}>Custom…</option>
-            </select>
+        {setLoaded && countsProvisional ? (
+          <p className="text-xs text-amber-800" data-testid="set-provisional-notice">
+            {PROVISIONAL_NOTE}
+          </p>
+        ) : null}
+        {!setLoaded ? (
+          <p className="text-xs text-slate-600" data-testid="set-loading-notice">
+            {LOADING_NOTE}
+          </p>
+        ) : scoredFrom ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* A scored set's scores are stored, and they are the ones the
+              evaluator reads, so nothing is recomputed here. */}
+            <p className="text-xs text-slate-600" data-testid="scored-set-notice">
+              Scored set: the scores shown are the ones stored with configuration{" "}
+              <span className="font-medium">
+                {setScoringConfigName ?? setScoringConfigId ?? "unknown"}
+              </span>
+              , over the candidates of{" "}
+              <Link
+                href={`/${locale}/instrument/functional-annotation/${scoredFrom}`}
+                className="font-mono text-blue-600 hover:underline"
+              >
+                {scoredFrom.slice(0, 8)}
+              </Link>
+              .
+            </p>
+            <DownloadButton setId={setId} />
           </div>
-          <DownloadButton
-            setId={setId}
-            scoringConfigId={
-              selectedConfigId && selectedConfigId !== CUSTOM_ID ? selectedConfigId : undefined
-            }
-            customBlocked={selectedConfigId === CUSTOM_ID}
-          />
-        </div>
-        <div>
-          {selectedConfigId && (
-            <WeightPanel
-              config={selectedConfigId !== CUSTOM_ID ? selectedConfig : undefined}
-              isCustom={selectedConfigId === CUSTOM_ID}
-              customWeights={customWeights}
-              customFormula={customFormula}
-              onWeightChange={(key, val) => setCustomWeights((prev) => ({ ...prev, [key]: val }))}
-              onFormulaChange={setCustomFormula}
-              onSave={async (name) => {
-                setSavingCustom(true);
-                try {
-                  const saved = await createScoringConfig({ name, formula: customFormula, weights: customWeights });
-                  setScoringConfigs((prev) => [...prev, saved]);
-                  setSelectedConfigId(saved.id);
-                } finally {
-                  setSavingCustom(false);
-                }
-              }}
-              saving={savingCustom}
-            />
-          )}
-        </div>
+        ) : (
+          <div className="flex flex-wrap items-start gap-2">
+            {/* A candidate set holds neighbours and their evidence, not scores.
+              It is scored by a job, each scoring a set of its own, and the
+              scores the evaluator reads are the ones those sets stored. */}
+            <div className="space-y-1 text-xs text-slate-600" data-testid="candidate-set-notice">
+              <p>
+                Candidate set: the neighbours and their evidence. Scoring is a job of its own,{" "}
+                <code className="font-mono">score_prediction_set</code>, and each scoring is a set
+                that stores its scores.
+              </p>
+              {scoredSets.length === 0 ? (
+                <p>No scored set has been made from it yet.</p>
+              ) : (
+                <ul className="flex flex-wrap gap-x-3 gap-y-1">
+                  {scoredSets.map((s) => (
+                    <li key={s.id}>
+                      <Link
+                        href={`/${locale}/instrument/functional-annotation/${s.id}`}
+                        className="text-blue-600 hover:underline"
+                        title={s.id}
+                      >
+                        {s.scoring_config_name ?? s.scoring_config_id ?? "unknown"}{" "}
+                        <span className="font-mono">{s.id.slice(0, 8)}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <DownloadButton setId={setId} />
+          </div>
+        )}
       </div>
 
       <div className="flex gap-1 border-b mb-6 overflow-x-auto">
@@ -1074,7 +895,9 @@ const tToast = useTranslations("toasts");
                 </button>
               )}
             </form>
-            <span className="text-sm text-slate-600">{formatCount(proteinTotal)} proteins</span>
+            <span className="text-sm text-slate-600">
+              {loadingProteins ? "Counting proteins\u2026" : `${formatCount(proteinTotal)} proteins`}
+            </span>
           </div>
 
           {/* Mobile card list */}
@@ -1129,7 +952,6 @@ const tToast = useTranslations("toasts");
                       loading={loadingDetail}
                       onClose={() => setSelectedAccession(null)}
                       ontologySnapshotId={ontologySnapshotId}
-                      scoringConfig={selectedConfig}
                     />
                   </div>
                 )}
@@ -1200,7 +1022,6 @@ const tToast = useTranslations("toasts");
                       loading={loadingDetail}
                       onClose={() => setSelectedAccession(null)}
                       ontologySnapshotId={ontologySnapshotId}
-                      scoringConfig={selectedConfig}
                     />
                   </div>
                 )}
@@ -1225,7 +1046,7 @@ const tToast = useTranslations("toasts");
       {/* ── GO Distribution ── */}
       {activeTab === "distribution" && (
         <div>
-          {loadingDist && <p className="text-sm text-slate-600">Loading…</p>}
+          {loadingDist && <p className="text-sm text-slate-600">{LOADING_NOTE}</p>}
 
           {distribution && (
             <div className="space-y-6">

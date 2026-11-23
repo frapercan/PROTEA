@@ -1,0 +1,23 @@
+# The web front of the development stack: apps/web/Dockerfile with the variables
+# Next.js bakes in at build time. The browser talks to the API through the app's own
+# proxy (/api-proxy, rewritten to the dev API on the host's loopback), so the API's
+# loopback binding and its allowed origins stay as they are. The server side reaches
+# the API on 127.0.0.1 too, because the container runs on the host's network
+# (protea-dev-web.container). Same Node major as the production image, by digest.
+FROM docker.io/library/node:20-alpine@sha256:afdf98210b07b586eb71fa22ba2e432e058e4cd1304d31ed60888755b8c865fb AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NEXT_PUBLIC_API_URL=/api-proxy \
+    PROTEA_API_URL=http://127.0.0.1:26800
+RUN npm run build
+
+FROM docker.io/library/node:20-alpine@sha256:afdf98210b07b586eb71fa22ba2e432e058e4cd1304d31ed60888755b8c865fb AS runner
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+CMD ["node", "server.js"]

@@ -99,7 +99,8 @@ class TestPlacingAnObservation:
             category="NK",
             aspect="P",
             residues=3000,
-            neighbourhood=Neighbourhood(best_identity=25.0, donor_is_experimental=True),
+            identity=25.0,
+            retrieval=Neighbourhood(best_identity=25.0, donor_is_experimental=True),
         )
         assert s.category is Category.NO_KNOWLEDGE
         assert s.aspect is Aspect.BIOLOGICAL_PROCESS
@@ -112,13 +113,15 @@ class TestPlacingAnObservation:
             category="LK",
             aspect="F",
             residues=100,
-            neighbourhood=Neighbourhood(best_identity=None, donor_is_experimental=None),
+            identity=None,
+            retrieval=Neighbourhood(best_identity=None, donor_is_experimental=None),
         )
         by_enum = stratum_for(
             category=Category.LIMITED_KNOWLEDGE,
             aspect=Aspect.MOLECULAR_FUNCTION,
             residues=100,
-            neighbourhood=Neighbourhood(best_identity=None, donor_is_experimental=None),
+            identity=None,
+            retrieval=Neighbourhood(best_identity=None, donor_is_experimental=None),
         )
         assert by_code == by_enum
 
@@ -126,27 +129,30 @@ class TestPlacingAnObservation:
         """Silently resolving the contradiction would invent a population."""
         with pytest.raises(ValueError, match="disagree about whether a donor exists"):
             stratum_for(
-            category="NK",
-            aspect="P",
-            residues=100,
-            neighbourhood=Neighbourhood(best_identity=None, donor_is_experimental=True),
-        )
+                category="NK",
+                aspect="P",
+                residues=100,
+                identity=None,
+                retrieval=Neighbourhood(best_identity=None, donor_is_experimental=True),
+            )
 
     def test_a_donor_without_a_verdict_is_refused_too(self) -> None:
         with pytest.raises(ValueError, match="disagree about whether a donor exists"):
             stratum_for(
-            category="NK",
-            aspect="P",
-            residues=100,
-            neighbourhood=Neighbourhood(best_identity=55.0, donor_is_experimental=None),
-        )
+                category="NK",
+                aspect="P",
+                residues=100,
+                identity=55.0,
+                retrieval=Neighbourhood(best_identity=55.0, donor_is_experimental=None),
+            )
 
     def test_the_string_form_names_every_axis(self) -> None:
         s = stratum_for(
             category="PK",
             aspect="C",
             residues=100,
-            neighbourhood=Neighbourhood(best_identity=95.0, donor_is_experimental=False),
+            identity=95.0,
+            retrieval=Neighbourhood(best_identity=95.0, donor_is_experimental=False),
         )
         assert str(s) == "PK/C/<=512/>90/other/none/none"
 
@@ -155,13 +161,15 @@ class TestTheGridIsDerivedNotEnumerated:
     def test_no_stratum_repeats(self) -> None:
         assert len(set(all_strata())) == len(all_strata())
 
-    def test_the_no_donor_band_carries_only_the_no_donor_evidence(self) -> None:
-        """Crossing it with an evidence verdict would invent empty strata."""
-        for s in all_strata():
-            if s.homology is HomologyBand.NONE:
-                assert s.donor_evidence is DonorEvidence.NONE
-            else:
-                assert s.donor_evidence is not DonorEvidence.NONE
+    def test_homology_and_donor_evidence_are_crossed_freely(self) -> None:
+        """The homology band is the window's and the evidence one arm's retrieval.
+
+        They used to be coupled, when both were read from the same retrieval. A
+        target with a measured homolog can be one whose arm retrieved no donor,
+        so every pair is a stratum that can be occupied.
+        """
+        pairs = {(s.homology, s.donor_evidence) for s in all_strata()}
+        assert pairs == {(h, e) for h in HomologyBand for e in DonorEvidence}
 
     def test_every_axis_value_appears(self) -> None:
         grid = all_strata()
@@ -173,60 +181,31 @@ class TestTheGridIsDerivedNotEnumerated:
         assert {s.propagation for s in grid} == set(PropagationBand)
 
     def test_the_size_is_what_the_axes_imply(self) -> None:
-        """3 categories x 3 aspects x 4 lengths x (1 + 4x2) donor states
-        x 6 taxonomy bands x 5 propagation bands.
-
-        The number is large on purpose and is not a reporting frame. See
-        ``reportable_strata``: of the 1,080 combinations the five
-        protein-level axes admit, 77 were populated on prot_t5 at K=30
-        before the campaign wipe of 2026-08-27.
+        """3 categories x 3 aspects x 4 lengths x 5 homology bands x 3 donor
+        evidences x 6 taxonomy bands x 5 propagation bands. Large on purpose:
+        it is an ordering key, and ``reportable_strata`` says what is occupied.
         """
-        assert len(all_strata()) == 3 * 3 * 4 * 9 * 6 * 5
-
-    def test_the_protein_level_axes_admit_one_thousand_and_eighty(self) -> None:
-        """The count the docstring quotes, held to the grid that produces it.
-
-        The five protein-level axes are not freely crossed: homology and donor
-        evidence are coupled, so their pair contributes 9 states and not 15,
-        and the free product of the enums (1,800) is an overcount. The number
-        that belongs in prose is 1,080, and it has been wrong in this docstring
-        before, so it is pinned here rather than left to be re-derived by hand.
-        """
-        grid = all_strata()
-        protein_level = {
-            (s.length, s.homology, s.donor_evidence, s.taxonomy, s.propagation) for s in grid
-        }
-        category_aspect = {(s.category, s.aspect) for s in grid}
-
-        assert len(protein_level) == 1080
-        assert len(category_aspect) == 9
-        # The grid is the full rectangle of the two halves, which is why the
-        # 9,720 total already implies the 1,080 and cannot disagree with it.
-        assert len(grid) == 9720
-        assert len(grid) == len(category_aspect) * len(protein_level)
+        assert len(all_strata()) == 3 * 3 * 4 * 5 * 3 * 6 * 5
 
     def test_the_docstring_quotes_the_count_the_grid_produces(self) -> None:
         """The defect this guards against was prose, so the prose is asserted.
 
-        ``all_strata`` was correct while its docstring claimed the five
-        protein-level axes admit 1,920 combinations, a number that is neither
-        the coupled count nor the free product, and that contradicted the same
-        docstring's own 9,720. Nothing failed, because no code reads a
-        docstring. This reads it.
+        ``all_strata`` was correct while its docstring claimed a count that was
+        neither the coupled one nor the free product. Nothing failed, because no
+        code reads a docstring. This reads it.
         """
         doc = all_strata.__doc__ or ""
-
-        assert "1,080" in doc
-        assert "1,920" not in doc
-        # The 77 is a pre-wipe observation and must not read as a current one.
-        assert "2026-08-27" in doc
+        assert len(all_strata()) == 16200
+        assert "16,200" in doc
+        assert "1,080" not in doc and "9,720" not in doc
 
     def test_a_placed_observation_is_in_the_grid(self) -> None:
         s = stratum_for(
             category="LK",
             aspect="F",
             residues=700,
-            neighbourhood=Neighbourhood(best_identity=45.0, donor_is_experimental=False),
+            identity=45.0,
+            retrieval=Neighbourhood(best_identity=45.0, donor_is_experimental=False),
         )
         assert s in set(all_strata())
 
@@ -241,7 +220,8 @@ class TestPoolingIsRefusedRatherThanDiscouraged:
             category=category,
             aspect="P",
             residues=100,
-            neighbourhood=Neighbourhood(best_identity=50.0, donor_is_experimental=True),
+            identity=50.0,
+            retrieval=Neighbourhood(best_identity=50.0, donor_is_experimental=True),
         )
 
     def test_an_empty_report_raises(self) -> None:
@@ -323,7 +303,14 @@ class TestReportableStrataNamesWhatItWithholds:
             category=category,
             aspect="F",
             residues=400,
-            neighbourhood=Neighbourhood(best_identity=55.0, donor_is_experimental=True, taxonomic_relation="close", nearest_any=0.05, nearest_experimental=0.12),
+            identity=55.0,
+            retrieval=Neighbourhood(
+                best_identity=55.0,
+                donor_is_experimental=True,
+                taxonomic_relation="close",
+                nearest_any=0.05,
+                nearest_experimental=0.12,
+            ),
         )
 
     def test_thin_strata_are_returned_as_withheld_rather_than_dropped(self) -> None:

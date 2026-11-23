@@ -1,9 +1,11 @@
 """Evidence regimes for Information Accretion corpora.
 
 IA is not a property of an ontology. It is estimated from term frequencies over
-an annotation corpus, so an IA table is identified by THREE axes:
+an annotation corpus, so an IA table is identified by FOUR axes:
 
-    (ontology_snapshot, annotation_set, evidence_regime)
+    (ontology_snapshot, annotation_set, evidence_regime, cohort)
+
+The fourth, :data:`IA_COHORTS`, says which proteins of the corpus count.
 
 The third axis is the one that is easiest to lose and the most expensive to get
 wrong. Measured on the v226 pivot (``releases/2025-03-16``) against the GOA
@@ -32,15 +34,30 @@ from types import MappingProxyType
 # The evidence set LAFA scores on: experimental, high-throughput experimental,
 # plus IC and TAS. This is the regime to use for board-comparable IA.
 LAFA_EVIDENCE: tuple[str, ...] = (
-    "EXP", "IDA", "IPI", "IMP", "IGI", "IEP",
-    "HTP", "HDA", "HMP", "HGI", "HEP",
-    "IC", "TAS",
+    "EXP",
+    "IDA",
+    "IPI",
+    "IMP",
+    "IGI",
+    "IEP",
+    "HTP",
+    "HDA",
+    "HMP",
+    "HGI",
+    "HEP",
+    "IC",
+    "TAS",
 )
 
 # The strict experimental six, without the high-throughput variants and
 # without the curator-inference codes.
 EXPERIMENTAL_EVIDENCE: tuple[str, ...] = (
-    "EXP", "IDA", "IPI", "IMP", "IGI", "IEP",
+    "EXP",
+    "IDA",
+    "IPI",
+    "IMP",
+    "IGI",
+    "IEP",
 )
 
 # ``None`` means no evidence predicate at all: every annotation in the set.
@@ -51,6 +68,13 @@ EVIDENCE_REGIMES: MappingProxyType[str, tuple[str, ...] | None] = MappingProxyTy
         "all": None,
     }
 )
+
+#: Which proteins of the corpus count. ``every_protein`` is what every stored
+#: table did. ``swissprot`` keeps the Swiss-Prot list of the UniProt release
+#: paired with the corpus's cut photo, which is the cohort LAFA computes its
+#: information accretion over: its workflow filters each GAF to that list before
+#: anything else (``protea.core.lafa_frame``).
+IA_COHORTS: tuple[str, ...] = ("every_protein", "swissprot")
 
 #: The default is deliberately the board-comparable one. An IA table computed
 #: over all evidence is a valid object but answers a different question, so it
@@ -67,7 +91,6 @@ def resolve_regime(name: str) -> tuple[str, ...] | None:
     """
     if name not in EVIDENCE_REGIMES:
         raise ValueError(
-            f"unknown evidence regime {name!r}; "
-            f"known regimes: {sorted(EVIDENCE_REGIMES)}"
+            f"unknown evidence regime {name!r}; known regimes: {sorted(EVIDENCE_REGIMES)}"
         )
     return EVIDENCE_REGIMES[name]

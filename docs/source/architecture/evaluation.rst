@@ -288,20 +288,63 @@ Evaluation flow in PROTEA
    4. POST /jobs  (compute_embeddings, query_set_id=...)
       → compute ESM-2 embeddings for delta proteins
    5. POST /embeddings/predict  (predict_go_terms, query_set_id=...)
-      → run KNN GO transfer; creates PredictionSet
-   6. POST /annotations/evaluation-sets/{id}/run
+      → run kNN GO transfer; creates a PredictionSet of candidates
+   6. POST /jobs  (score_prediction_set, prediction_set_id=..., scoring_config_id=...)
+      → scores each candidate once and stores the scores; creates the scored set
+   7. POST /annotations/evaluation-sets/{id}/run  (prediction_set_id = the scored set)
       → queues run_cafa_evaluation job
-      → runs cafaeval for NK, LK, PK; creates EvaluationResult
-   7. View results in the Evaluation UI or download artifacts.zip.
+      → runs cafaeval for NK, LK, PK over the window's terms of interest;
+        creates EvaluationResult
+   8. View results in the Evaluation UI or download artifacts.zip.
 
-The ``cafaeval`` command equivalent (for manual inspection):
+The ``cafaeval`` command equivalent, on the files ``artifacts.zip`` holds, with
+the pivot's OBO and the IA table the run was given:
 
 .. code-block:: bash
 
-   python -m cafaeval go-basic.obo predictions/ ground_truth_NK.tsv -out_dir results/NK
-   python -m cafaeval go-basic.obo predictions/ ground_truth_LK.tsv -out_dir results/LK
-   python -m cafaeval go-basic.obo predictions/ ground_truth_PK.tsv \
+   python -m cafaeval go-basic.obo predictions/ gt_NK.tsv -ia ia.tsv \
+     -toi terms_of_interest.txt -prop fill -norm cafa -no_orphans -th_step 0.01 -out_dir results/NK
+   python -m cafaeval go-basic.obo predictions/ gt_LK.tsv -ia ia.tsv \
+     -toi terms_of_interest.txt -prop fill -norm cafa -no_orphans -th_step 0.01 -out_dir results/LK
+   python -m cafaeval go-basic.obo predictions/ gt_PK.tsv -ia ia.tsv \
+     -toi terms_of_interest.txt -prop fill -norm cafa -no_orphans -th_step 0.01 \
      -known pk_known_terms.tsv -out_dir results/PK
+
+Where each target sits: the window's placement
+----------------------------------------------
+
+Results are reported per stratum (:mod:`protea.core.strata`), and two of the
+axes describe a target's sequence rather than a method: its length, and its
+identity to the closest protein whose function had been measured when the
+window opened. ``place_window_targets`` reads both once per window and stores
+them (``window_placement`` declares the placement, ``window_placement_target``
+holds one row per target), so two methods evaluated on one window place every
+protein in the same band.
+
+- **Length** is the length of the target's sequence in the full photo of the
+  opening cut (ADR-D59).
+- **Identity** is to the closest OTHER protein of that photo with a truth row
+  (the thirteen LAFA codes). An identical sequence under another accession
+  places the target at 100, through the membership table (ADR-D61, decision
+  3). Otherwise the best hit of the cut's homology table among the truth
+  members' sequences decides: highest bit score, then identity, e-value and
+  md5. With neither, the target is in the ``none`` band, a population and not
+  a missing value.
+- The bit score ranks first because it grows with the length of the alignment.
+  The highest identity alone would let a short local alignment at 100 % place
+  a protein among the near-identical ones.
+- Identity is MMseqs2's ``fident`` as it was printed, three decimals, so the
+  percentage is rounded to one decimal. Stored as float32, 0.300 reads
+  0.30000001, which would otherwise cross the edge of the twilight band.
+- No threshold is applied, neither by the homology table (ADR-D61, decision 4)
+  nor here.
+
+Every reader of the two axes reads the placement: ``stratify_evaluation``, a
+paired comparison restricted to a stratum, and the two stratum pages. A window
+with no placement is refused with the operation to run. Only the three
+retrieval axes (donor evidence, taxonomy and propagation) read a method's own
+neighbours, and only when they are asked for; they describe that method's
+retrieval and are crossed with the homology band like any other pair of axes.
 
 Data model
 ----------
@@ -310,6 +353,30 @@ Data model
    Stores the (old\_annotation\_set\_id, new\_annotation\_set\_id) pair and a
    JSONB ``stats`` dict with delta/NK/LK/PK protein and annotation counts.
    Created by ``generate_evaluation_set``.
+
+   Two fields make it a window of a frame (ADR-D60, decision 1):
+
+   - ``window_role``: ADR-D40's ``valid`` and ``test``, and the three roles of a
+     frame, ``training`` (its gains may be fitted on), ``validation`` (a method
+     instance is selected and read on it, never fitted on it) and
+     ``test_spent`` (a test window whose single read has happened).
+   - ``truth_rules``: the rules the build applied, as ``profile``,
+     ``toi_rule``, ``not_codes`` and ``closure``. They are read from the path
+     the build took and the graphs it resolved, never copied from the payload:
+     when both corpora and every graph are one snapshot, the same-snapshot path
+     reads none of the three payload rules, and the row says so. The closure
+     says how the graphs relate to the window's own ends (``per_side``,
+     ``t0_graph``, ``t1_graph``), which is the form that compares across cuts.
+     Rows built before the column hold NULL and read as legacy.
+
+   A payload can name a rule set instead of spelling the rules out.
+   ``truth_rule_set: "october-headline-frame"`` is the author's choice of
+   2026-11-15 for the four training windows, the rules of the October headline
+   window ``ea0f4334``: ``projected``, ``live_in_both_ends``, ``experimental``,
+   and both sides closed under the graph of t0, which is also the pivot. A build
+   that would apply anything else is refused before the delta is computed.
+   :func:`protea.core.window_declarations.common_truth_rules` refuses a list of
+   windows whose stored rules differ, or cannot be compared at all.
 
 ``EvaluationResult``
    Stores per-setting (NK/LK/PK) and per-namespace (MFO/BPO/CCO) metrics:
@@ -378,9 +445,14 @@ band binds two derived artefacts that are pinned rather than free-floated:
 1. An ``OntologySnapshot`` identified by its ``obo_version``. The snapshot
    governs True-Path propagation, the term universe, and orphan handling.
    Every cell in the band scores against the same snapshot.
-2. An Information Accretion (IA) artefact identified by a stable file token.
-   The IA weights each GO term by its information content on the t0 corpus of
-   that band.
+2. An Information Accretion (IA) artefact. The IA weights each GO term by its
+   information content on the t0 corpus of that band. A table this platform
+   computed is identified by its content sha256, the
+   ``InformationAccretionSet.content_sha256`` its row records
+   (``Band.ia_sha256s``): the row id is a uuid4 minted by the database that
+   computed it, so the same table rebuilt in another universe keeps its digest
+   and gets another id. A table supplied from outside is identified by its
+   file name (``Band.ia_tokens``).
 
 The registry is ``protea.core.band_registry.BANDS``. Authoritative pairs:
 
@@ -391,19 +463,33 @@ The registry is ``protea.core.band_registry.BANDS``. Authoritative pairs:
    * - Band
      - GOA t0
      - Canonical ``obo_version``
-     - Canonical IA token
+     - Canonical IA
    * - v226
      - goa 226 (2025-05-03)
      - ``releases/2025-03-16``
      - ``IA_cafa6.tsv``
+   * - v211
+     - goa 211 (2022-09-16)
+     - ``releases/2022-07-01``
+     - the production row ``80bbc9e4``, by set id (legacy)
    * - v227
      - goa 227 (2025-09-04)
      - ``releases/2025-07-22``
-     - ``IA.tsv`` / ``IA-swissprot-exp-v227.txt``
+     - ``IA.tsv`` / ``IA-swissprot-exp-v227.txt``; the production row
+       ``1aaff913``, by set id (legacy)
+
+No computed table is pinned by content yet. The two production tables were
+pinned by the set id of their rows before the digest was the identity; those
+ids stay in ``Band.legacy_ia_set_ids`` so the evaluations that pinned them keep
+resolving, and nothing new is added there. When a run pins its IA by
+``information_accretion_set_id``, the guard reads that row's digest and checks
+the band by it; the set id still resolves a legacy row.
 
 Adding a new band requires one new ``Band`` row in ``BANDS``. No
-``obo_version`` and no IA token may be shared by two bands; the CI guard
+``obo_version`` and no IA identity may be shared by two bands; the CI guard
 (``scripts/check_band_registry.py``, wired into ``lint.yml``) enforces this.
+No band may open after the mark (227): a ``Band`` named for a later release
+cannot be built.
 
 **Why a snapshot/IA mismatch inflates a phantom gap.** If a cell declared for
 one band is scored with the snapshot or IA of another band, the comparison
@@ -471,8 +557,8 @@ PROTEA were previously misaligned and the current state after the fix
      - Must point at the same IA artefact as LAFA used for the band
    * - ``toi``
      - ``groundtruth_terms_of_interest.txt``
-     - payload ``toi_file``, else snapshot terms
-     - Residual up to 0.004 on MFO without the exact file; pass it for strict parity
+     - the window's terms, by its gain rule (a request has not named them since 2026-11-20)
+     - LAFA's frame derives LAFA's own terms (:doc:`lafa-frame`); the residual up to 0.004 on MFO was the pivot's terms
    * - ``prop``
      - ``fill``
      - ``fill``
@@ -488,23 +574,135 @@ PROTEA were previously misaligned and the current state after the fix
 
 **How to run a LAFA-comparable evaluation.** In the ``run_cafa_evaluation``
 payload, leave ``th_step`` and ``max_terms`` at their defaults (``0.01`` and
-``None``), pass ``ia_file`` pointing at the same IA artefact LAFA used for
-the band, and pass ``toi_file`` pointing at LAFA's release
-``groundtruth_terms_of_interest.txt`` for strict MFO parity.
+``None``) and name the IA table LAFA's frame uses. The terms of interest and
+the population are the window's: a window of LAFA's frame derives LAFA's own
+terms (:doc:`lafa-frame`), and every evaluation scores all the window's targets,
+an unpredicted one as a failure, with coverage beside the number.
 
 **Persisted metrics.** ``run_cafa_evaluation`` persists, per aspect, the
 IA-weighted ``f_micro_w`` (headline), ``fmax_w``, ``f_micro``, and the
-weighted micro ``precision_w`` / ``recall_w`` / ``coverage_w``. The ``_w``
+weighted micro ``precision_w`` / ``recall_w`` / ``coverage_w_at_tau``. The
+last is the coverage at the threshold ``f_micro_w`` was reported at, cafaeval's
+``cov_w`` and the coverage LAFA prints beside it. ``coverage_w`` is the largest
+coverage over every threshold, cafaeval's ``cov_max``, as ``coverage`` is for
+the unweighted ``coverage_at_tau``; results made before 2026-11-21 carry only
+``coverage_w``. Each cell also records its size in each variant, ``n_targets``
+and ``n_targets_w``: the proteins with ground truth among its terms of
+interest, and those with positive weighted ground truth. They are the
+denominators of the cell and of its coverage, counted from the rows of the
+per-protein grid, so the record and the file agree. ``n_proteins`` is
+cafaeval's ``n``, the proteins with a prediction at the reported threshold, and
+it moves with the threshold. The ``_w``
 keys appear only when a real IA file was supplied; under the uniform IC=1
 fallback they are omitted. The ``/v1/benchmark/matrix`` endpoint ranks every
 cell by ``f_micro_w`` (falling back to ``fmax`` for legacy IC=1 rows, flagged
 via ``primary_metric``) and exposes a ``per_task`` mean and 95% CI.
+
+**Where each figure was read on the threshold grid.** cafaeval reports each F at
+the threshold where its curve peaks, on a grid of step ``th_step``. Each cell
+records, per F variant, that threshold and whether it is an edge:
+``maxima.f_micro_w.tau`` is the threshold of the headline, and
+``maxima.f_micro_w.edge`` is ``"top"`` when the curve peaks at the highest
+threshold that kept a prediction, ``"bottom"`` at the lowest, and null for an
+interior maximum. A figure at an edge is not a maximum and no verdict is read
+from it (ADR-D55, section 6); the window page marks it beside the figure and
+says so in its tooltip. The cell's own ``tau`` is the threshold of the
+unweighted ``fmax``, not of the headline: on 211 -> 227, LK's cellular component
+reads 0.97 there and 0.99 for ``f_micro_w``. How the scores were read before
+the grid (``results.reading``): ``score_reading``, ``raw`` (LAFA's reading) or
+``percentile_rank`` (ADR-D55's comparison reading), and the grid's ``th_step``.
+Two results of one scored set can differ in these alone, and the window page
+names each result's reading; a result written before 2026-11-21 takes it from
+the payload of the job that evaluated it.
+
+**The files behind each figure.** A result records every file the run wrote:
+``results.artifacts.keys`` lists their keys in the artifact store, and since
+2026-11-21 ``results.artifacts.sha256`` holds the digest of each file as it was
+uploaded. A cell's ``f_micro_w`` and ``cov_w`` are read from its category's
+``evaluation_best_f_micro_w.tsv``, and its size from the category's
+``per_protein_grid.parquet``. ``GET
+/annotations/evaluation-sets/{id}/results/{rid}/artifacts/{path}`` serves one
+recorded file by itself, with the recorded digest in the ``X-Recorded-SHA256``
+header, so whoever downloads it can check that the bytes are the ones the
+figures were read from. The window page names the file and the digest behind
+each cell. Results made before 2026-11-21 record the keys only.
+
+**Paired comparisons on the window page.** ``compare_paired_panels`` writes no
+row of its own; its job is its record. ``GET
+/annotations/evaluation-sets/{id}/paired-comparisons`` reads, from those jobs,
+the latest whole-panel comparison of each pair of the window's results: the
+method axis it declared, its operating point and resampling, and per panel the
+difference of ``f_micro_w`` (the arm under test minus the baseline), its
+interval and the interval's method, the verdict and the number of paired
+proteins. The window page shows them against a baseline the reader picks, and
+marks a cell where either side's headline peaks at an edge of the threshold
+grid. Each result in the list also names its arm: the model of its set, the
+scoring it read and its method.
 
 **Obsolete metrics.** Unweighted ``fmax`` / ``f_micro`` (equal weight on all
 GO terms) are superseded by IA-weighted ``f_micro_w``; they are kept for
 history but are not LAFA-comparable. Numbers from the v226 evaluation window
 are also kept for history but should not be compared head-to-head with LAFA
 v227 results (different band, different ground truth shape).
+
+Checked against a second implementation
+---------------------------------------
+
+The evaluator is checked against the lab's: ``sfjepa.eval.cafa.evaluate_cell``
+in the thesis' lab repository, a separate call of ``cafaeval-protea`` with
+LAFA's flags, written for the lab's own campaigns. Both pin ``cafaeval-protea``
+203af0a, the commit that names each NK and LK per-protein row by the truth
+protein it came from.
+
+The check reads one evaluation result back through the API: the files the run
+stored (``artifacts.zip``), the information accretion table it was given, and
+the ontologies of the window's pivot and two ends. It evaluates every cell with
+the lab's evaluator on those files, and compares, protein by protein:
+
+- the IA-weighted true-positive and predicted mass at every threshold, and the
+  truth mass. The platform stores the per-threshold grid in float32 and the
+  scalars in float64 (the contract in
+  ``protea/core/operations/_paired_panels_artifact.py``), so the grid is
+  compared with the lab's float64 masses cast to float32. That is equality
+  when both computed the same values;
+- each protein's masses at the cell's chosen threshold, in float64;
+- the published ``f_micro_w``, which the platform stores to four decimals.
+
+It also asks, input by input, whether a reader outside could rerun every cell
+from the public API alone. On the development store, for the ESM-2 650M
+nearest-neighbour set at cut 211 scored with ``embedding_only``, on the window
+211 -> 227 of LAFA's frame:
+
+.. literalinclude:: ../_data/lab-evaluator-parity-211-227.json
+   :language: json
+
+Every cell agrees, protein by protein.
+
+Two cells, PK's biological process and cellular component, are compared at
+the chosen threshold only. When the record was made, the platform did not store
+their grid, because its weighted and unweighted branches score different
+proteins: 38 and 4 PK proteins whose remaining truth carries no information
+accretion. The grid held one row per protein for both variants, so it refused
+those namespaces and recorded the refusal (``per_protein_grid_namespace_dropped``,
+``variant_populations_differ``). Since 2026-11-21 each variant has its own
+population in the grid. The rows are the unweighted population, a protein
+outside the weighted one carries zeros in its weighted columns, and every
+reader of the weighted variant keeps the rows with positive weighted ground
+truth, so evaluations made since then store both cells.
+
+Every input has a door:
+
+- The CAFA export restricted to the window, and the three ground-truth
+  downloads, are byte-identical to the files the run read.
+- The known-terms download is a superset of the PK cell's known terms. Its
+  extra rows lie in aspects where the protein has no PK truth, and it gives
+  the same PK numbers.
+- The terms of interest are the window's rule applied to the two ends'
+  ontologies.
+
+The record names the platform's revision, the lab's, and the
+``cafaeval-protea`` commit on both sides. The check is repeated whenever the
+evaluator or that commit changes.
 
 Implementation reference
 -------------------------

@@ -242,8 +242,10 @@ def test_the_message_to_the_server_must_name_the_uploaded_shard(node: SimpleName
 
 def test_the_stage_is_registered_and_its_queue_carries_operation_messages() -> None:
     from protea.core.operation_catalog import build_operation_registry
+    from protea.core.operation_spec import message_queues
 
-    assert build_operation_registry().get("upload_residue_shard").name == "upload_residue_shard"
-    worker = (Path(__file__).resolve().parents[1] / "scripts" / "worker.py").read_text()
-    queues = worker.split("_OPERATION_QUEUES = {", 1)[1].split("}", 1)[0]
-    assert f'"{spool.UPLOAD_QUEUE}"' in queues
+    registry = build_operation_registry()
+    assert registry.get("upload_residue_shard").name == "upload_residue_shard"
+    assert registry.spec("upload_residue_shard").queue == spool.UPLOAD_QUEUE
+    # scripts/worker.py gives the queues of message stages an OperationConsumer.
+    assert spool.UPLOAD_QUEUE in message_queues(registry.specs().values())

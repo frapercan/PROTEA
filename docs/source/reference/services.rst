@@ -103,22 +103,7 @@ Embeddings service helpers
 Scoring service helpers
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: protea.services._scoring_metrics_helpers
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. automodule:: protea.services._scoring_models
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: protea.services._scoring_pipeline_helpers
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: protea.services._scoring_prediction_metrics_helpers
    :members:
    :undoc-members:
    :show-inheritance:

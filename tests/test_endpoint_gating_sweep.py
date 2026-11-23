@@ -67,7 +67,6 @@ def _make_app() -> Any:
     with (
         patch("protea.api.app.load_settings", return_value=fake_settings),
         patch("protea.api.app.build_session_factory", return_value=MagicMock()),
-        patch("protea.api.app.load_benchmark_config", return_value=MagicMock()),
         patch("protea.api.app.build_operation_registry", return_value=MagicMock()),
         patch("protea.api.app.assert_bearer_config"),
     ):
@@ -463,7 +462,6 @@ class TestPublicGetRoutes:
         [
             "/health",
             "/metrics",
-            "/benchmark",
             "/scoring/configs",
         ],
     )
@@ -503,7 +501,6 @@ _PUBLIC_VIEWER_GETS: list[str] = [
     "/embeddings/prediction-sets",
     "/scoring/configs",
     "/scoring/rerankers/",
-    "/benchmark",
     "/experiment-runs",
     "/stack",
     "/registry/operations",

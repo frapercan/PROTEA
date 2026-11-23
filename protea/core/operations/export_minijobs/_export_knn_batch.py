@@ -21,6 +21,7 @@ from typing import Any
 import numpy as np
 from sqlalchemy.orm import Session
 
+from protea.core import queues
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.knn_search import search_knn
@@ -34,7 +35,7 @@ from protea.infrastructure.storage import get_artifact_store
 
 _LOG = logging.getLogger(__name__)
 
-_FEATURES_QUEUE = "protea.training.features"
+_FEATURES_QUEUE = queues.TRAINING_FEATURES
 
 
 class ExportKnnBatchPayload(ProteaPayload, frozen=True):

@@ -61,7 +61,6 @@ from protea.core.operations.audit_evaluation_frames import (
 from protea.core.operations.audit_per_protein_artifacts import (
     AuditPerProteinArtifactsPayload,
 )
-from protea.core.operations.batch_rescore_evaluation import BatchRescoreEvaluationPayload
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrencePayload
 from protea.core.operations.compare_paired_panels import ComparePairedPanelsPayload
 from protea.core.operations.compute_embeddings import (
@@ -81,6 +80,7 @@ from protea.core.operations.declare_corpus_population import (
 from protea.core.operations.declare_exam_population import (
     DeclareExamPopulationPayload,
 )
+from protea.core.operations.declare_member_taxa import DeclareMemberTaxaPayload
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenancePayload,
 )
@@ -125,12 +125,16 @@ from protea.core.operations.ingest_method_predictions import (
     IngestMethodPredictionsPayload,
 )
 from protea.core.operations.insert_proteins import InsertProteinsPayload
+from protea.core.operations.load_cut_photo import LoadCutPhotoPayload
+from protea.core.operations.load_embedding_bank import LoadEmbeddingBankPayload
 from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsPayload,
 )
+from protea.core.operations.load_homology_table import LoadHomologyTablePayload
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingPayload,
 )
+from protea.core.operations.load_lexicon_bank import LoadLexiconBankPayload
 from protea.core.operations.load_ontology_aliases import (
     LoadOntologyAliasesPayload,
 )
@@ -140,12 +144,14 @@ from protea.core.operations.load_ontology_snapshot import (
 from protea.core.operations.load_quickgo_annotations import (
     LoadQuickGOAnnotationsPayload,
 )
+from protea.core.operations.load_segment_families import LoadSegmentFamiliesPayload
 from protea.core.operations.load_swissprot_release import (
     LoadSwissProtReleasePayload,
 )
 from protea.core.operations.measure_embedding_magnitude import (
     MeasureEmbeddingMagnitudePayload,
 )
+from protea.core.operations.place_window_targets import PlaceWindowTargetsPayload
 from protea.core.operations.predict_go_terms_from_interpro import (
     PredictGOTermsFromInterProPayload,
 )
@@ -155,6 +161,9 @@ from protea.core.operations.refresh_goa_release_dates import (
 from protea.core.operations.register_ingested_method import (
     RegisterIngestedMethodPayload,
 )
+from protea.core.operations.resolve_protein_metadata import (
+    ResolveProteinMetadataPayload,
+)
 from protea.core.operations.resolve_protein_sequences import (
     ResolveProteinSequencesPayload,
 )
@@ -162,16 +171,21 @@ from protea.core.operations.retire_evaluation_sets import (
     RetireEvaluationSetsPayload,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
+from protea.core.operations.run_count_map import RunCountMapPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
 )
 from protea.core.operations.run_lab_method import RunLabMethodPayload
+from protea.core.operations.run_own_annotations import RunOwnAnnotationsPayload
+from protea.core.operations.score_prediction_set import ScorePredictionSetPayload
 from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
 from protea.core.operations.seal_evaluation_groundtruth import (
     SealEvaluationGroundtruthPayload,
 )
 from protea.core.operations.store_residue_codes import StoreResidueCodesPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
+from protea.core.operations.summarize_prediction_sets import SummarizePredictionSetsPayload
+from protea.core.operations.supersede_evaluation_sets import SupersedeEvaluationSetsPayload
 from protea.core.operations.upload_residue_shard import UploadResidueShardPayload
 from protea.core.operations.verify_window_against_reference import (
     VerifyWindowAgainstReferencePayload,
@@ -353,6 +367,87 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         },
         ("release",),
     ),
+    # A photo is named by the sha256 of its manifest, which is what the loader
+    # verifies before reading anything else, so a digest that is not one is
+    # refused before the directory is opened.
+    (
+        "load_cut_photo",
+        LoadCutPhotoPayload,
+        {
+            "photo_dir": "/srv/photos/211",
+            "manifest_sha256": "not-a-digest",
+            "ontology_snapshot_id": "7c5cf2d8-6f0a-4a43-9a43-25e7b8c0a2a1",
+        },
+        ("manifest_sha256",),
+    ),
+    # A homology table is named the same way, by its manifest's sha256 (ADR-D61).
+    (
+        "load_homology_table",
+        LoadHomologyTablePayload,
+        {"table_dir": "/srv/homology/211", "manifest_sha256": "not-a-digest"},
+        ("manifest_sha256",),
+    ),
+    # A window placement names its window by id, and nothing else.
+    (
+        "place_window_targets",
+        PlaceWindowTargetsPayload,
+        {"evaluation_set_id": "not-a-window"},
+        ("evaluation_set_id",),
+    ),
+    # An embedding bank too, and the configuration it is the bank of (ADR-D62).
+    (
+        "load_embedding_bank",
+        LoadEmbeddingBankPayload,
+        {
+            "bank_dir": "/srv/banks/photos",
+            "embedding_config_id": "not-a-uuid",
+            "manifest_sha256": "not-a-digest",
+        },
+        ("embedding_config_id",),
+    ),
+    # A lexicon bank, by its lexicon's registered weights and its manifest (ADR-D63).
+    (
+        "load_lexicon_bank",
+        LoadLexiconBankPayload,
+        {
+            "bank_dir": "/srv/banks/photos",
+            "name": "lexico-93k",
+            "model_weights_id": "not-a-uuid",
+            "manifest_sha256": "0" * 64,
+        },
+        ("model_weights_id",),
+    ),
+    # Segment families, by their directory and their manifest (ADR-D65).
+    (
+        "load_segment_families",
+        LoadSegmentFamiliesPayload,
+        {"families_dir": "/srv/families/211", "manifest_sha256": "not-a-digest"},
+        ("manifest_sha256",),
+    ),
+    # A count map read on a window, with the lexicon bank whose cut gives its units (ADR-D65).
+    (
+        "run_count_map",
+        RunCountMapPayload,
+        {
+            "evaluation_set_id": "not-a-uuid",
+            "lexicon_bank_id": "6ab4cbfd-711d-432f-be6c-2ad1738cd438",
+        },
+        ("evaluation_set_id",),
+    ),
+    # A window's targets read from their own non-experimental annotations at t0.
+    (
+        "run_own_annotations",
+        RunOwnAnnotationsPayload,
+        {"evaluation_set_id": "not-a-uuid"},
+        ("evaluation_set_id",),
+    ),
+    # The members' taxa of a loaded photo, named by its manifest's sha256.
+    (
+        "declare_member_taxa",
+        DeclareMemberTaxaPayload,
+        {"photo_dir": "/srv/photos/211", "manifest_sha256": "not-a-digest"},
+        ("manifest_sha256",),
+    ),
     # missing-required: source_version
     (
         "load_quickgo_annotations",
@@ -409,12 +504,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         {"evaluation_set_id": "eval"},
         ("prediction_set_id",),
     ),
-    # missing-required: scoring_config_ids
+    # retired: the evaluator scores what a method stored, so a request that asks
+    # it to score with a config is refused with where that is done now
     (
-        "batch_rescore_evaluation",
-        BatchRescoreEvaluationPayload,
-        {"evaluation_set_id": "eval", "prediction_set_id": "pred"},
-        ("scoring_config_ids",),
+        "run_cafa_evaluation",
+        RunCafaEvaluationPayload,
+        {"evaluation_set_id": "eval", "prediction_set_id": "pred", "scoring_config_id": "c"},
+        (),
     ),
     # invariant-violation: must provide exactly one of
     # query_set_id / accessions (model_validator after-mode)
@@ -536,6 +632,14 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         {"max_accessions": 0},
         ("max_accessions",),
     ),
+    # zero-cap, likewise: a capped smoke run that asks about nothing would report
+    # success and read exactly like a platform whose entries were all current.
+    (
+        "resolve_protein_metadata",
+        ResolveProteinMetadataPayload,
+        {"max_accessions": 0},
+        ("max_accessions",),
+    ),
     # bad-vocabulary: evidence_regime must name a known regime. Falling back to
     # a default here would silently widen the IA corpus (ADR-D46).
     (
@@ -623,8 +727,10 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         # verifica el manifiesto contra ESTE valor antes de leer una fila.
         "declare_exam_population",
         DeclareExamPopulationPayload,
-        {"manifest_key": "exam-population/sitios/manifest-524f1133208d.json",
-         "manifest_sha256": "524f1133208d"},
+        {
+            "manifest_key": "exam-population/sitios/manifest-524f1133208d.json",
+            "manifest_sha256": "524f1133208d",
+        },
         ("manifest_sha256",),
     ),
     (
@@ -662,6 +768,33 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         RetireEvaluationSetsPayload,
         {"evaluation_set_ids": []},
         ("evaluation_set_ids",),
+    ),
+    (
+        # Scoring names its arithmetic: there is no default formula a candidate
+        # set could be scored with without anyone having chosen it.
+        "score_prediction_set",
+        ScorePredictionSetPayload,
+        {"prediction_set_id": "4244033e-bb05-4222-8472-4ac50655ea49", "scoring_config_id": ""},
+        ("scoring_config_id",),
+    ),
+    (
+        # A set is named by its id: a name that is not one counts nothing.
+        "summarize_prediction_sets",
+        SummarizePredictionSetsPayload,
+        {"prediction_set_ids": ["not-a-set"]},
+        ("prediction_set_ids",),
+    ),
+    (
+        # A mark says why, or it is not made: the note is what a reader of a
+        # superseded window's results is pointed to.
+        "supersede_evaluation_sets",
+        SupersedeEvaluationSetsPayload,
+        {
+            "successor_id": "4244033e-bb05-4222-8472-4ac50655ea49",
+            "evaluation_set_ids": ["daeb24b8-0000-4000-8000-000000000000"],
+            "note": "",
+        },
+        ("note",),
     ),
     (
         # Sin modo "todas": un alcance que vive en un valor por defecto es un

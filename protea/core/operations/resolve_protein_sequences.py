@@ -244,10 +244,10 @@ class ResolveProteinSequencesOperation(Operation):
         One request, not two: the TSV route carries both, where the FASTA route the
         first version used carried no dates and would have doubled the traffic.
         """
-        from protea_sources.uniprot import MAX_ACCESSIONS_PER_REQUEST
+        from protea_sources.uniprot import accession_batches
 
         counts = StoreCounts()
-        for batch in chunks(candidates, MAX_ACCESSIONS_PER_REQUEST):
+        for batch in accession_batches(candidates, fields=_TSV_FIELDS):
             parsed = _parse_tsv(
                 self._uniprot.fetch_accessions_tsv(
                     batch, fields=_TSV_FIELDS, emit=emit, knobs=self._knobs(p)
@@ -526,9 +526,9 @@ class ResolveProteinSequencesOperation(Operation):
         outcome.dates_pending = len(pending)
         if not pending:
             return
-        from protea_sources.uniprot import MAX_ACCESSIONS_PER_REQUEST
+        from protea_sources.uniprot import accession_batches
 
-        for batch in chunks(list(pending), MAX_ACCESSIONS_PER_REQUEST):
+        for batch in accession_batches(pending, fields=_DATE_FIELDS):
             rows = _parse_dates_tsv(
                 self._uniprot.fetch_accessions_tsv(
                     batch, fields=_DATE_FIELDS, emit=emit, knobs=self._knobs(p)

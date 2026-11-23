@@ -71,8 +71,10 @@ from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from protea.core import denials
+from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.utils import contract_payload
+from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.interpro_annotation import (
@@ -158,9 +160,7 @@ class PredictGOTermsFromInterProPayload(ProteaPayload, frozen=True):
     @model_validator(mode="after")
     def _at_least_one_query_input(self) -> PredictGOTermsFromInterProPayload:
         if self.query_set_id is None and self.query_accessions is None:
-            raise ValueError(
-                "either query_set_id or query_accessions must be provided"
-            )
+            raise ValueError("either query_set_id or query_accessions must be provided")
         return self
 
 
@@ -181,6 +181,8 @@ class _RunCounters:
     proteins_with_predictions: int = 0
     candidate_pairs: int = 0
     predictions_inserted: int = 0
+    #: Candidates the bank denies, dropped before the insert (protea.core.denials).
+    denied_removed: int = 0
     ipr_releases: set[str] = field(default_factory=set)
 
 
@@ -244,9 +246,8 @@ class PredictGOTermsFromInterProOperation:
             return OperationResult(result={"proteins": 0, "predictions": 0})
 
         prediction_set = self._create_prediction_set(session, p, ids)
-        ctx = _RunContext(
-            p=p, ids=ids, accessions=accessions, prediction_set_id=prediction_set.id
-        )
+        prediction_set.job_id = job_id_from_payload(payload)
+        ctx = _RunContext(p=p, ids=ids, accessions=accessions, prediction_set_id=prediction_set.id)
         counters = self._run_pipeline(session, ctx)
         self._stamp_prediction_set_meta(session, prediction_set, p, counters)
 
@@ -270,11 +271,14 @@ class PredictGOTermsFromInterProOperation:
     def _run_pipeline(self, session: Session, ctx: _RunContext) -> _RunCounters:
         """Materialise + persist prediction rows; return the run counters."""
         counters = _RunCounters()
-        rows = list(self._build_prediction_rows(session, ctx, counters))
+        rows, counters.denied_removed = denials.honour_denials(
+            session,
+            ctx.ids.annotation_set_id,
+            ctx.ids.ontology_snapshot_id,
+            list(self._build_prediction_rows(session, ctx, counters)),
+        )
         if rows:
-            counters.predictions_inserted = self._bulk_insert(
-                session, rows, ctx.p.chunk_size
-            )
+            counters.predictions_inserted = self._bulk_insert(session, rows, ctx.p.chunk_size)
         return counters
 
     @staticmethod
@@ -294,6 +298,9 @@ class PredictGOTermsFromInterProOperation:
             "interpro_mapping_source_version": p.source_version,
             "ipr_release_floor": p.ipr_release_floor,
             "ipr_releases_seen": sorted(counters.ipr_releases),
+            # This method honours the bank's denials when it predicts.
+            "denials": {"honoured": True, **denials.POLICY},
+            "denied_removed": counters.denied_removed,
         }
         session.add(prediction_set)
 
@@ -312,6 +319,7 @@ class PredictGOTermsFromInterProOperation:
             "proteins_with_predictions": counters.proteins_with_predictions,
             "candidate_pairs": counters.candidate_pairs,
             "predictions_inserted": counters.predictions_inserted,
+            "denied_removed": counters.denied_removed,
             "elapsed_seconds": time.perf_counter() - t0,
         }
 
@@ -320,9 +328,7 @@ class PredictGOTermsFromInterProOperation:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _validate_inputs(
-        session: Session, p: PredictGOTermsFromInterProPayload
-    ) -> _ResolvedIds:
+    def _validate_inputs(session: Session, p: PredictGOTermsFromInterProPayload) -> _ResolvedIds:
         ids = _ResolvedIds(
             embedding_config_id=uuid.UUID(p.embedding_config_id),
             annotation_set_id=uuid.UUID(p.annotation_set_id),
@@ -389,6 +395,11 @@ class PredictGOTermsFromInterProOperation:
             limit_per_entry=0,
             distance_threshold=None,
             meta={"algorithm": _ALGORITHM_TAG, "pending": True},
+            description=(
+                f"GO terms transferred from InterPro hits through the InterPro2GO mapping, "
+                f"over annotation set {ids.annotation_set_id}."
+            ),
+            producer_git_sha=code_revision(),
         )
         session.add(ps)
         session.flush()
@@ -430,9 +441,7 @@ class PredictGOTermsFromInterProOperation:
         ipr_release, evidence)``.
         """
         ipr_release_filter = (
-            [InterProAnnotation.ipr_release >= p.ipr_release_floor]
-            if p.ipr_release_floor
-            else []
+            [InterProAnnotation.ipr_release >= p.ipr_release_floor] if p.ipr_release_floor else []
         )
 
         stmt = (
@@ -515,9 +524,7 @@ class PredictGOTermsFromInterProOperation:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _bulk_insert(
-        session: Session, rows: list[dict[str, Any]], chunk_size: int
-    ) -> int:
+    def _bulk_insert(session: Session, rows: list[dict[str, Any]], chunk_size: int) -> int:
         """Insert prediction rows via ``ON CONFLICT DO NOTHING``.
 
         The :class:`GOPrediction` unique constraint
@@ -532,13 +539,9 @@ class PredictGOTermsFromInterProOperation:
             stmt = (
                 pg_insert(GOPrediction.__table__)
                 .values(chunk)
-                .on_conflict_do_nothing(
-                    constraint="uq_go_prediction_set_protein_term"
-                )
+                .on_conflict_do_nothing(constraint="uq_go_prediction_set_protein_term")
                 .returning(GOPrediction.__table__.c.id)
             )
             result = session.execute(stmt)
             inserted += len(result.fetchall())
         return inserted
-
-

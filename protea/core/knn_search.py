@@ -11,6 +11,14 @@ forwarded to the library via the ``PROTEA_METHOD_NUMPY_QUERY_CHUNK``
 environment variable on first call, so the chunk-size knob is
 preserved without changing call signatures.
 
+The exact backend (``numpy``) searches in two passes (protea-method,
+``_exact_two_pass``): a float32 pass shortlists every reference that can be
+among the k nearest, within a proven error margin, and the float64 pass decides
+among them. Its first pass runs on a CUDA card when one is visible
+(``PROTEA_METHOD_EXACT_FIRST_PASS_DEVICE``, ``auto`` by default), and the
+neighbours are the same on either device, so ``PROTEA_KNN_DEVICE`` below does
+not concern it: the card never decides a neighbour there.
+
 Torch backend env vars (pass-through, no PROTEA-side config required):
 
 - ``PROTEA_KNN_DEVICE``: ``"cuda"`` or ``"cpu"``. PROTEA defaults it to

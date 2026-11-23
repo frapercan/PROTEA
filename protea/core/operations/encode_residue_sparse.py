@@ -49,6 +49,7 @@ from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from protea.core import queues
 from protea.core.contracts.operation import (
     EmitFn,
     Operation,
@@ -86,11 +87,10 @@ TARGET_BACKEND = "residue-sparse"
 PositiveInt = Annotated[int, Field(gt=0)]
 
 
-#: Queue the per-batch messages are addressed to. It is the same queue
-#: ``compute_embeddings`` fans out to, because the requirement is identical: a
-#: worker with a card. Reusing it means this operation reaches the card through
-#: machinery that already exists rather than through a second path to keep in step.
-_BATCH_QUEUE = "protea.embeddings.batch"
+#: Queue the per-batch messages are addressed to: the one ``compute_embeddings`` fans out
+#: to, because the requirement is identical (a worker with a card), so this operation reaches
+#: the card through machinery that already exists rather than a second path to keep in step.
+_BATCH_QUEUE = queues.EMBEDDINGS_BATCH
 
 
 class EncodeResidueSparsePayload(ProteaPayload, frozen=True):

@@ -86,7 +86,8 @@ class TestProjection:
             category=Category.NO_KNOWLEDGE,
             aspect=Aspect.MOLECULAR_FUNCTION,
             residues=300,
-            neighbourhood=Neighbourhood(
+            identity=45.0,
+            retrieval=Neighbourhood(
                 best_identity=45.0, donor_is_experimental=True, taxonomic_relation="close"
             ),
         )
@@ -141,7 +142,8 @@ class TestTheStratumRefusesContradictions:
                 category=Category.NO_KNOWLEDGE,
                 aspect=Aspect.MOLECULAR_FUNCTION,
                 residues=100,
-                neighbourhood=Neighbourhood(best_identity=None, donor_is_experimental=True),
+                identity=None,
+                retrieval=Neighbourhood(best_identity=None, donor_is_experimental=True),
             )
 
     def test_no_donor_places_the_protein_in_the_none_bands(self) -> None:
@@ -149,7 +151,8 @@ class TestTheStratumRefusesContradictions:
             category=Category.NO_KNOWLEDGE,
             aspect=Aspect.MOLECULAR_FUNCTION,
             residues=100,
-            neighbourhood=Neighbourhood(best_identity=None, donor_is_experimental=None),
+            identity=None,
+            retrieval=Neighbourhood(best_identity=None, donor_is_experimental=None),
         )
         assert s.homology is HomologyBand.NONE
         assert s.donor_evidence is DonorEvidence.NONE
@@ -162,22 +165,35 @@ class TestIdentityIsAPercentage:
     population under the lowest band, so the mistake is silent."""
 
     def test_a_fraction_would_land_everything_in_twilight(self) -> None:
-        assert HomologyBand.TWILIGHT is stratum_for(
-            category=Category.NO_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION, residues=100,
-            neighbourhood=Neighbourhood(best_identity=0.95, donor_is_experimental=True),
-        ).homology
+        assert (
+            HomologyBand.TWILIGHT
+            is stratum_for(
+                category=Category.NO_KNOWLEDGE,
+                aspect=Aspect.MOLECULAR_FUNCTION,
+                residues=100,
+                identity=0.95,
+                retrieval=Neighbourhood(best_identity=0.95, donor_is_experimental=True),
+            ).homology
+        )
 
     def test_the_percentage_lands_where_it_should(self) -> None:
-        assert HomologyBand.NEAR_IDENTICAL is stratum_for(
-            category=Category.NO_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION, residues=100,
-            neighbourhood=Neighbourhood(best_identity=95.0, donor_is_experimental=True),
-        ).homology
+        assert (
+            HomologyBand.NEAR_IDENTICAL
+            is stratum_for(
+                category=Category.NO_KNOWLEDGE,
+                aspect=Aspect.MOLECULAR_FUNCTION,
+                residues=100,
+                identity=95.0,
+                retrieval=Neighbourhood(best_identity=95.0, donor_is_experimental=True),
+            ).homology
+        )
 
     def test_out_of_range_is_refused(self) -> None:
         with pytest.raises(ValueError, match="not a percentage"):
             stratum_for(
                 category=Category.NO_KNOWLEDGE, aspect=Aspect.MOLECULAR_FUNCTION, residues=100,
-                neighbourhood=Neighbourhood(best_identity=140.0, donor_is_experimental=True),
+                identity=140.0,
+                retrieval=Neighbourhood(best_identity=140.0, donor_is_experimental=True),
             )
 
 

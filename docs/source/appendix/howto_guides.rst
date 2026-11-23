@@ -131,14 +131,21 @@ Add a new operation
               # ... domain logic ...
               return OperationResult(result={"done": True})
 
-2. Register it in the worker entry point (``scripts/worker.py``):
+2. Add one row to ``CATALOG`` in ``protea/core/operation_catalog.py``: the class
+   and the ``OperationSpec`` it declares (ADR-D60, decision 6). The registry
+   refuses an operation without one.
 
    .. code-block:: python
 
       from protea.core.operations.my_operation import MyOperation
-      registry.register(MyOperation())
 
-3. Route jobs to the appropriate queue (``protea.jobs`` or a new dedicated queue).
+      (MyOperation, OperationSpec(
+          domain="method", kind="job", queue=queues.JOBS,
+          purity="database", resource="cpu",
+      )),
+
+3. Post its jobs to the queue its spec names: ``POST /jobs`` refuses any other
+   with 422. A new dedicated queue is named in ``protea/core/queues.py`` first.
 
 No changes to ``BaseWorker``, the FastAPI router, or the DB schema are needed.
 
@@ -417,8 +424,10 @@ which consumes the frozen parquet dataset that PROTEA publishes via
 :ref:`Register a reranker from protea-reranker-lab
 <howto-register-reranker>` below.
 
-Apply a trained re-ranker to new predictions via
-``GET /scoring/prediction-sets/{id}/rerank.tsv?reranker_id=<uuid>``.
+A registered re-ranker is applied when the method predicts (the
+``reranker_model_id`` of ``predict_go_terms``, or one booster per knowledge
+category), and its score is stored as the method's score
+(:doc:`/architecture/scoring`).
 
 .. _howto-register-reranker:
 
@@ -502,7 +511,7 @@ UUID in the ``predict_go_terms`` payload:
      -H "Content-Type: application/json" \
      -d '{
        "operation": "predict_go_terms",
-       "queue_name": "protea.jobs",
+       "queue_name": "protea.predictions",
        "payload": {
          "embedding_config_id": "<config-uuid>",
          "annotation_set_id": "<annotation-set-uuid>",
@@ -564,12 +573,17 @@ Create a scoring config and apply it to a prediction set:
        "weights": {"embedding_similarity": 0.5, "identity_nw": 0.3, "identity_sw": 0.2}
      }' | python -m json.tool
 
-   # Download scored predictions
-   curl -s "http://127.0.0.1:8000/scoring/prediction-sets/<id>/score.tsv?scoring_config_id=<config-id>" \
+   # Score a candidate set with it: a job that stores the scores as a set
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{"operation": "score_prediction_set", "queue_name": "protea.jobs",
+          "payload": {"prediction_set_id": "<candidate-set>", "scoring_config_id": "<config-id>"}}'
+
+   # Download the scored set's stored scores in CAFA format, for a window's targets
+   curl -s "http://127.0.0.1:8000/embeddings/prediction-sets/<scored-set>/predictions-cafa.tsv?eval_id=<eval-id>" \
      -o scored.tsv
 
-   # Compute CAFA metrics for scored predictions
-   curl -s "http://127.0.0.1:8000/scoring/prediction-sets/<id>/metrics?scoring_config_id=<config-id>&evaluation_set_id=<eval-id>"
+   # The numbers come from the evaluator: run_cafa_evaluation on the scored set
 
 Scale batch workers
 --------------------
