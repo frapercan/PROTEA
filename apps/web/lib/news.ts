@@ -16,31 +16,41 @@ export const CHANGES: Change[] = [
   {
     date: "2026-11-24",
     text: {
+      es: "El instrumento sirve un universo nuevo, reconstruido desde cero: 2.758.480 proteínas, 113.487.299 anotaciones GO en seis versiones de 2016 a 2025, los metadatos de UniProt y 20.191.896 vectores de ocho modelos de lenguaje de proteínas.",
+      en: "The instrument now serves a new universe, rebuilt from scratch: 2,758,480 proteins, 113,487,299 GO annotations in six releases from 2016 to 2025, UniProt metadata, and 20,191,896 vectors from eight protein language models.",
+      de: "Das Instrument bedient ein neues, von Grund auf neu aufgebautes Universum: 2.758.480 Proteine, 113.487.299 GO-Annotationen in sechs Versionen von 2016 bis 2025, UniProt-Metadaten und 20.191.896 Vektoren aus acht Protein-Sprachmodellen.",
+      pt: "O instrumento serve um universo novo, reconstruído do zero: 2.758.480 proteínas, 113.487.299 anotações GO em seis versões de 2016 a 2025, os metadados do UniProt e 20.191.896 vetores de oito modelos de linguagem de proteínas.",
+      zh: "本工具现使用一个从零重建的新数据集：2,758,480 个蛋白质、2016 至 2025 年六个版本中的 113,487,299 条 GO 注释、UniProt 元数据，以及来自八个蛋白质语言模型的 20,191,896 个向量。",
+    },
+  },
+  {
+    date: "2026-11-24",
+    text: {
+      es: "Cada pieza se comparó con desarrollo antes de aceptarla, los ficheros por su huella digital y las tablas por sus recuentos, y la evaluación del método de referencia coincide con la de desarrollo métrica a métrica.",
+      en: "Every piece was checked against development before it was accepted, files by their digest and tables by their counts, and the reference method's evaluation matches development metric by metric.",
+      de: "Jedes Teil wurde vor der Übernahme mit der Entwicklungsumgebung abgeglichen, Dateien über ihren Hashwert und Tabellen über ihre Zählungen, und die Auswertung der Referenzmethode stimmt Metrik für Metrik mit der Entwicklungsumgebung überein.",
+      pt: "Cada peça foi comparada com o desenvolvimento antes de ser aceite, os ficheiros pela sua impressão digital e as tabelas pelas suas contagens, e a avaliação do método de referência coincide com a do desenvolvimento métrica a métrica.",
+      zh: "每个部分在被接受前都与开发环境核对过：文件核对其摘要，数据表核对其计数；参考方法的评估结果与开发环境逐项指标一致。",
+    },
+  },
+  {
+    date: "2026-11-24",
+    text: {
+      es: "Anotar una secuencia vuelve a funcionar: cada predicción lee el grafo GO del conjunto del que toma sus términos.",
+      en: "Annotating a sequence works again: each prediction reads the GO graph of the set its terms come from.",
+      de: "Das Annotieren einer Sequenz funktioniert wieder: Jede Vorhersage liest den GO-Graphen des Datensatzes, aus dem ihre Begriffe stammen.",
+      pt: "Anotar uma sequência volta a funcionar: cada previsão lê o grafo GO do conjunto de onde vêm os seus termos.",
+      zh: "序列注释功能已恢复：每个预测都读取其术语来源数据集对应的 GO 图。",
+    },
+  },
+  {
+    date: "2026-11-24",
+    text: {
       es: "Portada nueva: primero la herramienta, después las cifras en vivo, lo que ha cambiado y lo que viene.",
       en: "A new front page: the tool first, then live figures, what has changed and what comes next.",
       de: "Neue Startseite: zuerst das Werkzeug, dann aktuelle Zahlen, was sich geändert hat und was als Nächstes kommt.",
       pt: "Página inicial nova: primeiro a ferramenta, depois os números ao vivo, o que mudou e o que vem a seguir.",
       zh: "全新首页：先是工具，然后是实时数据、最新变化和后续计划。",
-    },
-  },
-  {
-    date: "2026-11-24",
-    text: {
-      es: "Anotar una secuencia vuelve a funcionar: cada predicción lee el grafo GO de las anotaciones que transfiere.",
-      en: "Annotating a sequence works again: each prediction reads the GO graph of the annotations it transfers.",
-      de: "Das Annotieren einer Sequenz funktioniert wieder: Jede Vorhersage liest den GO-Graphen der Annotationen, die sie überträgt.",
-      pt: "Anotar uma sequência volta a funcionar: cada previsão lê o grafo GO das anotações que transfere.",
-      zh: "序列注释功能已恢复：每个预测都读取其所转移注释对应的 GO 图。",
-    },
-  },
-  {
-    date: "2026-11-24",
-    text: {
-      es: "La web funciona sobre una base limpia, reconstruida desde cero con operaciones declaradas y comprobada contra desarrollo: seis versiones de las anotaciones GO, de 2016 a 2025, los metadatos de UniProt y ocho modelos de lenguaje de proteínas.",
-      en: "The site runs on a clean store, rebuilt from scratch by declared operations and checked against development: six releases of the GO annotations, from 2016 to 2025, UniProt metadata and eight protein language models.",
-      de: "Die Seite läuft auf einem sauberen Datenbestand, von Grund auf mit deklarierten Operationen neu aufgebaut und gegen die Entwicklungsumgebung geprüft: sechs Versionen der GO-Annotationen von 2016 bis 2025, UniProt-Metadaten und acht Protein-Sprachmodelle.",
-      pt: "O site funciona sobre uma base limpa, reconstruída do zero com operações declaradas e verificada contra o desenvolvimento: seis versões das anotações GO, de 2016 a 2025, os metadados do UniProt e oito modelos de linguagem de proteínas.",
-      zh: "网站现运行在一个干净的数据库上：通过声明的操作从零重建，并与开发环境逐项核对，包括 2016 至 2025 年的六个 GO 注释版本、UniProt 元数据和八个蛋白质语言模型。",
     },
   },
 ];
