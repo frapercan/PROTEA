@@ -2626,5 +2626,19 @@
       "setLink": "set",
       "nothing": "Nothing matches the search."
     }
+  },
+  "landing": {
+    "statsTitle": "In figures",
+    "statsNote": "Read live from the database that serves this page.",
+    "statProteins": "Proteins",
+    "statWithGo": "With GO annotations",
+    "statCuts": "GO annotation releases",
+    "statCutsValue": "{count}, from {first} to {last}",
+    "statModels": "Protein language models",
+    "statVectors": "Sequence embeddings",
+    "newsTitle": "What is new",
+    "plansTitle": "What comes next",
+    "evaluation": "See the evaluation",
+    "linksLabel": "Where to go next"
   }
 }

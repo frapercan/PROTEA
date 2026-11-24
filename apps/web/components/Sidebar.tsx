@@ -91,6 +91,13 @@ type NavItem = {
    * project rather than an unfinished dataset.
    */
   needsData?: boolean;
+  /**
+   * Offered only to a signed-in caller. The lab and operation pages read well
+   * to someone who knows the vocabulary behind them and badly to a first-time
+   * visitor, who gets the tool, the data, the results and the docs (the author,
+   * 2026-11-24).
+   */
+  needsAuth?: boolean;
 };
 
 type NavGroup = {
@@ -333,13 +340,13 @@ export function Sidebar({
       hint: t("pipelineHint"),
       icon: Workflow,
       items: [
-        { href: "/instrument/embeddings", label: t("embeddings"), hint: "PLM embedding configs · ESM-2 · ESM3c · ProstT5 · Ankh", icon: Atom , needsData: true },
-        { href: "/instrument/weights", label: t("modelWeights"), hint: "Residue vocabularies, learned encoders and other fitted weights, by hash", icon: Archive },
-        { href: "/instrument/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO", icon: Tags , needsData: true },
-        { href: "/instrument/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB", icon: Sliders , needsData: true },
-        { href: "/instrument/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB", icon: ArrowUpDown , needsData: true },
-        { href: "/instrument/datasets", label: t("datasets"), hint: "Frozen reranker dumps and export dispatcher", icon: Archive , needsData: true },
-        { href: "/feature-registry", label: t("featureRegistry"), hint: "What every reranker feature means, who produces it, and whether it is live", icon: ListTree , needsData: true },
+        { needsAuth: true, href: "/instrument/embeddings", label: t("embeddings"), hint: "PLM embedding configs · ESM-2 · ESM3c · ProstT5 · Ankh", icon: Atom , needsData: true },
+        { needsAuth: true, href: "/instrument/weights", label: t("modelWeights"), hint: "Residue vocabularies, learned encoders and other fitted weights, by hash", icon: Archive },
+        { needsAuth: true, href: "/instrument/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO", icon: Tags , needsData: true },
+        { needsAuth: true, href: "/instrument/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB", icon: Sliders , needsData: true },
+        { needsAuth: true, href: "/instrument/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB", icon: ArrowUpDown , needsData: true },
+        { needsAuth: true, href: "/instrument/datasets", label: t("datasets"), hint: "Frozen reranker dumps and export dispatcher", icon: Archive , needsData: true },
+        { needsAuth: true, href: "/feature-registry", label: t("featureRegistry"), hint: "What every reranker feature means, who produces it, and whether it is live", icon: ListTree , needsData: true },
       ],
     },
     {
@@ -350,7 +357,7 @@ export function Sidebar({
       items: [
         { href: "/instrument/proteins", label: t("proteins"), hint: "UniProt entries · Swiss-Prot + TrEMBL, isoforms", icon: Dna },
         { href: "/instrument/annotations", label: t("annotations"), hint: "GO ontology snapshots and ground-truth GAF / QuickGO sets", icon: Tag , needsData: true },
-        { href: "/instrument/query-sets", label: t("querySets"), hint: "FASTA uploads grouped for batch runs", icon: FolderOpen , needsData: true },
+        { needsAuth: true, href: "/instrument/query-sets", label: t("querySets"), hint: "FASTA uploads grouped for batch runs", icon: FolderOpen , needsData: true },
       ],
     },
     {
@@ -359,8 +366,8 @@ export function Sidebar({
       hint: t("resultsHint"),
       icon: BarChart3,
       items: [
-        { href: "/instrument/explorations", label: t("explorations"), hint: "One hypothesis each: its frozen rules, its receipt, its report and its review", icon: FlaskConical },
-        { href: "/instrument/graph", label: t("graph"), hint: "Every decision as a node, with the strength of the evidence behind it", icon: Workflow , needsData: true },
+        { needsAuth: true, href: "/instrument/explorations", label: t("explorations"), hint: "One hypothesis each: its frozen rules, its receipt, its report and its review", icon: FlaskConical },
+        { needsAuth: true, href: "/instrument/graph", label: t("graph"), hint: "Every decision as a node, with the strength of the evidence behind it", icon: Workflow , needsData: true },
         { href: "/instrument/stratum", label: t("stratum"), hint: "One cell opened into its proteins, banded by length and by donor identity", icon: Rows3 , needsData: true },
         { href: "/instrument/evaluation", label: t("evaluation"), hint: "Each window and its panel: the arms in its nine cells, by depth, over time and by strata", icon: Gauge , needsData: true },
       ],
@@ -371,9 +378,9 @@ export function Sidebar({
       hint: t("operationsHint"),
       icon: Server,
       items: [
-        { href: "/instrument/jobs", label: t("jobs"), hint: "Live job queue and event audit trail", icon: Inbox },
-        { href: "/maintenance", label: t("maintenance"), hint: "Vacuum orphan sequences and unindexed embeddings", icon: Wrench, minRole: "operator" },
-        { href: "/instrument/stack", label: t("stack"), hint: "Eight repositories, open PRs, deploy targets", icon: Boxes },
+        { needsAuth: true, href: "/instrument/jobs", label: t("jobs"), hint: "Live job queue and event audit trail", icon: Inbox },
+        { needsAuth: true, href: "/maintenance", label: t("maintenance"), hint: "Vacuum orphan sequences and unindexed embeddings", icon: Wrench, minRole: "operator" },
+        { needsAuth: true, href: "/instrument/stack", label: t("stack"), hint: "Eight repositories, open PRs, deploy targets", icon: Boxes },
       ],
     },
     {
@@ -437,6 +444,7 @@ export function Sidebar({
     items: group.items.filter(
       (item) =>
         (item.minRole === undefined || hasRole(role, item.minRole)) &&
+        (!item.needsAuth || isAuthed) &&
         (!item.needsData || surfaceHasRows(item.href)),
     ),
   })).filter((group) => group.items.length > 0);

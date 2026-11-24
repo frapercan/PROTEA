@@ -2627,5 +2627,19 @@
       "setLink": "Menge",
       "nothing": "Nichts passt zur Suche."
     }
+  },
+  "landing": {
+    "statsTitle": "In Zahlen",
+    "statsNote": "Live aus der Datenbank gelesen, die diese Seite ausliefert.",
+    "statProteins": "Proteine",
+    "statWithGo": "Mit GO-Annotationen",
+    "statCuts": "Versionen der GO-Annotationen",
+    "statCutsValue": "{count}, von {first} bis {last}",
+    "statModels": "Protein-Sprachmodelle",
+    "statVectors": "Sequenz-Embeddings",
+    "newsTitle": "Neuigkeiten",
+    "plansTitle": "Als Nächstes",
+    "evaluation": "Zur Auswertung",
+    "linksLabel": "Weiter geht es"
   }
 }

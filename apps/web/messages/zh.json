@@ -2627,5 +2627,19 @@
       "setLink": "集合",
       "nothing": "没有匹配的结果。"
     }
+  },
+  "landing": {
+    "statsTitle": "数据概览",
+    "statsNote": "实时读取自提供本页面的数据库。",
+    "statProteins": "蛋白质",
+    "statWithGo": "有 GO 注释的蛋白质",
+    "statCuts": "GO 注释版本",
+    "statCutsValue": "{count} 个，{first} 至 {last}",
+    "statModels": "蛋白质语言模型",
+    "statVectors": "序列嵌入向量",
+    "newsTitle": "最新动态",
+    "plansTitle": "后续计划",
+    "evaluation": "查看评估",
+    "linksLabel": "继续浏览"
   }
 }
