@@ -8,7 +8,8 @@ ADR-D66: The instrument publishes the champion's predictions every night, as a f
          submitted to the instrument". He also asked for a changelog for
          visitors, "bien visible, nuevos anuncios y estado del proyecto". The
          design below was worked out with the session that operates the
-         production node and waits for the author's word.
+         production node and waits for the author's word. The champion rule
+         (question 4) was decided by the author on 2026-11-24: per cell.
 :Date: 2026-11-23
 :Author: Francisco Miguel Perez Canales
 :Phase: platform closure
@@ -57,14 +58,25 @@ without one.
 Decision
 ~~~~~~~~
 
-**1. The champion is chosen by a declared rule, not by hand.** The candidates
-are the arms with a method identity whose producer can run at the latest cut.
-They are compared on the latest validation window with its headline reading:
-the weighted micro F-measure, mean of the nine cells, read raw. The champion
-changes only when a challenger beats it on that window by at least 0.01 in a
-paired bootstrap with enough power, the comparison rule of the research line.
-On 2026-11-23 the rule names the protein's own annotations, ordered by the
-model with co-annotation fitted on 194->211, at 0.3543 on 211->227.
+**1. The champion is chosen per cell, by a declared rule, not by hand.** The
+candidates are the arms with a method identity whose producer can run at the
+latest cut. In each of the nine cells (knowledge category by GO branch), a
+challenger replaces the incumbent when its paired comparison with it on the
+latest validation window, read raw with the weighted micro F-measure, resolves
+it as better: the verdict of ``compare_paired_panels`` with the effect of
+interest 0.01, the comparison rule of the research line. A cell without a
+resolved difference keeps its incumbent. A protein's published terms in a cell
+come from that cell's champion. This is routing per cell in its simplest form,
+and it matches the benchmark, which reports each cell and no mean.
+
+On 2026-11-24 the incumbent in every cell is the protein's own annotations,
+ordered by the model with co-annotation fitted on 194->211 (0.3543 on
+211->227, mean of the nine cells). Against it, the larger of its probability
+and that of the GO head over ProtT5-XL vectors (0.3664) is resolved as better
+in six cells: NK-BPO, NK-MFO, NK-CCO, LK-MFO, LK-CCO and PK-CCO. The incumbent
+is resolved as better in PK-BPO, and LK-BPO and PK-MFO are not resolved. That
+combination takes its six cells once its producer runs at the latest cut,
+which the head, fitted by a laboratory script, does not do yet.
 
 **2. The population is the corpus of the latest cut, plus the sequences
 submitted to the instrument.** For cut 227 that is the 1,850,077 members of
@@ -172,14 +184,5 @@ Open questions for the author
    with the file delivered to the production inbox. The current champion is
    cheap: it reads the protein's own terms. A retrieval champion would need
    the banks.
-4. Which champion rule. The rule above compares the mean of the nine cells.
-   The alternative is per-cell dominance: in each cell (knowledge category by
-   GO branch), a challenger replaces the incumbent when its paired comparison
-   on the validation window resolves a gain of at least 0.01 there. Per-cell
-   dominance matches the benchmark, which reports each cell and no mean. It
-   also lets the published predictions come from different arms in different
-   cells. On 211->227 the ordered own annotations lead in eight of the nine
-   cells by point estimate. Transfer from the nearest neighbour (ProtT5-XL)
-   leads in one: biological process for proteins with no experimental
-   annotation (0.3034 against 0.2696, 1,477 proteins). These are point
-   estimates; the paired comparison has not been run.
+4. Which champion rule. Decided by the author on 2026-11-24: per cell, as
+   decision 1 states, instead of the mean of the nine cells.
