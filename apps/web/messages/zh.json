@@ -2632,7 +2632,6 @@
     "statsTitle": "数据概览",
     "statsNote": "实时读取自提供本页面的数据库。",
     "statProteins": "蛋白质",
-    "statReviewed": "Swiss-Prot 审阅条目",
     "statWithGo": "有 GO 注释的蛋白质",
     "statCuts": "GO 注释版本",
     "statCutsValue": "{count} 个，{first} 至 {last}",

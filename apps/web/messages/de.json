@@ -2632,7 +2632,6 @@
     "statsTitle": "In Zahlen",
     "statsNote": "Live aus der Datenbank gelesen, die diese Seite ausliefert.",
     "statProteins": "Proteine",
-    "statReviewed": "In Swiss-Prot geprüft",
     "statWithGo": "Mit GO-Annotationen",
     "statCuts": "Versionen der GO-Annotationen",
     "statCutsValue": "{count}, von {first} bis {last}",

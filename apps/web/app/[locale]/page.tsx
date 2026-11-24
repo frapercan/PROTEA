@@ -15,7 +15,7 @@ import { CHANGES, PLANS, inLocale } from "@/lib/news";
  * goes stale.
  */
 
-type ProteinStats = { total?: number; reviewed?: number; with_go_annotations?: number };
+type ProteinStats = { total?: number; with_go_annotations?: number };
 type AnnotationSetRow = { source?: string; source_published_at?: string | null };
 type ConfigRow = { embedding_count?: number | null };
 
@@ -66,7 +66,6 @@ export default async function FrontPage() {
 
   const figures: Array<[string, string]> = [
     [t("statProteins"), shown(stats?.total)],
-    [t("statReviewed"), shown(stats?.reviewed)],
     [t("statWithGo"), shown(stats?.with_go_annotations)],
     [
       t("statCuts"),

@@ -2631,7 +2631,6 @@
     "statsTitle": "In figures",
     "statsNote": "Read live from the database that serves this page.",
     "statProteins": "Proteins",
-    "statReviewed": "Reviewed in Swiss-Prot",
     "statWithGo": "With GO annotations",
     "statCuts": "GO annotation releases",
     "statCutsValue": "{count}, from {first} to {last}",
