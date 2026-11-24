@@ -1,73 +1,39 @@
-// Critical user flow: the front door is the argument, not a dashboard.
-// `/` opens with the one-sentence thesis, sets the sealed nine-cell board
-// as the hero (leading with the two cells it does not win), and offers the
-// four pillars as chapters. Each `/pillar/n` carries the claim, the evidence,
-// the pulled-footnote receipt, and the caveats. The hands-on annotate surface
-// moved one level in to `/annotate` (covered by annotate.spec.ts).
+// Critical user flow: the front door is the instrument (the author, 2026-11-24).
+// `/` opens with what PROTEA does in plain words and the annotate form, then
+// live figures, what has changed and what comes next, and where to go from
+// there. The pillar pages stay reachable by their own URL, with their own test.
 //
-// These pages make no client-side API calls, but we keep the mock-api fixture
-// so the Playwright webServer (showcase mock) still boots for the project.
-
+// We keep the mock-api fixture so the Playwright webServer (showcase mock)
+// still boots for the project. The figures are read on the server and show a
+// dash when the API cannot answer.
 import { test, expect } from "./fixtures/mock-api";
 
-test.describe("argument front door", () => {
-  test("opens in plain language, and still carries the thesis", async ({ page }) => {
+test.describe("instrument front door", () => {
+  test("opens in plain language, with the annotate form on the page", async ({ page }) => {
     await page.goto("/en/");
-    // The h1 used to be the thesis sentence, so the first thing a visitor
-    // read was "a taxonomy of orthogonal evidence, combined by a calibrated
-    // fusion". It is the right sentence for the argument and the wrong one
-    // for an opening, so it moved down to an h2 without losing a word.
     await expect(
       page.getByRole("heading", { level: 1, name: /predicts what a protein does/i }),
     ).toBeVisible();
-    // Both halves matter: the plain opening AND the thesis still being
-    // published in full. Asserting only the first would let the argument
-    // quietly disappear.
-    await expect(
-      page.getByRole("heading", { level: 2, name: /Protein function is predictable/i }),
-    ).toBeVisible();
+    await expect(page.locator("#annotate-form")).toBeVisible();
   });
 
-  test("names who built it, and links the code", async ({ page }) => {
+  test("names who built it", async ({ page }) => {
     await page.goto("/en/");
-    // A reader evaluating the project looks for this first, and it was
-    // nowhere on the site until 2026-10-07.
     await expect(page.getByRole("link", { name: /Pérez Canales/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /^ORCID$/ })).toBeVisible();
   });
 
-  test("the board leads with the two cells it does not win", async ({ page }) => {
+  test("shows the figures, what is new and what comes next, and no sealed board", async ({ page }) => {
     await page.goto("/en/");
-    // The values are withdrawn while the campaign recomputes, so the test
-    // asserts the finding that survives rather than the numbers that do not:
-    // seven regimes the method carries and two it does not, the latter in
-    // frontier rose inside a hairline bracket.
-    await expect(page.getByText("carried").first()).toBeVisible();
-    await expect(page.getByText("frontier").first()).toBeVisible();
-    // The honest frame line is present. It used to repeat the rank that
-    // the sentence beside it already states, so it keeps only the half
-    // that is not a repetition: the admission about the two cells.
-    await expect(page.getByText(/we do not win, we explain/i)).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: /In figures/i })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: /What is new/i })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: /What comes next/i })).toBeVisible();
+    await expect(page.getByText(/we do not win, we explain/i)).toHaveCount(0);
   });
 
-  test("the four pillars are chapter links", async ({ page }) => {
+  test("the footer opens the instrument", async ({ page }) => {
     await page.goto("/en/");
-    const chapter = page.getByRole("link", { name: /The taxonomy of evidence/i });
-    await expect(chapter).toBeVisible();
-    await chapter.click();
-    await page.waitForURL(/\/pillar\/1/);
-    expect(page.url()).toMatch(/\/pillar\/1/);
-  });
-
-  test("the quiet footer opens the instrument", async ({ page }) => {
-    await page.goto("/en/");
-    // Two of them, repeating the call to action in the header rail and in
-    // the quiet footer, which is ordinary for a landing page. What is NOT
-    // ordinary, and was true until 2026-10-07, is three links with this
-    // same label going to three different destinations. So the test pins
-    // the count AND that every one of them leads to the same place.
     const all = page.getByRole("link", { name: /Open the instrument/i });
-    await expect(all).toHaveCount(2);
     for (const href of await all.evaluateAll((els) => els.map((e) => e.getAttribute("href")))) {
       expect(href).toMatch(/\/instrument\/?$/);
     }
@@ -75,9 +41,6 @@ test.describe("argument front door", () => {
     await expect(instrument).toBeVisible();
     await instrument.click();
     await page.waitForURL(/\/instrument\/?$/);
-    // It used to land on /instrument/benchmark. That surface is hidden
-    // from the rail while the corpus is empty, so sending the main call
-    // to action there contradicted the navigation: it goes to the hub.
     expect(page.url()).toMatch(/\/instrument\/?$/);
   });
 });

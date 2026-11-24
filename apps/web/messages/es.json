@@ -2626,5 +2626,20 @@
       "setLink": "conjunto",
       "nothing": "Nada coincide con la búsqueda."
     }
+  },
+  "landing": {
+    "statsTitle": "En cifras",
+    "statsNote": "Leído en vivo de la base de datos que sirve esta página.",
+    "statProteins": "Proteínas",
+    "statReviewed": "Revisadas en Swiss-Prot",
+    "statWithGo": "Con anotaciones GO",
+    "statCuts": "Versiones de anotaciones GO",
+    "statCutsValue": "{count}, de {first} a {last}",
+    "statModels": "Modelos de lenguaje de proteínas",
+    "statVectors": "Embeddings de secuencia",
+    "newsTitle": "Qué hay de nuevo",
+    "plansTitle": "Qué viene",
+    "evaluation": "Ver la evaluación",
+    "linksLabel": "Por dónde seguir"
   }
 }
