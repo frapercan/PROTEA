@@ -1201,7 +1201,11 @@
     },
     "statDelta": "差集蛋白数",
     "statsTitle": "评估集统计",
-    "title": "CAFA 评估"
+    "title": "CAFA 评估",
+    "strataCta": {
+      "title": "分层结果",
+      "body": "每个方法在九个单元格中的结果，按与最近已注释蛋白的序列一致性和长度分层，并给出每层的 n。"
+    }
   },
   "scoring": {
     "title": "评分配置",

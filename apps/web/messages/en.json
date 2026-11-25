@@ -1200,7 +1200,11 @@
     },
     "statDelta": "delta proteins",
     "statsTitle": "Set stats",
-    "title": "CAFA Evaluation"
+    "title": "CAFA Evaluation",
+    "strataCta": {
+      "title": "Results by stratum",
+      "body": "Every arm in the nine cells, opened by sequence identity to the nearest annotated protein and by length, with n in each band."
+    }
   },
   "scoring": {
     "title": "Scoring Configs",

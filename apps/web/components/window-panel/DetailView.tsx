@@ -5,7 +5,16 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { CELLS, armLabel, cellEdge, cellF, isNeighbour, mayNotBeRead, modelName, type SummaryResult } from "@/lib/windowPanel";
+import {
+  armLabel,
+  armModel,
+  cellEdge,
+  cellF,
+  CELLS,
+  isNeighbour,
+  mayNotBeRead,
+  type SummaryResult,
+} from "@/lib/windowPanel";
 import { INK, deltaFill, fmt, signed } from "./chart";
 import type { PanelView } from "./WindowPanel";
 
@@ -21,7 +30,7 @@ export default function DetailView({ view }: { view: PanelView }) {
   const keyOf: Record<SortKey, (r: SummaryResult) => number | string> = {
     f: (r) => cellF(r, state.cell) ?? -1,
     delta: (r) => (cellF(r, state.cell) ?? -1) - refF(state.cell),
-    model: (r) => (isNeighbour(r) ? modelName(r.arm.model) : (r.arm.method ?? "")),
+    model: (r) => (isNeighbour(r) ? armModel(r) : (r.arm.method ?? "")),
     scoring: (r) => r.arm.scoring ?? "",
     k: (r) => r.arm.depth ?? 0,
     time: (r) => r.created_at ?? "",
@@ -88,7 +97,7 @@ export default function DetailView({ view }: { view: PanelView }) {
                     <td className="px-3 py-1.5">{colour ? <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colour }} /> : null}</td>
                     <td className="px-3 py-1.5 font-mono text-xs">{r.id.slice(0, 8)}</td>
                     <td className="px-3 py-1.5">
-                      {isNeighbour(r) ? modelName(r.arm.model) : armLabel(r)}
+                      {isNeighbour(r) ? armModel(r) : armLabel(r)}
                       {r === ref ? ` (${t("referenceShort")})` : ""}
                     </td>
                     <td className="px-3 py-1.5">{r.arm.scoring ?? "—"}</td>

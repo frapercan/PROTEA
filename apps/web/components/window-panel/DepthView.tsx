@@ -4,17 +4,17 @@
 
 import { useTranslations } from "next-intl";
 import {
-  CELLS,
-  DEPTHS,
-  SCORINGS,
-  SCORING_SHORT,
   armLabel,
+  armModel,
   cellEdge,
   cellF,
+  CELLS,
+  DEPTHS,
   isNeighbour,
-  modelName,
   modelsOf,
   sameExclusion,
+  SCORING_SHORT,
+  SCORINGS,
   type SummaryResult,
 } from "@/lib/windowPanel";
 import { Figure, INK, Legend, SERIES, extent, fmt, pressable, signed, ticks, useTooltip } from "./chart";
@@ -26,7 +26,7 @@ function seriesOf(view: PanelView, cell: string): { series: Series[]; model: str
   const { state, shown } = view;
   const arms = shown.filter((r) => isNeighbour(r) && r.arm.depth != null && cellF(r, cell) != null);
   const models = modelsOf(arms);
-  const swept = models.filter((m) => arms.some((r) => modelName(r.arm.model) === m && r.arm.depth !== 30));
+  const swept = models.filter((m) => arms.some((r) => armModel(r) === m && r.arm.depth !== 30));
   const model = swept.includes(state.model) ? state.model : (swept[0] ?? models[0] ?? "");
   const byDepth = (a: SummaryResult, b: SummaryResult) => (a.arm.depth ?? 0) - (b.arm.depth ?? 0);
   if (state.group === "model") {
@@ -37,7 +37,7 @@ function seriesOf(view: PanelView, cell: string): { series: Series[]; model: str
         .map((m, i) => ({
           label: `${m} · ${state.scoring}`,
           colour: SERIES[i % SERIES.length],
-          points: arms.filter((r) => modelName(r.arm.model) === m && r.arm.scoring === state.scoring).sort(byDepth),
+          points: arms.filter((r) => armModel(r) === m && r.arm.scoring === state.scoring).sort(byDepth),
         }))
         .filter((s) => s.points.length),
     };
@@ -48,7 +48,7 @@ function seriesOf(view: PanelView, cell: string): { series: Series[]; model: str
     series: SCORINGS.map((s, i) => ({
       label: `${model} · ${s}`,
       colour: SERIES[i],
-      points: arms.filter((r) => modelName(r.arm.model) === model && r.arm.scoring === s).sort(byDepth),
+      points: arms.filter((r) => armModel(r) === model && r.arm.scoring === s).sort(byDepth),
     })).filter((s) => s.points.length),
   };
 }
@@ -262,7 +262,7 @@ export default function DepthView({ view }: { view: PanelView }) {
               return (
                 <g key={a.id}>
                   <text x={0} y={y + 4} fontSize={12} fill="#0c0a09">
-                    {isNeighbour(a) ? `${modelName(a.arm.model)} · ${SCORING_SHORT[a.arm.scoring ?? ""] ?? a.arm.scoring}` : armLabel(a)}
+                    {isNeighbour(a) ? `${armModel(a)} · ${SCORING_SHORT[a.arm.scoring ?? ""] ?? a.arm.scoring}` : armLabel(a)}
                   </text>
                   <line x1={X(raw)} x2={X(pct)} y1={y} y2={y} stroke={colour} strokeWidth={2} />
                   <circle cx={X(raw)} cy={y} r={5} fill={INK.surface} stroke={cellEdge(a, state.cell) ? INK.edge : colour} strokeWidth={2} />

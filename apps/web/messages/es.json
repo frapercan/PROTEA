@@ -1200,7 +1200,11 @@
     },
     "statDelta": "proteínas del delta",
     "statsTitle": "Estadísticas del conjunto",
-    "title": "Evaluación CAFA"
+    "title": "Evaluación CAFA",
+    "strataCta": {
+      "title": "Resultados por estrato",
+      "body": "Cada brazo en las nueve celdas, abiertas por identidad de secuencia con la proteína anotada más cercana y por longitud, con n en cada banda."
+    }
   },
   "scoring": {
     "title": "Configuraciones de scoring",

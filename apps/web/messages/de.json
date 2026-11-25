@@ -1201,7 +1201,11 @@
     },
     "statDelta": "Delta-Proteine",
     "statsTitle": "Statistiken des Sets",
-    "title": "CAFA-Evaluierung"
+    "title": "CAFA-Evaluierung",
+    "strataCta": {
+      "title": "Ergebnisse nach Schicht",
+      "body": "Jeder Arm in den neun Zellen, aufgeteilt nach Sequenzidentität zum nächsten annotierten Protein und nach Länge, mit n in jedem Band."
+    }
   },
   "scoring": {
     "title": "Scoring",
