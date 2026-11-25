@@ -55,6 +55,11 @@ function setCookie(value: string | null) {
   }
 }
 
+/** Sign in with a session cookie carrying ``role``; ``beforeEach`` signs out again. */
+function signIn(role: string) {
+  setCookie(mintFakeJwt({ sub: "x", role, exp: 9_999_999_999 }));
+}
+
 /**
  * Hrefs of the rail a viewer can actually reach.
  *
@@ -89,6 +94,8 @@ describe("Sidebar nav", () => {
   });
 
   it("never offers the same destination twice, graph included", () => {
+    // Signed in, so the graph is offered whenever it has rows.
+    signIn("viewer");
     render(<Sidebar />);
     // The original defect was two identical rows for /instrument/graph.
     // The route is hidden while the corpus is empty, so assert the thing
@@ -129,11 +136,27 @@ describe("Sidebar nav", () => {
     const hrefs = railHrefs();
     // The middleware is permissive by design, and hiding a surface
     // because it is EMPTY must not spread to the ones that are not.
-    // Proteins has 754,862 rows, jobs is the live campaign and stack is
-    // the architecture a technical reader comes for; none of those may
-    // disappear with the data flag.
-    for (const open of ["/instrument/proteins", "/instrument/jobs", "/instrument/stack"]) {
+    // Proteins is the data a visitor comes for and may not disappear with
+    // the data flag. Jobs and stack moved behind sign-in on 2026-11-24; the
+    // next test pins that.
+    for (const open of ["/instrument/proteins"]) {
       expect(hrefs.some((h) => h.endsWith(open)), open).toBe(true);
+    }
+  });
+
+  it("offers the lab and operation pages only to a signed-in caller", () => {
+    // The author, 2026-11-24: a first-time visitor gets the tool, the data,
+    // the results and the docs; the lab and operation pages are for whoever
+    // signs in.
+    const anonymous = render(<Sidebar />);
+    for (const route of ["/instrument/weights", "/feature-registry", "/instrument/explorations", "/instrument/jobs", "/instrument/stack"]) {
+      expect(railHrefs().some((h) => h.endsWith(route)), route).toBe(false);
+    }
+    anonymous.unmount();
+    signIn("viewer");
+    render(<Sidebar />);
+    for (const route of ["/instrument/jobs", "/instrument/stack"]) {
+      expect(railHrefs().some((h) => h.endsWith(route)), route).toBe(true);
     }
   });
 
@@ -142,6 +165,7 @@ describe("Sidebar nav", () => {
     // empty table hid the six surfaces holding the campaign's work. Each
     // route now answers for itself; the assertion is the same: offered
     // iff it has rows.
+    signIn("viewer"); // signed in, so the data gate alone decides
     render(<Sidebar />);
     const hrefs = railHrefs();
     const gated = [

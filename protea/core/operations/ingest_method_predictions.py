@@ -231,8 +231,7 @@ def _lines(path: str) -> Iterator[list[str]]:
         header = handle.readline().rstrip("\n").split("\t")
         if tuple(header) != TSV_COLUMNS:
             raise ValueError(
-                f"{path} declares columns {header}; this reads "
-                f"{list(TSV_COLUMNS)}, in that order"
+                f"{path} declares columns {header}; this reads {list(TSV_COLUMNS)}, in that order"
             )
         for line in handle:
             yield line.rstrip("\n").split("\t")
@@ -294,6 +293,21 @@ def _read_rows(
         }
 
 
+def _set_description(
+    method: dict[str, Any], digest: str, corpus_id: uuid.UUID, snapshot_id: uuid.UUID
+) -> str:
+    """What the set's page shows people: the method by its name.
+
+    Never the producer's record printed as a dict; that record stays in ``meta``,
+    where the seal reads it as identity.
+    """
+    named = f"method {method['name']}" if method.get("name") else "an unnamed method"
+    return (
+        f"The predictions of {named}, ingested from a file hashing to {digest[:12]}, "
+        f"against annotation set {corpus_id} on ontology snapshot {snapshot_id}."
+    )
+
+
 class IngestMethodPredictionsOperation:
     """Read a method's TSV and write its prediction set."""
 
@@ -328,11 +342,7 @@ class IngestMethodPredictionsOperation:
                 ontology_snapshot_id=snapshot.id,
                 query_set_id=uuid.UUID(p.query_set_id) if p.query_set_id else None,
                 limit_per_entry=p.limit_per_entry or counters.max_terms_per_protein,
-                description=(
-                    f"The predictions of method {p.method}, ingested from a file hashing to "
-                    f"{digest[:12]}, against annotation set {corpus.id} on ontology "
-                    f"snapshot {snapshot.id}."
-                ),
+                description=_set_description(p.method, digest, corpus.id, snapshot.id),
                 job_id=job_id_from_payload(payload),
                 producer_git_sha=code_revision(),
                 meta={

@@ -93,7 +93,10 @@ def photo_sources(records: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any
             "published": members["published"],
             "url": members.get("source_file", {}).get("url", ""),
             "sha256": members.get("source_file", {}).get("sha256", ""),
-            "date_generated": members.get("gaf_header", {}).get("date-generated", ""),
+            # GAF 2.2 names it date-generated; GOA's GAF 2.1 names it Generated.
+            "date_generated": members.get("gaf_header", {}).get(
+                "date-generated", members.get("gaf_header", {}).get("generated", "")
+            ),
             "go_version": members.get("gaf_header", {}).get("go-version", ""),
             "declared_go_release": declared_go_release(members.get("gaf_header", {})),
             "go_release_rule": go_release_rule(members.get("gaf_header", {})),

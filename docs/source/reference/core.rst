@@ -636,6 +636,16 @@ are documented below; the four ephemeral siblings
    :undoc-members:
    :show-inheritance:
 
+**link_protein_sequences**
+   Links every protein with no sequence to the sequence its latest cut photo
+   records, by md5, with no request to UniProt. Writes ``protein.sequence_id``
+   only; the sequences are the ones the embedding banks were built from.
+
+.. automodule:: protea.core.operations.link_protein_sequences
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **load_goa_annotations**
    Bulk-loads a GAF (Gene Association Format) file. Annotations are filtered
    against canonical accessions present in the database, avoiding orphaned

@@ -78,6 +78,15 @@ export default function WindowPanel({ evaluationSetId }: { evaluationSetId: stri
   const [comparisons, setComparisons] = useState<PairedComparison[] | null | "failed">(null);
   const [bandComparisons, setBandComparisons] = useState<Record<string, PairedComparison[] | "failed" | "loading">>({});
   const [error, setError] = useState<string | null>(null);
+  // A window read one way only must not open empty on the other: the public 211->227 holds
+  // raw readings alone, and the panel opened on percentile ranks showed nothing (2026-11-25).
+  useEffect(() => {
+    if (!summary) return;
+    const readings = new Set(summary.results.map((r) => r.arm.reading));
+    if (readings.size > 0 && !readings.has(state.reading)) {
+      commit({ reading: readings.has("raw") ? "raw" : [...readings][0] });
+    }
+  }, [summary, state.reading, commit]);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
@@ -175,7 +184,14 @@ export default function WindowPanel({ evaluationSetId }: { evaluationSetId: stri
 
   const models = modelsOf(summary.results);
   const active = listOf(state.models).length + listOf(state.scorings).length + listOf(state.depths).length;
-  const pool = summary.results.filter((r) => r.arm.reading === state.reading && (state.superseded === "1" || r.arm.exclude_self !== false));
+  // An arm that kept the query as its own neighbour is superseded only where the window also
+  // holds arms that excluded it; where keeping it is the design (the public ablation, the
+  // author's "no excluir el primer hit"), hiding them emptied the panel.
+  const replaced = summary.results.some((r) => r.arm.exclude_self === true);
+  const pool = summary.results.filter(
+    (r) =>
+      r.arm.reading === state.reading && (state.superseded === "1" || !replaced || r.arm.exclude_self !== false),
+  );
   const chip = (key: "models" | "scorings" | "depths", value: string, label: string) => {
     const on = listOf(state[key]).includes(value);
     return (

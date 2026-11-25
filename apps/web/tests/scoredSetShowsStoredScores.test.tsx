@@ -53,7 +53,7 @@ describe("a scored set", () => {
   it("shows the score it stored", () => {
     render(<PredictionTable preds={[pred({ score: 0.123 })]} knownByGoId={new Map()} />);
     expect(screen.getAllByText("0.123").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Score").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("card.score").length).toBeGreaterThan(0);
   });
 
   it("orders its rows by the stored score, highest first", () => {
@@ -76,7 +76,7 @@ describe("a candidate set", () => {
         knownByGoId={new Map()}
       />,
     );
-    expect(screen.queryAllByText("Score")).toHaveLength(0);
+    expect(screen.queryAllByText("card.score")).toHaveLength(0);
     // Nearest donor first.
     const html = document.body.innerHTML;
     expect(html.indexOf("GO:0000002")).toBeLessThan(html.indexOf("GO:0000001"));
