@@ -125,6 +125,7 @@ from protea.core.operations.ingest_method_predictions import (
     IngestMethodPredictionsPayload,
 )
 from protea.core.operations.insert_proteins import InsertProteinsPayload
+from protea.core.operations.link_protein_sequences import LinkProteinSequencesPayload
 from protea.core.operations.load_cut_photo import LoadCutPhotoPayload
 from protea.core.operations.load_embedding_bank import LoadEmbeddingBankPayload
 from protea.core.operations.load_goa_annotations import (
@@ -631,6 +632,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         ResolveProteinSequencesPayload,
         {"max_accessions": 0},
         ("max_accessions",),
+    ),
+    # not-a-boolean: a run that cannot say whether it writes is refused, not guessed.
+    (
+        "link_protein_sequences",
+        LinkProteinSequencesPayload,
+        {"dry_run": "perhaps"},
+        ("dry_run",),
     ),
     # zero-cap, likewise: a capped smoke run that asks about nothing would report
     # success and read exactly like a platform whose entries were all current.

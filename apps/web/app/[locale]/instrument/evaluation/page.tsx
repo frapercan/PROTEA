@@ -360,9 +360,9 @@ function EvaluationSetCard({
             <Link
               href={`/${locale}/instrument/evaluation/${e.id}`}
               onClick={(ev) => ev.stopPropagation()}
-              className="mt-1 inline-block text-xs font-medium text-blue-700 hover:underline"
+              className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
             >
-              {t("evaluationSetCard.openPanel")}
+              {t("evaluationSetCard.openPanel")} <span aria-hidden>→</span>
             </Link>
           </div>
           <button
@@ -802,6 +802,41 @@ export default function EvaluationPage() {
         </section>
       )}
 
+
+      {/* ── Evaluation Sets ───────────────────────────────────────── */}
+      {liveSets.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="text-base font-semibold text-slate-800">{t("evaluationSetsSection.heading")}</h2>
+          {liveSets.slice(0, visibleEvalCount).map((e) => (
+            <EvaluationSetCard
+              key={e.id}
+              e={e}
+              annotationSets={annotationSets}
+              predictionSets={predictionSets}
+              scoringConfigs={scoringConfigs}
+              rerankers={rerankers}
+              isSelected={selectedEvalId === e.id}
+              onSelect={() => setSelectedEvalId(e.id === selectedEvalId ? "" : e.id)}
+              onDeleted={() => setEvaluationSets((prev) => prev.filter((x) => x.id !== e.id))}
+            />
+          ))}
+          {liveSets.length > visibleEvalCount && (
+            <div className="flex flex-col items-center gap-1.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setVisibleEvalCount((c) => c + EVAL_PAGE_SIZE)}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+              >
+                Load more evaluation sets
+              </button>
+              <span className="text-xs text-slate-500 tabular-nums">
+                Showing {Math.min(visibleEvalCount, liveSets.length)} of {liveSets.length}
+              </span>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* ── Generate Evaluation Set ───────────────────────────────── */}
       <section className="rounded-lg border border-slate-200 p-6 space-y-5">
         <div>
@@ -840,40 +875,6 @@ export default function EvaluationPage() {
           {generating ? t("generateSection.generating") : t("generateSection.generateEvaluationSet")}
         </button>
       </section>
-
-      {/* ── Evaluation Sets ───────────────────────────────────────── */}
-      {liveSets.length > 0 && (
-        <section className="space-y-4">
-          <h2 className="text-base font-semibold text-slate-800">{t("evaluationSetsSection.heading")}</h2>
-          {liveSets.slice(0, visibleEvalCount).map((e) => (
-            <EvaluationSetCard
-              key={e.id}
-              e={e}
-              annotationSets={annotationSets}
-              predictionSets={predictionSets}
-              scoringConfigs={scoringConfigs}
-              rerankers={rerankers}
-              isSelected={selectedEvalId === e.id}
-              onSelect={() => setSelectedEvalId(e.id === selectedEvalId ? "" : e.id)}
-              onDeleted={() => setEvaluationSets((prev) => prev.filter((x) => x.id !== e.id))}
-            />
-          ))}
-          {liveSets.length > visibleEvalCount && (
-            <div className="flex flex-col items-center gap-1.5 pt-1">
-              <button
-                type="button"
-                onClick={() => setVisibleEvalCount((c) => c + EVAL_PAGE_SIZE)}
-                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
-              >
-                Load more evaluation sets
-              </button>
-              <span className="text-xs text-slate-500 tabular-nums">
-                Showing {Math.min(visibleEvalCount, liveSets.length)} of {liveSets.length}
-              </span>
-            </div>
-          )}
-        </section>
-      )}
 
       {/* ── Superseded windows, folded ─────────────────────────────── */}
       {supersededSets.length > 0 && (

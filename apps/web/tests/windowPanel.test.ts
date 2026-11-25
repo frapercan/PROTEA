@@ -166,7 +166,7 @@ describe("the state in the address", () => {
     const state = readPanelState(new URLSearchParams("tab=strata&cell=PK:BPO&result=abc"));
     expect(state.tab).toBe("strata");
     expect(state.cell).toBe("PK:BPO");
-    expect(state.reading).toBe("percentile_rank");
+    expect(state.reading).toBe("raw");
   });
 
   it("keeps the page's own parameters and drops the panel's defaults", () => {
