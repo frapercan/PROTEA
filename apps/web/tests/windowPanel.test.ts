@@ -106,6 +106,15 @@ describe("what the panel shows", () => {
     expect(visibleResults(all, { ...base, superseded: true }).map((r) => r.id)).toContain("self");
   });
 
+  it("keeps the arms that kept their own sequence where nothing in the window excluded it", () => {
+    // Production's shape: two method arms with no exclusion and every neighbour arm
+    // keeping the first hit on purpose. Hiding them left one arm of 114 on screen.
+    const method = result("m", { model: null, scoring: null, method: "own-annotations-nonexp-lafa-211", depth: null, exclude_self: null });
+    const a = result("a", { exclude_self: false });
+    const b = result("b", { exclude_self: false, model: "ElnaggarLab/ankh-base" });
+    expect(visibleResults([method, a, b], base).map((r) => r.id)).toEqual(["m", "a", "b"]);
+  });
+
   it("filters the neighbour arms by model and depth, never the methods", () => {
     expect(visibleResults(all, { ...base, models: ["Ankh base"] }).map((r) => r.id)).toEqual(["own", "ankh"]);
     expect(visibleResults(all, { ...base, depths: [1] }).map((r) => r.id)).toEqual(["own", "k1"]);
