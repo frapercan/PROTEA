@@ -1087,6 +1087,28 @@
       "delete": "Löschen",
       "deleteConfirm": "Dieses Annotationsset und seine {count} GO-Term-Zuweisungen löschen? Dies kann nicht rückgängig gemacht werden.",
       "deleteConfirmNoAssignments": "Dieses Annotationsset löschen?"
+    },
+    "card": {
+      "viewProtein": "Protein ansehen →",
+      "matchKnown": "{matches} von {total} vorhergesagten Begriffen waren bereits bekannt",
+      "showGraph": "GO-Graph",
+      "hideGraph": "Graph ausblenden",
+      "loading": "Wird geladen…",
+      "noData": "Keine Daten gefunden.",
+      "predictedKnown": "{predicted} vorhergesagt, {known} bekannt",
+      "uncovered": "Bekannt, nicht vorhergesagt ({count})",
+      "goId": "GO-ID",
+      "name": "Name",
+      "evidence": "Evidenz",
+      "score": "Wert",
+      "witness": "Beleg",
+      "via": "Über (Ref.)",
+      "predEv": "Vorh. Ev.",
+      "knownEv": "Bek. Ev.",
+      "dist": "Dist.",
+      "markExperimental": "bereits bekannt (experimentell)",
+      "markImplied": "folgt aus {term}",
+      "markAnnotated": "bereits annotiert"
     }
   },
   "evaluation": {
@@ -1127,7 +1149,7 @@
       "artifactsDownload": "↓ Artefakte (.zip)",
       "resultDelete": "Löschen",
       "deleteResultConfirm": "Dieses Evaluierungsergebnis löschen?",
-      "openPanel": "Panel des Fensters öffnen"
+      "openPanel": "Ergebnisse und Schichten ansehen"
     },
     "evaluationSetsSection": {
       "heading": "Evaluierungssets",
@@ -1179,7 +1201,11 @@
     },
     "statDelta": "Delta-Proteine",
     "statsTitle": "Statistiken des Sets",
-    "title": "CAFA-Evaluierung"
+    "title": "CAFA-Evaluierung",
+    "strataCta": {
+      "title": "Ergebnisse nach Schicht",
+      "body": "Jeder Arm in den neun Zellen, aufgeteilt nach Sequenzidentität zum nächsten annotierten Protein und nach Länge, mit n in jedem Band."
+    }
   },
   "scoring": {
     "title": "Scoring",
@@ -2627,5 +2653,19 @@
       "setLink": "Menge",
       "nothing": "Nichts passt zur Suche."
     }
+  },
+  "landing": {
+    "statsTitle": "In Zahlen",
+    "statsNote": "Live aus der Datenbank gelesen, die diese Seite ausliefert.",
+    "statProteins": "Proteine",
+    "statWithGo": "Mit GO-Annotationen",
+    "statCuts": "Versionen der GO-Annotationen",
+    "statCutsValue": "{count}, von {first} bis {last}",
+    "statModels": "Protein-Sprachmodelle",
+    "statVectors": "Sequenz-Embeddings",
+    "newsTitle": "Neuigkeiten",
+    "plansTitle": "Als Nächstes",
+    "evaluation": "Zur Auswertung",
+    "linksLabel": "Weiter geht es"
   }
 }

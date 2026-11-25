@@ -244,7 +244,9 @@ class TestAnnotateSuccess:
         reranker = MagicMock()
         reranker.id = uuid4()
 
-        first_results = iter([ann, snap, reranker])
+        # The snapshot is the set's own; no separate query looks it up.
+        ann.ontology_snapshot_id = snap.id
+        first_results = iter([ann, reranker])
 
         def query_side_effect(*args):
             q = MagicMock()
@@ -289,7 +291,9 @@ class TestAnnotateSuccess:
         snap = MagicMock()
         snap.id = uuid4()
 
-        first_results = iter([ann, snap, None])
+        # The snapshot is the set's own; no separate query looks it up.
+        ann.ontology_snapshot_id = snap.id
+        first_results = iter([ann, None])
 
         def query_side_effect(*args):
             q = MagicMock()
@@ -330,7 +334,9 @@ class TestAnnotateSuccess:
         reranker = MagicMock()
         reranker.id = uuid4()
 
-        first_results = iter([ann, snap, reranker])
+        # The snapshot is the set's own; no separate query looks it up.
+        ann.ontology_snapshot_id = snap.id
+        first_results = iter([ann, reranker])
 
         def query_side_effect(*args):
             q = MagicMock()
@@ -506,22 +512,43 @@ class TestNewestAnnotationSet:
         session.query.return_value.order_by.return_value.first.return_value = None
         assert _newest_annotation_set(session) is None
 
-
-class TestNewestOntologySnapshot:
-    def test_returns_newest(self):
-        from protea.api.routers.annotate import _newest_ontology_snapshot
-
-        session = MagicMock()
-        snap = MagicMock()
-        session.query.return_value.order_by.return_value.first.return_value = snap
-        assert _newest_ontology_snapshot(session) is snap
-
-    def test_returns_none_when_empty(self):
-        from protea.api.routers.annotate import _newest_ontology_snapshot
+    def test_orders_by_the_source_publication_first(self):
+        # The newest cut is the set whose source was published last, not the one
+        # loaded last: a store built out of order must still serve its latest cut.
+        from protea.api.routers.annotate import _newest_annotation_set
 
         session = MagicMock()
-        session.query.return_value.order_by.return_value.first.return_value = None
-        assert _newest_ontology_snapshot(session) is None
+        _newest_annotation_set(session)
+        keys = [str(k) for k in session.query.return_value.order_by.call_args.args]
+        assert keys[0].startswith("annotation_set.source_published_at DESC")
+        assert keys[1] == "annotation_set.created_at DESC"
+
+
+class TestDispatchReadsTheDonorSetsGraph:
+    """The graph a prediction reads is the one its donor set draws its terms from.
+
+    Picking the most recently loaded graph on its own broke /annotate on a store whose
+    graphs were loaded out of order: on 2026-11-24 the 2019-11-02 graph had been loaded
+    last, the newest set drew on 2025-07-22, and predict_go_terms refused the pair.
+    """
+
+    def test_the_snapshot_is_the_sets_own(self):
+        from protea.api.routers import annotate
+
+        session = MagicMock()
+        config = MagicMock()
+        config.id = uuid4()
+        session.get.return_value = config
+        ann = MagicMock()
+        ann.id = uuid4()
+        ann.ontology_snapshot_id = uuid4()
+        with (
+            patch.object(annotate, "_newest_annotation_set", return_value=ann),
+            patch.object(annotate, "active_or_latest_reranker", return_value=None),
+        ):
+            resolved = annotate._resolve_dispatch_resources(session, cached_config_id=config.id)
+        assert resolved == (config.id, ann.id, ann.ontology_snapshot_id, None)
+        session.query.assert_not_called()
 
 
 class TestBestEmbeddingConfigIdCached:
@@ -545,9 +572,7 @@ class TestBestEmbeddingConfigIdCached:
         session.query.side_effect = query_side_effect
         factory = MagicMock()
 
-        with patch.object(
-            annotate, "session_scope", side_effect=lambda _: _mock_scope(session)
-        ):
+        with patch.object(annotate, "session_scope", side_effect=lambda _: _mock_scope(session)):
             first = annotate._best_embedding_config_id_cached(factory, ttl=300.0)
             calls_after_first = session.query.call_count
             second = annotate._best_embedding_config_id_cached(factory, ttl=300.0)
@@ -572,9 +597,7 @@ class TestBestEmbeddingConfigIdCached:
         session.query.side_effect = query_side_effect
         factory = MagicMock()
 
-        with patch.object(
-            annotate, "session_scope", side_effect=lambda _: _mock_scope(session)
-        ):
+        with patch.object(annotate, "session_scope", side_effect=lambda _: _mock_scope(session)):
             result = annotate._best_embedding_config_id_cached(factory, ttl=300.0)
             # A None answer (empty DB) must NOT be cached, so a later
             # default-create is picked up: the second call rescans.

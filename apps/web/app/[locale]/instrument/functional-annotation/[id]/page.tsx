@@ -169,11 +169,112 @@ function groupAnnotations(anns: ProteinAnnotation[]): Map<string, GroupedAnnotat
   return map;
 }
 
-export function PredictionTable({ preds, knownByGoId }: {
+/** Where a predicted term stands against what the protein already knew at t0. */
+type Standing = "new" | "annotated" | "implied" | "experimental";
+const STANDING_ORDER: Record<Standing, number> = { new: 0, annotated: 1, implied: 2, experimental: 3 };
+
+/** A known term says nothing new: mark it, so the eye goes to the terms that do (the author, 2026-11-25). */
+function StandingMark({ standing, impliedBy }: { standing: Standing; impliedBy?: string }) {
+  const t = useTranslations("functionalAnnotation");
+  if (standing === "new") return null;
+  const label =
+    standing === "experimental"
+      ? t("card.markExperimental")
+      : standing === "implied"
+        ? t("card.markImplied", { term: impliedBy ?? "" })
+        : t("card.markAnnotated");
+  return (
+    <span className="ml-1.5 inline-block rounded border border-green-200 bg-white px-1 py-0.5 align-middle text-[10px] font-medium text-green-700">
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Every ancestor of a known experimental term, mapped to the name of the term that implies it.
+ * The subgraph holds the asked terms and their ancestors; the asked terms are the deepest nodes,
+ * so whichever end of their edges they sit on is the child end.
+ */
+function impliedByKnown(graph: GoSubgraph, known: { go_id: string; name: string | null }[]): Map<string, string> {
+  const goIdOf = new Map(graph.nodes.map((n) => [n.id, n.go_id]));
+  const nodeOf = new Map(graph.nodes.map((n) => [n.go_id, n.id]));
+  const asked = new Set(graph.nodes.filter((n) => n.is_query).map((n) => n.id));
+  const childIsSource =
+    graph.edges.filter((e) => asked.has(e.source)).length >= graph.edges.filter((e) => asked.has(e.target)).length;
+  const parents = new Map<number, number[]>();
+  for (const e of graph.edges) {
+    const [child, parent] = childIsSource ? [e.source, e.target] : [e.target, e.source];
+    parents.set(child, [...(parents.get(child) ?? []), parent]);
+  }
+  const out = new Map<string, string>();
+  for (const k of known) {
+    const start = nodeOf.get(k.go_id);
+    if (start === undefined) continue;
+    const stack = [...(parents.get(start) ?? [])];
+    const seen = new Set<number>();
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const goId = goIdOf.get(id);
+      if (goId && !out.has(goId)) out.set(goId, k.name ?? k.go_id);
+      stack.push(...(parents.get(id) ?? []));
+    }
+  }
+  return out;
+}
+
+/** The known terms of one aspect that no prediction covers, under that aspect's own section. */
+function UncoveredKnown({ anns }: { anns: GroupedAnnotation[] }) {
+  const t = useTranslations("functionalAnnotation");
+  return (
+    <div className="mt-2">
+      <p className="text-xs font-semibold text-slate-500 mb-2">{t("card.uncovered", { count: anns.length })}</p>
+      <div className="overflow-x-auto rounded-md border bg-white text-xs">
+        <div className="grid grid-cols-[90px_1fr_80px] gap-2 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-600">
+          <div>{t("card.goId")}</div><div>{t("card.name")}</div><div>Evidence</div>
+        </div>
+        {anns.map((ann) => (
+          <div key={ann.go_id} className="grid grid-cols-[90px_1fr_80px] gap-2 border-b px-3 py-2 last:border-0 items-start">
+            <span className="font-mono text-blue-600 pt-0.5">{ann.go_id}</span>
+            <span className="text-slate-700 leading-snug">{ann.name ?? "—"}</span>
+            <div className="flex flex-col items-end gap-0.5">
+              <div className="flex flex-wrap gap-0.5 justify-end">
+                {ann.evidence_codes.map((ec) => (
+                  <span key={ec} className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(ec)}`}>
+                    {ec}
+                  </span>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-0.5 justify-end">
+                {ann.sources.map((s) => (
+                  <span key={`${s.source}-${s.version ?? ""}`} className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-500">
+                    {formatSource(s)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function PredictionTable({ preds, knownByGoId, implied }: {
   preds: Prediction[];
   knownByGoId: Map<string, GroupedAnnotation>;
+  /** Terms implied by the protein's known experimental terms, to the term that implies each. */
+  implied?: Map<string, string>;
 }) {
   const locale = useLocale();
+  const t = useTranslations("functionalAnnotation");
+  const standing = (p: Prediction): Standing => {
+    const known = knownByGoId.get(p.go_id);
+    if (known?.evidence_codes.some((c) => EXPERIMENTAL_CODES.has(c))) return "experimental";
+    if (implied?.has(p.go_id)) return "implied";
+    return known ? "annotated" : "new";
+  };
   // Every candidate of a retrieval arm has one; a set written by
   // ingest_method_predictions has none, because nothing was retrieved. The
   // page used to assume it was always there and crashed on .toFixed().
@@ -202,6 +303,10 @@ export function PredictionTable({ preds, knownByGoId }: {
       ? [...preds].sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
       : [...preds].sort((a, b) => a.go_id.localeCompare(b.go_id));
 
+  // New terms first, then the ones the protein already knew; the sort is stable, so each
+  // group keeps the order above.
+  const ordered = [...sorted].sort((a, b) => STANDING_ORDER[standing(a)] - STANDING_ORDER[standing(b)]);
+
   // Tailwind requires complete class strings — no dynamic construction
   const gridClass = isMethod
     ? "grid-cols-[60px_90px_1fr_210px_65px]"
@@ -214,18 +319,18 @@ export function PredictionTable({ preds, knownByGoId }: {
     <div className="rounded-md border bg-white text-xs">
       {/* Desktop header */}
       <div className={`hidden lg:grid ${gridClass} gap-x-3 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-600`}>
-        {(hasScore || isMethod) && <div>Score</div>}
-        <div>GO ID</div>
-        <div>Name</div>
-        {isMethod ? <div>Witness</div> : <div>Via (ref)</div>}
-        {!isMethod && <div>Pred. ev.</div>}
-        <div>Known ev.</div>
-        {!isMethod && <div>Dist</div>}
+        {(hasScore || isMethod) && <div>{t("card.score")}</div>}
+        <div>{t("card.goId")}</div>
+        <div>{t("card.name")}</div>
+        {isMethod ? <div>{t("card.witness")}</div> : <div>{t("card.via")}</div>}
+        {!isMethod && <div>{t("card.predEv")}</div>}
+        <div>{t("card.knownEv")}</div>
+        {!isMethod && <div>{t("card.dist")}</div>}
       </div>
 
-      {sorted.length === 0 ? (
+      {ordered.length === 0 ? (
         <p className="px-3 py-3 text-slate-300">—</p>
-      ) : sorted.map((pred) => {
+      ) : ordered.map((pred) => {
         const isExpanded = expanded === pred.go_id;
         const knownAnn = knownByGoId.get(pred.go_id);
 
@@ -233,7 +338,7 @@ export function PredictionTable({ preds, knownByGoId }: {
           <div key={pred.go_id}>
             {/* ── Mobile card ── */}
             <div
-              className={`lg:hidden border-b px-3 py-2.5 ${knownAnn ? "bg-green-50" : ""} ${hasDetail ? "cursor-pointer active:bg-blue-50/40" : ""}`}
+              className={`lg:hidden border-b px-3 py-2.5 ${standing(pred) !== "new" ? "bg-green-50" : ""} ${hasDetail ? "cursor-pointer active:bg-blue-50/40" : ""}`}
               onClick={() => hasDetail ? setExpanded(isExpanded ? null : pred.go_id) : undefined}
             >
               <div className="flex items-start justify-between gap-2 mb-1">
@@ -253,7 +358,8 @@ export function PredictionTable({ preds, knownByGoId }: {
                   {hasDetail && <span className="text-slate-300 text-[10px]">{isExpanded ? "▲" : "▼"}</span>}
                 </div>
               </div>
-              <p className="text-slate-700 leading-snug text-xs mb-1">{pred.name ?? "—"}</p>
+              <p className="text-slate-700 leading-snug text-xs mb-1">{pred.name ?? "—"}
+                <StandingMark standing={standing(pred)} impliedBy={implied?.get(pred.go_id)} /></p>
               <div className="flex flex-wrap items-center gap-2 text-[10px]">
                 {isMethod ? <MethodWitness pred={pred} /> : <span className="text-slate-600">via</span>}
                 {!isMethod && <Link
@@ -277,7 +383,7 @@ export function PredictionTable({ preds, knownByGoId }: {
             {/* ── Desktop row ── */}
             <div
               className={`hidden lg:grid ${gridClass} gap-x-3 border-b px-3 py-2 last:border-0 items-start
-                ${knownAnn ? "bg-green-50" : ""}
+                ${standing(pred) !== "new" ? "bg-green-50" : ""}
                 ${hasDetail ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
               onClick={() => hasDetail ? setExpanded(isExpanded ? null : pred.go_id) : undefined}
             >
@@ -290,7 +396,8 @@ export function PredictionTable({ preds, knownByGoId }: {
                 <span className={`font-mono ${scoreColor(methodScore(pred))}`}>{methodScore(pred).toFixed(3)}</span>
               )}
               <span className="font-mono text-blue-600">{pred.go_id}</span>
-              <span className="text-slate-700 leading-snug">{pred.name ?? "—"}</span>
+              <span className="text-slate-700 leading-snug">{pred.name ?? "—"}
+                <StandingMark standing={standing(pred)} impliedBy={implied?.get(pred.go_id)} /></span>
               {isMethod ? (
                 <MethodWitness pred={pred} />
               ) : (
@@ -432,7 +539,28 @@ function ProteinDetail({
       setLoadingGraph(false);
     }
   }
+  const t = useTranslations("functionalAnnotation");
   const knownByGoId = groupAnnotations(annotations);
+  const [implied, setImplied] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    const experimental = annotations.filter((a) => a.evidence_code && EXPERIMENTAL_CODES.has(a.evidence_code));
+    if (!ontologySnapshotId || experimental.length === 0) {
+      setImplied(new Map());
+      return;
+    }
+    let cancelled = false;
+    const names = new Map(experimental.map((a) => [a.go_id, a.name]));
+    getGoSubgraph(ontologySnapshotId, Array.from(names.keys()), 6)
+      .then((graph) => {
+        if (!cancelled) setImplied(impliedByKnown(graph, Array.from(names, ([go_id, name]) => ({ go_id, name }))));
+      })
+      .catch(() => {
+        if (!cancelled) setImplied(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [annotations, ontologySnapshotId]);
 
   const predByAspect: Record<string, Prediction[]> = { F: [], P: [], C: [], other: [] };
   for (const p of predictions) {
@@ -440,15 +568,16 @@ function ProteinDetail({
     predByAspect[key].push(p);
   }
 
-  const aspects = (["F", "P", "C"] as const).filter((asp) => predByAspect[asp].length > 0);
+  // An aspect with known terms and no prediction still gets its section, or its known terms vanish.
+  const aspects = (["F", "P", "C"] as const).filter(
+    (asp) => predByAspect[asp].length > 0 || Array.from(knownByGoId.values()).some((a) => a.aspect === asp),
+  );
 
   const predictedGoIds = new Set(predictions.map((p) => p.go_id));
   const annotatedGoIds = new Set(annotations.map((a) => a.go_id));
-  const totalMatches = predictions.filter((p) => knownByGoId.has(p.go_id)).length;
-  const totalUniquePredicted = predictions.length;
-
-  // Known terms not covered by any prediction
-  const uncoveredKnown = Array.from(knownByGoId.values()).filter((a) => !predictedGoIds.has(a.go_id));
+  // Counted by term: a retrieval set has one row per donor of a term.
+  const totalUniquePredicted = predictedGoIds.size;
+  const totalMatches = Array.from(predictedGoIds).filter((goId) => knownByGoId.has(goId)).length;
 
   return (
     <div className="mt-4 rounded-lg border bg-slate-50 p-4">
@@ -456,23 +585,23 @@ function ProteinDetail({
         <span className="font-mono font-semibold text-slate-900">{accession}</span>
         {inDb && (
           <Link href={`/${locale}/instrument/proteins/${accession}`} className="text-xs text-blue-500 hover:underline">
-            View protein →
+            {t("card.viewProtein")}
           </Link>
         )}
         {annotations.length > 0 && predictions.length > 0 && (
           <span className="text-xs text-green-700 font-medium sm:ml-auto">
-            {totalMatches} / {totalUniquePredicted} match known
+            {t("card.matchKnown", { matches: totalMatches, total: totalUniquePredicted })}
           </span>
         )}
         {ontologySnapshotId && predictions.length > 0 && (
           <button onClick={toggleGraph} className="rounded border bg-white px-2 py-1 text-xs hover:bg-slate-50">
-            {loadingGraph ? "Loading…" : showGraph ? "Hide graph" : "GO graph"}
+            {loadingGraph ? t("card.loading") : showGraph ? t("card.hideGraph") : t("card.showGraph")}
           </button>
         )}
         <button onClick={onClose} className="text-slate-600 hover:text-slate-600 text-lg leading-none ml-auto sm:ml-2">×</button>
       </div>
 
-      {loading && <p className="text-sm text-slate-600">Loading…</p>}
+      {loading && <p className="text-sm text-slate-600">{t("card.loading")}</p>}
 
       {showGraph && subgraph && (
         <div className="mb-4">
@@ -486,60 +615,29 @@ function ProteinDetail({
       )}
 
       {!loading && predictions.length === 0 && annotations.length === 0 && (
-        <p className="text-sm text-slate-600">No data found.</p>
+        <p className="text-sm text-slate-600">{t("card.noData")}</p>
       )}
 
       {!loading && aspects.map((asp) => {
         const preds = predByAspect[asp];
         const uniquePredCount = new Set(preds.map((p) => p.go_id)).size;
         const knownInAspect = Array.from(knownByGoId.values()).filter((a) => a.aspect === asp);
+        const uncoveredInAspect = knownInAspect.filter((a) => !predictedGoIds.has(a.go_id));
         return (
           <div key={asp} className="mb-5 last:mb-0">
             <div className="flex items-center gap-2 mb-2">
               <AspectBadge aspect={asp} />
               <span className="text-xs font-semibold text-slate-600">{ASPECT_LABELS[asp]}</span>
-              <span className="text-xs text-slate-600 ml-1">{uniquePredCount} predicted · {knownInAspect.length} known</span>
+              <span className="text-xs text-slate-600 ml-1">
+                {t("card.predictedKnown", { predicted: uniquePredCount, known: knownInAspect.length })}
+              </span>
             </div>
-            <PredictionTable preds={preds} knownByGoId={knownByGoId} />
+            {preds.length > 0 && <PredictionTable preds={preds} knownByGoId={knownByGoId} implied={implied} />}
+            {uncoveredInAspect.length > 0 && <UncoveredKnown anns={uncoveredInAspect} />}
           </div>
         );
       })}
 
-      {/* Known terms with no matching prediction */}
-      {!loading && uncoveredKnown.length > 0 && (
-        <div className="mt-4">
-          <p className="text-xs font-semibold text-slate-500 mb-2">
-            Known annotations not covered by any prediction ({uncoveredKnown.length})
-          </p>
-          <div className="overflow-x-auto rounded-md border bg-white text-xs">
-            <div className="grid grid-cols-[90px_1fr_80px] gap-2 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-600">
-              <div>GO ID</div><div>Name</div><div>Evidence</div>
-            </div>
-            {uncoveredKnown.map((ann) => (
-              <div key={ann.go_id} className="grid grid-cols-[90px_1fr_80px] gap-2 border-b px-3 py-2 last:border-0 items-start">
-                <span className="font-mono text-blue-600 pt-0.5">{ann.go_id}</span>
-                <span className="text-slate-700 leading-snug">{ann.name ?? "—"}</span>
-                <div className="flex flex-col items-end gap-0.5">
-                  <div className="flex flex-wrap gap-0.5 justify-end">
-                    {ann.evidence_codes.map((ec) => (
-                      <span key={ec} className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(ec)}`}>
-                        {ec}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap gap-0.5 justify-end">
-                    {ann.sources.map((s) => (
-                      <span key={`${s.source}-${s.version ?? ""}`} className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-500">
-                        {formatSource(s)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

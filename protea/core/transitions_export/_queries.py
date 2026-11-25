@@ -19,6 +19,7 @@ a window missing either is refused there rather than written as NULL.
 
 from __future__ import annotations
 
+import uuid
 from typing import NamedTuple
 
 import pyarrow as pa
@@ -26,6 +27,7 @@ import pyarrow.parquet as pq
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from protea.core.operations.predict_go_terms._photo_sequences import photo_of, photo_sequences
 from protea.core.transitions_export._window_facts import WindowFacts
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -63,13 +65,21 @@ class WindowQueries(NamedTuple):
     without_sequence: int
 
 
-def _sequences(session: Session, accessions: list[str]) -> dict[str, tuple[int, int]]:
+def _sequences(
+    session: Session, accessions: list[str], photo: uuid.UUID | None = None
+) -> dict[str, tuple[int, int]]:
     """Accession to ``(sequence_id, length)``, for those that have one.
 
-    The id comes from the protein's own row and the length from that sequence,
+    The id comes from a stored sequence row and the length from that sequence,
     so neither is derived from the published bytes: the FASTA is canonicalised
     (upper case, gaps removed) and its length can differ from the stored one.
+    On a window whose start set a photo loaded, the row is the member's sequence
+    at the cut (``photo_sequences``); the protein's own row is today's, which in
+    development is empty for every member and in production is the future.
     """
+    if photo is not None:
+        at_cut = photo_sequences(session, photo, accessions)
+        return {accession: (sid, len(residues)) for accession, (sid, residues) in at_cut.items()}
     rows = session.execute(
         select(Protein.accession, Protein.sequence_id, Sequence.sequence)
         .join(Sequence, Sequence.id == Protein.sequence_id)
@@ -88,7 +98,7 @@ def queries_of(session: Session, facts: WindowFacts, categories: list[str]) -> W
             f"window {facts.window} has no delta proteins in {categories}, so it would "
             "contribute no queries and the bundle would carry a window nothing asks about"
         )
-    conocidas = _sequences(session, accessions)
+    conocidas = _sequences(session, accessions, photo_of(session, facts.eset.old_annotation_set_id))
     rows = [
         QueryRow(
             window=facts.window,

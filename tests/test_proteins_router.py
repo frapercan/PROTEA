@@ -291,6 +291,33 @@ class TestGetProtein:
         assert data["metadata"] is not None
         assert data["metadata"]["function_cc"] == "mock_function_cc"
 
+    def test_empty_core_fields_come_from_the_entry_metadata(self, client):
+        # The clean store, 2026-11-24: no descriptive column of protein is filled,
+        # and resolve_protein_metadata wrote them to protein_uniprot_metadata.
+        c, session = client
+        p = _make_protein(
+            entry_name=None, organism=None, taxonomy_id=None, length=None, reviewed=None
+        )
+        meta = _make_metadata()
+        meta.entry_name, meta.organism_name, meta.organism_id = (
+            "META_HUMAN",
+            "Homo sapiens (Human)",
+            9606,
+        )
+        meta.length, meta.reviewed = 321, True
+        session.get.return_value = p
+        session.query.return_value.filter.return_value.first.return_value = meta
+        session.query.return_value.filter.return_value.scalar.return_value = 2
+        session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+
+        data = c.get("/proteins/P12345").json()
+        assert (data["entry_name"], data["organism"], data["taxonomy_id"]) == (
+            "META_HUMAN",
+            "Homo sapiens (Human)",
+            9606,
+        )
+        assert (data["length"], data["reviewed"]) == (321, True)
+
     def test_returns_protein_without_metadata(self, client):
         c, session = client
         p = _make_protein()
