@@ -127,6 +127,7 @@ def test_a_neighbour_arm_reads_its_cut_its_exclusion_and_its_reading() -> None:
         "depth": 3,
         "exclude_self": True,
         "self_exclusion": None,
+        "donors": None,
         "reading": "percentile_rank",
         "leak": "not_fitted",
         "training_release": None,
@@ -134,6 +135,16 @@ def test_a_neighbour_arm_reads_its_cut_its_exclusion_and_its_reading() -> None:
     assert shown["cells"] == {"NK:MFO": {"f": 0.4405, "tau": 0.57, "edge": None, "targets": 1045}}
     assert shown["created_at"] == "2026-11-21T12:00:00+00:00"
     assert shown["strata"] is None
+
+
+def test_two_donor_policies_of_one_model_are_two_arms() -> None:
+    # 2026-11-25: the ablation ran each PLM with experimental donors and with every code
+    # but ND; keyed by the model alone, the panel drew them as one series.
+    experimental = ["EXP", "IDA", "IPI", "IMP"]
+    everything = ["EXP", "IDA", "IEA", "ISS", "TAS"]
+    assert summary_row(_row(donor_codes=experimental), FRAME)["arm"]["donors"] == "experimental"
+    assert summary_row(_row(donor_codes=everything), FRAME)["arm"]["donors"] == "all"
+    assert summary_row(_row(donor_codes=None), FRAME)["arm"]["donors"] is None
 
 
 def test_an_arm_that_excluded_only_the_query_says_so() -> None:
