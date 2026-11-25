@@ -270,10 +270,13 @@ photo adds rows and never rewrites an earlier one.
 - ``load_cut_photo`` runs on the server. It verifies the manifest, writes the
   rows of decision 3 and declares the photo. The photo's GO graph is the newest
   loaded graph not after the GO release the GAF declares in its ``!go-version``
-  line; a GAF 2.1, as GOA wrote up to 2019 (cuts 160, 177 and 194), declares
-  none, and its graph is the newest loaded one not after the cut's date, the
-  pairing rule ADR-D60 gives cut 160 (amended 2026-11-16 with the author; the
-  manifest names the rule it applied).
+  line. A GAF that declares none would take the newest loaded graph not after
+  the cut's date (amended 2026-11-16 with the author; the manifest names the rule
+  it applied). Corrected 2026-11-23: GOA's GAF 2.1 files (cuts 160, 177 and 194)
+  do declare a release, with capitalised keys (``!GO-version:``), which the first
+  reading of the header matched case-sensitively and missed. Cut 160 declares
+  2016-10-29, the graph ADR-D60 gives it; 177 declares 2018-04-20 and 194
+  2019-11-09.
 
 **Two kinds of photo** (amended 2026-11-16 with the author: "Si, ok"). A ``full``
 photo is everything above. A ``truth_only`` photo is the photo of a cut that only

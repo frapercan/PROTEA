@@ -66,8 +66,11 @@ def upstream_source(record_path: Path, family: str, source: PassSource) -> dict[
     return {"release": str(record["release"]), "published": str(record["published"])}
 
 
-#: A GAF header field: ``!go-version: <url>``, ``!date-generated: ...``.
-_HEADER_FIELD = re.compile(r"^!([a-z][a-z-]*):\s*(.*?)\s*$")
+#: A GAF header field: ``!go-version: <url>``, ``!date-generated: ...``. GOA's GAF 2.1
+#: files capitalise their keys (``!GO-version:``, ``!Generated:``), so a key is matched
+#: in any case and stored in lower case: a case-sensitive match read the 2.1 headers of
+#: cuts 160, 177 and 194 as declaring no GO release, which they all do.
+_HEADER_FIELD = re.compile(r"^!([A-Za-z][A-Za-z-]*):\s*(.*?)\s*$")
 
 #: The GO release a GAF says it was built against, inside its ``go-version`` URL.
 _DECLARED_GO_RELEASE = re.compile(r"releases/(\d{4}-\d{2}-\d{2})")
@@ -87,7 +90,7 @@ def _gaf_columns(lines: Iterable[str], header: dict[str, str] | None = None) -> 
         elif header is not None and line.startswith("!"):
             field = _HEADER_FIELD.match(line)
             if field:
-                header.setdefault(field.group(1), field.group(2))
+                header.setdefault(field.group(1).lower(), field.group(2))
 
 
 def declared_go_release(header: dict[str, str]) -> str:
@@ -100,10 +103,11 @@ def go_release_rule(header: dict[str, str]) -> str:
     """Which rule picks the photo's GO graph (ADR-D59, amended 2026-11-16).
 
     ``declared``: the newest loaded graph not after the GO release the GAF declares.
-    ``cut_date``: the GAF has no ``go-version`` line (a GAF 2.1, as GOA wrote up to
-    2019), so the newest loaded graph not after the cut's date, the pairing rule
-    ADR-D60 gives cut 160. ``unreadable``: a ``go-version`` line that names no
-    release, which refuses the photo.
+    ``cut_date``: the GAF declares no GO release at all, so the newest loaded graph
+    not after the cut's date. GOA's GAF 2.1 files do declare one, capitalised
+    (``!GO-version:``): cut 160 declares 2016-10-29, the graph ADR-D60 gives it.
+    ``unreadable``: a ``go-version`` line that names no release, which refuses the
+    photo.
     """
     if "go-version" not in header:
         return "cut_date"

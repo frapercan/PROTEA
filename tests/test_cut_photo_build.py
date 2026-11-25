@@ -432,8 +432,28 @@ class TestTheManifest:
         assert sources["uniref"]["release"] == "2022_03"
         assert sources["uniprot"]["knowledgebase"] == KB_FILE
 
+    def test_a_gaf_2_1_header_declares_its_go_release(self, tmp_path: Path) -> None:
+        # GOA's GAF 2.1 files capitalise their keys; this is the head of GOA 160 as EBI
+        # serves it. Read case-sensitively, it looked like a GAF declaring no release.
+        header_2_1 = [
+            "!gaf-version: 2.1\n",
+            "!\n",
+            "!This file contains all GO annotations and gene product information for proteins\n",
+            "!\n",
+            "!Generated: 2016-10-31 11:10\n",
+            "!GO-version: http://purl.obolibrary.org/obo/go/releases/2016-10-29/go.owl\n",
+            "!\n",
+        ]
+        out = _build(tmp_path, [*header_2_1, *GAF[len(HEADER) :]])
+        self._sequences(tmp_path, out)
+        manifest = manifest_pass(out, revision="abc")
+        assert manifest["status"] == "complete"
+        goa = manifest["sources"]["goa"]
+        assert (goa["declared_go_release"], goa["go_release_rule"]) == ("2016-10-29", "declared")
+        assert goa["date_generated"] == "2016-10-31 11:10"
+
     def test_a_gaf_with_no_go_version_is_bound_by_the_cut_date(self, tmp_path: Path) -> None:
-        # GOA wrote GAF 2.1 with no go-version line up to 2019 (160, 177, 194).
+        # A GAF that declares no GO release at all.
         out = _build(tmp_path, [line for line in GAF if not line.startswith("!go-version")])
         self._sequences(tmp_path, out)
         manifest = manifest_pass(out, revision="abc")

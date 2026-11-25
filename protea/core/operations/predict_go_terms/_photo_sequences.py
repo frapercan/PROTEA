@@ -65,6 +65,53 @@ def member_sequences(photo_id: uuid.UUID) -> Any:
     )
 
 
+def _chunks(items: list[str], size: int) -> list[list[str]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def photo_sequences(
+    session: Session, photo_id: uuid.UUID, accessions: list[str], chunk: int = 10_000
+) -> dict[str, tuple[int, str]]:
+    """Accession to ``(sequence id, residues)`` at the photo's cut, for members that have one.
+
+    The sequence is the member's (``cut_photo_member.sequence_md5``), never the
+    protein's row: on a photo's run, an alignment, a length, a target FASTA or a
+    transitions table built from today's sequence would read the future in
+    production and nothing at all in development.
+    """
+    found: dict[str, tuple[int, str]] = {}
+    for part in _chunks(sorted(set(accessions)), chunk):
+        rows = session.execute(
+            select(CutPhotoMember.accession, Sequence.id, Sequence.sequence)
+            .join(Sequence, Sequence.sequence_hash == CutPhotoMember.sequence_md5)
+            .where(CutPhotoMember.photo_id == photo_id, CutPhotoMember.accession.in_(part))
+        ).all()
+        found.update(
+            {accession: (sequence_id, residues) for accession, sequence_id, residues in rows}
+        )
+    return found
+
+
+def photo_taxa(
+    session: Session, photo_id: uuid.UUID, accessions: list[str], chunk: int = 10_000
+) -> dict[str, int | None]:
+    """Accession to the member's taxon at the photo's cut (``cut_photo_member.taxon_id``).
+
+    Every asked accession is a key; a member with no recorded taxon, or an
+    accession the photo does not hold, maps to None, as an unknown taxon did
+    before.
+    """
+    found: dict[str, int | None] = dict.fromkeys(accessions)
+    for part in _chunks(sorted(set(accessions)), chunk):
+        rows = session.execute(
+            select(CutPhotoMember.accession, CutPhotoMember.taxon_id).where(
+                CutPhotoMember.photo_id == photo_id, CutPhotoMember.accession.in_(part)
+            )
+        ).all()
+        found.update({accession: (int(taxon) if taxon else None) for accession, taxon in rows})
+    return found
+
+
 def donor_pool_base(
     session: Session, annotation_set_id: object, embedding_config_id: uuid.UUID, annotated: Any
 ) -> tuple[Any, Any]:
@@ -101,4 +148,4 @@ def donor_pool_base(
     return query, Protein.accession
 
 
-__all__ = ["donor_pool_base", "member_sequences", "photo_of"]
+__all__ = ["donor_pool_base", "member_sequences", "photo_of", "photo_sequences", "photo_taxa"]
