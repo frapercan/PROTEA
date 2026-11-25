@@ -1087,6 +1087,28 @@
       "delete": "Excluir",
       "deleteConfirm": "Excluir este conjunto e suas {count} atribuições de termos GO? Esta ação não pode ser desfeita.",
       "deleteConfirmNoAssignments": "Excluir este conjunto de anotações?"
+    },
+    "card": {
+      "viewProtein": "Ver proteína →",
+      "matchKnown": "{matches} de {total} termos previstos já eram conhecidos",
+      "showGraph": "Grafo GO",
+      "hideGraph": "Ocultar grafo",
+      "loading": "A carregar…",
+      "noData": "Sem dados.",
+      "predictedKnown": "{predicted} previstos, {known} conhecidos",
+      "uncovered": "Conhecidos, não previstos ({count})",
+      "goId": "GO ID",
+      "name": "Nome",
+      "evidence": "Evidência",
+      "score": "Pontuação",
+      "witness": "Testemunha",
+      "via": "Via (ref.)",
+      "predEv": "Ev. prev.",
+      "knownEv": "Ev. conhecida",
+      "dist": "Dist.",
+      "markExperimental": "já conhecido (experimental)",
+      "markImplied": "implícito por {term}",
+      "markAnnotated": "já anotado"
     }
   },
   "evaluation": {

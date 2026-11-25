@@ -1087,6 +1087,28 @@
       "delete": "删除",
       "deleteConfirm": "删除此注释集及其 {count} 个 GO 术语分配？此操作无法撤销。",
       "deleteConfirmNoAssignments": "删除此注释集？"
+    },
+    "card": {
+      "viewProtein": "查看蛋白质 →",
+      "matchKnown": "{total} 个预测术语中有 {matches} 个已知",
+      "showGraph": "GO 图",
+      "hideGraph": "隐藏图",
+      "loading": "加载中…",
+      "noData": "未找到数据。",
+      "predictedKnown": "预测 {predicted} 个，已知 {known} 个",
+      "uncovered": "已知但未预测（{count}）",
+      "goId": "GO ID",
+      "name": "名称",
+      "evidence": "证据",
+      "score": "得分",
+      "witness": "依据",
+      "via": "来源（参考）",
+      "predEv": "预测证据",
+      "knownEv": "已知证据",
+      "dist": "距离",
+      "markExperimental": "已知（实验）",
+      "markImplied": "由 {term} 推出",
+      "markAnnotated": "已注释"
     }
   },
   "evaluation": {
