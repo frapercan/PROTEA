@@ -47,6 +47,8 @@ export type PanelArm = {
   method: string | null;
   depth: number | null;
   exclude_self: boolean | null;
+  /** Which annotations it transferred; two donor policies of one model are two arms. */
+  donors?: "experimental" | "all" | null;
   /** Who left the query's neighbourhood with it: its twins too ("sequence") or
    *  nobody ("accession"). Null when the run left the rule to the flag. */
   self_exclusion?: string | null;
@@ -152,9 +154,19 @@ export function isNeighbour(r: SummaryResult): boolean {
 }
 
 /** The arm in full: "ESM-2 650M · embedding_only · k=1", or the method's name. */
+/**
+ * The model as the panel tells arms apart: the PLM, and "exp" when its donors were
+ * experimental annotations only. Keyed by the PLM alone, two donor policies of one
+ * model drew as one series and filtered as one model (2026-11-25).
+ */
+export function armModel(r: SummaryResult): string {
+  const name = modelName(r.arm.model);
+  return r.arm.donors === "experimental" ? `${name} · exp` : name;
+}
+
 export function armLabel(r: SummaryResult): string {
   if (!isNeighbour(r)) return methodName(r.arm.method) || r.prediction_set_id.slice(0, 8);
-  const parts = [modelName(r.arm.model), r.arm.scoring ?? "candidates"];
+  const parts = [armModel(r), r.arm.scoring ?? "candidates"];
   if (r.arm.depth != null) parts.push(`k=${r.arm.depth}`);
   if (r.arm.self_exclusion === "accession") parts.push("self by accession");
   return parts.join(" · ");
@@ -162,13 +174,17 @@ export function armLabel(r: SummaryResult): string {
 
 /** Two arms that differ only in which proteins left with the query are two arms. */
 export function sameExclusion(a: SummaryResult["arm"], b: SummaryResult["arm"]): boolean {
-  return a.exclude_self === b.exclude_self && (a.self_exclusion ?? null) === (b.self_exclusion ?? null);
+  return (
+    a.exclude_self === b.exclude_self &&
+    (a.self_exclusion ?? null) === (b.self_exclusion ?? null) &&
+    (a.donors ?? null) === (b.donors ?? null)
+  );
 }
 
 /** The arm in a few characters, for rows and cells: "650M emb k=1". */
 export function armShort(r: SummaryResult): string {
   if (!isNeighbour(r)) return methodName(r.arm.method) || r.prediction_set_id.slice(0, 8);
-  const model = modelName(r.arm.model).replace(/^ESM-2 /, "");
+  const model = armModel(r).replace(/^ESM-2 /, "");
   const scoring = r.arm.scoring ? (SCORING_SHORT[r.arm.scoring] ?? r.arm.scoring) : "cand";
   const self = r.arm.self_exclusion === "accession" ? " acc" : "";
   return `${model} ${scoring}${r.arm.depth != null ? ` k=${r.arm.depth}` : ""}${self}`;
@@ -218,7 +234,7 @@ export function visibleResults(results: SummaryResult[], f: PanelFilters): Summa
     if (r.arm.reading !== f.reading) return false;
     if (!f.superseded && isSuperseded(r)) return false;
     if (!isNeighbour(r)) return true;
-    if (f.models.length && !f.models.includes(modelName(r.arm.model))) return false;
+    if (f.models.length && !f.models.includes(armModel(r))) return false;
     if (f.scorings.length && !f.scorings.includes(r.arm.scoring ?? "")) return false;
     if (f.depths.length && (r.arm.depth == null || !f.depths.includes(r.arm.depth))) return false;
     return true;
@@ -236,7 +252,7 @@ export function referenceOf(shown: SummaryResult[], asked: string | null): Summa
 export function modelsOf(results: SummaryResult[]): string[] {
   const seen: string[] = [];
   for (const r of results) {
-    const name = isNeighbour(r) ? modelName(r.arm.model) : null;
+    const name = isNeighbour(r) ? armModel(r) : null;
     if (name && !seen.includes(name)) seen.push(name);
   }
   return seen;

@@ -15,7 +15,8 @@ import { useCallback, useMemo } from "react";
 export const PANEL_DEFAULTS = {
   tab: "summary",
   cell: "NK:MFO",
-  reading: "percentile_rank",
+  // LAFA's reading; a window read the other way only falls back to it (WindowPanel).
+  reading: "raw",
   ref: "",
   models: "",
   scorings: "",

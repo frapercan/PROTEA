@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import distinct, func
+from sqlalchemy import and_, distinct, exists, func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached, refresh
@@ -61,6 +61,76 @@ def _count_proteins_with_go(session: Session) -> int:
     )
 
 
+def _reviewed_somewhere() -> Any:
+    """True for a protein whose own row, or its canonical entry's metadata, says reviewed.
+
+    The clean store fills no descriptive column of ``protein`` (2026-11-24: every
+    ``reviewed`` is NULL); ``resolve_protein_metadata`` writes them to
+    ``protein_uniprot_metadata``. Reading both counts a store that has the columns and
+    one that has the metadata the same way.
+    """
+    return or_(
+        Protein.reviewed.is_(True),
+        exists().where(
+            and_(
+                ProteinUniProtMetadata.canonical_accession == Protein.canonical_accession,
+                ProteinUniProtMetadata.reviewed.is_(True),
+            )
+        ),
+    )
+
+
+def _shown(p: Protein, meta: ProteinUniProtMetadata | None) -> dict[str, Any]:
+    """The descriptive fields a page shows: the protein's own, else its entry's metadata.
+
+    The metadata belongs to the canonical entry, so an isoform takes its name, organism
+    and review status from it, never its length.
+    """
+    if meta is None:
+        return {
+            "entry_name": p.entry_name,
+            "organism": p.organism,
+            "taxonomy_id": p.taxonomy_id,
+            "length": p.length,
+            "reviewed": p.reviewed,
+        }
+    return {
+        "entry_name": p.entry_name or meta.entry_name,
+        "organism": p.organism or meta.organism_name,
+        "taxonomy_id": p.taxonomy_id or meta.organism_id,
+        "length": p.length or (meta.length if p.is_canonical else None),
+        "reviewed": p.reviewed if p.reviewed is not None else meta.reviewed,
+    }
+
+
+def _matches(like: str) -> Any:
+    """A search term against the accession, the gene and the names, the protein's or its entry's."""
+    return (
+        Protein.accession.ilike(like)
+        | Protein.entry_name.ilike(like)
+        | Protein.gene_name.ilike(like)
+        | Protein.organism.ilike(like)
+        | exists().where(
+            and_(
+                ProteinUniProtMetadata.canonical_accession == Protein.canonical_accession,
+                ProteinUniProtMetadata.entry_name.ilike(like)
+                | ProteinUniProtMetadata.organism_name.ilike(like),
+            )
+        )
+    )
+
+
+def _metadata_of(session: Session, rows: list[Protein]) -> dict[str, ProteinUniProtMetadata]:
+    """The entry metadata of one page of proteins, by canonical accession, in one query."""
+    entries = sorted({p.canonical_accession for p in rows})
+    found = (
+        session.query(ProteinUniProtMetadata)
+        .filter(ProteinUniProtMetadata.canonical_accession.in_(entries))
+        .all()
+    )
+    return {m.canonical_accession: m for m in found}
+
+
 def _compute_protein_stats(
     factory: sessionmaker[Session],
 ) -> dict[str, Any]:
@@ -79,8 +149,7 @@ def _compute_protein_stats(
             or 0
         )
         reviewed = (
-            session.query(func.count(Protein.accession)).filter(Protein.reviewed.is_(True)).scalar()
-            or 0
+            session.query(func.count(Protein.accession)).filter(_reviewed_somewhere()).scalar() or 0
         )
         with_metadata = (
             session.query(func.count(distinct(Protein.canonical_accession)))
@@ -182,19 +251,15 @@ def list_proteins(
         if canonical_only:
             q = q.filter(Protein.is_canonical.is_(True))
         if reviewed is not None:
-            q = q.filter(Protein.reviewed == reviewed)
+            q = q.filter(_reviewed_somewhere() if reviewed else ~_reviewed_somewhere())
         if search:
             # Limit search length to prevent abuse; escape LIKE special chars.
             term = search[:100].replace("%", r"\%").replace("_", r"\_")
             like = f"%{term}%"
-            q = q.filter(
-                Protein.accession.ilike(like)
-                | Protein.entry_name.ilike(like)
-                | Protein.gene_name.ilike(like)
-                | Protein.organism.ilike(like)
-            )
+            q = q.filter(_matches(like))
         total = q.count()
         rows = q.order_by(Protein.accession).offset(offset).limit(limit).all()
+        metas = _metadata_of(session, rows)
         return {
             "total": total,
             "offset": offset,
@@ -202,12 +267,8 @@ def list_proteins(
             "items": [
                 {
                     "accession": p.accession,
-                    "entry_name": p.entry_name,
                     "gene_name": p.gene_name,
-                    "organism": p.organism,
-                    "taxonomy_id": p.taxonomy_id,
-                    "length": p.length,
-                    "reviewed": p.reviewed,
+                    **_shown(p, metas.get(p.canonical_accession)),
                     "is_canonical": p.is_canonical,
                     "isoform_index": p.isoform_index,
                 }
@@ -310,12 +371,8 @@ def get_protein(
 
         return {
             "accession": p.accession,
-            "entry_name": p.entry_name,
             "gene_name": p.gene_name,
-            "organism": p.organism,
-            "taxonomy_id": p.taxonomy_id,
-            "length": p.length,
-            "reviewed": p.reviewed,
+            **_shown(p, meta),
             "is_canonical": p.is_canonical,
             "canonical_accession": p.canonical_accession,
             "isoform_index": p.isoform_index,

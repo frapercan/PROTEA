@@ -1087,6 +1087,28 @@
       "delete": "删除",
       "deleteConfirm": "删除此注释集及其 {count} 个 GO 术语分配？此操作无法撤销。",
       "deleteConfirmNoAssignments": "删除此注释集？"
+    },
+    "card": {
+      "viewProtein": "查看蛋白质 →",
+      "matchKnown": "{total} 个预测术语中有 {matches} 个已知",
+      "showGraph": "GO 图",
+      "hideGraph": "隐藏图",
+      "loading": "加载中…",
+      "noData": "未找到数据。",
+      "predictedKnown": "预测 {predicted} 个，已知 {known} 个",
+      "uncovered": "已知但未预测（{count}）",
+      "goId": "GO ID",
+      "name": "名称",
+      "evidence": "证据",
+      "score": "得分",
+      "witness": "依据",
+      "via": "来源（参考）",
+      "predEv": "预测证据",
+      "knownEv": "已知证据",
+      "dist": "距离",
+      "markExperimental": "已知（实验）",
+      "markImplied": "由 {term} 推出",
+      "markAnnotated": "已注释"
     }
   },
   "evaluation": {
@@ -1127,7 +1149,7 @@
       "artifactsDownload": "↓ 产物（.zip）",
       "resultDelete": "删除",
       "deleteResultConfirm": "删除此评估结果？",
-      "openPanel": "打开该窗口的面板"
+      "openPanel": "查看结果与分层"
     },
     "evaluationSetsSection": {
       "heading": "评估集",
@@ -1179,7 +1201,11 @@
     },
     "statDelta": "差集蛋白数",
     "statsTitle": "评估集统计",
-    "title": "CAFA 评估"
+    "title": "CAFA 评估",
+    "strataCta": {
+      "title": "分层结果",
+      "body": "每个方法在九个单元格中的结果，按与最近已注释蛋白的序列一致性和长度分层，并给出每层的 n。"
+    }
   },
   "scoring": {
     "title": "评分配置",
@@ -2627,5 +2653,19 @@
       "setLink": "集合",
       "nothing": "没有匹配的结果。"
     }
+  },
+  "landing": {
+    "statsTitle": "数据概览",
+    "statsNote": "实时读取自提供本页面的数据库。",
+    "statProteins": "蛋白质",
+    "statWithGo": "有 GO 注释的蛋白质",
+    "statCuts": "GO 注释版本",
+    "statCutsValue": "{count} 个，{first} 至 {last}",
+    "statModels": "蛋白质语言模型",
+    "statVectors": "序列嵌入向量",
+    "newsTitle": "最新动态",
+    "plansTitle": "后续计划",
+    "evaluation": "查看评估",
+    "linksLabel": "继续浏览"
   }
 }

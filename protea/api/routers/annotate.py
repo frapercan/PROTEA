@@ -24,7 +24,6 @@ from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.routers.query_sets import _parse_fasta, _upsert_sequences
 from protea.core import queues
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.reranker_model import (
     active_or_latest_reranker,
@@ -150,11 +149,21 @@ def invalidate_best_config_cache() -> None:
 
 
 def _newest_annotation_set(session: Session) -> AnnotationSet | None:
-    return session.query(AnnotationSet).order_by(AnnotationSet.created_at.desc()).first()
+    """The donors of the latest cut: the set whose source was published last.
 
-
-def _newest_ontology_snapshot(session: Session) -> OntologySnapshot | None:
-    return session.query(OntologySnapshot).order_by(OntologySnapshot.loaded_at.desc()).first()
+    Ordered by the source's publication date, not by when the set was loaded: a store
+    can be built out of order, and the set loaded last need not be the newest cut. A set
+    with no recorded publication date sorts after every dated one; the load time breaks
+    ties.
+    """
+    return (
+        session.query(AnnotationSet)
+        .order_by(
+            AnnotationSet.source_published_at.desc().nulls_last(),
+            AnnotationSet.created_at.desc(),
+        )
+        .first()
+    )
 
 
 class AnnotateFormOptions(BaseModel):
@@ -426,7 +435,8 @@ def _resolve_dispatch_resources(
     session: Session, cached_config_id: uuid.UUID | None = None
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID | None]:
     """Pick the best embedding config (creating the default ESM-2 if none exists),
-    the newest AnnotationSet + OntologySnapshot, and the serve RerankerModel
+    the newest AnnotationSet and the OntologySnapshot it draws its terms from, and the
+    serve RerankerModel
     (active-first, then latest-by-created_at; see ``active_or_latest_reranker``).
 
     ``cached_config_id`` is the TTL-cached id of the smallest config that has
@@ -434,7 +444,13 @@ def _resolve_dispatch_resources(
     config scan. ``None`` means resolve fresh (and create the default if the
     DB is empty).
 
-    Raises HTTP 409 when no annotation set or ontology snapshot is loaded yet.
+    The snapshot is the donor set's own, never one looked up on its own: every
+    predicted term comes from a donor annotation, and ``predict_go_terms`` refuses a
+    snapshot other than the set's. Picking the most recently loaded snapshot broke
+    /annotate on a store whose graphs were loaded out of order (2026-11-24: the
+    2019-11-02 graph loaded last, the newest set drawing on 2025-07-22).
+
+    Raises HTTP 409 when no annotation set is loaded yet.
     Returns ``(config_id, annotation_set_id, ontology_snapshot_id, reranker_id)``;
     ``reranker_id`` is ``None`` when no RerankerModel rows exist."""
     config = None
@@ -455,15 +471,9 @@ def _resolve_dispatch_resources(
             status_code=409,
             detail="No annotation sets available. Load GO annotations first.",
         )
-    snap = _newest_ontology_snapshot(session)
-    if snap is None:
-        raise HTTPException(
-            status_code=409,
-            detail="No ontology snapshots available. Load a GO ontology first.",
-        )
     best_reranker = active_or_latest_reranker(session)
     reranker_id = best_reranker.id if best_reranker else None
-    return config.id, ann.id, snap.id, reranker_id
+    return config.id, ann.id, ann.ontology_snapshot_id, reranker_id
 
 
 def _enqueue_embed_job(
