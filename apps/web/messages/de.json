@@ -1149,7 +1149,7 @@
       "artifactsDownload": "↓ Artefakte (.zip)",
       "resultDelete": "Löschen",
       "deleteResultConfirm": "Dieses Evaluierungsergebnis löschen?",
-      "openPanel": "Panel des Fensters öffnen"
+      "openPanel": "Ergebnisse und Schichten ansehen"
     },
     "evaluationSetsSection": {
       "heading": "Evaluierungssets",
