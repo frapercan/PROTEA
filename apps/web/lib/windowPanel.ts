@@ -228,11 +228,18 @@ export type PanelFilters = {
   depths: number[];
 };
 
-/** The results the panel shows: one reading, filtered by factor; methods always. */
+/** The results the panel shows: one reading, filtered by factor; methods always.
+ *
+ * An arm that kept the query as its own neighbour is superseded only where the window
+ * ALSO holds arms that excluded it. Where keeping it is the design -- the public
+ * ablation keeps the first hit on purpose, and 112 of its 114 arms do -- hiding them
+ * left the panel showing one arm of 114. The rule lives here, once: the panel's own
+ * pool reads it from this function so the two cannot drift apart again. */
 export function visibleResults(results: SummaryResult[], f: PanelFilters): SummaryResult[] {
+  const replaced = results.some((r) => r.arm.exclude_self === true);
   return results.filter((r) => {
     if (r.arm.reading !== f.reading) return false;
-    if (!f.superseded && isSuperseded(r)) return false;
+    if (!f.superseded && replaced && isSuperseded(r)) return false;
     if (!isNeighbour(r)) return true;
     if (f.models.length && !f.models.includes(armModel(r))) return false;
     if (f.scorings.length && !f.scorings.includes(r.arm.scoring ?? "")) return false;

@@ -184,14 +184,15 @@ export default function WindowPanel({ evaluationSetId }: { evaluationSetId: stri
 
   const models = modelsOf(summary.results);
   const active = listOf(state.models).length + listOf(state.scorings).length + listOf(state.depths).length;
-  // An arm that kept the query as its own neighbour is superseded only where the window also
-  // holds arms that excluded it; where keeping it is the design (the public ablation, the
-  // author's "no excluir el primer hit"), hiding them emptied the panel.
-  const replaced = summary.results.some((r) => r.arm.exclude_self === true);
-  const pool = summary.results.filter(
-    (r) =>
-      r.arm.reading === state.reading && (state.superseded === "1" || !replaced || r.arm.exclude_self !== false),
-  );
+  // The same rule the table uses, read from the same function: a hand-rolled copy here
+  // is what let the pool and the table disagree, and the table won.
+  const pool = visibleResults(summary.results, {
+    reading: state.reading,
+    superseded: state.superseded === "1",
+    models: [],
+    scorings: [],
+    depths: [],
+  });
   const chip = (key: "models" | "scorings" | "depths", value: string, label: string) => {
     const on = listOf(state[key]).includes(value);
     return (
