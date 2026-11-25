@@ -511,6 +511,21 @@ Published under ``protein_resolution/<job_id>/`` in the ``ArtifactStore``:
 Annotations of a protein whose sequence never arrives are KEPT: the protein took
 part in the deltas. Queries that need a chain filter on ``sequence_id IS NOT NULL``.
 
+link_protein_sequences
+----------------------
+
+**Operation name:** ``link_protein_sequences``; queue: ``protea.jobs``
+
+| **Tables touched:** ``Protein`` (``sequence_id`` and ``updated_at`` only).
+
+Links every protein with no sequence to the one its latest cut photo records. Each
+photo keeps every member's sequence at its cut by md5
+(``cut_photo_member.sequence_md5``), and the embedding banks were built from exactly
+those sequences, so a protein linked here is linked to the vectors the banks hold. A
+protein whose sequence changed between cuts takes the latest cut's. Nothing is asked
+of UniProt; ``resolve_protein_sequences`` is the networked alternative, and a protein
+already linked by either one is left alone.
+
 resolve_protein_metadata
 ------------------------
 

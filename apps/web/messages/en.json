@@ -1086,6 +1086,28 @@
       "delete": "Delete",
       "deleteConfirm": "Delete this annotation set and its {count} GO term assignments? This cannot be undone.",
       "deleteConfirmNoAssignments": "Delete this annotation set?"
+    },
+    "card": {
+      "viewProtein": "View protein →",
+      "matchKnown": "{matches} of {total} predicted terms already known",
+      "showGraph": "GO graph",
+      "hideGraph": "Hide graph",
+      "loading": "Loading…",
+      "noData": "No data found.",
+      "predictedKnown": "{predicted} predicted, {known} known",
+      "uncovered": "Known, not predicted ({count})",
+      "goId": "GO ID",
+      "name": "Name",
+      "evidence": "Evidence",
+      "score": "Score",
+      "witness": "Witness",
+      "via": "Via (ref)",
+      "predEv": "Pred. ev.",
+      "knownEv": "Known ev.",
+      "dist": "Dist",
+      "markExperimental": "already known (experimental)",
+      "markImplied": "implied by {term}",
+      "markAnnotated": "already annotated"
     }
   },
   "evaluation": {
@@ -1126,7 +1148,7 @@
       "artifactsDownload": "↓ Artifacts (.zip)",
       "resultDelete": "Delete",
       "deleteResultConfirm": "Delete this evaluation result?",
-      "openPanel": "Open the window's panel"
+      "openPanel": "See results and strata"
     },
     "evaluationSetsSection": {
       "heading": "Evaluation Sets",
@@ -1178,7 +1200,11 @@
     },
     "statDelta": "delta proteins",
     "statsTitle": "Set stats",
-    "title": "CAFA Evaluation"
+    "title": "CAFA Evaluation",
+    "strataCta": {
+      "title": "Results by stratum",
+      "body": "Every arm in the nine cells, opened by sequence identity to the nearest annotated protein and by length, with n in each band."
+    }
   },
   "scoring": {
     "title": "Scoring Configs",
@@ -2626,5 +2652,19 @@
       "setLink": "set",
       "nothing": "Nothing matches the search."
     }
+  },
+  "landing": {
+    "statsTitle": "In figures",
+    "statsNote": "Read live from the database that serves this page.",
+    "statProteins": "Proteins",
+    "statWithGo": "With GO annotations",
+    "statCuts": "GO annotation releases",
+    "statCutsValue": "{count}, from {first} to {last}",
+    "statModels": "Protein language models",
+    "statVectors": "Sequence embeddings",
+    "newsTitle": "What is new",
+    "plansTitle": "What comes next",
+    "evaluation": "See the evaluation",
+    "linksLabel": "Where to go next"
   }
 }

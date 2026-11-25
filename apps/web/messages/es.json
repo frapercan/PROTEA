@@ -1086,6 +1086,28 @@
       "delete": "Eliminar",
       "deleteConfirm": "¿Eliminar este conjunto de anotaciones y sus {count} asignaciones de términos GO? Esta acción no se puede deshacer.",
       "deleteConfirmNoAssignments": "¿Eliminar este conjunto de anotaciones?"
+    },
+    "card": {
+      "viewProtein": "Ver proteína →",
+      "matchKnown": "{matches} de {total} términos predichos ya se conocían",
+      "showGraph": "Grafo GO",
+      "hideGraph": "Ocultar grafo",
+      "loading": "Cargando…",
+      "noData": "No hay datos.",
+      "predictedKnown": "{predicted} predichos, {known} conocidos",
+      "uncovered": "Conocidos sin predecir ({count})",
+      "goId": "GO ID",
+      "name": "Nombre",
+      "evidence": "Evidencia",
+      "score": "Puntuación",
+      "witness": "Testigo",
+      "via": "Vía (ref.)",
+      "predEv": "Ev. pred.",
+      "knownEv": "Ev. conocida",
+      "dist": "Dist.",
+      "markExperimental": "ya conocido (experimental)",
+      "markImplied": "implícito por {term}",
+      "markAnnotated": "ya anotado"
     }
   },
   "evaluation": {
@@ -1126,7 +1148,7 @@
       "artifactsDownload": "↓ Artefactos (.zip)",
       "resultDelete": "Eliminar",
       "deleteResultConfirm": "¿Eliminar este resultado de evaluación?",
-      "openPanel": "Abrir el panel de la ventana"
+      "openPanel": "Ver resultados y estratos"
     },
     "evaluationSetsSection": {
       "heading": "Conjuntos de evaluación",
@@ -1178,7 +1200,11 @@
     },
     "statDelta": "proteínas del delta",
     "statsTitle": "Estadísticas del conjunto",
-    "title": "Evaluación CAFA"
+    "title": "Evaluación CAFA",
+    "strataCta": {
+      "title": "Resultados por estrato",
+      "body": "Cada brazo en las nueve celdas, abiertas por identidad de secuencia con la proteína anotada más cercana y por longitud, con n en cada banda."
+    }
   },
   "scoring": {
     "title": "Configuraciones de scoring",
@@ -2626,5 +2652,19 @@
       "setLink": "conjunto",
       "nothing": "Nada coincide con la búsqueda."
     }
+  },
+  "landing": {
+    "statsTitle": "En cifras",
+    "statsNote": "Leído en vivo de la base de datos que sirve esta página.",
+    "statProteins": "Proteínas",
+    "statWithGo": "Con anotaciones GO",
+    "statCuts": "Versiones de anotaciones GO",
+    "statCutsValue": "{count}, de {first} a {last}",
+    "statModels": "Modelos de lenguaje de proteínas",
+    "statVectors": "Embeddings de secuencia",
+    "newsTitle": "Qué hay de nuevo",
+    "plansTitle": "Qué viene",
+    "evaluation": "Ver la evaluación",
+    "linksLabel": "Por dónde seguir"
   }
 }

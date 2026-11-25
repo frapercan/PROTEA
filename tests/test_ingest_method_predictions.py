@@ -343,6 +343,16 @@ class TestWhatItReportsWhenItWorks:
         assert meta["code_revision"] and "dependency_revisions" in meta
         assert "query_population" not in meta  # nothing was declared
 
+    def test_the_description_names_the_method_not_its_record(self, tmp_path: Path) -> None:
+        # The set's page shows the description to people: a method name, never the
+        # producer's record printed as a dict (2026-11-24, the champion's page).
+        session = _Session()
+        op = IngestMethodPredictionsOperation()
+        op.execute(session, _payload(_write(tmp_path, GOOD)).model_dump(), emit=_emit)
+        description = session.added[0].description
+        assert description.startswith(f"The predictions of method {METHOD['name']}, ingested")
+        assert "{" not in description
+
     def test_a_list_it_was_handed_is_the_population_it_records(self, tmp_path: Path) -> None:
         session = _Session()
         op = IngestMethodPredictionsOperation()

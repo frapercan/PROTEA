@@ -26,7 +26,12 @@ from protea.core.operations.predict_go_terms._common import (
 from protea.core.operations.predict_go_terms._missing_query_vectors import (
     report_queries_without_vector,
 )
-from protea.core.operations.predict_go_terms._photo_sequences import member_sequences, photo_of
+from protea.core.operations.predict_go_terms._photo_sequences import (
+    member_sequences,
+    photo_of,
+    photo_sequences,
+    photo_taxa,
+)
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -68,11 +73,15 @@ class _FeatureLoadingMixin:
         query_tax_ids: dict[str, int | None] = {}
 
         if p.compute_alignments:
-            ref_sequences = self._load_sequences_for_proteins(session, all_unique_neighbors)
+            ref_sequences = self._load_sequences_for_proteins(
+                session, all_unique_neighbors, annotation_set_id=p.annotation_set_id
+            )
             query_sequences = self._load_sequences_for_queries(session, p, valid_accessions)
 
         if p.compute_taxonomy:
-            ref_tax_ids = self._load_taxonomy_ids_for_proteins(session, all_unique_neighbors)
+            ref_tax_ids = self._load_taxonomy_ids_for_proteins(
+                session, all_unique_neighbors, annotation_set_id=p.annotation_set_id
+            )
             query_tax_ids = self._load_taxonomy_ids_for_queries(session, p, valid_accessions)
 
         return ref_sequences, query_sequences, ref_tax_ids, query_tax_ids
@@ -208,11 +217,21 @@ class _FeatureLoadingMixin:
         return embeddings, valid_accessions
 
     def _load_sequences_for_proteins(
-        self, session: Session, accessions: set[str]
+        self, session: Session, accessions: set[str], annotation_set_id: object = None
     ) -> dict[str, str]:
+        """Accession to residues: at the photo's cut on a photo's run, today's otherwise.
+
+        A run whose annotation set a photo loaded reads each member's sequence at
+        the cut (``photo_sequences``), so alignment and length features never see
+        a sequence published after it.
+        """
         from protea.config.tuning import get_tuning
 
         chunk_size = get_tuning().operation.annotation_chunk_size
+        photo = photo_of(session, annotation_set_id) if annotation_set_id is not None else None
+        if photo is not None:
+            at_cut = photo_sequences(session, photo, list(accessions), chunk_size)
+            return {accession: residues for accession, (_, residues) in at_cut.items()}
         result: dict[str, str] = {}
         acc_list = list(accessions)
         for i in range(0, len(acc_list), chunk_size):
@@ -242,14 +261,27 @@ class _FeatureLoadingMixin:
                 .all()
             )
             return {acc: seq for acc, seq in rows}
-        return self._load_sequences_for_proteins(session, set(accessions))
+        return self._load_sequences_for_proteins(
+            session, set(accessions), annotation_set_id=p.annotation_set_id
+        )
 
     def _load_taxonomy_ids_for_proteins(
-        self, session: Session, accessions: set[str]
+        self, session: Session, accessions: set[str], annotation_set_id: object = None
     ) -> dict[str, int | None]:
+        """Accession to taxon: the member's at the photo's cut on a photo's run.
+
+        ``protein.taxonomy_id`` is today's entry; on a photo's run the taxon is
+        the one the photo recorded (``photo_taxa``).
+        """
         from protea.config.tuning import get_tuning
 
         chunk_size = get_tuning().operation.annotation_chunk_size
+        photo = photo_of(session, annotation_set_id) if annotation_set_id is not None else None
+        if photo is not None:
+            at_cut = photo_taxa(session, photo, list(accessions), chunk_size)
+            return {
+                accession: taxon for accession, taxon in at_cut.items() if accession in accessions
+            }
         result: dict[str, int | None] = {}
         acc_list = list(accessions)
         for i in range(0, len(acc_list), chunk_size):
@@ -273,6 +305,10 @@ class _FeatureLoadingMixin:
 
         chunk_size = get_tuning().operation.annotation_chunk_size
         acc_set = set(accessions)
+        if not p.query_set_id:
+            photo = photo_of(session, p.annotation_set_id)
+            if photo is not None:
+                return photo_taxa(session, photo, sorted(acc_set), chunk_size)
         result: dict[str, int | None] = {acc: None for acc in acc_set}
         acc_list = list(acc_set)
         for i in range(0, len(acc_list), chunk_size):
