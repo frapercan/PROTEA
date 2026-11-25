@@ -1087,6 +1087,28 @@
       "delete": "Löschen",
       "deleteConfirm": "Dieses Annotationsset und seine {count} GO-Term-Zuweisungen löschen? Dies kann nicht rückgängig gemacht werden.",
       "deleteConfirmNoAssignments": "Dieses Annotationsset löschen?"
+    },
+    "card": {
+      "viewProtein": "Protein ansehen →",
+      "matchKnown": "{matches} von {total} vorhergesagten Begriffen waren bereits bekannt",
+      "showGraph": "GO-Graph",
+      "hideGraph": "Graph ausblenden",
+      "loading": "Wird geladen…",
+      "noData": "Keine Daten gefunden.",
+      "predictedKnown": "{predicted} vorhergesagt, {known} bekannt",
+      "uncovered": "Bekannt, nicht vorhergesagt ({count})",
+      "goId": "GO-ID",
+      "name": "Name",
+      "evidence": "Evidenz",
+      "score": "Wert",
+      "witness": "Beleg",
+      "via": "Über (Ref.)",
+      "predEv": "Vorh. Ev.",
+      "knownEv": "Bek. Ev.",
+      "dist": "Dist.",
+      "markExperimental": "bereits bekannt (experimentell)",
+      "markImplied": "folgt aus {term}",
+      "markAnnotated": "bereits annotiert"
     }
   },
   "evaluation": {

@@ -1086,6 +1086,28 @@
       "delete": "Eliminar",
       "deleteConfirm": "¿Eliminar este conjunto de anotaciones y sus {count} asignaciones de términos GO? Esta acción no se puede deshacer.",
       "deleteConfirmNoAssignments": "¿Eliminar este conjunto de anotaciones?"
+    },
+    "card": {
+      "viewProtein": "Ver proteína →",
+      "matchKnown": "{matches} de {total} términos predichos ya se conocían",
+      "showGraph": "Grafo GO",
+      "hideGraph": "Ocultar grafo",
+      "loading": "Cargando…",
+      "noData": "No hay datos.",
+      "predictedKnown": "{predicted} predichos, {known} conocidos",
+      "uncovered": "Conocidos sin predecir ({count})",
+      "goId": "GO ID",
+      "name": "Nombre",
+      "evidence": "Evidencia",
+      "score": "Puntuación",
+      "witness": "Testigo",
+      "via": "Vía (ref.)",
+      "predEv": "Ev. pred.",
+      "knownEv": "Ev. conocida",
+      "dist": "Dist.",
+      "markExperimental": "ya conocido (experimental)",
+      "markImplied": "implícito por {term}",
+      "markAnnotated": "ya anotado"
     }
   },
   "evaluation": {

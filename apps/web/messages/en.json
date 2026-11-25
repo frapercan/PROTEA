@@ -1086,6 +1086,28 @@
       "delete": "Delete",
       "deleteConfirm": "Delete this annotation set and its {count} GO term assignments? This cannot be undone.",
       "deleteConfirmNoAssignments": "Delete this annotation set?"
+    },
+    "card": {
+      "viewProtein": "View protein →",
+      "matchKnown": "{matches} of {total} predicted terms already known",
+      "showGraph": "GO graph",
+      "hideGraph": "Hide graph",
+      "loading": "Loading…",
+      "noData": "No data found.",
+      "predictedKnown": "{predicted} predicted, {known} known",
+      "uncovered": "Known, not predicted ({count})",
+      "goId": "GO ID",
+      "name": "Name",
+      "evidence": "Evidence",
+      "score": "Score",
+      "witness": "Witness",
+      "via": "Via (ref)",
+      "predEv": "Pred. ev.",
+      "knownEv": "Known ev.",
+      "dist": "Dist",
+      "markExperimental": "already known (experimental)",
+      "markImplied": "implied by {term}",
+      "markAnnotated": "already annotated"
     }
   },
   "evaluation": {
