@@ -75,11 +75,35 @@ _CAMPAIGN = text(
            meta ->> 'axis'   AS axis,
            meta ->> 'scorer' AS scorer,
            status::text      AS status,
+           operation         AS operation,
            progress_current  AS batches_done,
            progress_total    AS batches_total
     FROM job WHERE id = :jid
     """
 )
+
+
+#: Operations that split into batches and record how many when they split: their
+#: completion is the count. Any other operation's success is its completion.
+_BATCHED = frozenset({"predict_go_terms", "compute_embeddings"})
+
+#: The run behind a scored set's candidates, the one that could have stopped short.
+_CANDIDATES_JOB = text("SELECT meta ->> 'job_id' FROM prediction_set WHERE id = CAST(:sid AS uuid)")
+
+
+def _completion_job_id(session: Session, receipt: dict[str, Any]) -> str | None:
+    """The job whose completion the set inherits.
+
+    A scored set is as complete as the candidates it scored: scoring a remnant
+    succeeds, so the scorer's own success says nothing about the candidates. Any
+    other set answers for its own job.
+    """
+    scored_from = receipt.get("scored_from")
+    if scored_from:
+        candidates_job = session.execute(_CANDIDATES_JOB, {"sid": str(scored_from)}).scalar()
+        if candidates_job:
+            return str(candidates_job)
+    return receipt.get("job_id")
 
 
 def _finished(job: dict[str, Any] | None) -> bool | None:
@@ -95,10 +119,16 @@ def _finished(job: dict[str, Any] | None) -> bool | None:
     """
     if job is None:
         return None
-    done, total = job.get("batches_done"), job.get("batches_total")
-    if job.get("status") != "SUCCEEDED" or total is None:
+    if job.get("status") != "SUCCEEDED":
         return False
-    return done == total
+    operation = job.get("operation")
+    if operation is not None and operation not in _BATCHED:
+        # Scoring, an ingest, the own annotations: nothing to count, and a job that
+        # succeeded is done. Reading their missing counts as unfinished drew every
+        # scored set of the public ablation as "did not finish" (2026-11-25).
+        return True
+    done, total = job.get("batches_done"), job.get("batches_total")
+    return total is not None and done == total
 
 
 def _donors(policy: dict[str, Any] | None) -> dict[str, Any]:
@@ -220,5 +250,10 @@ def get_receipt(
             c = session.execute(_CAMPAIGN, {"jid": receipt["job_id"]}).mappings().first()
             job = dict(c) if c else None
         campaign = {k: job[k] for k in ("rung", "window", "axis", "scorer")} if job else None
+        run_job = job
+        completion_id = _completion_job_id(session, receipt)
+        if completion_id and completion_id != receipt.get("job_id"):
+            c = session.execute(_CAMPAIGN, {"jid": completion_id}).mappings().first()
+            run_job = dict(c) if c else None
 
-    return _payload(row, receipt, campaign, job)
+    return _payload(row, receipt, campaign, run_job)
