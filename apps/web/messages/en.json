@@ -1148,7 +1148,7 @@
       "artifactsDownload": "↓ Artifacts (.zip)",
       "resultDelete": "Delete",
       "deleteResultConfirm": "Delete this evaluation result?",
-      "openPanel": "Open the window's panel"
+      "openPanel": "See results and strata"
     },
     "evaluationSetsSection": {
       "heading": "Evaluation Sets",

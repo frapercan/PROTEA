@@ -1148,7 +1148,7 @@
       "artifactsDownload": "↓ Artefactos (.zip)",
       "resultDelete": "Eliminar",
       "deleteResultConfirm": "¿Eliminar este resultado de evaluación?",
-      "openPanel": "Abrir el panel de la ventana"
+      "openPanel": "Ver resultados y estratos"
     },
     "evaluationSetsSection": {
       "heading": "Conjuntos de evaluación",

@@ -1149,7 +1149,7 @@
       "artifactsDownload": "↓ Artefatos (.zip)",
       "resultDelete": "Excluir",
       "deleteResultConfirm": "Excluir este resultado de avaliação?",
-      "openPanel": "Abrir o painel da janela"
+      "openPanel": "Ver resultados e estratos"
     },
     "evaluationSetsSection": {
       "heading": "Conjuntos de avaliação",
