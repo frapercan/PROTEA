@@ -499,7 +499,7 @@ class TestNoBandOpensAfterTheMark:
             Band(name="v228", obo_versions=frozenset({"a"}), ia_tokens=frozenset({"b"}))
 
     def test_the_band_at_the_mark_is_allowed(self):
-        # 227 -> 230 opens AT the mark: it is the spent test, not a later window.
+        # 227 -> 230 opens AT the mark: it is the held-out test, not a later window.
         assert Band(name="v227").name == "v227"
 
     def test_a_name_without_a_release_is_not_read_as_one(self):

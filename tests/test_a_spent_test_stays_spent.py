@@ -1,7 +1,7 @@
 """A window marked ``test_spent`` cannot be re-designated (ADR-D60, decision 5).
 
-The 227->230 test was read once on 2026-10-27. Its truth cannot become unread, so
-no rebind may move a spent window back to a role that admits another reading.
+A test window is read once. Its truth cannot become unread, so no rebind may move
+a spent window back to a role that admits another reading.
 Moving a window to ``test_spent`` stays allowed: that is how it is marked spent.
 """
 

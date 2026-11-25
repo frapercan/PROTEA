@@ -54,7 +54,7 @@ __all__ = [
     "HOLDOUT_BAND_END",
     "HOLDOUT_WAIVER",
     "PROSPECTIVE_DECLARATION",
-    "refuse_unless_beyond_the_spent_band",
+    "refuse_unless_beyond_the_holdout_band",
     "SplitLeakError",
     "SplitName",
     "SplitUndecidedError",
@@ -494,14 +494,15 @@ def window_reads_past_the_mark(end_published: date) -> bool:
 #: flag that gets set by reflex, and this one may be used once.
 HOLDOUT_WAIVER = "this is the single declared pass on the holdout"
 
-#: The release the spent holdout band ENDS at.
+#: The release the holdout band ENDS at.
 #:
-#: The single pass was spent on 2026-10-27: ``evaluation_set cb46395a`` is the
-#: 227 -> 230 window, built with :data:`HOLDOUT_WAIVER` in its job payload and
-#: declared ``window_role = test``. That band is read and it stays read.
+#: The holdout band is the 227 -> 230 window (``evaluation_set cb46395a``), held
+#: out for the single pass of the frozen method: its truth is built only with
+#: :data:`HOLDOUT_WAIVER` in the job payload, and it is declared
+#: ``window_role = test``.
 HOLDOUT_BAND_END = "v230"
 
-#: What a caller must say, verbatim, to open a band BEYOND the spent holdout.
+#: What a caller must say, verbatim, to open a band BEYOND the holdout.
 #:
 #: The mark says where selection stops; it does not say that everything after
 #: it is one single band. What :data:`HOLDOUT_WAIVER` protects is looking at
@@ -517,16 +518,16 @@ HOLDOUT_BAND_END = "v230"
 #:
 #: It is honoured ONLY for a window that begins at or after
 #: :data:`HOLDOUT_BAND_END`. A window that starts earlier and ends later
-#: STRADDLES the spent band, and a straddle is exactly the shape of the
+#: STRADDLES the holdout band, and a straddle is exactly the shape of the
 #: 220 -> 230 windows that were deleted in August: the union of a window used
 #: for selection and the one held back. See :func:`assert_window_may_inform`.
 PROSPECTIVE_DECLARATION = "this band begins after the holdout and selects nothing"
 
 
-def refuse_unless_beyond_the_spent_band(
+def refuse_unless_beyond_the_holdout_band(
     start_published: date | None, *, context: str = ""
 ) -> None:
-    """Raise unless a band's START puts it past the spent holdout band.
+    """Raise unless a band's START puts it past the holdout band.
 
     The one check behind :data:`PROSPECTIVE_DECLARATION`, and the reason that
     declaration is safe at all. Its own function because the straddle is the
@@ -590,7 +591,7 @@ def assert_window_may_inform(
     if waiver == HOLDOUT_WAIVER:
         return
     if declaration == PROSPECTIVE_DECLARATION:
-        refuse_unless_beyond_the_spent_band(start_published, context=context)
+        refuse_unless_beyond_the_holdout_band(start_published, context=context)
         return
     where = f"{context}: " if context else ""
     raise HoldoutTouchedError(
@@ -600,7 +601,7 @@ def assert_window_may_inform(
         f"nothing; every parameter, threshold and design decision is selected strictly "
         f"earlier. If this IS the single declared pass on the holdout, say so by passing "
         f"the waiver verbatim: {HOLDOUT_WAIVER!r}. If instead this is a band BEYOND the "
-        f"spent holdout -- one that begins at or after {HOLDOUT_BAND_END} and selects "
+        f"holdout -- one that begins at or after {HOLDOUT_BAND_END} and selects "
         f"nothing -- say that verbatim: {PROSPECTIVE_DECLARATION!r}. It is deliberately a "
         "sentence and not "
         f"a flag, because it may be used once and should not be settable by reflex."

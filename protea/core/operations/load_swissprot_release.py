@@ -21,8 +21,8 @@ or one of them is wrong and the job says so instead of writing.
 The ceiling
 -----------
 
-The 227->230 window was spent on 2026-10-27, and the universe reads nothing
-past its mark (ADR-D60). So the payload refuses any release from
+The 227->230 window is held out for the decisive read, and the universe reads
+nothing past its mark (ADR-D60). So the payload refuses any release from
 :data:`protea.core.marks.UNIPROT_CEILING` on, before anything is downloaded or
 written; 2025_03, the release cut 227 pairs with, is the last one it accepts.
 """

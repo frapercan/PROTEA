@@ -83,8 +83,8 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
     evaluation_set_id: str
     #: Permits the single pass on the holdout; see split_registry.HOLDOUT_WAIVER.
     holdout_waiver: str | None = None
-    #: Permits a band BEYOND the spent holdout, which begins at or after it and
-    #: so cannot be a second look at it. Refused by name for a window that
+    #: Permits a band BEYOND the holdout, which begins at or after it and so
+    #: cannot read it. Refused by name for a window that
     #: straddles the band. See split_registry.PROSPECTIVE_DECLARATION.
     prospective_declaration: str | None = None
     prediction_set_id: str

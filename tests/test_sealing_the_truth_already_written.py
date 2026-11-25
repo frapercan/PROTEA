@@ -12,8 +12,7 @@ onwards. An object already replaced before the seal gets recorded as
 authentic. It closes the future, not the past.
 
 IT NEVER DESERIALISES, and that is a rule with a name: ``cb46395a`` is the
-holdout, its single declared look was spent in the laboratory on 2026-10-26,
-and parsing its truth inside the platform would be a second read of the one
+holdout, and parsing its truth inside the platform would be a read of the one
 artefact the waiver protects. Hashing bytes is not reading a truth.
 """
 

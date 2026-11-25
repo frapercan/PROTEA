@@ -231,8 +231,8 @@ Consequences
   database-holding nodes consume.
 - One-time scripts and dead paths are deleted on the integration branch, one
   commit per group, so each deletion can be reverted alone.
-- Rebuilding the data does not restore the 227->230 test, which was spent on
-  2026-10-27. Development never reads it.
+- 227->230 is the held-out test window: the frozen method is read on it once,
+  by the author's word. Development never reads it.
 
 Alternatives considered
 ~~~~~~~~~~~~~~~~~~~~~~~

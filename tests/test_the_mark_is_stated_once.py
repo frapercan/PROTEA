@@ -1,7 +1,7 @@
 """The mark is stated once, in ``protea.core.marks``, and every other module imports it.
 
-The campaign's test, the 227->230 window, was spent on 2026-10-27, so the mark is
-the value every guard of the universe compares against (ADR-D60). Two copies of
+The campaign's test, the 227->230 window, is held out for the decisive read, so
+the mark is the value every guard of the universe compares against (ADR-D60). Two copies of
 it are two marks the day one of them is edited, and a guard reading the stale
 copy admits what the other refuses. The scan below reads every module of the
 package and of ``scripts/`` and fails on a second statement of either value: a
