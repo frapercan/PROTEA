@@ -27,6 +27,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core._evaluation_leakage import FITTED_BACKENDS
+from protea.core.ia_regimes import EXPERIMENTAL_EVIDENCE
 from protea.core.leakage_guard import Frame, release_ordinal, training_cut_verdict
 
 #: The cells of a result, as the evaluator stores them: ``results[setting][aspect]``.
@@ -57,6 +58,8 @@ _SUMMARY = text(
                     ps.meta ->> 'exclude_self_neighbour') AS exclude_self,
            coalesce(cand.meta ->> 'self_exclusion',
                     ps.meta ->> 'self_exclusion') AS self_exclusion,
+           coalesce(cand.meta -> 'donor_policy' -> 'evidence_codes',
+                    ps.meta -> 'donor_policy' -> 'evidence_codes') AS donor_codes,
            j.payload ->> 'score_reading' AS job_reading
     FROM evaluation_result r
     JOIN prediction_set ps ON ps.id = r.prediction_set_id
@@ -120,6 +123,14 @@ def _cells(results: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _donors(codes: list[str] | None) -> str | None:
+    """``experimental`` when the donor policy kept experimental codes only, ``all`` when it
+    kept any other, ``None`` without a recorded policy (a method's set, or an older one)."""
+    if not codes:
+        return None
+    return "experimental" if set(codes) <= set(EXPERIMENTAL_EVIDENCE) else "all"
+
+
 def summary_row(row: dict[str, Any], frame: Frame | None = None) -> dict[str, Any]:
     """One result as the panel shows it, on the window ``frame`` spans.
 
@@ -156,6 +167,8 @@ def summary_row(row: dict[str, Any], frame: Frame | None = None) -> dict[str, An
             # Who left with the query: its twins too ("sequence") or nobody
             # ("accession"). None when the run left it to the flag.
             "self_exclusion": row["self_exclusion"],
+            # Which annotations it transferred: two donor policies of one model are two arms.
+            "donors": _donors(row.get("donor_codes")),
             "reading": (results.get("reading") or {}).get("score_reading")
             or row["job_reading"]
             or "raw",

@@ -388,6 +388,18 @@ export default function EvaluationDetailPage() {
               );
             })()}
 
+          {/* The strata were one small toggle per result row; the reader who comes for
+              them gets a plain way in (the author, 2026-11-25). */}
+          <Link
+            href={`/${params.locale}/instrument/evaluation/${params.id}?tab=strata`}
+            className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 hover:bg-blue-100"
+          >
+            <span>
+              <span className="block text-sm font-semibold text-blue-900">{t("strataCta.title")}</span>
+              <span className="block text-xs text-blue-800">{t("strataCta.body")}</span>
+            </span>
+            <span aria-hidden className="text-lg text-blue-700">→</span>
+          </Link>
           <WindowPanel evaluationSetId={params.id} />
 
           <section className="rounded-lg border bg-white shadow-sm">
