@@ -450,3 +450,39 @@ PRESET_CONFIGS: list[dict[str, Any]] = [
         ),
     },
 ]
+
+
+#: The votes weighted by distance, one preset per signal. Each entry is a valid
+#: ``ScoringConfigCreate`` body, created one at a time through the ordinary
+#: create endpoint, ``POST /scoring/configs``. They are kept out of
+#: :data:`PRESET_CONFIGS` on purpose: the seed-all endpoint
+#: ``POST /scoring/configs/presets`` creates every preset an instance lacks,
+#: so it would also bring back the ones an instance deleted. Both signals are
+#: read at a declared depth (``max_k_position``), from the donor ledger.
+NEIGHBOURHOOD_VOTE_PRESETS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "similarity_vote",
+        "formula": "linear",
+        "weights": {"neighbor_similarity_vote": 1.0},
+        "description": (
+            "Similarity-weighted vote over the neighbourhood: for each term, the summed "
+            "similarity 1 - d/2 of the neighbours within the depth that carry it, over "
+            "the summed similarity of every neighbour within the depth (the form of "
+            "DiamondScore, with similarities for bit scores). Read at a declared depth. "
+            "Tests whether weighing each vote by its neighbour's similarity beats "
+            "counting the votes (vote_fraction)."
+        ),
+    },
+    {
+        "name": "kernel_fraction",
+        "formula": "linear",
+        "weights": {"neighbor_kernel_fraction": 1.0},
+        "description": (
+            "goPredSim's reliability index over k neighbours: for each term, the sum of "
+            "h / (h + d) over the neighbours within the depth that carry it, divided by "
+            "the depth, with goPredSim's bandwidth h = 0.5. Read at a declared depth. "
+            "Tests whether a vote that decays with the distance beats an unweighted one "
+            "(vote_fraction)."
+        ),
+    },
+)

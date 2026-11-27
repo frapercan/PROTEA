@@ -120,6 +120,49 @@ scores it stored, and a candidate set's page lists the scored sets made from
 it, with their configurations; neither computes a score. Configurations are
 made on the scoring page and applied by ``score_prediction_set``.
 
+Votes weighted by distance
+--------------------------
+
+Two signals weigh each neighbour's vote by how close the neighbour is. Neither
+is stored: both are taken at the cut from each candidate's donor ledger
+(``protea.core.operations._donor_recount``), so a configuration that weights
+either is refused unless the run names a depth (``max_k_position``, or
+``max_sequence_rank`` with every count made in sequences). Both are fractions
+in [0, 1].
+
+``neighbor_similarity_vote``
+   For a term, the summed similarity ``1 - d/2`` of the neighbours within the
+   depth that carry it, over the summed similarity of every neighbour within
+   the depth: a similarity-weighted vote, the form of DiamondScore with
+   similarities for bit scores. A term every neighbour carries scores 1.
+
+``neighbor_kernel_fraction``
+   For a term, the sum of ``h / (h + d)`` over the neighbours within the depth
+   that carry it, divided by the depth: goPredSim's reliability index over
+   ``k`` neighbours, with its bandwidth ``h = 0.5``.
+
+No row holds the similarity vote's denominator, the neighbourhood: a ledger
+names only the donors of its own term. The step rebuilds it as the union of
+the ledgers of one protein's candidates, in one aspect when the set's record
+says its search ranked each aspect on its own (``aspect_separated_knn``), and
+across aspects when it ranked one list; a set whose record does not say is
+refused for this signal. The union is the neighbourhood when every neighbour
+left a candidate, as every neighbour of an aspect-separated search donates a
+term of its aspect, and the step asserts it: within the depth the ledgers must
+name the positions 1 to ``min(k, n)``, where ``n`` is the deepest position any
+of them reaches, since no row records how many neighbours the search returned.
+A protein whose ledgers skip a position stops the run, with the protein, the
+aspect and the missing positions in the message. A neighbour leaves no
+candidate when every term it donated was dropped, for instance as a denial of
+the query.
+
+Two presets weight one signal each, ``similarity_vote`` and
+``kernel_fraction``. They are defined beside the others
+(``NEIGHBOURHOOD_VOTE_PRESETS`` in ``protea/services/_scoring_models.py``) and
+created one at a time through ``POST /scoring/configs``. They are not in the
+list the seed-all endpoint ``POST /scoring/configs/presets`` creates, which
+creates every preset an instance lacks, the ones it deleted included.
+
 What a scored set records
 -------------------------
 

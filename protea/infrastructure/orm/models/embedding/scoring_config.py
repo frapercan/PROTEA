@@ -91,6 +91,12 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "ref_annotation_density": 0.0,
     "anc2vec_neighbor_cos": 0.0,
     "anc2vec_neighbor_maxcos": 0.0,
+    # --- Votes weighted by distance (opt-in) ---
+    # Not columns: taken at the scoring's depth from each candidate's donor
+    # ledger (protea.core.operations._donor_recount), so a configuration that
+    # weights either is read only at a named depth.
+    "neighbor_similarity_vote": 0.0,
+    "neighbor_kernel_fraction": 0.0,
 }
 
 # ---------------------------------------------------------------------------
