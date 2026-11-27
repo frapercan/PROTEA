@@ -152,6 +152,22 @@ Environment variable overrides
        https://protea.ngrok.app``. Empty values are stripped; the
        resolved tuple is read by
        ``protea.api.app._register_middlewares`` at startup.
+   * - ``PROTEA_API_PREWARM_ENABLED``
+     - Whether the API keeps its cached aggregates warm: the protein
+       statistics and their sections, the prediction sets, the embedding
+       configurations, the ontology snapshots and the annotation sets.
+       ``true`` (the default) starts one task per aggregate that computes it
+       at start and again a minute before its time to live runs out, for as
+       long as the process runs. ``false`` starts no such task, neither the
+       first pass nor the refresh: each aggregate is computed when a request
+       reads it, and the API logs one warning at start saying the prewarm is
+       off. Meant for an instance with few readers over a large store, where
+       the refresh costs more than it serves: one statistics section counts
+       the GO terms of every protein in the newest annotation set. Read as a
+       boolean (``true`` or ``false``, ``1`` or ``0``, ``yes`` or ``no``, ``on``
+       or ``off``, in any case); any other value stops the API at start. Read
+       by ``protea.api.app._build_lifespan`` through
+       ``Settings.api_prewarm_enabled``.
    * - ``PROTEA_PAIR_FEATURE_WORKERS``
      - Number of parallel worker processes for pairwise alignment feature
        computation inside ``export_research_dataset`` (PR #421). Defaults

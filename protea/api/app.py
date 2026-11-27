@@ -526,9 +526,38 @@ async def _safe_prewarm(label: str, fn, factory) -> None:  # noqa: ANN001
         _log.warning("%s prewarm failed: %s", label, exc)
 
 
-def _build_lifespan(factory):  # noqa: ANN001 - sessionmaker factory, mocked in tests
+#: The line the API logs at start when the prewarm is switched off. A warning,
+#: not an info line, because nothing in this process gives its own loggers a
+#: handler: uvicorn configures only its own, so an info line from this module
+#: never reaches the journal, and this one is what an operator checks after a
+#: deploy.
+PREWARM_OFF_MESSAGE = (
+    "API prewarm is off (PROTEA_API_PREWARM_ENABLED=false): no cached aggregate is "
+    "computed at start or refreshed on its time to live; each is computed when a "
+    "request reads it"
+)
+
+
+def _build_lifespan(factory, *, prewarm_enabled: bool = True):  # noqa: ANN001 - sessionmaker factory, mocked in tests
+    """The API's lifespan: one refresh loop per cached aggregate, or none at all.
+
+    On (``Settings.api_prewarm_enabled``, the default), every target of
+    :func:`_prewarm_targets` gets a task that computes it at start and again
+    before its time to live runs out, for as long as the process runs. Off, no
+    task starts, neither the first pass nor the refresh, and the lifespan logs
+    :data:`PREWARM_OFF_MESSAGE` once. The switch exists for an instance with
+    few readers over a large store: on the development store the prewarm kept
+    Postgres busy for 16.5 CPU-hours in 16.9 hours while the API served two
+    requests, because one of the statistics sections counts the GO terms of
+    every protein in the newest annotation set (33.7 million rows there).
+    """
+
     @asynccontextmanager
     async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if not prewarm_enabled:
+            _log.warning(PREWARM_OFF_MESSAGE)
+            yield
+            return
         targets = _prewarm_targets()
 
         async def _refresh_loop(label: str, fn, ttl: float) -> None:
@@ -590,7 +619,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
         description=_API_DESCRIPTION,
         contact={"name": "PROTEA Team", "email": "contact@protea.example.org"},
         openapi_tags=_OPENAPI_TAGS,
-        lifespan=_build_lifespan(factory),
+        lifespan=_build_lifespan(factory, prewarm_enabled=settings.api_prewarm_enabled),
     )
     app.state.session_factory = factory
     app.state.amqp_url = settings.amqp_url

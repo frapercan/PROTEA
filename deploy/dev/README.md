@@ -168,6 +168,7 @@ PROTEA_MINIO_ACCESS_KEY=protea-dev-root
 PROTEA_MINIO_SECURE=false
 PROTEA_ALLOWED_ORIGINS='["http://127.0.0.1:26800"]'
 PROTEA_SKIP_TAXONOMY_WARMUP=1
+PROTEA_API_PREWARM_ENABLED=false
 HF_HUB_OFFLINE=1
 EOF
 # Paths are absolute in the file (systemd does not expand $HOME there), so
@@ -199,6 +200,14 @@ What each line is for:
   `protea.jobs`, `protea.predictions.batch` and `protea.training` open the
   NCBI taxonomy before consuming anything, and download today's when the
   file is missing (see "Not wired yet").
+- `PROTEA_API_PREWARM_ENABLED=false`: the API starts no task that keeps its
+  cached aggregates warm, so each is computed when a page reads it. With the
+  prewarm on, the API recomputes its statistics sections every nine minutes
+  for as long as it runs, and one of them counts the GO terms of every
+  protein in the newest annotation set (cut 227, about 33.7 million rows). In
+  one session Postgres spent 16.5 CPU-hours in 16.9 hours on the prewarm while
+  the API served two requests. The API logs one warning at start saying the
+  prewarm is off.
 - `HF_HOME` and `HF_HUB_OFFLINE=1`: models come from the dev cache, never
   from a download at run time.
 - The cache variables keep every cache under `~/protea-dev/cache`.
@@ -303,10 +312,12 @@ step announced to him before it runs.
          > ~/.secrets/protea-dev/operator-key )
    ```
 
-4. The rest:
+4. The rest. The API says at start that its prewarm is off, which the
+   environment file asks for:
 
    ```bash
    systemctl --user start protea-dev.target
+   journalctl --user -u protea-dev-api | grep 'prewarm is off'
    ```
 
 5. A ping through the whole stack. The key goes in a header read from the
