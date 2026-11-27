@@ -63,6 +63,9 @@ from protea.core.operations.audit_per_protein_artifacts import (
 )
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrencePayload
 from protea.core.operations.compare_paired_panels import ComparePairedPanelsPayload
+from protea.core.operations.compute_embedding_space_statistics import (
+    ComputeEmbeddingSpaceStatisticsPayload,
+)
 from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsBatchPayload,
     ComputeEmbeddingsPayload,
@@ -405,6 +408,17 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "manifest_sha256": "not-a-digest",
         },
         ("embedding_config_id",),
+    ),
+    # The statistics of a configuration's space at a cut name the configuration and the
+    # photo by id, and nothing else.
+    (
+        "compute_embedding_space_statistics",
+        ComputeEmbeddingSpaceStatisticsPayload,
+        {
+            "embedding_config_id": "6ab4cbfd-711d-432f-be6c-2ad1738cd438",
+            "cut_photo_id": "photo-211",
+        },
+        ("cut_photo_id",),
     ),
     # A lexicon bank, by its lexicon's registered weights and its manifest (ADR-D63).
     (

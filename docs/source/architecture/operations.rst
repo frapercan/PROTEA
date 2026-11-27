@@ -2146,6 +2146,88 @@ Payload fields
      - Free card memory the run needs before it starts (default 10000).
 
 
+compute_embedding_space_statistics
+----------------------------------
+
+Measures the space of an embedding configuration at a cut without labels: the
+statistics every search-space transform reads (centre, standardise, whiten, or remove
+the dominant directions; :mod:`protea.core.embedding_space.transforms`). A job on
+``protea.training``.
+
+The population is the photo's distinct member sequences with a vector under the
+configuration, whatever the donor policy of a later search, so every breadth level of a
+pool shares one geometry; its size ``n`` is recorded. The operation refuses before it
+reads a shard unless the configuration and the photo exist, the configuration's latest
+loaded bank (the one the search reads) covers the photo, the node names its bank folder
+(``PROTEA_EMBEDDING_BANK_DIR``, the folder the search reads too) and the manifest there
+hashes to the sha256 the store recorded for that bank. Each shard is checked against its
+manifest's sha256 as it is read, and every member sequence must be in exactly one shard:
+a sequence the bank lacks is a refusal, never a gap.
+
+Two streaming passes in float64 (:mod:`protea.core.embedding_space.statistics`) read the
+population's rows: the first counts them, sums them, histograms the float16 exponents of
+the stored values and keeps a seeded sample; the second accumulates the cross-products of
+the centred rows, their sum (the correction of the two-pass algorithm) and the fourth
+moment of their norms, which gives Ledoit and Wolf's ``b2bar`` without a third pass. From
+these it records:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Value
+     - Meaning
+   * - ``mean``, ``variances``
+     - The mean vector and the per-dimension variances (the covariance is divided by
+       ``n``, as Ledoit and Wolf's is).
+   * - ``eigenvalues``, ``eigenvectors``
+     - The eigendecomposition of the covariance, eigenvalues descending, each
+       eigenvector's largest component positive.
+   * - ``shrinkage``
+     - Ledoit and Wolf's (2004) ``delta*``, the intensity that shrinks the covariance
+       towards ``m I``, ``m = tr(S) / d``; ``whiten`` uses
+       ``(1 - delta*) lambda + delta* m``.
+   * - ``removed_directions``
+     - ``D*``, the profile-likelihood scree elbow of Zhu and Ghodsi (2006) over the
+       eigenvalues, which ``remove_dominant_directions`` removes; the
+       ``broken_stick_count`` and the ``participation_ratio`` are recorded beside it.
+   * - ``fixed_count``
+     - ``floor(d / 100)``, the fixed count of the literal variant, with its share of the
+       spectrum.
+   * - ``nu16``
+     - The float16 rounding variance of the stored values, the mean of
+       ``ulp16(x)^2 / 12``, since a pool is stored in half precision.
+   * - ``n_below_shrinkage``, ``n_below_storage``
+     - The eigenvalues below ``delta* m`` and below ``nu16``: the counts the rule for a
+       second whitening value reads, over every configuration.
+   * - Diagnostics
+     - On a seeded sample of the population, before and after each transform: the mean
+       cosine over every pair, each dimension's contribution to it, the skewness of the
+       10-occurrence (hubness) and the share of the leading direction.
+
+Everything goes into one ``.npz`` in the store,
+``embedding-space-statistics/<config>/<photo>/<sha256>.npz``, with a JSON document of
+every recorded value inside it, and one ``embedding_space_statistics`` row names it by
+URI and sha256 with the configuration, the photo, the bank, ``n``, ``d``, a description
+derived from the values, the job and the code revision. A configuration and a photo have
+one row: asking again is a no-op that returns it.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``embedding_config_id``
+     - The configuration whose space is measured; its latest loaded bank must cover the
+       photo.
+   * - ``cut_photo_id``
+     - The photo whose distinct member sequences are the population.
+
+
 Registering a new operation
 ----------------------------
 

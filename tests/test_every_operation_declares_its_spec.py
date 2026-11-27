@@ -87,6 +87,7 @@ TODAY: dict[str, str] = {
     "load_segment_families": queues.JOBS,
     "run_count_map": queues.TRAINING,
     "run_own_annotations": queues.TRAINING,
+    "compute_embedding_space_statistics": queues.TRAINING,
     # Docs and dispatchers: the residue vocabulary's coordinator (architecture/
     # operations.rst; the weights dialog posts it), build_go_cooccurrence
     # (runbooks/lafa-native-parity.rst) and apply_learned_encoder (its pull request:
@@ -292,7 +293,7 @@ def _constant(module: str, name: str) -> str:
 def test_every_registered_operation_declares_a_spec() -> None:
     registry = build_operation_registry()
     assert set(registry.specs()) == set(registry._ops)
-    assert len(CATALOG) == len(registry._ops) == 71
+    assert len(CATALOG) == len(registry._ops) == 72
 
 
 def test_each_spec_routes_where_the_code_routes_today(specs: dict[str, OperationSpec]) -> None:
