@@ -1015,10 +1015,44 @@ Payload fields
      - Optional UUID of an ``OntologySnapshot`` to use as the pivot for
        NOT-propagation when the two annotation sets reference different
        snapshots. Ignored when both sets share a snapshot.
+   * - ``target_query_set_id``
+     - ``null``
+     - Optional UUID of a ``window_sample`` query set: the window is then its
+       parent's (the sample's window) kept to the sample's proteins. Part of the
+       window's identity.
 
 If ``pivot_ontology_snapshot_id`` is not set, both annotation sets must
 share the same ``ontology_snapshot_id``; the operation raises
 ``ValueError`` otherwise.
+
+A window on a declared sample
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+With ``target_query_set_id`` the operation computes no delta. The sample (a
+``window_sample`` query set, ``declare_window_sample``) names its parent window;
+the identity asked for (the two annotation sets, the pivot, the two natives, the
+four truth rules and the target population, copied from the parent's row) must be
+the parent's, and so must the truth rules the running code applies to it. The
+parent's groundtruth parquet is streamed from the store and verified against its
+recorded sha256, and every bucket (``nk``, ``lk``, ``pk``, ``known``, ``pk_known``,
+``removed``) is kept to the sample's proteins, so the window's truth is the
+parent's filtered, exact by construction whatever revision built the parent. The
+sample's entries must hash to its sha256, and a sampled protein that is not a
+target of the parent is refused (the count named).
+
+The row's ``stats`` start as a copy of the parent's (its mode, pivot, rules, terms
+of interest, LAFA steps and population counts), so every reader resolves the same
+pivot and the same terms of interest; the counts the truth itself gives are then
+the kept truth's; and ``target_set_restriction`` records the parent's id and
+groundtruth sha256, the sample's id and sha256, the proteins kept and left out per
+bucket, and the copied keys that count the parent's build rather than this
+window's. Its own truth parquet is written with its own sha256, so placements,
+native methods and the evaluator read the sample without a change.
+
+The identity constraint ``uq_evaluation_set_identity`` holds eleven columns, the
+declared sample last, ``NULLS NOT DISTINCT``: a NULL sample is the whole
+population, so two unrestricted windows still collide, a window on a sample does
+not collide with its parent, and two on one sample do.
 
 Execution flow
 ~~~~~~~~~~~~~~

@@ -258,7 +258,7 @@ def _run(payload_over: dict[str, Any], found: Population | None) -> tuple[dict[s
         side.ontology_snapshot_id = uuid.uuid4()
     session.get.side_effect = [old_set, new_set, MagicMock()]
     lookup = session.query.return_value.filter_by
-    lookup.return_value.one_or_none.return_value = None
+    lookup.return_value.filter.return_value.one_or_none.return_value = None
     persisted: dict[str, Any] = {}
 
     def _persist(_self: Any, _row: Any, data: Any, _emit: Any) -> str:

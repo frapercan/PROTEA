@@ -20,9 +20,10 @@ from protea.services._annotations_evaluation_helpers import (
     evaluation_set_to_dict,
 )
 
-#: The nine columns ``uq_evaluation_set_identity`` names. Written here rather
-#: than imported so that adding a tenth to the constraint fails this test
-#: instead of silently leaving the new one out of the API.
+#: The eleven columns ``uq_evaluation_set_identity`` names. Written here rather
+#: than imported, and compared with the constraint below, so that adding a
+#: twelfth to the constraint fails this test instead of silently leaving the new
+#: one out of the API.
 IDENTITY = (
     "old_annotation_set_id",
     "new_annotation_set_id",
@@ -33,6 +34,8 @@ IDENTITY = (
     "toi_rule",
     "not_codes",
     "target_population",
+    "binding_rule",
+    "target_query_set_id",
 )
 
 
@@ -99,10 +102,20 @@ def test_an_unsealed_result_says_so_rather_than_omitting_the_field():
     assert body["frame_digest"] is None
 
 
-def test_a_window_carries_all_nine_columns_of_its_identity():
+def test_the_list_is_the_constraints():
+    identity = next(
+        c
+        for c in EvaluationSet.__table__.constraints
+        if getattr(c, "name", "") == "uq_evaluation_set_identity"
+    )
+    assert tuple(c.name for c in identity.columns) == IDENTITY
+
+
+def test_a_window_carries_all_eleven_columns_of_its_identity():
     """Serving two of eight meant two windows could not be told apart from the
     API. ``7aa37929`` and ``ea0f4334`` are that case in the live record."""
-    body = evaluation_set_to_dict(_window())
+    sample = uuid.uuid4()
+    body = evaluation_set_to_dict(_window(binding_rule="cafa", target_query_set_id=sample))
 
     missing = [name for name in IDENTITY if name not in body]
     assert missing == []
@@ -110,6 +123,15 @@ def test_a_window_carries_all_nine_columns_of_its_identity():
     assert body["toi_rule"] == "live_in_both_ends"
     assert body["not_codes"] == "experimental"
     assert body["target_population"] == "superset_at_t0"
+    assert body["binding_rule"] == "cafa"
+    assert body["target_query_set_id"] == str(sample)
+
+
+def test_a_window_over_its_whole_population_serves_a_null_sample():
+    body = evaluation_set_to_dict(_window())
+
+    assert "target_query_set_id" in body
+    assert body["target_query_set_id"] is None
 
 
 def test_two_windows_that_differ_only_in_the_truth_profile_serialise_apart():

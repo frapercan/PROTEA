@@ -7,6 +7,7 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from protea.core.evaluation import EvaluationData
 from protea.core.operations.generate_evaluation_set import (
@@ -182,7 +183,7 @@ class TestGenerateEvaluationSetExecute:
         new_set = _make_annotation_set(uuid.uuid4())  # different snapshot
         session.get.side_effect = [old_set, new_set]
         # No pre-existing EvaluationSet — force the compute path.
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
 
         def add_side(obj):
             obj.id = uuid.uuid4()
@@ -215,7 +216,7 @@ class TestGenerateEvaluationSetExecute:
         # session.get is called for old, new, and the pivot lookup.
         session.get.side_effect = [old_set, new_set, pivot_snap]
         # No pre-existing EvaluationSet — force the compute path.
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
 
         def add_side(obj):
             obj.id = uuid.uuid4()
@@ -242,7 +243,7 @@ class TestGenerateEvaluationSetExecute:
         new_set = _make_annotation_set(snap_id)
         session.get.side_effect = [old_set, new_set]
         # No pre-existing EvaluationSet — force the compute path.
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
 
         eval_set = MagicMock()
         eval_set.id = uuid.uuid4()
@@ -277,7 +278,7 @@ class TestGenerateEvaluationSetExecute:
         old_set = _make_annotation_set(snap_id)
         new_set = _make_annotation_set(snap_id)
         session.get.side_effect = [old_set, new_set]
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
 
         created: list = []
 
@@ -308,7 +309,7 @@ class TestGenerateEvaluationSetExecute:
         old_set = _make_annotation_set(snap_id)
         new_set = _make_annotation_set(snap_id)
         session.get.side_effect = [old_set, new_set]
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
 
         created: list = []
 
@@ -334,7 +335,7 @@ class TestGenerateEvaluationSetExecute:
         new_set = _make_annotation_set(snap_id)
         session.get.side_effect = [old_set, new_set]
         # No pre-existing EvaluationSet — force the compute path.
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
 
         MagicMock()
 
@@ -360,7 +361,7 @@ class TestGenerateEvaluationSetExecute:
         old_set = _make_annotation_set(snap_id)
         new_set = _make_annotation_set(snap_id)
         session.get.side_effect = [old_set, new_set]
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
 
         added: list = []
         session.add.side_effect = lambda obj: (setattr(obj, "id", uuid.uuid4()), added.append(obj))
@@ -389,7 +390,7 @@ class TestGenerateEvaluationSetExecute:
         existing.stats = {"nk_proteins": 1}
         existing.groundtruth_uri = "file://gt.parquet"
         existing.window_role = None
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = existing
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = existing
         session.flush = MagicMock()
 
         payload = self._payload()
@@ -415,7 +416,7 @@ class TestGenerateEvaluationSetExecute:
         new_native = uuid.uuid4()
         # get: old set, new set, then OntologySnapshot existence for each override.
         session.get.side_effect = [old_set, new_set, MagicMock(), MagicMock()]
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
         session.add.side_effect = lambda obj: setattr(obj, "id", uuid.uuid4())
         session.flush = MagicMock()
 
@@ -454,7 +455,7 @@ class TestGenerateEvaluationSetExecute:
         old_native = uuid.uuid4()
         session.get.side_effect = [old_set, new_set, MagicMock()]
         # No row under THIS identity, though one exists for the bare pair.
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
 
         payload = self._payload()
         payload["old_native_snapshot_id"] = str(old_native)
@@ -474,20 +475,22 @@ class TestGenerateEvaluationSetExecute:
     def test_identity_lookup_filters_on_every_field_of_the_identity(self):
         """A lookup on fewer fields would serve a delta the caller did not ask for.
 
-        Ten now, not five. ``truth_profile`` decides how the t1 truth is
+        Eleven now, not five. ``truth_profile`` decides how the t1 truth is
         built, ``toi_rule`` which part of it counts as a gain, ``not_codes``
         which denials may take it away, ``target_population`` which proteins
-        it is about and ``binding_rule`` which protein-binding rule shapes its
-        F side, so a lookup that ignored any of them would hand back a delta
-        the caller did not ask for. The literal list is the point: it is what
-        fails when an eleventh field is added to the identity and not to the
-        lookup.
+        it is about, ``binding_rule`` which protein-binding rule shapes its
+        F side and ``target_query_set_id`` which declared sample of the targets
+        it is kept to, so a lookup that ignored any of them would hand back a
+        delta the caller did not ask for. The literal list is the point: it is
+        what fails when a twelfth field is added to the identity and not to the
+        lookup. The ten NOT NULL columns are compared by equality, the sample
+        (NULL for the whole population) with ``IS NOT DISTINCT FROM``.
         """
         session = MagicMock()
         old_set = _make_annotation_set(uuid.uuid4())
         new_set = _make_annotation_set(uuid.uuid4())
         session.get.side_effect = [old_set, new_set, MagicMock()]
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
 
         with patch(
             "protea.core.operations.generate_evaluation_set.compute_evaluation_data_reconciled",
@@ -510,7 +513,12 @@ class TestGenerateEvaluationSetExecute:
             "target_population",
             "binding_rule",
         }
-        assert len(session.query.return_value.filter_by.call_args.kwargs) == len(_Identity._fields)
+        (clause,) = session.query.return_value.filter_by.return_value.filter.call_args.args
+        compiled = str(clause.compile(dialect=postgresql.dialect()))
+        assert compiled == "evaluation_set.target_query_set_id IS NOT DISTINCT FROM NULL"
+        assert len(session.query.return_value.filter_by.call_args.kwargs) + 1 == len(
+            _Identity._fields
+        )
 
 
 class TestDeltaModeAndEmptyRefusal:

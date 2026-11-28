@@ -134,6 +134,10 @@ class EvaluationSet(Base):
         # 646 proteins and 2,610 entries of difference. Without it in the key
         # the two truths could not coexist: the five ids are the same, so the
         # second one would be refused as a duplicate of the first.
+        # ``target_query_set_id`` is the eleventh: a window restricted to a
+        # declared sample of its targets is another window than its parent, and
+        # NULLS NOT DISTINCT makes NULL one value, "the whole population", so two
+        # unrestricted windows still collide and two restricted to one sample do.
         UniqueConstraint(
             "old_annotation_set_id",
             "new_annotation_set_id",
@@ -145,7 +149,9 @@ class EvaluationSet(Base):
             "not_codes",
             "target_population",
             "binding_rule",
+            "target_query_set_id",
             name="uq_evaluation_set_identity",
+            postgresql_nulls_not_distinct=True,
         ),
         # ADR D40: keep the protocol-window vocabulary closed at the DB
         # level without a native enum type (cheaper to extend later). ADR-D60
@@ -347,6 +353,23 @@ class EvaluationSet(Base):
     #: identity because it changes the F side of the delta.
     binding_rule: Mapped[str] = mapped_column(
         String(24), nullable=False, server_default="descendants_both_ends"
+    )
+    #: The declared sample of its targets the window scores (a ``window_sample``
+    #: query set), or NULL for its whole population. A restricted window is its
+    #: parent's identity over fewer proteins: ``generate_evaluation_set`` keeps the
+    #: parent's verified truth to the sample, and never recomputes it. In the
+    #: identity, since it changes which proteins the window scores. RESTRICT: a
+    #: sample a window scores is not one to delete under it. Created after both
+    #: tables (``use_alter``), since the sample names its own window back.
+    target_query_set_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "query_set.id",
+            ondelete="RESTRICT",
+            name="fk_evaluation_set_target_query_set_id",
+            use_alter=True,
+        ),
+        nullable=True,
     )
     #: WHICH CODE BUILT THIS ROW, from :func:`protea.core.code_revision`.
     #:

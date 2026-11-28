@@ -178,7 +178,7 @@ def test_generate_evaluation_set_returns_existing_on_resubmit() -> None:
     existing.id = uuid.uuid4()
     existing.groundtruth_uri = "s3://protea/groundtruth/existing.parquet"
     existing.stats = {"nk_proteins": 7, "lk_proteins": 3, "mode": "same_snapshot"}
-    session.query.return_value.filter_by.return_value.one_or_none.return_value = existing
+    session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = existing
 
     payload = {
         "old_annotation_set_id": str(uuid.uuid4()),
@@ -223,7 +223,7 @@ def test_generate_evaluation_set_inserts_when_no_existing_row() -> None:
     old_set = _make_annotation_set_mock(snap_id)
     new_set = _make_annotation_set_mock(snap_id)
     session.get.side_effect = [old_set, new_set]
-    session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+    session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
 
     def add_side(obj):
         obj.id = uuid.uuid4()
