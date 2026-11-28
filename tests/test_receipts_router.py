@@ -75,6 +75,49 @@ class TestTheRunSaysWhetherItFinished:
         # finding them equal is how a gate passes what it exists to stop.
         assert not _finished({"status": "SUCCEEDED", "batches_done": None, "batches_total": None})
 
+    def test_a_job_that_never_splits_is_done_when_it_succeeds(self):
+        # Scoring has no batches to count; reading its missing counts as unfinished
+        # drew every scored set of the public ablation as "did not finish" (2026-11-25).
+        assert _finished(
+            {
+                "status": "SUCCEEDED",
+                "operation": "score_prediction_set",
+                "batches_done": 0,
+                "batches_total": None,
+            }
+        )
+
+    def test_a_batched_run_still_needs_its_count(self):
+        assert not _finished(
+            {
+                "status": "SUCCEEDED",
+                "operation": "predict_go_terms",
+                "batches_done": None,
+                "batches_total": None,
+            }
+        )
+        assert not _finished(
+            {
+                "status": "SUCCEEDED",
+                "operation": "predict_go_terms",
+                "batches_done": 3,
+                "batches_total": 22,
+            }
+        )
+
+    def test_a_scored_set_answers_for_the_run_of_its_candidates(self):
+        from unittest.mock import MagicMock
+
+        from protea.api.routers.receipts import _completion_job_id
+
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = "candidates-job"
+        assert (
+            _completion_job_id(session, {"job_id": "scorer-job", "scored_from": "c1"})
+            == "candidates-job"
+        )
+        assert _completion_job_id(session, {"job_id": "own-job"}) == "own-job"
+
     def test_no_job_is_unattributed_rather_than_unfinished(self):
         # A set from before the receipt existed is not a failed run.
         # Reporting False would accuse it of something the record cannot
