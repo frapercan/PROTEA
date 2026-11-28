@@ -68,6 +68,17 @@ from protea.infrastructure.storage import ArtifactStore, get_artifact_store
 #: and the population the settings were scored over.
 _NOT_SETTINGS: tuple[str, ...] = ("artifacts", "terms_of_interest", "population")
 
+#: The leakage role a result takes from its window's role when the request names
+#: none. A frame's fitting (``training``) and selection (``validation``) windows
+#: feed selection, as ADR-D40's ``valid`` does; ADR-D40's ``test`` is a test. A
+#: role not listed derives nothing, and the result is left unstamped.
+DERIVED_LEAKAGE_ROLES: dict[str, str] = {
+    "valid": "select",
+    "test": "test",
+    "training": "select",
+    "validation": "select",
+}
+
 
 def _refuse_a_cyclic_snapshot(session: Session, snapshot: Any, emit: EmitFn) -> None:
     """Refuse a snapshot whose True Path Rule edges close a cycle, by name.
@@ -284,16 +295,16 @@ class RunCafaEvaluationOperation:
         F-METHOD-EVAL-SURFACE) from the payload:
 
         - ``leakage_role``: explicit, else derived from the (now possibly
-          stamped) EvaluationSet ``window_role`` ('valid'->'select',
-          'test'->'test').
+          stamped) EvaluationSet ``window_role`` (:data:`DERIVED_LEAKAGE_ROLES`:
+          the fitting and selection windows of a frame, and ADR-D40's 'valid',
+          feed selection; ADR-D40's 'test' is a test).
         - ``arms_enabled``: as the caller labels the method, or None. It is no
           longer derived: the evaluator runs no arm, and what the method ran is
           in its prediction set's record.
         """
         leakage_role = p.leakage_role
         if leakage_role is None:
-            leakage_role = {"valid": "select", "test": "test"}.get(eval_set.window_role or "")
-            leakage_role = leakage_role or None
+            leakage_role = DERIVED_LEAKAGE_ROLES.get(eval_set.window_role or "")
         return p.frame, p.temporal_window, leakage_role, p.arms_enabled
 
     def _run_evaluation_pipeline(

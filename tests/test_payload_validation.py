@@ -90,6 +90,9 @@ from protea.core.operations.declare_photo_member_set import (
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenancePayload,
 )
+from protea.core.operations.declare_operating_threshold import (
+    DeclareOperatingThresholdPayload,
+)
 from protea.core.operations.declare_window_sample import DeclareWindowSamplePayload
 from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
@@ -191,6 +194,7 @@ from protea.core.operations.seal_evaluation_groundtruth import (
     SealEvaluationGroundtruthPayload,
 )
 from protea.core.operations.store_residue_codes import StoreResidueCodesPayload
+from protea.core.operations.read_operating_point import ReadOperatingPointPayload
 from protea.core.operations.stratify_evaluation import StratifyEvaluationPayload
 from protea.core.operations.summarize_prediction_sets import SummarizePredictionSetsPayload
 from protea.core.operations.supersede_evaluation_sets import SupersedeEvaluationSetsPayload
@@ -252,6 +256,43 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "operating_point": "fixed",
         },
         (),
+    ),
+    # invariant: the nine panels read as one family share one stream and read
+    # balanced percentile bounds; a bca interval corrects each panel on its own and
+    # has no joint coverage, so the family refuses it (and it is the default).
+    (
+        "compare_paired_panels",
+        ComparePairedPanelsPayload,
+        {
+            "evaluation_result_id": "a",
+            "baseline_evaluation_result_id": "b",
+            "interval_family": "simultaneous",
+        },
+        (),
+    ),
+    # invariant: a threshold declared on a percentile reading is relative to each
+    # arm and window and travels nowhere; the operation declares on raw readings.
+    (
+        "declare_operating_threshold",
+        DeclareOperatingThresholdPayload,
+        {
+            "name": "ladder-toy-transport-threshold-ours-raw",
+            "evaluation_result_ids": ["4b8f0b48-1f0e-4f45-9c43-5d3e21b2a001"],
+            "reading": "percentile_rank",
+        },
+        ("reading",),
+    ),
+    # invariant: a reading is per evaluator cell, so its axes include the category
+    # and the aspect; a stratum axis alone would read no cell.
+    (
+        "read_operating_point",
+        ReadOperatingPointPayload,
+        {
+            "evaluation_result_id": "4b8f0b48-1f0e-4f45-9c43-5d3e21b2a001",
+            "declared_threshold_id": "4b8f0b48-1f0e-4f45-9c43-5d3e21b2a002",
+            "axes": ["homology"],
+        },
+        ("axes",),
     ),
     # invariant: a population floor of zero would report every cell, including
     # the ones holding a single protein, at the same weight as one holding

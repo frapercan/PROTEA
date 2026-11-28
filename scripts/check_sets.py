@@ -75,6 +75,7 @@ EXPECTED: dict[str, str] = {
     "lexicon_bank": "one lexicon's cut and theme mass of every member sequence of a set of photos",
     "segment_families": "the families of one cut's lexicon segments, linked by MMseqs2",
     "embedding_space_statistics": "label-free statistics of one configuration's space at a cut",
+    "evaluation_operating_point": "one result read at the per-cell thresholds one weights declares",
 }
 
 #: Tables whose name ends in ``_set`` but which are membership or join rows,

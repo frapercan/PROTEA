@@ -209,7 +209,8 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "'select' (feeds model/threshold selection), 'test' (report-once "
             "held-out measurement), or 'probe' (exploratory, must not feed "
             "selection). When None it is derived from the EvaluationSet "
-            "window_role ('valid'->'select', 'test'->'test')."
+            "window_role ('training', 'validation' and 'valid' -> 'select'; "
+            "'test' -> 'test')."
         ),
     )
     arms_enabled: dict[str, bool] | None = Field(

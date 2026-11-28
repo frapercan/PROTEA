@@ -101,6 +101,9 @@ TODAY: dict[str, str] = {
     "encode_residue_sparse": queues.EMBEDDINGS,
     "stratify_evaluation": queues.EVALUATIONS,
     "compare_paired_panels": queues.EVALUATIONS,
+    # The literature ladder's readings: CLAUDE.md's queue routing list.
+    "declare_operating_threshold": queues.EVALUATIONS,
+    "read_operating_point": queues.EVALUATIONS,
     "seal_evaluation_frames": queues.EVALUATIONS,
     "audit_evaluation_frames": queues.EVALUATIONS,
     "audit_per_protein_artifacts": queues.EVALUATIONS,
@@ -295,7 +298,7 @@ def _constant(module: str, name: str) -> str:
 def test_every_registered_operation_declares_a_spec() -> None:
     registry = build_operation_registry()
     assert set(registry.specs()) == set(registry._ops)
-    assert len(CATALOG) == len(registry._ops) == 74
+    assert len(CATALOG) == len(registry._ops) == 76
 
 
 def test_each_spec_routes_where_the_code_routes_today(specs: dict[str, OperationSpec]) -> None:

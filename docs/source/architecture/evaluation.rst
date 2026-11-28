@@ -645,6 +645,57 @@ history but are not LAFA-comparable. Numbers from the v226 evaluation window
 are also kept for history but should not be compared head-to-head with LAFA
 v227 results (different band, different ground truth shape).
 
+Reading a result at a declared threshold
+----------------------------------------
+
+The oracle ``Fmax`` of a cell is the maximum over the threshold grid, chosen with the
+truth it is scored on. A reading of the literature ladder is instead read at a threshold
+each cell declared before the read, on the scale its reading lives on, and every
+comparison between two arms reads both at their declared thresholds.
+
+**One path to the grid.** A stored set and the out-of-fold scores of a fit reach the
+per-protein threshold grid by the same code
+(:mod:`protea.core.operating_point.grid`): ``evaluate_setting`` calls cafaeval with
+LAFA's options and the per-protein sink (``run_cafa_evaluation`` scores through it), and
+``evaluate_to_grid`` renders in-memory scores as the evaluator renders a stored set
+(``'%.4f'``, ordered by protein and term) and evaluates them. A fixture holds the two
+byte-identical. A result also records S's minimum in both weightings with its threshold
+(``smin``, ``tau_smin``, ``smin_w``, ``tau_smin_w``), read from cafaeval's curve.
+
+**Hierarchy restoration.** Before a calibrated reading or a fitted set is rendered and
+evaluated, every ancestor of a predicted term takes the maximum of its own score and the
+term's (:mod:`protea.core.operating_point.hierarchy`), with the ancestors cafaeval-protea's
+own parser reads from the window's OBO. The evaluator's ``fill`` and a ``max``
+propagation then read the same set, and give byte-identical per-protein grids. A raw
+literal set is not restored: LAFA scores it under ``fill``.
+
+**The t0 category.** The evaluator's category of a (protein, aspect) depends on t1. A
+method that keys anything by category uses the t0 category instead
+(:mod:`protea.core.t0_category`): partial knowledge when the protein's closed t0
+experimental state holds a term in the aspect, limited when it holds one elsewhere only,
+none otherwise, read from the window's t0 side alone. ``read_operating_point`` records how
+often the two disagree on the window's benchmark pairs.
+
+**Declared thresholds and readings.** ``declare_operating_threshold`` pools one arm's
+raw fitting-window grids into a threshold per cell (a transport diagnostic on raw
+scores); ``read_operating_point`` reads a result at the thresholds a weights row declares
+and writes one ``evaluation_operating_point`` row, per cell and per stratum.
+
+**Simultaneous intervals.** ``compare_paired_panels`` takes ``declared_threshold_id`` and
+``baseline_declared_threshold_id``, which read each arm at its own declared threshold in
+each panel, and ``interval_family``. Under ``simultaneous`` the panels share one stream
+of protein multiplicities over the union of their paired proteins, and each panel's
+interval is a balanced percentile interval (Beran 1988): its bounds are the order
+statistics of ranks ``ceil(g/2 B)`` and ``ceil((1 - g/2) B)`` of its ``B`` replicate
+differences, with one level ``g`` for every panel, the largest between ``alpha / k`` and
+``alpha`` at which the share of replicates with every panel inside its interval reaches
+the confidence. The result records ``g`` (``simultaneous_level``), the joint coverage
+reached, and each bound's Monte Carlo error, half the distance between the order
+statistics one binomial deviation of the rank either side; the caller doubles ``B``
+until every error is small enough. The detectable effect and the verdict are read from
+the simultaneous bounds, and ``bca`` is refused with the family. Without these fields a
+comparison is what it was.
+
 Checked against a second implementation
 ---------------------------------------
 

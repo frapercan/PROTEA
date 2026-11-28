@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import tempfile
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,14 @@ from protea.core.operations._paired_panels_artifact import (
     resolve_setting_file,
 )
 from protea.core.operations._paired_panels_stratum import Restriction
+
+# The verdict and the tally live beside the panel; re-exported, since readers of
+# the tally (the graph's edges) import it from here.
+from protea.core.operations._paired_panels_verdict import (  # noqa: F401
+    TALLY_KEYS,
+    tally,
+    verdict_for,
+)
 from protea.core.operations._run_cafa_helpers import eval_artifact_key
 
 # The exact-path control. ``_micro`` is the function behind every published
@@ -89,11 +98,29 @@ class PanelConfig:
     #: beside an index: the two cannot then disagree, and every consumer of it
     #: below needs the index and not the word.
     tau_index: int | None = None
+    #: Each panel's ``(arm, baseline)`` columns when each arm is read at its own
+    #: declared threshold, in place of :attr:`tau_index`.
+    declared: Mapping[str, tuple[int, int]] | None = None
+    #: ``per_panel`` resamples each panel alone; ``simultaneous`` shares one stream.
+    family: str = "per_panel"
 
     @property
     def operating_point(self) -> str:
-        """The vocabulary word for what :attr:`tau_index` says, never stored twice."""
-        return boot.RESELECTED_PER_RESAMPLE if self.tau_index is None else boot.FIXED
+        """The vocabulary word for what the columns say, never stored twice."""
+        if self.tau_index is None and self.declared is None:
+            return boot.RESELECTED_PER_RESAMPLE
+        return boot.FIXED
+
+    def taus(self, key: str) -> tuple[int | None, int | None]:
+        """The columns panel ``key`` is read at, ``(arm, baseline)``."""
+        if self.declared is None:
+            return self.tau_index, self.tau_index
+        if key not in self.declared:
+            raise PanelComparabilityError(
+                f"panel {key} has artefacts on both sides and no declared threshold on one of "
+                "them; a panel is read at the threshold each arm declared for it"
+            )
+        return self.declared[key]
 
 
 @dataclass
@@ -495,28 +522,18 @@ def _diagnostics(
     }
 
 
-def resample(
-    a: boot.PanelArrays,
-    b: boot.PanelArrays,
+def resampled_block(
+    draws: boot.Draws,
+    interval: boot.Interval,
     cfg: PanelConfig,
     ops: tuple[boot.OperatingPoint, boot.OperatingPoint],
-    panel_index: int,
 ) -> dict[str, Any]:
-    """The bootstrap, the interval and the MDE for one aligned panel.
+    """What a resampled panel reports: its delta, interval, detectable effect and diagnostics.
 
-    The seed is spawned from the panel's canonical index rather than taken in
-    sequence, so a run over three panels and a run over nine give the same
-    numbers for the panels they share, whatever order they were requested in.
+    One shape for both families, so a reader of a panel never asks how it was
+    resampled; the simultaneous family adds its bounds' Monte Carlo errors.
     """
     delta = float(ops[0].value - ops[1].value)
-    seed = np.random.SeedSequence(cfg.seed, spawn_key=(panel_index,))
-    draws = boot.paired_bootstrap(
-        a, b, n_resamples=cfg.n_resamples, seed=seed, tau_index=cfg.tau_index
-    )
-    jack = boot.jackknife_deltas(a, b, tau_index=cfg.tau_index)
-    interval = boot.build_interval(
-        draws.deltas, delta, jack, alpha=cfg.alpha, force_percentile=cfg.force_percentile
-    )
     mde = boot.minimum_detectable_effect(draws.deltas, delta, interval, power=cfg.power)
     return {
         "delta": delta,
@@ -531,57 +548,31 @@ def resample(
     }
 
 
-def verdict_for(panel: dict[str, Any]) -> tuple[str, str]:
-    """``(status, verdict)`` from what the interval and the MDE actually say.
+def resample(
+    a: boot.PanelArrays,
+    b: boot.PanelArrays,
+    cfg: PanelConfig,
+    ops: tuple[boot.OperatingPoint, boot.OperatingPoint],
+    panel_index: int,
+    taus: boot.TauIndex = None,
+) -> dict[str, Any]:
+    """The bootstrap, the interval and the MDE for one aligned panel, resampled alone.
 
-    **A null is read against the effect the caller came to detect, never against
-    the observed difference.** The earlier rule compared the MDE to
-    ``abs(delta)``, and that comparison can never fire: the MDE is built from
-    the same bootstrap distribution as the interval, at power 0.80, so it is
-    always about 1.43 times the half-width, while an interval covering zero
-    forces ``abs(delta)`` to be at most the half-width. Measured over 2,000
-    random panels the branch fired 0 times, so every null the campaign could
-    ever produce was stamped "could not have resolved anything", which is the
-    exact misreading the requirement exists to prevent, pointing the other way.
-    It is also the wrong comparison on its own terms: an effect is worth
-    detecting or not for reasons outside this run, so the threshold is a payload
-    field and not a function of the answer.
-
-    Three readings of an interval that covers zero, and they are different
-    facts:
-
-    ``null_with_power``   the comparison could have resolved an effect the size
-                          the caller declared, and did not find one. That is
-                          evidence of sameness, bounded by the MDE.
-    ``underpowered``      the smallest effect this comparison could have found
-                          is larger than the one the caller cares about. The
-                          null says nothing about the two systems.
-    ``null_unread``       no effect of interest was declared, so the null cannot
-                          be read at all. The MDE is reported and the caller is
-                          told what to declare; guessing a threshold here would
-                          be this operation inventing the campaign's standard.
-
-    A panel below the population floor is forced to ``not_resolved`` even when
-    its interval excludes zero: an interval from a handful of units has coverage
-    the bootstrap cannot vouch for, and reporting a win from one is how a
-    fluctuation becomes a published finding. A degenerate resample distribution
-    is never a win either, whatever its zero-width interval appears to exclude.
+    The seed is spawned from the panel's canonical index rather than taken in
+    sequence, so a run over three panels and a run over nine give the same
+    numbers for the panels they share, whatever order they were requested in.
+    ``taus`` are the panel's columns (:meth:`PanelConfig.taus`); None reads
+    ``cfg.tau_index`` for both arms.
     """
-    mde = panel["minimum_detectable_effect"]
-    effect = panel.get("effect_of_interest")
-    if panel["interval_method"] == boot.DEGENERATE:
-        return "unresolvable", "not_resolved"
-    if not panel["reportable"]:
-        return "underpowered", "not_resolved"
-    if panel["excludes_zero"]:
-        return "ok", ("a_greater" if panel["delta"] > 0 else "b_greater")
-    if mde is None:
-        return "unresolvable", "not_resolved"
-    if effect is None:
-        return "null_unread", "not_resolved"
-    if mde <= effect:
-        return "null_with_power", "not_resolved"
-    return "underpowered", "not_resolved"
+    columns = (cfg.tau_index, cfg.tau_index) if taus is None else taus
+    delta = float(ops[0].value - ops[1].value)
+    seed = np.random.SeedSequence(cfg.seed, spawn_key=(panel_index,))
+    draws = boot.paired_bootstrap(a, b, n_resamples=cfg.n_resamples, seed=seed, tau_index=columns)
+    jack = boot.jackknife_deltas(a, b, tau_index=columns)
+    interval = boot.build_interval(
+        draws.deltas, delta, jack, alpha=cfg.alpha, force_percentile=cfg.force_percentile
+    )
+    return resampled_block(draws, interval, cfg, ops)
 
 
 def absent_stats(rule: tuple[str, float]) -> dict[str, Any]:
@@ -591,7 +582,7 @@ def absent_stats(rule: tuple[str, float]) -> dict[str, Any]:
 def _arms(
     sides: tuple[Side, Side], key: str, aligned: tuple[boot.PanelArrays, boot.PanelArrays],
     raw: tuple[boot.PanelArrays, boot.PanelArrays],
-    tau_index: int | None,
+    taus: tuple[int | None, int | None],
     whole: tuple[boot.PanelArrays, boot.PanelArrays] | None = None,
 ) -> tuple[tuple[boot.OperatingPoint, boot.OperatingPoint], dict[str, Any], dict[str, Any]]:
     """Both arms' blocks. ``whole`` is the unrestricted pair, when there is one.
@@ -606,7 +597,7 @@ def _arms(
         raw[0],
         sides[0].grids[setting].meta,
         sides[0].stored_metric(setting, aspect),
-        tau_index,
+        taus[0],
         None if whole is None else whole[0],
     )
     op_b, block_b = arm_block(
@@ -614,7 +605,7 @@ def _arms(
         raw[1],
         sides[1].grids[setting].meta,
         sides[1].stored_metric(setting, aspect),
-        tau_index,
+        taus[1],
         None if whole is None else whole[1],
     )
     return (op_a, op_b), block_a, block_b
@@ -690,18 +681,30 @@ def _below_floor(
     }
 
 
-def panel_result(
+@dataclass(frozen=True)
+class PreparedPanel:
+    """A paired panel with its arms read, before it is resampled."""
+
+    key: str
+    stats: dict[str, Any]
+    arms: tuple[boot.PanelArrays, boot.PanelArrays]
+    ops: tuple[boot.OperatingPoint, boot.OperatingPoint]
+    blocks: tuple[dict[str, Any], dict[str, Any]]
+    arm_silent: str | None
+    taus: tuple[int | None, int | None]
+
+
+def prepare_panel(
     sides: tuple[Side, Side],
     key: str,
     cfg: PanelConfig,
-    index: int,
     rule: tuple[str, float],
     narrow: Restriction | None = None,
-) -> dict[str, Any]:
-    """One panel's whole answer, including the answers that are refusals to answer.
+) -> PreparedPanel | dict[str, Any]:
+    """A panel up to its resample, or its finished answer when it cannot be resampled.
 
-    ``narrow`` restricts the paired population to one stratum and carries the
-    name that restriction is reported under. ``None`` is the whole panel.
+    The finished answers are the refusals to answer: an absent artefact, an
+    empty stratum, a refused population, a panel below the bootstrap floor.
     """
     reported = narrow.label if narrow else key
     raw = _raw_pair(sides, key, narrow)
@@ -720,24 +723,32 @@ def panel_result(
             f"{a.n} and {b.n}; the number and the population it is over have come apart"
         )
     assert_same_ground_truth(a, b, reported)
-    ops, block_a, block_b = _arms(sides, key, (a, b), (raw_a, raw_b), cfg.tau_index, whole)
+    taus = cfg.taus(key)
+    ops, block_a, block_b = _arms(sides, key, (a, b), (raw_a, raw_b), taus, whole)
     delta = float(ops[0].value - ops[1].value)
     silent = [n for n, blk in (("A", block_a), ("B", block_b)) if blk["silent"]]
     arm_silent = silent[0] if len(silent) == 1 else None
     if a.n < 2:
         return _below_floor(stats, block_a, block_b, delta, arm_silent)
+    return PreparedPanel(reported, stats, (a, b), ops, (block_a, block_b), arm_silent, taus)
+
+
+def finish_panel(
+    prepared: PreparedPanel, cfg: PanelConfig, resampled: dict[str, Any]
+) -> dict[str, Any]:
+    """A prepared panel with its resample, read into a status and a verdict."""
     panel: dict[str, Any] = {
-        **stats,
-        "a": block_a,
-        "b": block_b,
+        **prepared.stats,
+        "a": prepared.blocks[0],
+        "b": prepared.blocks[1],
         # A system that predicts nothing genuinely scores zero, and the
         # difference against it is a real difference. The arm is named, not
         # dropped and not treated as missing data.
-        "arm_silent": arm_silent,
-        "reportable": a.n >= cfg.min_population,
+        "arm_silent": prepared.arm_silent,
+        "reportable": prepared.arms[0].n >= cfg.min_population,
         "reason": None,
         "message": None,
-        **resample(a, b, cfg, ops, index),
+        **resampled,
     }
     panel["status"], panel["verdict"] = verdict_for(panel)
     panel["resolves"] = panel["verdict"] in ("a_greater", "b_greater")
@@ -745,33 +756,21 @@ def panel_result(
     return panel
 
 
-#: Every bucket a panel can land in, and they are six because they are six
-#: different facts. Collapsing ``null_unread`` and ``null_with_power`` into
-#: ``underpowered`` is what made a readable null unreportable; collapsing
-#: ``refused`` into ``not_computed`` is what let an identifier-space bug look
-#: like a missing file.
-TALLY_KEYS: tuple[str, ...] = (
-    "resolved",
-    "null_with_power",
-    "null_unread",
-    "underpowered",
-    "refused",
-    "not_computed",
-)
+def panel_result(
+    sides: tuple[Side, Side],
+    key: str,
+    cfg: PanelConfig,
+    index: int,
+    rule: tuple[str, float],
+    narrow: Restriction | None = None,
+) -> dict[str, Any]:
+    """One panel's whole answer, resampled alone, including the answers that are refusals.
 
-
-def tally(panels: dict[str, dict[str, Any]]) -> dict[str, int]:
-    """The one-line reading of the nine, stated once and plainly."""
-    counts = dict.fromkeys(TALLY_KEYS, 0)
-    for panel in panels.values():
-        if panel["status"] == "refused":
-            counts["refused"] += 1
-        elif panel["verdict"] == "not_computed":
-            counts["not_computed"] += 1
-        elif panel["resolves"]:
-            counts["resolved"] += 1
-        elif panel["status"] in ("null_with_power", "null_unread"):
-            counts[panel["status"]] += 1
-        else:
-            counts["underpowered"] += 1
-    return counts
+    ``narrow`` restricts the paired population to one stratum and carries the
+    name that restriction is reported under. ``None`` is the whole panel.
+    """
+    prepared = prepare_panel(sides, key, cfg, rule, narrow)
+    if isinstance(prepared, dict):
+        return prepared
+    a, b = prepared.arms
+    return finish_panel(prepared, cfg, resample(a, b, cfg, prepared.ops, index, prepared.taus))

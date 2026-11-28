@@ -536,6 +536,41 @@ transforms to a pool in place and in chunks, from that artifact's values.
    :members:
    :show-inheritance:
 
+Operating point
+---------------
+
+``protea.core.operating_point`` holds the declared threshold's document: the block a
+weights artifact of a declaring kind carries (its grid step, and per cell the threshold
+and whether it is the grid's edge), and its verified loading.
+``protea.core.operating_point.grid`` is the one path to the per-protein grid, for a
+stored set and for a fit's in-memory scores, the metrics read off a grid at a threshold
+with the evaluator's formulas, and the threshold pooled over an arm's fitting windows.
+``protea.core.operating_point.hierarchy`` restores hierarchy consistency with the
+evaluator's own ancestors. ``protea.core.operating_point.window_fields`` lists the fields
+one arm's sets may differ in across windows and compares everything else.
+``protea.core.t0_category`` reads the knowledge category a method may use from a window's
+t0 side alone.
+
+.. automodule:: protea.core.operating_point
+   :members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operating_point.grid
+   :members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operating_point.hierarchy
+   :members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operating_point.window_fields
+   :members:
+   :show-inheritance:
+
+.. automodule:: protea.core.t0_category
+   :members:
+   :show-inheritance:
+
 Declared samples
 ----------------
 

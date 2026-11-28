@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 
 from sqlalchemy import text
@@ -97,46 +97,55 @@ def load_end_ontology(session: Session, snapshot_id: uuid.UUID) -> EndOntology:
     )
 
 
+#: The clause that restricts an end's rows to some proteins, when a caller names them.
+_ONLY_THESE = "\n              AND pga.protein_accession = ANY(:accessions)"
+
+
 def load_end_rows(
-    session: Session, annotation_set_id: uuid.UUID, experimental_not_only: bool
+    session: Session,
+    annotation_set_id: uuid.UUID,
+    experimental_not_only: bool,
+    accessions: Collection[str] | None = None,
 ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     """One end's experimental rows without ``NOT``, by protein, and its ``NOT`` rows.
 
     The ``NOT`` rows are the experimental ones when ``experimental_not_only``,
-    every one otherwise: that is the window's ``not_codes``.
+    every one otherwise: that is the window's ``not_codes``. ``accessions``
+    restricts both reads to those proteins (the t0 category reads a window's
+    targets only); None reads every protein of the end, as a window's build does.
     """
+    only = "" if accessions is None else _ONLY_THESE
+    bound: dict[str, object] = {"set_id": annotation_set_id, "codes": _EXPERIMENTAL}
+    if accessions is not None:
+        bound["accessions"] = sorted(accessions)
     positives: dict[str, set[str]] = defaultdict(set)
     for protein, go_id in session.execute(
         text(
-            """
+            f"""
             SELECT pga.protein_accession, gt.go_id
             FROM protein_go_annotation pga
             JOIN go_term gt ON gt.id = pga.go_term_id
             WHERE pga.annotation_set_id = :set_id
               AND pga.evidence_code = ANY(:codes)
-              AND (pga.qualifier IS NULL OR pga.qualifier NOT LIKE '%NOT%')
+              AND (pga.qualifier IS NULL OR pga.qualifier NOT LIKE '%NOT%'){only}
             """
         ),
-        {"set_id": annotation_set_id, "codes": _EXPERIMENTAL},
+        bound,
     ):
         positives[protein].add(go_id)
     negations: dict[str, set[str]] = defaultdict(set)
     for protein, go_id in session.execute(
         text(
-            """
+            f"""
             SELECT pga.protein_accession, gt.go_id
             FROM protein_go_annotation pga
             JOIN go_term gt ON gt.id = pga.go_term_id
             WHERE pga.annotation_set_id = :set_id
               AND pga.qualifier LIKE '%NOT%'
-              AND (NOT :experimental_only OR pga.evidence_code = ANY(:codes))
+              AND (NOT :experimental_only OR pga.evidence_code = ANY(:codes)){only}
             """
         ),
-        {
-            "set_id": annotation_set_id,
-            "codes": _EXPERIMENTAL,
-            "experimental_only": experimental_not_only,
-        },
+        {**bound, "experimental_only": experimental_not_only},
     ):
         negations[protein].add(go_id)
     return dict(positives), dict(negations)
