@@ -1,0 +1,60 @@
+{
+ "about": "What visitors are told: dated announcements and where the project stands. Editorial content only, reviewed in a pull request and released with the platform. What runs every night (the champion's predictions, their digest, the cut) is written by the platform itself and is not kept here.",
+ "status": {
+  "as_of": "2026-11-23",
+  "stage": "Closing the thesis. The exploration is consolidated into one research line by stages. Each component is being re-run in the platform at every cut as a debugging pass, the heavy training on the Picasso supercomputer, and measured by strata before the final combination.",
+  "champion": {
+   "name": "The protein's own annotations, ordered by a model that reads co-annotation",
+   "measure": "0.3543",
+   "reading": "weighted micro F-measure, mean of the nine cells, LAFA window 211->227",
+   "fitted_on": "the earlier window 194->211",
+   "rule": "The champion is the best arm measured on the latest validation window under one declared rule, and it changes only when another arm measures better."
+  },
+  "nightly": "In preparation. Once the next release of the platform is deployed, the instrument will publish every night the champion's predictions for the corpus of the latest cut and for the sequences submitted to it.",
+  "next": [
+   "Release the platform with the cut photos and the identity of each method.",
+   "Publish the champion's predictions every night.",
+   "Re-run every component of the research line at every cut and measure it by strata.",
+   "Route the best combination per stratum, freeze it, and read it once on the held-out test window 227->230.",
+   "Close the thesis."
+  ]
+ },
+ "announcements": [
+  {
+   "date": "2026-11-23",
+   "title": "Learned vectors complement what a protein says about itself",
+   "body": "A GO head learned over ProtT5-XL vectors from the experimental annotation known at the cut is weaker than nearest-neighbour transfer on its own, but taking the larger of its probability and the champion's reaches 0.3664 on 211->227, better than the champion in six of the nine cells by paired comparison.",
+   "link": "research_line"
+  },
+  {
+   "date": "2026-11-23",
+   "title": "One research line, by stages",
+   "body": "Everything explored so far now sits in a single line: representations of the protein, sources of candidate terms, signals, two learners that read the same evidence (a world model and decision trees), stratified evaluation, and routing per stratum. Every component is defined, run and validated in the platform at every cut.",
+   "link": "research_line"
+  },
+  {
+   "date": "2026-11-23",
+   "title": "The corpus at a cut, in figures",
+   "body": "Five full photos of the corpus, from 2016 to 2025, grow from 1.13 to 1.85 million proteins, and the photo of September 2025 carries 33.7 million GOA rows by evidence channel. Every number is read from the photo manifests, which are named by their digests.",
+   "link": "corpus"
+  },
+  {
+   "date": "2026-11-22",
+   "title": "Eight protein language models, one fair comparison",
+   "body": "Transfer from the nearest neighbour, with the query excluded by accession, on the LAFA window 211->227: the eight models span 0.3149 (ESM C 600M) to 0.3241 (ProtT5-XL) in the weighted micro F-measure, nine-cell mean. The choice of model moves the result by less than a hundredth.",
+   "link": "research_line"
+  },
+  {
+   "date": "2026-11-22",
+   "title": "What a protein already says about itself",
+   "body": "A protein's own non-experimental annotations at the cut, ordered by a model fitted on the earlier window 194->211 that reads co-annotation, reach 0.3543 on 211->227. That is above the transfer from any single language model, and it is the champion today.",
+   "link": "research_line"
+  },
+  {
+   "date": "2026-11-16",
+   "title": "The corpus at a cut is a photo",
+   "body": "Each cut now has its own corpus: the Swiss-Prot entries of that date, the proteins with experimental or curated rows, and the annotated UniRef50 neighbours of Swiss-Prot proteins, with every GOA row kept and classed by its evidence channel.",
+   "link": "corpus"
+  }
+ ]
+}

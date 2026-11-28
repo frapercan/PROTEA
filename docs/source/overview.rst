@@ -20,23 +20,45 @@ plain view.
 How it works, in one breath
 ---------------------------
 
-PROTEA does not guess a function from the sequence directly. It *retrieves*. It
-turns each protein into a compact code, finds the most similar proteins that are
-already labelled, and lets those neighbours vote for GO terms; this is
-*k-nearest-neighbours*, kNN. A second stage, a *reranker*, weighs that vote
-against other clues (how strong each match is, how a candidate term relates to
-what we already know) and calibrates a final score. The full flow, from UniProt
-sequence to a scored prediction, is in :doc:`architecture/index`.
+PROTEA does not guess a function from the sequence directly. It gathers
+*candidate* terms from several sources and learns how far to trust each one.
+A protein already says something about itself: its own annotations that no
+experiment has confirmed yet. Similar proteins say more: PROTEA turns each
+protein into a vector with a protein language model, finds the closest
+proteins that are already labelled, and lets them vote; this is
+*k-nearest-neighbours*, kNN. Terms that usually appear together say the rest.
+A learned reader then weighs every candidate against all of these clues and
+gives it a calibrated score. The full flow, from UniProt sequence to a scored
+prediction, is in :doc:`architecture/index`.
+
+How it is studied
+-----------------
+
+Everything the project has explored sits in one line of research, by stages:
+representations of the protein, sources of candidates, signals, two learners
+that read the same evidence (a world model that predicts how a protein's
+knowledge will change, and decision trees), evaluation by strata, and routing
+per stratum. It is laid out in :doc:`research_line`. The corpus each method may
+use is fixed per cut, as a photo whose contents are shown in :doc:`corpus`.
 
 What it achieves
 ----------------
 
-On a fair test, PROTEA reaches ``f_micro_w`` 0.40765 (a weighted,
-information-aware F-measure) and ranks first in seven of the nine evaluation
-cells. The nine cells are three knowledge regimes, from proteins we know nothing
-about to proteins we already know something about, crossed with the three
-branches of GO. The board and its reproduction path are in :doc:`results` and
-:doc:`operate/reproduce-the-sealed-board`.
+Two results, on two frames that should not be compared with each other.
+
+- **The sealed board (July 2026).** On the earlier temporal frame, PROTEA
+  reached ``f_micro_w`` 0.40765 (a weighted, information-aware F-measure) and
+  ranked first in seven of the nine evaluation cells. The nine cells are three
+  knowledge regimes, from proteins we know nothing about to proteins we already
+  know something about, crossed with the three branches of GO. The board and
+  its reproduction path are in :doc:`results` and
+  :doc:`operate/reproduce-the-sealed-board`.
+- **The current frame.** The windows now follow the LAFA benchmark's rules
+  exactly, over the corpus photo of each cut. On the validation window 211->227
+  the champion today orders the protein's own annotations with a model fitted
+  on the earlier window and reaches 0.3543 in the same measure, mean of the nine
+  cells; transfer from the nearest neighbour with the best of eight language
+  models reaches 0.3241. The current state is on :doc:`news`.
 
 Why the test is fair
 --------------------
@@ -63,6 +85,9 @@ which of the choices turn out not to have mattered, are collected in
 Where to go next
 ----------------
 
+- Want the research behind it, and where it stands? :doc:`research_line` and
+  :doc:`news`.
+- Want to see the data each cut holds? :doc:`corpus`.
 - New here and want to run something? The quickstart gets you from a clone to a
   first job in about ten minutes: :doc:`appendix/installation_and_quickstart`.
 - Want to rebuild the board itself? That is a different and longer road, and
