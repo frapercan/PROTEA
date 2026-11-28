@@ -23,6 +23,24 @@ the explainable-units family. For the window named by ``evaluation_set_id``
    parameter. Its explanation names the evidence codes of the direct
    annotations whose closure holds the term.
 
+THE CHANNELS. Each own row has an evidence channel at the cut (ADR-D59), read
+with the photo's channel table and the target's review state there
+(``evidence_channel_of``). ``evidence_channels`` admits only the rows of the
+channels it lists: the literal arm, CAFA5's baseline, reads every channel but the
+truth and no_data (the default, and every set written before the field); the
+recipe arm reads the four recipe channels a protein's own annotations can carry,
+and leaves the mirror channel (``signature_electronic``) out. Whatever the filter,
+each written term records the channels of the direct rows that imply it: a
+bitmask in its explanation (``channel_mask``, one bit per channel in the order of
+:data:`protea.core.cut_photo.channels.CHANNELS`) and a parquet of (protein, term,
+mask) as the set's ``evidence_artifact``, so a set can be split by channel without
+running again. Which rows are written and their scores do not depend on it.
+
+THE TARGETS. A window that declares its target set (a toy window's sample, a full
+window's ``evaluation_targets`` set) is read on those proteins and the set names
+it as its query set; any other window is read on its truth's targets, named by
+their digest, as before.
+
 It reads labels at t0 and nothing later and fits nothing, so it needs no
 training window; the same method over the same window again is a no-op.
 """
@@ -31,9 +49,13 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Iterator, Mapping
-from typing import Any
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, NamedTuple
 
+import pyarrow as pa
+from protea_contracts.payloads import EvidenceChannel
 from pydantic import field_validator
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -41,26 +63,31 @@ from sqlalchemy.orm import Session
 from protea.core import lafa_frame
 from protea.core._cut_state import cut_state, window_of
 from protea.core._evaluation_graph import _bfs_closure, _load_parents_by_go_id
-from protea.core._evaluation_groundtruth import load_evaluation_data_for_set
 from protea.core._lafa_frame_data import load_end_ontology, load_end_rows
 from protea.core.contracts.method import Family, InstanceCut, MethodSpec, Pin
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.count_map.inputs import ROOTS
+from protea.core.cut_photo.channels import CHANNELS
 from protea.core.evaluation import _EXP_CODES
 from protea.core.method_write import (
+    DeclaredTargets,
     SetContext,
     copy_explanations,
     copy_predictions,
     ensure_method,
     new_prediction_set,
+    population_spelling,
+    store_evidence,
+    window_targets,
 )
 from protea.core.operations.run_count_map import CountMapRefused, term_ids
-from protea.core.query_population import population_of
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.cut_photo import CutPhoto
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.settings import load_settings
+from protea.infrastructure.storage import get_artifact_store
 
 #: Codes that are not knowledge about the protein: no biological data available.
 NOT_KNOWLEDGE = ("ND",)
@@ -78,42 +105,119 @@ LAFA_STATE = (
     "of t0 and everything under it taken out first, roots out"
 )
 
+#: The channels a protein's own non-experimental annotations can carry: every channel
+#: but the truth (its experimental side, the window's) and no_data (no knowledge).
+OWN_CHANNELS: tuple[str, ...] = tuple(c for c in CHANNELS if c not in ("truth", "no_data"))
+#: The recipe's own channels: every own channel but the mirror, signature_electronic.
+RECIPE_OWN_CHANNELS: tuple[str, ...] = tuple(c for c in OWN_CHANNELS if c != "signature_electronic")
+#: One bit per channel, in the order of ``CHANNELS``: a term's ``channel_mask``.
+CHANNEL_BITS: dict[str, int] = {channel: 1 << i for i, channel in enumerate(CHANNELS)}
+#: Each own channel's word in a method code.
+_CHANNEL_WORDS = {
+    "curated": "curated",
+    "phylogenetic": "phylogenetic",
+    "orthology_electronic": "orthology",
+    "reviewed_field_electronic": "reviewed-field",
+    "signature_electronic": "signature",
+}
+
 
 class RunOwnAnnotationsPayload(ProteaPayload, frozen=True):
-    """The window whose targets are read."""
+    """The window whose targets are read, and the channels of their own rows admitted.
+
+    ``evidence_channels`` unset, or naming every own channel, is today's rule: every
+    channel but the truth and no_data. The channels are kept in the order of
+    ``CHANNELS``, so two orders of one list are one method.
+    """
 
     evaluation_set_id: str
+    evidence_channels: list[EvidenceChannel] | None = None
 
     @field_validator("evaluation_set_id", mode="before")
     @classmethod
     def must_be_a_uuid(cls, v: Any) -> str:
         return str(uuid.UUID(str(v)))
 
+    @field_validator("evidence_channels")
+    @classmethod
+    def own_channels_once(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        if not v:
+            raise ValueError("evidence_channels lists no channel; leave it unset for every one")
+        repeated = sorted({c for c in v if v.count(c) > 1})
+        if repeated:
+            raise ValueError(f"evidence_channels lists {repeated} more than once")
+        foreign = sorted(set(v) - set(OWN_CHANNELS))
+        if foreign:
+            raise ValueError(
+                f"evidence_channels names {foreign}: a protein's own non-experimental rows carry "
+                f"only {list(OWN_CHANNELS)}; the truth is the window's and no_data is no knowledge"
+            )
+        ordered = [c for c in OWN_CHANNELS if c in v]
+        return None if len(ordered) == len(OWN_CHANNELS) else ordered
+
+
+class OwnRows(NamedTuple):
+    """``{target: {native go_id: {codes}}}`` and ``{target: {native go_id: {channels}}}``."""
+
+    codes: dict[str, dict[str, set[str]]]
+    channels: dict[str, dict[str, set[str]]]
+
 
 def own_rows(
-    session: Session, annotation_set_id: uuid.UUID, targets: Iterable[str]
-) -> dict[str, dict[str, set[str]]]:
-    """``{target: {native go_id: {codes}}}``: its own non-NOT, non-experimental rows but ND."""
+    session: Session,
+    photo: CutPhoto,
+    targets: Iterable[str],
+    channels: Sequence[str] | None = None,
+) -> OwnRows:
+    """The targets' own non-NOT, non-experimental rows but ND, with each row's channel at the cut.
+
+    The channel is read with the photo's channel table and the target's review
+    state at the cut; a row the table cannot classify has none, and is admitted
+    only when no channel is asked for.
+    """
     rows = session.execute(
         text(
-            "SELECT pga.protein_accession, gt.go_id, pga.evidence_code "
+            "SELECT pga.protein_accession, gt.go_id, pga.evidence_code, "
+            "evidence_channel_of(:table, pga.evidence_code, pga.db_reference, pga.with_from, "
+            "coalesce(m.superset, false)) "
             "FROM protein_go_annotation pga JOIN go_term gt ON gt.id = pga.go_term_id "
+            "LEFT JOIN cut_photo_member m "
+            "ON m.photo_id = :photo AND m.accession = pga.protein_accession "
             "WHERE pga.annotation_set_id = :s AND pga.protein_accession = ANY(:t) "
             "AND NOT (pga.evidence_code = ANY(:skip)) "
             "AND (pga.qualifier IS NULL OR pga.qualifier NOT LIKE '%NOT%')"
         ),
-        {"s": annotation_set_id, "t": sorted(set(targets)), "skip": [*_EXP_CODES, *NOT_KNOWLEDGE]},
+        {
+            "table": photo.channel_table_sha256,
+            "photo": photo.id,
+            "s": photo.annotation_set_id,
+            "t": sorted(set(targets)),
+            "skip": [*_EXP_CODES, *NOT_KNOWLEDGE],
+        },
     )
-    out: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
-    for protein, go_id, code in rows:
-        out[str(protein)][str(go_id)].add(str(code))
-    return {p: dict(terms) for p, terms in out.items()}
+    admitted = None if channels is None else set(channels)
+    codes: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    found: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for protein, go_id, code, channel in rows:
+        if admitted is not None and channel not in admitted:
+            continue
+        codes[str(protein)][str(go_id)].add(str(code))
+        found[str(protein)][str(go_id)].update({str(channel)} if channel else set())
+    return OwnRows(
+        {p: dict(terms) for p, terms in codes.items()},
+        {p: dict(terms) for p, terms in found.items()},
+    )
 
 
 def term_codes(
     direct: Mapping[str, set[str]], parents: Mapping[str, set[str]]
 ) -> dict[str, set[str]]:
-    """Every term of the direct terms' closure, with the codes of the direct terms that imply it."""
+    """Every term of the direct terms' closure, with the codes of the direct terms that imply it.
+
+    The same walk gives a term's channels: hand it the channels of each direct term.
+    """
     out: dict[str, set[str]] = defaultdict(set)
     for go_id, codes in direct.items():
         for term in _bfs_closure({go_id}, parents):
@@ -121,38 +225,84 @@ def term_codes(
     return dict(out)
 
 
+def channel_mask(channels: Iterable[str]) -> int:
+    """The bitmask of a set of channels: one bit per channel, in the order of ``CHANNELS``."""
+    return sum(CHANNEL_BITS[channel] for channel in set(channels))
+
+
 def prediction_rows(
     positives: Mapping[str, Mapping[str, set[str]]],
     negatives: Mapping[str, set[str]],
     codes: Mapping[str, Mapping[str, set[str]]],
     ids: Mapping[str, int],
+    channels: Mapping[str, Mapping[str, set[str]]] | None = None,
 ) -> Iterator[tuple[str, int, float, dict[str, Any]]]:
-    """(accession, go_term_id, 1.0, explanation) for every reconciled term but roots and denials."""
+    """(accession, go_term_id, 1.0, explanation) for every reconciled term but roots and denials.
+
+    With ``channels`` (each target's closed terms with the channels that imply them,
+    as :func:`term_codes` gives them), the explanation records the term's
+    ``channel_mask``. A term that no direct closure names (a remap) takes every code
+    and every channel of its target.
+    """
     for protein in sorted(positives):
         denied = negatives.get(protein, set())
         mine = codes.get(protein, {})
         every = sorted(set().union(*mine.values())) if mine else []
+        held = (channels or {}).get(protein, {})
+        all_held: set[str] = set().union(*held.values()) if held else set()
         for aspect in sorted(positives[protein]):
             for go_id in sorted(positives[protein][aspect]):
                 if go_id in ROOTS or go_id in denied or go_id not in ids:
                     continue
-                why = sorted(mine[go_id]) if go_id in mine else every
-                yield protein, ids[go_id], 1.0, {"own": True, "aspect": aspect, "codes": why}
+                why: dict[str, Any] = {
+                    "own": True,
+                    "aspect": aspect,
+                    "codes": sorted(mine[go_id]) if go_id in mine else every,
+                }
+                if channels is not None:
+                    why["channel_mask"] = channel_mask(held.get(go_id, all_held))
+                yield protein, ids[go_id], 1.0, why
 
 
-def method_spec(photo: CutPhoto, truth_profile: str | None = None) -> MethodSpec:
-    """The method a run is: the rule, at the photo's cut, pinned to the photo it reads."""
+def method_code(lafa: bool, channels: Sequence[str] | None) -> str:
+    """The method's code: today's for every own channel, a code of its own for a channel set.
+
+    The recipe arm's four channels are ``recipe-channels``; any other set is named by
+    its channels' words. A rule on LAFA's frame is a variant at the same cut and takes
+    the ``-lafa`` code (``method_short_name``).
+    """
+    if channels is None:
+        return LAFA_CODE if lafa else CODE
+    words = (
+        "recipe-channels"
+        if tuple(channels) == RECIPE_OWN_CHANNELS
+        else "-".join(_CHANNEL_WORDS[c] for c in channels)
+    )
+    return f"own-annotations-{words}" + ("-lafa" if lafa else "")
+
+
+def method_spec(
+    photo: CutPhoto, truth_profile: str | None = None, channels: Sequence[str] | None = None
+) -> MethodSpec:
+    """The method a run is: the rule, at the photo's cut, pinned to the photo it reads.
+
+    Unset channels leave the recipe as it always was, so every set written before the
+    field keeps its method.
+    """
     lafa = truth_profile == lafa_frame.PROFILE
+    recipe: dict[str, Any] = {
+        "source": "the target's own annotations at t0 (democafa goa_nonexp)",
+        "evidence": "every code but the thirteen of the truth and ND, not NOT-qualified",
+        "state": LAFA_STATE if lafa else RECONCILED_STATE,
+        "score": 1.0,
+    }
+    if channels is not None:
+        recipe["evidence_channels"] = list(channels)
     return MethodSpec(
         family=Family.EXPLAINABLE_UNITS,
-        code=LAFA_CODE if lafa else CODE,
+        code=method_code(lafa, channels),
         instance=InstanceCut(photo.cut_release, photo.ontology_snapshot_id),
-        recipe={
-            "source": "the target's own annotations at t0 (democafa goa_nonexp)",
-            "evidence": "every code but the thirteen of the truth and ND, not NOT-qualified",
-            "state": LAFA_STATE if lafa else RECONCILED_STATE,
-            "score": 1.0,
-        },
+        recipe=recipe,
         pins=(Pin("photo", photo.manifest_sha256, (f"cut_photo:{photo.id}",)),),
         runtime="native",
         explains=True,
@@ -172,25 +322,47 @@ def resolve(session: Session, evaluation_set_id: str) -> tuple[EvaluationSet, Cu
     return eset, photo
 
 
+@dataclass(frozen=True)
+class OwnRead:
+    """What a run read: the targets, the set that declared them, and the rows it writes."""
+
+    targets: list[str]
+    declared: DeclaredTargets | None
+    rows: list[tuple[str, int, float, dict[str, Any]]]
+
+
+def read_own(
+    session: Session,
+    eset: EvaluationSet,
+    photo: CutPhoto,
+    channels: Sequence[str] | None = None,
+) -> OwnRead:
+    """The window's targets and every row of their own reconciled terms in the admitted channels."""
+    targets, declared = window_targets(session, eset)
+    direct = own_rows(session, photo, targets, channels)
+    old = session.get(AnnotationSet, eset.old_annotation_set_id)
+    if eset.truth_profile == lafa_frame.PROFILE:
+        positives = lafa_positives(session, eset, old.ontology_snapshot_id, direct.codes)
+        negatives: Mapping[str, set[str]] = {}
+    else:
+        raw = {p: set(terms) for p, terms in direct.codes.items()}
+        state = cut_state(session, window_of(eset), raw=raw)
+        positives, negatives = state.positives, state.negatives
+    parents = _load_parents_by_go_id(session, old.ontology_snapshot_id)
+    codes = {p: term_codes(terms, parents) for p, terms in direct.codes.items()}
+    held = {p: term_codes(terms, parents) for p, terms in direct.channels.items()}
+    ids = term_ids(session, eset.pivot_snapshot_id)
+    rows = list(prediction_rows(positives, negatives, codes, ids, held))
+    return OwnRead(targets, declared, rows)
+
+
 def read_targets(
     session: Session, eset: EvaluationSet
 ) -> tuple[list[str], list[tuple[str, int, float, dict[str, Any]]]]:
     """The window's targets and every row of their own reconciled non-experimental terms."""
-    truth, _ = load_evaluation_data_for_set(session, eset)
-    targets = sorted(set(truth.nk) | set(truth.lk) | set(truth.pk))
-    direct = own_rows(session, eset.old_annotation_set_id, targets)
-    old = session.get(AnnotationSet, eset.old_annotation_set_id)
-    if eset.truth_profile == lafa_frame.PROFILE:
-        positives, negatives = lafa_positives(session, eset, old.ontology_snapshot_id, direct), {}
-    else:
-        raw = {p: set(terms) for p, terms in direct.items()}
-        state = cut_state(session, window_of(eset), raw=raw)
-        positives, negatives = state.positives, state.negatives
-    parents = _load_parents_by_go_id(session, old.ontology_snapshot_id)
-    codes = {p: term_codes(terms, parents) for p, terms in direct.items()}
-    ids = term_ids(session, eset.pivot_snapshot_id)
-    rows = list(prediction_rows(positives, negatives, codes, ids))
-    return targets, rows
+    _, photo = resolve(session, str(eset.id))
+    read = read_own(session, eset, photo)
+    return read.targets, read.rows
 
 
 def lafa_positives(
@@ -214,14 +386,36 @@ def lafa_positives(
     return lafa_frame.end_truth(t0, positives, negations, Counter(), "t0")
 
 
+def channel_record(
+    rows: Iterable[tuple[str, int, float, dict[str, Any]]], ids: Mapping[str, int]
+) -> pa.Table:
+    """The channel record: (protein, term, channel mask) of every written row."""
+    go_id_of = {term_id: go_id for go_id, term_id in ids.items()}
+    listed = [(a, go_id_of[t], int(w["channel_mask"])) for a, t, _, w in rows]
+    table = pa.table(
+        {
+            "accession": pa.array([a for a, _, _ in listed], pa.string()),
+            "go_id": pa.array([g for _, g, _ in listed], pa.string()),
+            "channel_mask": pa.array([m for _, _, m in listed], pa.uint8()),
+        }
+    )
+    bits = ",".join(f"{channel}={bit}" for channel, bit in CHANNEL_BITS.items())
+    return table.replace_schema_metadata({"channel_bits": bits})
+
+
+def _store() -> Any:
+    return get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
+
+
 class RunOwnAnnotationsOperation:
     """Read a window's targets from their own non-experimental annotations at t0."""
 
     name = "run_own_annotations"
     description = (
         "Read a window's targets from their own non-experimental annotations at t0 (democafa's "
-        "goa_nonexp baseline), reconciled as the evaluator reconciles t0, as a native method's "
-        "prediction set with explanations (explainable-units family)."
+        "goa_nonexp baseline), in every channel or the admitted ones, reconciled as the evaluator "
+        "reconciles t0, as a native method's prediction set with explanations and the channel "
+        "record of every term (explainable-units family)."
     )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
@@ -232,7 +426,7 @@ class RunOwnAnnotationsOperation:
     ) -> OperationResult:
         p = RunOwnAnnotationsPayload.model_validate(contract_payload(payload))
         eset, photo = resolve(session, p.evaluation_set_id)
-        method = ensure_method(session, method_spec(photo, eset.truth_profile))
+        method = ensure_method(session, method_spec(photo, eset.truth_profile, p.evidence_channels))
         done = session.execute(
             select(PredictionSet).where(
                 PredictionSet.method_id == method.id,
@@ -247,13 +441,27 @@ class RunOwnAnnotationsOperation:
                 "info",
             )
             return OperationResult(result={"prediction_set_id": str(done.id), "skipped": True})
-        targets, rows = read_targets(session, eset)
+        read = read_own(session, eset, photo, p.evidence_channels)
+        return self._write(session, (eset, photo, method, read), payload, emit)
+
+    @staticmethod
+    def _write(
+        session: Session, run: tuple[Any, ...], payload: dict[str, Any], emit: EmitFn
+    ) -> OperationResult:
+        eset, photo, method, read = run
+        rows, targets = read.rows, read.targets
         covered = len({r[0] for r in rows})
         emit(
             "run_own_annotations.inputs",
             None,
             {"targets": len(targets), "targets_with_a_term": covered, "rows": len(rows)},
             "info",
+        )
+        evidence = store_evidence(
+            _store(),
+            channel_record(rows, term_ids(session, eset.pivot_snapshot_id)),
+            method_name=method.short_name,
+            evaluation_set_id=eset.id,
         )
         pset = new_prediction_set(
             session,
@@ -266,9 +474,13 @@ class RunOwnAnnotationsOperation:
                     f"The own non-experimental annotations at cut {photo.cut_release} of the "
                     f"{len(targets):,} targets of window {eset.id}: {covered:,} of them carry one."
                 ),
-                meta={"evaluation_set_id": str(eset.id), "targets_with_a_term": covered},
+                meta={
+                    "evaluation_set_id": str(eset.id),
+                    "targets_with_a_term": covered,
+                    "evidence_artifact": evidence,
+                },
                 job_id=job_id_from_payload(payload),
-                population=population_of(targets),
+                **population_spelling(targets, read.declared),
             ),
         )
         written = copy_predictions(session, pset, ((a, t, s) for a, t, s, _ in rows))
@@ -280,6 +492,7 @@ class RunOwnAnnotationsOperation:
             "rows": written,
             "explanations": explained,
             "targets_with_a_term": covered,
+            "evidence_artifact": evidence,
         }
         emit("run_own_annotations.done", f"{written} rows", result, "info")
         return OperationResult(result=result)

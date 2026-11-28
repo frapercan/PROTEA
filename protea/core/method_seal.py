@@ -89,8 +89,9 @@ class CrossedMethodAxes(ValueError):
 #: different populations are two experiments rather than two arms.
 #: ``limit_per_entry`` is the RETRIEVAL depth and decides which candidates were
 #: ever fetched, which ``_arm_identity`` separates from an evaluation cut for
-#: the same reason it is identity here. ``distance_threshold`` decides which of
-#: the fetched neighbours are allowed to vote.
+#: the same reason it is identity here; on a set a method produced it is
+#: execution (:data:`_EXECUTION_WHEN_A_METHOD_IS_NAMED`). ``distance_threshold``
+#: decides which of the fetched neighbours are allowed to vote.
 #:
 #: ``method_id`` is the method row that produced the set (ADR-D60, decision 3).
 #: Its id is derived from the method's whole spec (family, code, instance cut,
@@ -278,6 +279,37 @@ _EXECUTION_META: Mapping[str, str] = {
         "can change and the counts follow from them; the bytes are named by "
         "predictions_sha256, which is identity"
     ),
+    # The two keys every native writer of the literature ladder adds
+    # (run_term_frequency, run_homology_transfer, run_own_annotations).
+    "evidence_artifact": (
+        "the uri and sha256 of a parquet of the facts behind a native set's rows: a "
+        "homology vote's donors, a term frequency's counts, the channels of an own "
+        "annotation. They follow from the method's inputs and recipe, which are "
+        "identity, and the same facts written again under a new job land on the same "
+        "sha256"
+    ),
+    "written_counts": (
+        "what a native writer read, wrote, forced or left out: targets, rows, hits, "
+        "twins without a self score, denominators. A consequence of the data the "
+        "method met, like denied_removed; the choices behind it are the method's "
+        "recipe, which method_id carries"
+    ),
+}
+
+#: Columns that are method identity on a set no method row produced, and execution on
+#: a set that names one (``method_id`` set), each with why. The seal reads them as
+#: absent on a method's set, so two method sets never differ in them, and a method's
+#: set and a configuration's set differ in them exactly when the configuration's says
+#: anything, which is what a cross-family comparison then has to declare.
+_EXECUTION_WHEN_A_METHOD_IS_NAMED: Mapping[str, str] = {
+    "limit_per_entry": (
+        "on a set a method produced it is not a retrieval depth: a native writer "
+        "records the largest number of rows any target received (run_own_annotations, "
+        "run_homology_transfer, the length of run_term_frequency's vector) and the "
+        "count map three times its depth. What the method writes is its recipe, which "
+        "method_id carries. On a set without a method it is the retrieval depth and "
+        "stays identity"
+    ),
 }
 
 #: Every field that must agree unless the comparison declares it as its axis.
@@ -352,6 +384,13 @@ def _assert_the_lists_partition() -> None:
                 f"prediction_set {half} {both} are classified as method identity and as "
                 "execution at once; a field can be one or the other"
             )
+    loose = sorted(set(_EXECUTION_WHEN_A_METHOD_IS_NAMED) - set(_IDENTITY_COLUMNS))
+    if loose:
+        raise ValueError(
+            f"prediction_set columns {loose} are execution on a method's set and not "
+            "identity anywhere else; a field read as absent on a method's set must be an "
+            "identity column on every other"
+        )
 
 
 _assert_the_lists_partition()
@@ -446,6 +485,8 @@ def method_identity(row: Mapping[str, Any], *, name: str = "prediction set") -> 
 
     identity = {field: _normalise(row.get(field)) for field in _IDENTITY_COLUMNS}
     identity.update({field: _normalise(meta.get(field)) for field in _IDENTITY_META})
+    if row.get("method_id") is not None:
+        identity.update(dict.fromkeys(_EXECUTION_WHEN_A_METHOD_IS_NAMED))
     return identity
 
 
