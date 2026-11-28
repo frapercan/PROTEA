@@ -253,6 +253,9 @@ def test_the_recipe_channels_admit_a_neighbours_orthology_row(pg: Session, world
     b = whole_row(pg, uuid.UUID(truth_only["prediction_set_id"]))
     assert a["method_id"] == b["method_id"]
     assert assert_one_axis(["donor_policy"], a, b) == ("donor_policy",)
+    # The permissive policy admits every row: here the recipe channels' donors and no other.
+    every = _run(pg, world, rule="bitscore_vote", denominator="any_aspect")
+    assert _scores(pg, every["prediction_set_id"], world)["T1"] == pytest.approx(t1)
 
 
 @pytest.mark.integration
