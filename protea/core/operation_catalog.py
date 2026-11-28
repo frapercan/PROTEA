@@ -104,6 +104,9 @@ from protea.core.operations.link_protein_sequences import (
 from protea.core.operations.load_cut_photo import LoadCutPhotoOperation
 from protea.core.operations.load_embedding_bank import LoadEmbeddingBankOperation
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
+from protea.core.operations.load_homology_self_scores import (
+    LoadHomologySelfScoresOperation,
+)
 from protea.core.operations.load_homology_table import LoadHomologyTableOperation
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingOperation,
@@ -148,9 +151,11 @@ from protea.core.operations.retire_evaluation_sets import (
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
 from protea.core.operations.run_count_map import RunCountMapOperation
+from protea.core.operations.run_homology_transfer import RunHomologyTransferOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
 from protea.core.operations.run_lab_method import RunLabMethodOperation
 from protea.core.operations.run_own_annotations import RunOwnAnnotationsOperation
+from protea.core.operations.run_term_frequency import RunTermFrequencyOperation
 from protea.core.operations.score_prediction_set import ScorePredictionSetOperation
 from protea.core.operations.seal_evaluation_frames import (
     SealEvaluationFramesOperation,
@@ -216,6 +221,8 @@ _UNIVERSE: tuple[_Row, ...] = (
     (LoadSwissProtReleaseOperation, _FETCHED),
     (LoadCutPhotoOperation, _DERIVED),
     (LoadHomologyTableOperation, _DERIVED),
+    # The self scores of a table's queries, computed on the cluster: a twin's bit score.
+    (LoadHomologySelfScoresOperation, _DERIVED),
     (DeclareMemberTaxaOperation, _DERIVED),
     (RefreshGoaReleaseDatesOperation, _FETCHED),
     (LoadInterProGoMappingOperation, replace(_FETCHED, status="mirror")),
@@ -408,6 +415,16 @@ _METHOD: tuple[_Row, ...] = (
     # democafa's goa_nonexp baseline: a target's own non-experimental annotations at t0.
     (
         RunOwnAnnotationsOperation,
+        replace(_METHOD_JOB, queue=queues.TRAINING, family="explainable-units"),
+    ),
+    # The literature ladder's native rungs: term frequency (rung 0) and homology transfer
+    # (rungs 2a and 2b), each at a window's start.
+    (
+        RunTermFrequencyOperation,
+        replace(_METHOD_JOB, queue=queues.TRAINING, family="explainable-units"),
+    ),
+    (
+        RunHomologyTransferOperation,
         replace(_METHOD_JOB, queue=queues.TRAINING, family="explainable-units"),
     ),
     (RegisterIngestedMethodOperation, _METHOD_JOB),

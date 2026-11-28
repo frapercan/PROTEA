@@ -138,6 +138,7 @@ from protea.core.operations.load_embedding_bank import LoadEmbeddingBankPayload
 from protea.core.operations.load_goa_annotations import (
     LoadGOAAnnotationsPayload,
 )
+from protea.core.operations.load_homology_self_scores import LoadHomologySelfScoresPayload
 from protea.core.operations.load_homology_table import LoadHomologyTablePayload
 from protea.core.operations.load_interpro_go_mapping import (
     LoadInterProGoMappingPayload,
@@ -180,11 +181,13 @@ from protea.core.operations.retire_evaluation_sets import (
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.core.operations.run_count_map import RunCountMapPayload
+from protea.core.operations.run_homology_transfer import RunHomologyTransferPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
 )
 from protea.core.operations.run_lab_method import RunLabMethodPayload
 from protea.core.operations.run_own_annotations import RunOwnAnnotationsPayload
+from protea.core.operations.run_term_frequency import RunTermFrequencyPayload
 from protea.core.operations.score_prediction_set import ScorePredictionSetPayload
 from protea.core.operations.seal_evaluation_frames import SealEvaluationFramesPayload
 from protea.core.operations.seal_evaluation_groundtruth import (
@@ -395,6 +398,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         {"table_dir": "/srv/homology/211", "manifest_sha256": "not-a-digest"},
         ("manifest_sha256",),
     ),
+    # And a table's self scores by theirs.
+    (
+        "load_homology_self_scores",
+        LoadHomologySelfScoresPayload,
+        {"scores_dir": "/srv/self-scores/211", "manifest_sha256": "not-a-digest"},
+        ("manifest_sha256",),
+    ),
     # A window placement names its window by id, and nothing else.
     (
         "place_window_targets",
@@ -483,6 +493,79 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         RunOwnAnnotationsPayload,
         {"evaluation_set_id": "not-a-uuid"},
         ("evaluation_set_id",),
+    ),
+    # A protein's own non-experimental rows carry no truth channel: the truth is the window's.
+    (
+        "run_own_annotations",
+        RunOwnAnnotationsPayload,
+        {
+            "evaluation_set_id": "4228a366-3dc4-4c30-b4a4-287482a59edf",
+            "evidence_channels": ["truth"],
+        },
+        ("evidence_channels",),
+    ),
+    # Term frequency names its population and its variant from closed vocabularies.
+    (
+        "run_term_frequency",
+        RunTermFrequencyPayload,
+        {
+            "evaluation_set_id": "4228a366-3dc4-4c30-b4a4-287482a59edf",
+            "population": "reviewed_experimental",
+            "variant": "lafa",
+        },
+        ("variant",),
+    ),
+    # LAFA's literal counts LAFA's population, the reviewed experimental members.
+    (
+        "run_term_frequency",
+        RunTermFrequencyPayload,
+        {
+            "evaluation_set_id": "4228a366-3dc4-4c30-b4a4-287482a59edf",
+            "population": "experimental",
+            "variant": "lafa_direct",
+        },
+        (),
+    ),
+    # A homology rule is one of three, and a vote names its denominator.
+    (
+        "run_homology_transfer",
+        RunHomologyTransferPayload,
+        {"evaluation_set_id": "4228a366-3dc4-4c30-b4a4-287482a59edf", "rule": "best_hit"},
+        ("rule",),
+    ),
+    (
+        "run_homology_transfer",
+        RunHomologyTransferPayload,
+        {
+            "evaluation_set_id": "4228a366-3dc4-4c30-b4a4-287482a59edf",
+            "rule": "bitscore_identity_vote",
+            "identity": "global",
+        },
+        (),
+    ),
+    # A cap of 300 hits or more is every hit the table's search kept: no cap.
+    (
+        "run_homology_transfer",
+        RunHomologyTransferPayload,
+        {
+            "evaluation_set_id": "4228a366-3dc4-4c30-b4a4-287482a59edf",
+            "rule": "bitscore_vote",
+            "denominator": "any_aspect",
+            "hit_cap": 300,
+        },
+        ("hit_cap",),
+    ),
+    # The query leaves by accession or with its twins; it never votes for itself.
+    (
+        "run_homology_transfer",
+        RunHomologyTransferPayload,
+        {
+            "evaluation_set_id": "4228a366-3dc4-4c30-b4a4-287482a59edf",
+            "rule": "top_hit_identity",
+            "identity": "local",
+            "self_exclusion": "none",
+        },
+        (),
     ),
     # The members' taxa of a loaded photo, named by its manifest's sha256.
     (

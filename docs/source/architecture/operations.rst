@@ -2370,6 +2370,195 @@ Payload fields
      - The set's name, which gets the digest's first twelve characters.
 
 
+run_term_frequency
+------------------
+
+Scores every target of a window of LAFA's frame by how often each term is held at t0:
+term frequency, the CAFA Naive, rung 0 of the literature ladder and a native method of
+the explainable-units family. A job on ``protea.training``.
+
+The population counted is the photo's members with an experimental row at the cut
+(``experimental``), or those of them in its Swiss-Prot superset
+(``reviewed_experimental``, LAFA's). Two variants (:mod:`protea.core.term_frequency`):
+
+- ``lafa_direct``, LAFA's literal, as CAFA_forever runs democafa's ``naive.py
+  --n_terms 1500`` on the unpropagated ``train_terms.tsv`` of ``retrieve_terms -sgc
+  'Experimental,IC,TAS'``: the population's direct rows, NOT rows dropped without
+  negating, each id named under t0's own ontology (an alternative id as its primary,
+  an obsolete term as its replacement, a term not alive dropped), one row per protein,
+  term and aspect; ``N_t / D_aspect``, the proteins with a row on the term over the
+  proteins with any row in its aspect (the roots' own counts when all three roots
+  carry rows, a refusal naming the aspects when only some do, where democafa stops);
+  in an aspect with more than 500 terms, every score at or below the 500th largest is
+  zero. It counts LAFA's population only;
+- ``propagated``, the recipe's variant: every protein's closed state at t0 as LAFA's
+  frame states it (each NOT term of t0 and everything under it out of the direct
+  terms first), ``N_t / N_root`` with ``N_root`` the proteins holding a term in the
+  aspect, roots out, and every term whose four-decimal rendering is at or above the
+  evaluator grid's first element (0.01).
+
+The same vector goes to every target: the window's declared target set when it has
+one (a toy window's sample, or a full window's ``evaluation_targets`` set), which the
+set names as its ``query_set_id``, and otherwise the proteins its truth scores, named
+by their digest. The rows are compact (``prediction_score``, one row per target) and
+every term id is checked against the window's t0 snapshot before one is written
+(``protea.core.method_write.copy_scores``). The count table (every counted term, its
+proteins, its aspect's denominator and its score) goes to the store as the set's
+``evidence_artifact``; the branch taken, the denominators, the cap and the naming
+counts are its ``written_counts``. The same method over the same window again is a
+no-op.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``evaluation_set_id``
+     - The window read, of LAFA's frame, opening on a loaded full photo.
+   * - ``population``
+     - ``reviewed_experimental`` or ``experimental``.
+   * - ``variant``
+     - ``lafa_direct`` (with ``reviewed_experimental`` only) or ``propagated``.
+
+
+run_homology_transfer
+---------------------
+
+Scores the targets of a window of LAFA's frame from the donors their sequences hit in
+the cut's homology table: rungs 2a and 2b of the literature ladder, a native method of
+the explainable-units family. A job on ``protea.training``.
+
+Each target sequence's hits are streamed from the store and verified against the
+table's sha256; its twins (the members sharing its sequence under another accession,
+which the table cannot hold) vote at identity 1 with the target's self-alignment bit
+score (``homology_self_scores``), and a twin without one is left out of a vote and
+counted. The donors behind a hit are the photo's members with that sequence, admitted
+by the donor policy of the predict payloads: ``donor_set_id`` (a ``photo_members`` set
+of this photo), ``evidence_channels`` (each row's channel at the cut, read with the
+photo's channel table and the member's review state), ``evidence_codes`` and
+``exclude_reference_prefixes``; ``reviewed_only`` and ``admitted_by_release`` are
+refused, since neither says membership at the cut. The target's own accession leaves
+(``self_exclusion`` ``accession``), and its twins with it under ``sequence``. A donor's
+terms are its admitted rows as LAFA's frame states t0, its NOT terms of t0 and their
+descendants out first, roots out, so the scores are consistent with the ontology.
+
+The rules (:mod:`protea.core.homology.transfer`): ``top_hit_identity``, the largest
+identity among the voters carrying a term (CAFA's and LAFA's BLAST baseline);
+``bitscore_vote`` (S1), ``sum bits x I(t) / sum bits``; ``bitscore_identity_vote``
+(S2), ``sum bits x ID x I(t) / sum bits x ID``. Identity is ``local`` (``fident``) or
+``global`` (``nident / max(qlen, slen)``, ``nident = round(fident x alnlen)``); a vote's
+denominator sums every voter carrying an admitted term (``any_aspect``) or those
+carrying one in the term's aspect (``same_aspect``); ``multiplicity`` counts every
+donor accession or every donor sequence once; ``hit_cap`` reads the first hits by bit
+score. The rule and its variants are the method's recipe; the donor policy and the
+exclusion are written in the set's meta as a retrieval's receipt spells them. The rows
+are compact and their term ids checked; the evidence of every row (the best voter, its
+identity, alignment and bit score, the vote's numerator and denominator, the voters
+and the target's total weight) is the set's ``evidence_artifact``, and what was read,
+voted and left out its ``written_counts``. The same method over the same window, donors
+and exclusion again is a no-op.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``evaluation_set_id``
+     - The window read, of LAFA's frame, opening on a loaded full photo with a homology
+       table (and, for a vote, its self scores).
+   * - ``rule``
+     - ``top_hit_identity``, ``bitscore_vote`` or ``bitscore_identity_vote``.
+   * - ``identity``
+     - ``local`` or ``global``, for the rules that read one.
+   * - ``denominator``
+     - ``any_aspect`` or ``same_aspect``, for the votes.
+   * - ``multiplicity``
+     - ``accession`` (the default) or ``sequence``, for the votes.
+   * - ``hit_cap``
+     - Optional, from 1 to 299: the table's search kept at most 300 hits a query.
+   * - ``donor_policy``
+     - The predict payloads' donor policy.
+   * - ``self_exclusion``
+     - ``accession`` (the default) or ``sequence``.
+
+
+load_homology_self_scores
+-------------------------
+
+Declares the self-alignment bit scores of one homology table's queries, computed on
+the cluster by forced self alignments (``protea.core.homology.self_scores``, run by
+``deploy/cluster/homology_self_scores.sh``, which aligns the union of several tables'
+queries once and writes one folder per cut). A job on ``protea.jobs``.
+
+It refuses before writing anything unless the manifest hashes to the payload's sha256
+and is ``complete`` (a sampled ``measurement`` never loads), the scores parquet hashes as
+recorded and holds one positive finite bit score per query it scored, the counts
+agree, the photo it names is the loaded full photo of its cut, that photo's homology
+table has exactly the queries these scores were computed for (the sha256 of the bytes
+the table's prepare pass wrote, and their count), and every scored sequence is a
+superset sequence of the photo. Then it puts the scores and the manifest in the store
+(``homology-self-scores/<cut>/<sha256>/``) and writes one ``homology_self_scores`` row,
+derived from its table by a foreign key. A table has one row: the same manifest again
+is a no-op and another is refused.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``scores_dir``
+     - The cut's folder of the stage's output.
+   * - ``manifest_sha256``
+     - The sha256 of its ``self-scores.json``.
+
+
+run_own_annotations
+-------------------
+
+Reads a window's targets from their own non-experimental annotations at t0
+(democafa's ``goa_nonexp`` baseline, rung 1 of the literature ladder), a native method
+of the explainable-units family. A job on ``protea.training``.
+
+Each own row has its evidence channel at the cut, read with the photo's channel table
+and the target's review state there. ``evidence_channels`` admits the rows of the
+channels it lists among ``curated``, ``phylogenetic``, ``orthology_electronic``,
+``reviewed_field_electronic`` and ``signature_electronic``; unset (or every one of
+them) is the literal arm and every set written before the field, and the recipe arm
+lists the first four, leaving the mirror channel out. A channel set is a method of its
+own. Whatever the filter, each written term's explanation records the channels of the
+direct rows that imply it (``channel_mask``, one bit per channel in the order of
+``protea.core.cut_photo.channels.CHANNELS``), and the (protein, term, mask) record of
+every row is the set's ``evidence_artifact``, so a set splits by channel without
+running again; which rows are written and their scores do not depend on it. A window
+that declares its target set is read on it and the set names it as its query set.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``evaluation_set_id``
+     - The window read, opening on a loaded full photo.
+   * - ``evidence_channels``
+     - Optional: the own channels admitted.
+
+
 Registering a new operation
 ----------------------------
 

@@ -14,6 +14,7 @@ from .annotation.evidence_channel import (  # noqa: F401
 from .annotation.go_term import GOTerm  # noqa: F401
 from .annotation.go_term_alias import GOTermAlias  # noqa: F401
 from .annotation.go_term_relationship import GOTermRelationship  # noqa: F401
+from .annotation.homology_self_scores import HomologySelfScores  # noqa: F401
 from .annotation.homology_table import HomologyTable  # noqa: F401
 from .annotation.information_accretion_set import InformationAccretionSet  # noqa: F401
 from .annotation.interpro_annotation import InterProAnnotation  # noqa: F401

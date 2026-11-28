@@ -1,10 +1,11 @@
-# The files a cluster needs to measure and build a cut photo, its homology table, the
-# embedding and lexicon banks of the photos and a cut's segment families, and the job
-# scripts that run them: the import closure inside protea/ of
-# protea.core.cut_photo.measure and .build and of protea.core.homology.build (the standard
-# library and pyarrow are all they need), of protea.core.embedding_bank.build (which also
-# needs numpy, and torch with the protea-backends plugins in the cluster's own environment),
-# of protea.core.lexicon_bank.build (numpy, torch and Triton) and of
+# The files a cluster needs to measure and build a cut photo, its homology table and the
+# self-alignment scores of its queries, the embedding and lexicon banks of the photos and a
+# cut's segment families, and the job scripts that run them: the import closure inside
+# protea/ of protea.core.cut_photo.measure and .build and of protea.core.homology.build and
+# .self_scores (the standard library, pyarrow and a pinned MMseqs2 binary are all they
+# need), of protea.core.embedding_bank.build (which also needs numpy, and torch with the
+# protea-backends plugins in the cluster's own environment), of
+# protea.core.lexicon_bank.build (numpy, torch and Triton) and of
 # protea.core.segment_families.build (pyarrow, numpy and a pinned MMseqs2 binary).
 # send_builder_code.sh ships exactly these, and tests/test_cluster_builder_files.py fails
 # when the closure and the protea/ lines disagree, or when a job script here is missing.
@@ -26,6 +27,7 @@ protea/core/evidence_codes.py
 protea/core/file_stage.py
 protea/core/homology/__init__.py
 protea/core/homology/build.py
+protea/core/homology/self_scores.py
 protea/core/lexicon/__init__.py
 protea/core/lexicon/candidates.py
 protea/core/lexicon/decode.py
@@ -48,6 +50,7 @@ deploy/cluster/cut_photo_measure.sh
 deploy/cluster/cut_photo_build.sh
 deploy/cluster/cut_photo_truth.sh
 deploy/cluster/homology_build.sh
+deploy/cluster/homology_self_scores.sh
 deploy/cluster/embedding_bank_prepare.sh
 deploy/cluster/embedding_bank.sh
 deploy/cluster/lexicon_bank.sh

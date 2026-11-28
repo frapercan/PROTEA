@@ -26,6 +26,7 @@ ENTRY_POINTS = {
     "protea.core.cut_photo.build": frozenset({"pyarrow"}),
     "protea.core.cut_photo.measure": frozenset({"pyarrow"}),
     "protea.core.homology.build": frozenset({"pyarrow"}),
+    "protea.core.homology.self_scores": frozenset({"pyarrow"}),
     "protea.core.embedding_bank.build": frozenset({"pyarrow", "numpy", "torch"}),
     "protea.core.lexicon_bank.build": frozenset({"pyarrow", "numpy", "torch", "triton"}),
     # torch only through protea.core.file_stage, which asks it about the card when it is
@@ -87,6 +88,7 @@ def test_the_shipped_list_is_the_import_closure_and_the_job_scripts() -> None:
         "deploy/cluster/cut_photo_build.sh",
         "deploy/cluster/cut_photo_truth.sh",
         "deploy/cluster/homology_build.sh",
+        "deploy/cluster/homology_self_scores.sh",
         "deploy/cluster/embedding_bank_prepare.sh",
         "deploy/cluster/embedding_bank.sh",
         "deploy/cluster/lexicon_bank.sh",

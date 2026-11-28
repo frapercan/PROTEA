@@ -1,0 +1,13 @@
+# The environment democafa's baselines run in for the oracles of the literature ladder's
+# native rungs: LAFA's own environment (../lafa-environment.txt) and PyYAML, which the
+# baselines' scripts import to read their config.yaml (the version their containers pin).
+#
+#   uv venv --python 3.10 <venv>
+#   uv pip install --python <venv>/bin/python -r scripts/lafa_check/baselines/baselines-environment.txt
+#   uv pip install --python <venv>/bin/python --no-deps \
+#     "democafa @ git+https://github.com/anphan0828/democafa_package@1102e34ec2cdc9aa3737ef8b48992b4fc7775e60"
+#
+# run_prott5.sh's neighbour search is democafa's GPU path: it needs cupy and cuml on a
+# card besides these, which the other three oracles do not.
+-r ../lafa-environment.txt
+PyYAML==6.0.2
