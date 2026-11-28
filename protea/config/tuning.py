@@ -307,6 +307,20 @@ class OperationTuning(BaseModel):
             "frescura honesta y no un truco para esquivar la consulta."
         ),
     )
+    reference_pool_disk_write: bool = Field(
+        default=True,
+        description=(
+            "Whether a reference pool built on a cache miss is written to the disk cache "
+            "(PROTEA_REF_CACHE_DIR): its half-precision vectors and accessions, and per "
+            "aspect the index array, its pool fingerprint and the annotation arrays. On, "
+            "the next run of the same pool reads it back. Off, the pool is built in the "
+            "worker's memory (the process cache, worker.ref_cache_max) and nothing is "
+            "written, for a pool only one run reads: a pool is up to 2 x d bytes per donor "
+            "and nothing evicts the disk cache. A cache already on disk is read either way. "
+            "Execution only: the same pool is served whichever way it is set. Override: "
+            "PROTEA_TUNING__operation__reference_pool_disk_write."
+        ),
+    )
     max_implicit_query_population: int = Field(
         default=50_000,
         ge=0,

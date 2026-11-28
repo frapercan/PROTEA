@@ -32,6 +32,10 @@ type Receipt = {
     bank_published_at: string | null;
     regime: string;
     evidence_codes: string[] | null;
+    /** The declared set of photo members the donors were restricted to; absent on older receipts. */
+    donor_set_id?: string | null;
+    /** The evidence channels a donation could come through; absent on older receipts. */
+    evidence_channels?: string[] | null;
   };
   campaign: { rung: string | null; window: string | null; scorer: string | null } | null;
   run: {
@@ -141,6 +145,9 @@ export function RunReceipt({ predictionSetId }: { predictionSetId: string }) {
             {" "}
             ({r.donors.evidence_codes.length} evidence codes)
           </span>
+        ) : null}
+        {r.donors.donor_set_id ? (
+          <span className="text-slate-400"> (donor set {r.donors.donor_set_id.slice(0, 8)})</span>
         ) : null}
       </p>
     </section>

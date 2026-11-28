@@ -49,8 +49,13 @@ export type PanelArm = {
   exclude_self: boolean | null;
   /** Which annotations it transferred; two donor policies of one model are two arms. */
   donors?: "experimental" | "all" | null;
-  /** Who left the query's neighbourhood with it: its twins too ("sequence") or
-   *  nobody ("accession"). Null when the run left the rule to the flag. */
+  /** The declared set of photo members its donors were restricted to; null when any member could donate. */
+  donor_set?: { id: string; name: string | null } | null;
+  /** The evidence channels a donation could come through, in the platform's order; null for every channel. */
+  channels?: string[] | null;
+  /** Who left the query's neighbourhood with it: its twins too ("sequence"),
+   *  nobody ("accession"), or nobody once the asked depth was retrieved
+   *  ("accession_after_retrieval", LAFA's search). Null when the run left the rule to the flag. */
   self_exclusion?: string | null;
   reading: string;
   /** Null when the window's ends are not releases or the arm names no producer. */
@@ -153,31 +158,77 @@ export function isNeighbour(r: SummaryResult): boolean {
   return r.arm.method == null && r.arm.model != null;
 }
 
-/** The arm in full: "ESM-2 650M · embedding_only · k=1", or the method's name. */
+/** The channels the recipe reads (protea.core.cut_photo.channels.RECIPE_CHANNELS). */
+export const RECIPE_CHANNELS = [
+  "truth",
+  "curated",
+  "phylogenetic",
+  "orthology_electronic",
+  "reviewed_field_electronic",
+] as const;
+
 /**
- * The model as the panel tells arms apart: the PLM, and "exp" when its donors were
- * experimental annotations only. Keyed by the PLM alone, two donor policies of one
- * model drew as one series and filtered as one model (2026-11-25).
+ * The channels an arm admitted, as people name them: "recipe channels", the mirror
+ * arm's "recipe + signatures", one channel by its name, or the list.
  */
-export function armModel(r: SummaryResult): string {
-  const name = modelName(r.arm.model);
-  return r.arm.donors === "experimental" ? `${name} · exp` : name;
+export function channelsLabel(channels: readonly string[] | null | undefined): string | null {
+  if (!channels || channels.length === 0) return null;
+  const admitted = new Set(channels);
+  const recipe = RECIPE_CHANNELS.every((c) => admitted.has(c));
+  if (recipe && admitted.size === RECIPE_CHANNELS.length) return "recipe channels";
+  if (recipe && admitted.size === RECIPE_CHANNELS.length + 1 && admitted.has("signature_electronic")) {
+    return "recipe + signatures";
+  }
+  return channels.length === 1 ? `${channels[0]} channel` : `channels ${channels.join(", ")}`;
 }
 
+/** A donor set by its declared name, or by the first characters of its id. */
+export function donorSetLabel(set: PanelArm["donor_set"]): string | null {
+  if (!set) return null;
+  return set.name || `donor set ${set.id.slice(0, 8)}`;
+}
+
+/**
+ * The model as the panel tells arms apart: the PLM, "exp" when its donors were
+ * experimental annotations only, and the donor set and the channels it was
+ * restricted to. Keyed by the PLM alone, two donor policies of one model drew as
+ * one series and filtered as one model (2026-11-25); a breadth level or a channel
+ * set is a donor policy too.
+ */
+export function armModel(r: SummaryResult): string {
+  const parts = [modelName(r.arm.model)];
+  if (r.arm.donors === "experimental") parts.push("exp");
+  const set = donorSetLabel(r.arm.donor_set);
+  if (set) parts.push(set);
+  const channels = channelsLabel(r.arm.channels);
+  if (channels) parts.push(channels);
+  return parts.join(" · ");
+}
+
+/** Who left with the query, when it is not the default: "self by accession", "query left after retrieval". */
+export const EXCLUSION_LABEL: Record<string, { long: string; short: string }> = {
+  accession: { long: "self by accession", short: "acc" },
+  accession_after_retrieval: { long: "query left after retrieval", short: "after" },
+};
+
+/** The arm in full: "ESM-2 650M · embedding_only · k=1", or the method's name. */
 export function armLabel(r: SummaryResult): string {
   if (!isNeighbour(r)) return methodName(r.arm.method) || r.prediction_set_id.slice(0, 8);
   const parts = [armModel(r), r.arm.scoring ?? "candidates"];
   if (r.arm.depth != null) parts.push(`k=${r.arm.depth}`);
-  if (r.arm.self_exclusion === "accession") parts.push("self by accession");
+  const exclusion = EXCLUSION_LABEL[r.arm.self_exclusion ?? ""];
+  if (exclusion) parts.push(exclusion.long);
   return parts.join(" · ");
 }
 
-/** Two arms that differ only in which proteins left with the query are two arms. */
+/** Two arms that differ only in who left with the query, or in who could donate, are two arms. */
 export function sameExclusion(a: SummaryResult["arm"], b: SummaryResult["arm"]): boolean {
   return (
     a.exclude_self === b.exclude_self &&
     (a.self_exclusion ?? null) === (b.self_exclusion ?? null) &&
-    (a.donors ?? null) === (b.donors ?? null)
+    (a.donors ?? null) === (b.donors ?? null) &&
+    (a.donor_set?.id ?? null) === (b.donor_set?.id ?? null) &&
+    (a.channels ?? []).join(",") === (b.channels ?? []).join(",")
   );
 }
 
@@ -186,7 +237,8 @@ export function armShort(r: SummaryResult): string {
   if (!isNeighbour(r)) return methodName(r.arm.method) || r.prediction_set_id.slice(0, 8);
   const model = armModel(r).replace(/^ESM-2 /, "");
   const scoring = r.arm.scoring ? (SCORING_SHORT[r.arm.scoring] ?? r.arm.scoring) : "cand";
-  const self = r.arm.self_exclusion === "accession" ? " acc" : "";
+  const exclusion = EXCLUSION_LABEL[r.arm.self_exclusion ?? ""];
+  const self = exclusion ? ` ${exclusion.short}` : "";
   return `${model} ${scoring}${r.arm.depth != null ? ` k=${r.arm.depth}` : ""}${self}`;
 }
 

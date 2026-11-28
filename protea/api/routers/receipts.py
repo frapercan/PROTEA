@@ -109,10 +109,20 @@ def _donors(policy: dict[str, Any] | None) -> dict[str, Any]:
     that is the difference between two entirely different claims.
     """
     policy = policy or {}
-    # Absent on every policy recorded before the field existed, which is the
-    # unrestricted pool: the dump leaves the key out at None.
-    membership = {"admitted_by_release": policy.get("admitted_by_release")}
+    # Absent on every policy recorded before the fields existed, which is the
+    # unrestricted pool: the dump leaves each key out at None. The donor set and
+    # the channels are the corpus at the photo's cut and the channel each row had
+    # there (protea.core.operations.predict_go_terms._pool_admission).
+    channels = policy.get("evidence_channels")
+    membership = {
+        "admitted_by_release": policy.get("admitted_by_release"),
+        "donor_set_id": policy.get("donor_set_id"),
+        "evidence_channels": channels,
+    }
     codes = policy.get("evidence_codes")
+    if codes is None and channels:
+        regime = "the annotations of the channels " + ", ".join(channels) + " at the cut"
+        return {"regime": regime, "evidence_codes": None, **membership}
     if codes is None:
         return {"regime": "every annotation in the bank", "evidence_codes": None, **membership}
     codes = list(codes)

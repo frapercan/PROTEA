@@ -22,19 +22,29 @@ from protea.core.disk_cache import (
     _aspect_index_pool_path,
     _build_anno_csr,
     _derive_reference_views,
-    _load_anno_csr_from_disk,
     _load_reference_pool_cached,
     _save_anno_csr_to_disk,
     pool_fingerprint,
 )
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
+from protea.core.operations.predict_go_terms._aspect_caches import (
+    BuiltAspect,
+    _assemble_aspect_view,
+    _find_missing_aspects,
+)
 from protea.core.operations.predict_go_terms._bank_shards import fill_from_shards
 from protea.core.operations.predict_go_terms._common import (
     _REF_CACHE,
     _UNIFIED_REF_KEY,
 )
 from protea.core.operations.predict_go_terms._photo_sequences import donor_pool_base
-from protea.core.operations.predict_go_terms._reference_aspect import _ASPECT_SLICE
+from protea.core.operations.predict_go_terms._pool_admission import (
+    ChannelSource,
+    admit_channels,
+    admit_donor_set,
+    channels_of_the_cut,
+    positive_rows,
+)
 from protea.core.operations.predict_go_terms._reference_binary import fill_from_binary
 from protea.core.operations.predict_go_terms._reference_needs import reference_dtype_needs
 from protea.core.operations.predict_go_terms._sparse_bank import (
@@ -76,128 +86,17 @@ class _PoolRequest(NamedTuple):
         return RefPoolKey(self.embedding_config_id, self.annotation_set_id, self.discriminator)
 
 
-def _find_missing_aspects(request: _PoolRequest, pool: str | None = None) -> list[str]:
-    """Return aspects that cannot be served from disk for THIS pool.
-
-    Takes the request so the discriminator travels with the ids: a permissive
-    cache must not answer for a restricted pool. Takes the pool fingerprint so
-    an index built against a different pool counts as missing and is rebuilt,
-    rather than reaching the view and raising there. The reference pool grows
-    whenever proteins are ingested, and a stale cache should cost one query,
-    not a manual deletion before anything can run.
-
-    ``pool`` of None skips that comparison, for callers with no pool in hand.
-    """
-    ecid, asid, d = request.embedding_config_id, request.annotation_set_id, request.discriminator
-
-    def usable(asp: str) -> bool:
-        if not _aspect_index_path(ecid, asid, asp, d).exists():
-            return False
-        recorded = _recorded_pool(ecid, asid, asp, d)
-        if recorded is None or (pool is not None and recorded != pool):
-            return False
-        return _load_anno_csr_from_disk(ecid, asid, asp, d) is not None
-
-    return [asp for asp in _ASPECTS if not usable(asp)]
-
-
-def _recorded_pool(ecid: uuid.UUID, asid: uuid.UUID, aspect: str, discriminator: str) -> str | None:
-    """The fingerprint an aspect index was built against, or None if absent.
-
-    Absent means the index predates the fingerprint, so it cannot be told
-    apart from one built against a different pool. Rebuilt, not trusted.
-    """
-    path = _aspect_index_pool_path(ecid, asid, aspect, discriminator)
-    return path.read_text(encoding="utf-8").strip() if path.exists() else None
-
-
-def _assemble_aspect_view(
-    aspect: str,
-    unified: dict[str, Any],
-    request: _PoolRequest,
-    *,
-    need_cos: bool = True,
-    need_plain: bool = True,
-) -> tuple[dict[str, Any], int]:
-    """Slice the unified embeddings by the aspect's on-disk index array and
-    attach the CSR annotation cache. Returns ``(view, n_refs)``.
-
-    Each fancy-index slice is a full copy, so for high-dim PLMs a per-aspect
-    f32 view is tens of GB. Only the copies this run reads are materialised
-    (``need_cos`` → the cosine view, ``need_plain`` → the raw view); the f16
-    slice is never read downstream and is left as an empty placeholder.
-    """
-    ecid, asid, d = request.embedding_config_id, request.annotation_set_id, request.discriminator
-    idx_path = _aspect_index_path(ecid, asid, aspect, d)
-    indices = np.load(idx_path)
-    _check_index_addresses_pool(
-        indices, unified["accessions"], aspect, _recorded_pool(ecid, asid, aspect, d)
-    )
-    aspect_accessions = [unified["accessions"][i] for i in indices]
-    unified_f32 = unified.get("embeddings_f32")
-    unified_cos = unified.get("embeddings_f32_cos")
-    # The f32 banks are NOT cut here. A fancy-index slice is a full copy, and
-    # the three aspects together are 1,777,762 rows: 10.92 GB at 1536 dims.
-    # Only ONE of them is read at a time when the aspect searches run in
-    # series, so the view carries the pool and the index array and
-    # :func:`aspect_bank` gathers the rows when a search asks for them.
-    view: dict[str, Any] = {
-        "accessions": aspect_accessions,
-        "embeddings": np.empty((0,), dtype=np.float16),
-        "embeddings_f32": None,
-        "embeddings_f32_cos": None,
-        _ASPECT_SLICE: (
-            indices,
-            unified_f32 if need_plain else None,
-            unified_cos if need_cos else None,
-        ),
-    }
-    anno_csr = _load_anno_csr_from_disk(ecid, asid, aspect, d)
-    if anno_csr is not None:
-        gtids, quals, ecodes, offsets = anno_csr
-        view.update(
-            {
-                "anno_gtids": gtids,
-                "anno_quals": quals,
-                "anno_ecodes": ecodes,
-                "anno_offsets": offsets,
-                "acc_to_anno_idx": {acc: i for i, acc in enumerate(aspect_accessions)},
-            }
-        )
-    return view, len(indices)
-
-
-def _check_index_addresses_pool(
-    indices: np.ndarray, accessions: list[str], aspect: str, built_against: str | None
-) -> None:
-    """Fail unless this index was built against exactly this pool.
-
-    Compares the pool's fingerprint, not its length. Length only catches the
-    case where the two pools happen to differ in size, and an index built
-    under a donor policy and served permissively does not: it addresses a
-    prefix of the larger pool, raises nothing, and scores plausibly on a
-    fraction of the references. That is the mode that reaches a thesis.
-
-    ``built_against`` is None for an index written before the fingerprint
-    existed. Those are unverifiable rather than known-good, so they are
-    refused and rebuilt; a cache is cheap and a silent misattribution is not.
-    """
-    actual = pool_fingerprint(accessions)
-    if built_against == actual:
-        return
-    raise ValueError(
-        f"aspect index for {aspect} was not built against this pool "
-        f"(index carries {built_against or 'no fingerprint'}, pool is {actual}, "
-        f"{len(accessions)} accessions, max index "
-        f"{int(indices.max()) if indices.size else -1}); refusing to use it."
-    )
-
-
-def _restrict_annotations(annotations: Any, donor_policy: Any) -> Any:
+def _restrict_annotations(
+    annotations: Any, donor_policy: Any, channels_at: ChannelSource | None = None
+) -> Any:
     """Narrow the donating annotations to those the policy admits.
 
-    The two restrictions that act on the ANNOTATION rather than on the protein
-    sit here together, so they are read together.
+    The three restrictions that act on the ANNOTATION rather than on the protein
+    sit here together, so they are read together: the evidence codes, the
+    excluded reference prefixes and the evidence channels; combined, all apply.
+    ``channels_at`` is where the channels are read
+    (:func:`._pool_admission.channels_of_the_cut`), and a policy naming channels
+    without it is refused, so a reader cannot drop the channels silently.
     """
     if donor_policy is None:
         return annotations
@@ -213,6 +112,10 @@ def _restrict_annotations(annotations: Any, donor_policy: Any) -> Any:
             (ProteinGOAnnotation.db_reference.is_(None))
             | (~ProteinGOAnnotation.db_reference.startswith(prefix))
         )
+
+    channels = getattr(donor_policy, "evidence_channels", None)
+    if channels:
+        annotations = admit_channels(annotations, channels, channels_at)
     return annotations
 
 
@@ -475,6 +378,7 @@ class _ReferenceMixin:
             expected_count=expected,
             emit=lambda ev, fields: emit(f"predict_go_terms_batch.{ev}", None, fields, "info"),
             freshness_seconds=freshness_sec,
+            write=get_tuning().operation.reference_pool_disk_write,
         )
         return accessions, embeddings, source, transfer
 
@@ -497,9 +401,11 @@ class _ReferenceMixin:
         """Return the accession-only query for the reference pool.
 
         ``donor_policy`` restricts which proteins may donate annotations. The
-        permissive default keeps the historical pool, every protein carrying an
-        embedding and an annotation in the set, so an unrestricted run resolves
-        exactly the query it always did.
+        permissive default is every protein carrying an embedding and a
+        positive annotation in the set: a protein whose rows of the set are all
+        ``NOT`` rows donates nothing, and since the pool cache's epoch 5 it
+        takes no neighbour slot either. A declared set of photo members
+        (``donor_set_id``) keeps the donors it lists.
 
         The restriction is applied HERE, in the query, rather than by filtering
         the materialised pool afterwards. Filtering afterwards would mean
@@ -507,15 +413,20 @@ class _ReferenceMixin:
         it, and the pool is the largest thing this operation touches.
         """
         policy = request.donor_policy
+        # A donor is admitted through a row it may donate: positive, and passing
+        # the policy's filters (``_pool_admission`` says why the NOT rows left).
         annotations = session.query(ProteinGOAnnotation.protein_accession).filter(
-            ProteinGOAnnotation.annotation_set_id == request.annotation_set_id
+            ProteinGOAnnotation.annotation_set_id == request.annotation_set_id, positive_rows()
         )
-        annotations = _restrict_annotations(annotations, policy)
+        annotations = _restrict_annotations(
+            annotations, policy, channels_of_the_cut(session, request.annotation_set_id, policy)
+        )
         annotated_sq = annotations.distinct().subquery()
 
         query, accession = donor_pool_base(
             session, request.annotation_set_id, request.embedding_config_id, annotated_sq
         )
+        query = admit_donor_set(query, accession, getattr(policy, "donor_set_id", None))
         if policy is not None and getattr(policy, "reviewed_only", False):
             # ``reviewed`` is nullable, and an unknown review status is not a
             # reviewed one. Comparing to true excludes the nulls, which is the
@@ -625,22 +536,11 @@ class _ReferenceMixin:
 
         acc_to_idx: dict[str, int] = {acc: i for i, acc in enumerate(unified["accessions"])}
         missing_aspects = _find_missing_aspects(request, pool_fingerprint(unified["accessions"]))
-        if missing_aspects:
-            self._query_and_persist_aspect_caches(
-                session,
-                missing_aspects,
-                unified["accessions"],
-                acc_to_idx,
-                request,
-            )
-
+        built = self._query_and_persist_aspect_caches(
+            session, missing_aspects, unified["accessions"], acc_to_idx, request
+        )
         result, total_refs = self._assemble_all_aspect_views(
-            unified,
-            missing_aspects,
-            request,
-            emit,
-            need_cos=need_cos,
-            need_plain=need_plain,
+            unified, built, request, emit, need_cos=need_cos, need_plain=need_plain
         )
         result[_UNIFIED_REF_KEY] = unified  # F2C.5b: pipeline.predict() needs unified pool
         emit(
@@ -654,7 +554,7 @@ class _ReferenceMixin:
     def _assemble_all_aspect_views(
         self,
         unified: dict[str, Any],
-        missing_aspects: list[str],
+        built: dict[str, BuiltAspect],
         request: _PoolRequest,
         emit: EmitFn,
         *,
@@ -662,7 +562,10 @@ class _ReferenceMixin:
         need_plain: bool = True,
     ) -> tuple[dict[str, dict[str, Any]], int]:
         """Slice the unified cache into per-aspect views, emit one ``done`` event
-        per aspect, and return ``(views, total_refs)``."""
+        per aspect, and return ``(views, total_refs)``.
+
+        ``built`` holds the aspects this process just built from the database,
+        served as built; every other aspect is read from the disk cache."""
         result: dict[str, dict[str, Any]] = {}
         total_refs = 0
         for aspect in _ASPECTS:
@@ -672,6 +575,7 @@ class _ReferenceMixin:
                 request,
                 need_cos=need_cos,
                 need_plain=need_plain,
+                built=built.get(aspect),
             )
             result[aspect] = view
             total_refs += n_refs
@@ -681,7 +585,7 @@ class _ReferenceMixin:
                 {
                     "aspect": aspect,
                     "references": n_refs,
-                    "source": "database" if aspect in missing_aspects else "disk_cache",
+                    "source": "database" if aspect in built else "disk_cache",
                 },
                 "info",
             )
@@ -694,14 +598,18 @@ class _ReferenceMixin:
         unified_accessions: list[str],
         acc_to_idx: dict[str, int],
         request: _PoolRequest,
-    ) -> None:
+    ) -> dict[str, BuiltAspect]:
         """Single-pass DB scan + per-aspect on-disk persistence for the missing aspects.
 
         Collects ``(aspect_to_accset, aspect_to_go_map)`` via
-        :meth:`_collect_aspect_annotations`, then writes the index array +
-        annotation CSR for every missing aspect. Downstream batches read the
-        CSR straight from disk; zero per-batch IN queries.
+        :meth:`_collect_aspect_annotations`, then builds the index array +
+        annotation CSR for every missing aspect and returns them, written to
+        disk unless the tuning switch ``reference_pool_disk_write`` is off.
+        Downstream batches read the CSR from memory; zero per-batch IN queries.
+        Nothing missing, nothing scanned.
         """
+        if not missing_aspects:
+            return {}
         # Resolve the (possibly test-patched) ``_collect_aspect_annotations``
         # via the concrete subclass so ``patch.object(PredictGOTermsBatchOperation,
         # "_collect_aspect_annotations", ...)`` keeps wiring through. Lazy
@@ -726,17 +634,23 @@ class _ReferenceMixin:
                 session, missing_aspects, asid, request.donor_policy
             )
         )
+        from protea.config.tuning import get_tuning
+
+        write = get_tuning().operation.reference_pool_disk_write
+        pool = pool_fingerprint(unified_accessions)
+        built: dict[str, BuiltAspect] = {}
         for asp in missing_aspects:
-            idx_path = _aspect_index_path(ecid, asid, asp, d)
             indices = _aspect_indices(aspect_to_accset[asp], acc_to_idx)
-            idx_path.parent.mkdir(parents=True, exist_ok=True)
-            np.save(idx_path, indices)
-            _aspect_index_pool_path(ecid, asid, asp, d).write_text(
-                pool_fingerprint(unified_accessions), encoding="utf-8"
-            )
             asp_accessions = [unified_accessions[i] for i in indices]
             anno_csr = _build_anno_csr(asp_accessions, aspect_to_go_map[asp])
-            _save_anno_csr_to_disk(ecid, asid, asp, anno_csr, d)
+            built[asp] = BuiltAspect(indices, anno_csr, pool)
+            if write:
+                idx_path = _aspect_index_path(ecid, asid, asp, d)
+                idx_path.parent.mkdir(parents=True, exist_ok=True)
+                np.save(idx_path, indices)
+                _aspect_index_pool_path(ecid, asid, asp, d).write_text(pool, encoding="utf-8")
+                _save_anno_csr_to_disk(ecid, asid, asp, anno_csr, d)
+        return built
 
     @staticmethod
     def _collect_aspect_annotations(
@@ -750,7 +664,8 @@ class _ReferenceMixin:
     ]:
         """Single-pass query that fetches every ``ProteinGOAnnotation`` row for
         the missing aspects in one table scan, returning per-aspect accession
-        sets + per-protein GO maps. Skips ``NOT`` qualifiers."""
+        sets + per-protein GO maps. Reads the positive rows the policy admits,
+        the ones the pool admits its donors through (``_pool_admission``)."""
         aspect_to_accset: dict[str, set[str]] = {asp: set() for asp in missing_aspects}
         aspect_to_go_map: dict[str, dict[str, list[dict[str, Any]]]] = {
             asp: {} for asp in missing_aspects
@@ -767,13 +682,11 @@ class _ReferenceMixin:
             .filter(
                 ProteinGOAnnotation.annotation_set_id == annotation_set_id,
                 GOTerm.aspect.in_(missing_aspects),
-                (
-                    ProteinGOAnnotation.qualifier.is_(None)
-                    | ~ProteinGOAnnotation.qualifier.like("%NOT%")
-                ),
+                positive_rows(),
             )
         )
-        rows = _restrict_annotations(rows, donor_policy).yield_per(50_000)
+        channels_at = channels_of_the_cut(session, annotation_set_id, donor_policy)
+        rows = _restrict_annotations(rows, donor_policy, channels_at).yield_per(50_000)
         for acc, asp, go_term_id, qualifier, evidence_code in rows:
             if asp not in aspect_to_accset:
                 continue

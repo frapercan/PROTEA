@@ -89,3 +89,15 @@ def test_the_epoch_moved_for_the_ordered_pools() -> None:
     served to code that now expects accession order.
     """
     assert disk_cache._CACHE_EPOCH >= 4
+
+
+def test_the_epoch_moved_for_the_positive_admission() -> None:
+    """Epoch 4 names pools that admitted a donor through a NOT row.
+
+    Bumped on 2026-11-28. A unified pool cached under ``e4`` holds donors whose
+    admitted rows are all NOT rows, which take neighbour slots and donate
+    nothing; the pool's query now admits through a positive row only
+    (``predict_go_terms._pool_admission``), and ``e5`` is what stops an ``e4``
+    pool being served to it.
+    """
+    assert disk_cache._CACHE_EPOCH >= 5

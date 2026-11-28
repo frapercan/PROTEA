@@ -118,7 +118,10 @@ Environment variable overrides
    * - ``PROTEA_REF_CACHE_DIR``
      - Directory for the on-disk KNN reference cache (embedding +
        annotation matrices keyed by ``(embedding_config_id,
-       annotation_set_id)``). Defaults to ``data/ref_cache``. Read by
+       annotation_set_id)`` and the donor policy, behind an epoch, ``e5``
+       since a pool admits its donors through positive rows only). Defaults to
+       ``data/ref_cache``. Nothing evicts it; the tuning switch
+       ``reference_pool_disk_write`` stops the writes. Read by
        :mod:`protea.core.disk_cache`.
    * - ``PROTEA_EMBEDDING_BANK_DIR``
      - Folder holding the embedding bank's shards on this node, as the builder
@@ -424,6 +427,11 @@ Module-level chunk and batch sizes used inside operations.
    * - ``numpy_query_chunk``
      - 500
      - Query chunk size para KNN numpy backend (caps memoria de la matriz de distancias).
+   * - ``reference_pool_disk_write``
+     - ``true``
+     - Write a reference pool built on a cache miss to ``PROTEA_REF_CACHE_DIR``. Off,
+       the pool is built in the worker's memory and nothing is written, for a pool
+       only one run reads; a cache already on disk is still read. Execution only.
 
 HTTP retry policy and per-source timeouts (UniProt, GOA, QuickGO,
 ontology) live inside the respective pydantic payloads

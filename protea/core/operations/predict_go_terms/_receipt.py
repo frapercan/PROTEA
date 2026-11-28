@@ -115,10 +115,15 @@ def _self_exclusion(p: PredictGOTermsPayload) -> dict[str, Any]:
 
     ``exclude_self_neighbour`` records whether the query WAS excluded, whichever
     field asked for it, so a run that names only the rule does not read as a
-    self-vote. ``self_exclusion`` names who left with it: its twins too
-    ("sequence") or nobody ("accession"). It is written only by runs whose payload
-    named the rule, as ``faiss`` is, so a run that left it to the flag reads
-    exactly as it always did.
+    self-vote. ``self_exclusion`` names who left with it and when: its twins too
+    ("sequence"), nobody ("accession"), or nobody and only after the asked depth
+    was retrieved ("accession_after_retrieval", LAFA's own search, where a query
+    in the pool keeps one neighbour fewer). It is written only by runs whose
+    payload named the rule, as ``faiss`` is, so a run that left it to the flag
+    reads exactly as it always did.
+
+    The donor set and the evidence channels need no block of their own: they
+    travel inside ``donor_policy``, whose dump names them only when they are set.
     """
     rule = resolve_self_exclusion(p)
     block: dict[str, Any] = {"exclude_self_neighbour": rule != "none"}
