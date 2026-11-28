@@ -259,6 +259,12 @@ def _resolve_signal_values(
     - ``ref_annotation_density`` (axis F): see :func:`ref_density_signal`.
     - ``anc2vec_neighbor_cos`` / ``anc2vec_neighbor_maxcos`` (axis G):
       see :func:`anc2vec_unit_signal`.
+    - ``neighbor_similarity_vote`` and ``neighbor_kernel_fraction`` (float |
+      None): already in [0, 1]. Neither is stored: both are taken at a depth
+      from the donor ledger (``protea.core.operations._donor_recount``), the
+      similarity-weighted vote over the neighbourhood and goPredSim's kernel
+      over k neighbours, and a row carries them only when its frame was built
+      with them.
     """
     distance = pred.get("distance")
     embedding_sim = 1.0 - float(distance) / 2.0 if distance is not None else None
@@ -275,6 +281,8 @@ def _resolve_signal_values(
         ("ref_annotation_density", ref_density_signal(pred)),
         ("anc2vec_neighbor_cos", anc2vec_unit_signal(pred.get("anc2vec_neighbor_cos"))),
         ("anc2vec_neighbor_maxcos", anc2vec_unit_signal(pred.get("anc2vec_neighbor_maxcos"))),
+        ("neighbor_similarity_vote", pred.get("neighbor_similarity_vote")),
+        ("neighbor_kernel_fraction", pred.get("neighbor_kernel_fraction")),
     ]
 
 

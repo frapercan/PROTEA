@@ -46,6 +46,10 @@ _SIGNAL_TO_COLUMN: dict[str, str] = {
     "ref_annotation_density": "ref_annotation_density",
     "anc2vec_neighbor_cos": "anc2vec_neighbor_cos",
     "anc2vec_neighbor_maxcos": "anc2vec_neighbor_maxcos",
+    # The votes weighted by distance are taken from the donor ledger at the cut,
+    # so what they need stored is the ledger's distances.
+    "neighbor_similarity_vote": "donor_distances",
+    "neighbor_kernel_fraction": "donor_distances",
 }
 
 
@@ -84,7 +88,10 @@ def compute_missing_signals(
     if not required:
         return list(_unmappable_messages(unmappable))
 
-    cols_sql = ", ".join(f"COUNT({col}) AS cnt_{col}" for _, col in required)
+    # Each column counted once: two signals can read one column, and a repeated
+    # alias would make the row's mapping ambiguous.
+    columns = dict.fromkeys(col for _, col in required)
+    cols_sql = ", ".join(f"COUNT({col}) AS cnt_{col}" for col in columns)
     row = (
         session.execute(
             text(

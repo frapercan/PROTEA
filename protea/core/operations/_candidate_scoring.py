@@ -20,6 +20,7 @@ import numpy as np
 from sqlalchemy import func, select
 
 from protea.core.operations._base_frame_recount import ledger_columns
+from protea.core.operations._donor_recount import NEIGHBOURHOOD_SIGNALS
 from protea.core.operations._run_cafa_signal_arrays import (
     _anc2vec_array,
     _coverage_array,
@@ -123,6 +124,25 @@ def count_candidates(session: Session, ctx: Any) -> int:
     return int(session.execute(stmt).scalar_one())
 
 
+def _neighbourhood_array(df: Any, name: str, weights: dict[str, Any]) -> np.ndarray:
+    """A neighbourhood signal's column, or NaN where it was neither weighted nor computed.
+
+    The two neighbourhood signals are not stored: the frame's recount computes
+    them at the cut, and only for a configuration that weights them
+    (``_base_frame_recount``). A frame without one its configuration weights was
+    built without it, and scoring it would hand every row the other signals'
+    score in silence, so that is refused.
+    """
+    if name in df.columns:
+        return df[name].to_numpy(dtype=np.float64)
+    if float(weights.get(name) or 0.0) != 0.0:
+        raise ValueError(
+            f"the configuration weights {name}, which is computed at a depth from the donor "
+            "ledger, and this frame was built without it"
+        )
+    return np.full(len(df), np.nan)
+
+
 def vectorized_scores(df: Any, scoring_config: ScoringConfig) -> np.ndarray:
     """The score of every row of the frame under ``scoring_config``.
 
@@ -154,6 +174,7 @@ def vectorized_scores(df: Any, scoring_config: ScoringConfig) -> np.ndarray:
         ("ref_annotation_density", _ref_density_array(df)),
         ("anc2vec_neighbor_cos", _anc2vec_array(df, "anc2vec_neighbor_cos")),
         ("anc2vec_neighbor_maxcos", _anc2vec_array(df, "anc2vec_neighbor_maxcos")),
+        *((name, _neighbourhood_array(df, name, weights)) for name in NEIGHBOURHOOD_SIGNALS),
     )
     total_w = np.zeros(len(df), dtype=np.float64)
     weighted_sum = np.zeros(len(df), dtype=np.float64)

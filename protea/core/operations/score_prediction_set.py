@@ -11,7 +11,8 @@ WHAT IT DOES, per protein, in the evaluator's own order:
 
 1. reads the protein's candidates, cut to a depth when one is named, keeps the
    nearest row per term, and recounts the neighbour aggregates at the cut
-   (``_base_frame_recount``);
+   (``_base_frame_recount``), with the votes weighted by distance when the
+   configuration weights them (``_donor_recount``);
 2. checks that the cut was applied (``_depth_guard``);
 3. drops what the bank denies (``protea.core.denials``), the bank being the
    candidate set's annotation set and the ontology its own;
@@ -54,7 +55,7 @@ from sqlalchemy.orm import Session
 from protea.core import denials
 from protea.core.code_revision import code_revision, dependency_revisions
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.operations._base_frame_recount import build_base_frame
+from protea.core.operations._base_frame_recount import build_base_frame, cut_of
 from protea.core.operations._candidate_scoring import (
     BASE_SCORE_COLS,
     candidate_select,
@@ -67,6 +68,7 @@ from protea.core.operations._depth_unit_guard import (
     assert_depth_unit_is_available,
     assert_one_depth_unit,
 )
+from protea.core.operations._donor_recount import NeighbourhoodRequest, neighbourhood_request
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.embedding.prediction_score import PredictionScore
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
@@ -162,6 +164,7 @@ class _Chunk:
     max_distance: float | None
     max_k_position: int | None
     max_sequence_rank: int | None
+    neighbourhood: NeighbourhoodRequest | None = None
 
 
 @dataclass(frozen=True)
@@ -172,6 +175,7 @@ class _Run:
     config: ScoringConfig
     payload: ScorePredictionSetPayload
     scored_id: uuid.UUID
+    neighbourhood: NeighbourhoodRequest | None = None
 
 
 @dataclass
@@ -228,19 +232,7 @@ class ScorePredictionSetOperation:
         p = ScorePredictionSetPayload.model_validate(contract_payload(payload))
         source = self._candidate_set(session, p.prediction_set_id)
         config = self._scoring_config(session, p.scoring_config_id)
-        missing = compute_missing_signals(session, source.id, config)
-        if missing:
-            raise ValueError(
-                f"scoring config {config.id} ({config.name!r}) weights signals prediction set "
-                f"{source.id} does not carry: {'; '.join(missing)}. Predict with the matching "
-                "compute_* flag on, or name a configuration over the signals it has."
-            )
-        assert_depth_unit_is_available(
-            session,
-            source.id,
-            max_sequence_rank=p.max_sequence_rank,
-            max_k_position=p.max_k_position,
-        )
+        neighbourhood = self._what_it_can_read(session, source, config, p)
         proteins = self._proteins(session, source.id)
         job_id = payload.get("_job_id")
         scored = self._create_scored_set(session, source, config, p, job_id)
@@ -256,7 +248,7 @@ class ScorePredictionSetOperation:
             "info",
         )
         totals = _Totals(proteins=len(proteins))
-        run = _Run(source=source, config=config, payload=p, scored_id=scored.id)
+        run = _Run(source, config, p, scored.id, neighbourhood)
         for chunk in _chunks(proteins, p.proteins_per_chunk):
             self._score_chunk(session, run, chunk, totals)
             emit(
@@ -307,6 +299,43 @@ class ScorePredictionSetOperation:
                 "scored already, and the evaluator reads it as it is"
             )
         return source
+
+    @staticmethod
+    def _what_it_can_read(
+        session: Session,
+        source: PredictionSet,
+        config: ScoringConfig,
+        p: ScorePredictionSetPayload,
+    ) -> NeighbourhoodRequest | None:
+        """Refuse arithmetic the candidates cannot answer, before anything is written.
+
+        Every weighted signal needs a column the set fills, a depth needs a unit
+        the set carries, and the neighbourhood signals need a depth and, for the
+        similarity vote, the set's record of how its neighbours were ranked.
+
+        Returns:
+            The neighbourhood signals the configuration weights, or None.
+        """
+        missing = compute_missing_signals(session, source.id, config)
+        if missing:
+            raise ValueError(
+                f"scoring config {config.id} ({config.name!r}) weights signals prediction set "
+                f"{source.id} does not carry: {'; '.join(missing)}. Predict with the matching "
+                "compute_* flag on, or name a configuration over the signals it has."
+            )
+        assert_depth_unit_is_available(
+            session,
+            source.id,
+            max_sequence_rank=p.max_sequence_rank,
+            max_k_position=p.max_k_position,
+        )
+        try:
+            return neighbourhood_request(config.weights or {}, source.meta, cut_of(p))
+        except ValueError as exc:
+            raise ValueError(
+                f"scoring config {config.id} ({config.name!r}) over prediction set "
+                f"{source.id}: {exc}"
+            ) from exc
 
     @staticmethod
     def _scoring_config(session: Session, config_id: str) -> ScoringConfig:
@@ -384,6 +413,7 @@ class ScorePredictionSetOperation:
             max_distance=p.max_distance,
             max_k_position=p.max_k_position,
             max_sequence_rank=p.max_sequence_rank,
+            neighbourhood=run.neighbourhood,
         )
         frame, raw = build_base_frame(session, ctx, _select, _FRAME_COLS)
         assert_depth_was_applied(session, ctx, frame, count_candidates)

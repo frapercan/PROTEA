@@ -19,19 +19,33 @@ The donor arrays are fetched only when there is a cut, and dropped again
 before the frame is handed on. They are the widest columns in the table
 and nothing downstream reads them, so carrying them into the parquet
 would multiply its size to no purpose.
+
+The neighbourhood signals of ``_donor_recount`` are added here too, at the
+cut and only when a scoring configuration weights them: the similarity vote
+reads a protein's rows together, so it can only be taken where the whole
+frame of the protein is at hand.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from protea.core.operations._donor_recount import DepthCut, recount_at_depth
+from protea.core.operations._donor_recount import (
+    KERNEL_FRACTION,
+    SIMILARITY_VOTE,
+    DepthCut,
+    NeighbourhoodRequest,
+    kernel_fraction,
+    recount_at_depth,
+    similarity_votes,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = (
     "DONOR_LEDGER_COLS",
+    "LEDGER_SELECT_COLS",
     "build_base_frame",
     "cut_of",
     "ledger_columns",
@@ -40,18 +54,20 @@ __all__ = (
 
 
 def ledger_columns(wanted: bool) -> tuple[Any, ...]:
-    """The ORM columns to add to a SELECT, or nothing.
+    """The columns to add to a SELECT, in the order of ``LEDGER_SELECT_COLS``, or nothing.
 
     Kept here so the names appear once. A SELECT that added them in a
-    different order than ``DONOR_LEDGER_COLS`` would build a frame whose
+    different order than ``LEDGER_SELECT_COLS`` would build a frame whose
     ranks and distances belong to different columns, which is the kind of
-    mistake that produces plausible numbers.
+    mistake that produces plausible numbers. The term's aspect comes from
+    ``go_term``, which every candidate SELECT already joins for the GO id.
     """
     if not wanted:
         return ()
+    from protea.infrastructure.orm.models.annotation.go_term import GOTerm
     from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 
-    return tuple(getattr(GOPrediction, name) for name in DONOR_LEDGER_COLS)
+    return (*(getattr(GOPrediction, name) for name in DONOR_LEDGER_COLS), GOTerm.aspect)
 
 #: Fetched only under a cut, dropped before the frame is cached.
 DONOR_LEDGER_COLS: tuple[str, ...] = (
@@ -59,6 +75,12 @@ DONOR_LEDGER_COLS: tuple[str, ...] = (
     "donor_sequence_ranks",
     "donor_distances",
 )
+
+#: What a SELECT under a cut adds, in order: the ledger, then the term's
+#: aspect. An aspect-separated search ranks each aspect's neighbours on their
+#: own, so the neighbourhood the similarity vote divides by is one protein's in
+#: one aspect. Dropped with the ledger.
+LEDGER_SELECT_COLS: tuple[str, ...] = (*DONOR_LEDGER_COLS, "aspect")
 
 #: Written by the recount. Every one of them is a function of the cut; the
 #: minima are not here because the argument of a minimum is the term's
@@ -87,27 +109,39 @@ def cut_of(ctx: Any) -> DepthCut | None:
     return DepthCut(max_k_position=by_protein, max_sequence_rank=by_sequence)
 
 
-def recount_frame_aggregates(df: Any, cut: DepthCut | None) -> Any:
+def recount_frame_aggregates(
+    df: Any, cut: DepthCut | None, neighbourhood: NeighbourhoodRequest | None = None
+) -> Any:
     """Rewrite the cut-dependent columns from each row's donor ledger.
 
     Args:
-        df: The base frame, carrying :data:`DONOR_LEDGER_COLS`.
+        df: The base frame, carrying :data:`DONOR_LEDGER_COLS`, and the
+            term's ``aspect`` when the similarity vote is asked for over an
+            aspect-separated search.
         cut: The depth the frame was selected at, or None to leave the
             frame alone, which is correct: with no cut the stored
             aggregates already describe the whole neighbourhood.
+        neighbourhood: The neighbourhood signals to add at the cut, or None
+            to add neither. Asked for only by a configuration that weights
+            them, since the similarity vote stops at a protein whose
+            neighbourhood is not whole (``similarity_votes``).
 
     Returns:
-        The frame with the cut-dependent columns recounted and the ledger
-        columns dropped. Rows whose ledger is absent keep a null in every
-        recounted column rather than their stored value, so the absence
-        travels instead of being papered over. The run guard refuses such
-        a set up front, so this is the second line rather than the first.
+        The frame with the cut-dependent columns recounted, the asked
+        neighbourhood signals added, and the ledger columns dropped. Rows
+        whose ledger is absent keep a null in every recounted column rather
+        than their stored value, so the absence travels instead of being
+        papered over. The run guard refuses such a set up front, so this is
+        the second line rather than the first.
     """
-    if cut is None or df.empty:
+    if cut is None:
         return df.drop(columns=[c for c in DONOR_LEDGER_COLS if c in df], errors="ignore")
+    if df.empty:
+        return df.drop(columns=[c for c in LEDGER_SELECT_COLS if c in df], errors="ignore")
+    ledgers = [_as_lists(row) for row in df[list(DONOR_LEDGER_COLS)].to_dict("records")]
     recounted: dict[str, list[Any]] = {name: [] for name in _RECOUNTED}
-    for row in df[list(DONOR_LEDGER_COLS)].to_dict("records"):
-        got = recount_at_depth(_as_lists(row), cut)
+    for ledger in ledgers:
+        got = recount_at_depth(ledger, cut)
         recounted["donor_count"].append(None if got is None else got.donor_count)
         recounted["neighbor_vote_fraction"].append(
             None if got is None else got.vote_fraction()
@@ -118,10 +152,39 @@ def recount_frame_aggregates(df: Any, cut: DepthCut | None) -> Any:
         recounted["neighbor_distance_std"].append(
             None if got is None else got.distance_std
         )
+    if neighbourhood is not None:
+        recounted.update(_neighbourhood_columns(df, ledgers, cut, neighbourhood))
     out = df.copy()
     for name, values in recounted.items():
         out[name] = values
-    return out.drop(columns=[c for c in DONOR_LEDGER_COLS if c in out], errors="ignore")
+    return out.drop(columns=[c for c in LEDGER_SELECT_COLS if c in out], errors="ignore")
+
+
+def _neighbourhood_columns(
+    df: Any, ledgers: list[dict[str, Any]], cut: DepthCut, request: NeighbourhoodRequest
+) -> dict[str, list[Any]]:
+    """The asked neighbourhood signals of every row, in the frame's order.
+
+    The kernel fraction reads each row alone. The similarity vote reads a
+    protein's rows together, per aspect when the search ranked each aspect on
+    its own (``NeighbourhoodRequest.by_aspect``), since their ledgers together
+    are the neighbourhood it divides by. ``ledgers`` are the frame's rows'
+    ledgers, in its order.
+    """
+    out: dict[str, list[Any]] = {}
+    if KERNEL_FRACTION in request.signals:
+        out[KERNEL_FRACTION] = [kernel_fraction(ledger, cut) for ledger in ledgers]
+    if SIMILARITY_VOTE in request.signals:
+        keys = ["protein_accession", "aspect"] if request.by_aspect else ["protein_accession"]
+        votes: list[float | None] = [None] * len(ledgers)
+        for key, index in df.groupby(keys, sort=False, dropna=False).indices.items():
+            named = key if isinstance(key, tuple) else (key,)
+            where = "protein " + " in aspect ".join(str(part) for part in named)
+            group = similarity_votes([ledgers[i] for i in index], cut, where)
+            for i, vote in zip(index, group, strict=True):
+                votes[i] = vote
+        out[SIMILARITY_VOTE] = votes
+    return out
 
 
 def _as_lists(row: dict[str, Any]) -> dict[str, Any]:
@@ -158,7 +221,7 @@ def build_base_frame(
     import pandas as pd
 
     cut = cut_of(ctx)
-    columns = list(base_cols) + (list(DONOR_LEDGER_COLS) if cut else [])
+    columns = list(base_cols) + (list(LEDGER_SELECT_COLS) if cut else [])
     rows = session.execute(base_select(ctx, with_ledger=bool(cut))).all()
     df = pd.DataFrame.from_records([tuple(r) for r in rows], columns=columns)
     raw_count = int(len(df))
@@ -168,4 +231,5 @@ def build_base_frame(
             .drop_duplicates(subset=["protein_accession", "go_id"], keep="first")
             .reset_index(drop=True)
         )
-    return recount_frame_aggregates(df, cut), raw_count
+    neighbourhood = getattr(ctx, "neighbourhood", None)
+    return recount_frame_aggregates(df, cut, neighbourhood), raw_count
