@@ -159,6 +159,9 @@ _DEPENDENTS = (
     # Added with ADR-D62 (revision b8e3f1c6d2a4), later in the chain, and skipped on a
     # fresh database for the same reason.
     ("embedding_bank", "embedding_config_id"),
+    # Added with the space statistics (revision f2e0fc2717f7), later in the chain, and
+    # skipped on a fresh database for the same reason.
+    ("embedding_space_statistics", "embedding_config_id"),
 )
 
 

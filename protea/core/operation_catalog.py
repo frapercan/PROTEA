@@ -39,6 +39,9 @@ from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrenceOper
 from protea.core.operations.compare_paired_panels import (
     ComparePairedPanelsOperation,
 )
+from protea.core.operations.compute_embedding_space_statistics import (
+    ComputeEmbeddingSpaceStatisticsOperation,
+)
 from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsBatchOperation,
     ComputeEmbeddingsOperation,
@@ -312,6 +315,12 @@ _REPRESENTATION: tuple[_Row, ...] = (
     (CountBackendParametersOperation, _REPRESENTATION_JOB),
     # The bank computed on the cluster (ADR-D62), loaded where the database is.
     (LoadEmbeddingBankOperation, _REPRESENTATION_JOB),
+    # The label-free statistics of a bank's space at a cut, read from its shards on the
+    # node that holds them; one at a time, like the other long reads of protea.training.
+    (
+        ComputeEmbeddingSpaceStatisticsOperation,
+        replace(_REPRESENTATION_JOB, queue=queues.TRAINING),
+    ),
     # The lexicon bank decoded on the cluster (ADR-D63), for the explainable-units family.
     (LoadLexiconBankOperation, replace(_REPRESENTATION_JOB, family="explainable-units")),
     # The segment families built on the cluster (ADR-D65), units of the count map.

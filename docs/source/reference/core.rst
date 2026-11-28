@@ -514,6 +514,28 @@ so every method evaluated on the window is stratified on the same placement.
    :members:
    :show-inheritance:
 
+Embedding space
+---------------
+
+``protea.core.embedding_space.statistics`` measures the space of an embedding
+configuration at a cut without labels, in two streaming float64 passes over the
+loaded bank's shards for the photo's distinct member sequences, and writes the
+artifact ``compute_embedding_space_statistics`` stores: the mean, the variances,
+the eigendecomposition of the covariance, Ledoit and Wolf's shrinkage, the
+directions the profile-likelihood scree elbow removes, the float16 rounding
+variance with the counts below it and below the shrinkage floor, the fixed count
+``floor(d / 100)``, and label-free diagnostics before and after each transform.
+``protea.core.embedding_space.transforms`` applies the five search-space
+transforms to a pool in place and in chunks, from that artifact's values.
+
+.. automodule:: protea.core.embedding_space.statistics
+   :members:
+   :show-inheritance:
+
+.. automodule:: protea.core.embedding_space.transforms
+   :members:
+   :show-inheritance:
+
 Provenance
 ----------
 
