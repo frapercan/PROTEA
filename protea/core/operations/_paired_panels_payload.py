@@ -20,6 +20,7 @@ from typing import Annotated, Literal
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from protea.core.contracts.operation import ProteaPayload
+from protea.core.ladder_declaration import LadderDeclaration, refuse_unless_comparison
 from protea.core.method_seal import METHOD_IDENTITY_FIELDS
 from protea.core.operations._paired_panels_stratum import validate_stratum
 
@@ -167,6 +168,18 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
             ),
         ),
     ]
+    ladder_declaration: Annotated[
+        LadderDeclaration | None,
+        Field(
+            default=None,
+            description=(
+                "the rung of the literature ladder this comparison belongs to, declared before "
+                "the read: the rung, the role (what the comparison answers), its label, the stack "
+                "version where the rung reads one and, for a choice's confirmation, the job of the "
+                "pick. Recorded with the job; it changes nothing the comparison computes."
+            ),
+        ),
+    ]
     artifacts_root: str | None = None
     baseline_artifacts_root: str | None = None
 
@@ -243,6 +256,7 @@ class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
                 "and one remote is two different resolutions of where the bytes are"
             )
         self._one_declared_threshold()
+        refuse_unless_comparison(self.ladder_declaration)
         if self.interval_family == "simultaneous" and self.interval_method != "percentile":
             raise ValueError(
                 "interval_family='simultaneous' reads balanced percentile bounds, one per-panel "

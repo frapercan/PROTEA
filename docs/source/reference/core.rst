@@ -571,6 +571,15 @@ t0 side alone.
    :members:
    :show-inheritance:
 
+``protea.core.ladder_declaration`` is the vocabulary a reading or a comparison declares its
+rung of the literature ladder with: the rungs in ladder order, the comparison roles and the
+adoption roles, the reading variants, the labels each rung takes, and the declaration's own
+validation.
+
+.. automodule:: protea.core.ladder_declaration
+   :members:
+   :show-inheritance:
+
 Declared samples
 ----------------
 

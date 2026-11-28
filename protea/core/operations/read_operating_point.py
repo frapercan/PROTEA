@@ -41,13 +41,14 @@ from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from protea.core import lafa_frame
 from protea.core.code_revision import code_revision
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.ladder_declaration import LadderDeclaration, refuse_unless_reading
 from protea.core.operating_point import (
     DeclaredThreshold,
     load_declared_threshold,
@@ -104,6 +105,10 @@ class ReadOperatingPointPayload(ProteaPayload, frozen=True):
     declared_threshold_id: str
     axes: list[str] = Field(default_factory=lambda: list(AXES))
     min_population: int = Field(default=30, ge=1)
+    #: The rung of the literature ladder this reading belongs to, declared before the
+    #: read: the rung, the variant of the arm, its label and the stack version where the
+    #: rung reads one. Recorded with the job; it changes nothing the reading computes.
+    ladder_declaration: LadderDeclaration | None = None
 
     @field_validator("evaluation_result_id", "declared_threshold_id")
     @classmethod
@@ -121,6 +126,11 @@ class ReadOperatingPointPayload(ProteaPayload, frozen=True):
         if not {"category", "aspect"} <= set(value):
             raise ValueError("a reading is per cell: the axes include category and aspect")
         return value
+
+    @model_validator(mode="after")
+    def _a_readings_declaration(self) -> ReadOperatingPointPayload:
+        refuse_unless_reading(self.ladder_declaration)
+        return self
 
 
 def _rounded(values: dict[str, float]) -> dict[str, float]:
@@ -279,6 +289,13 @@ def _cells(read: ResultRead, declared: DeclaredThreshold) -> dict[str, Any]:
     return out
 
 
+def _declared(result: dict[str, Any], p: ReadOperatingPointPayload) -> dict[str, Any]:
+    """The job's result, with the reading's declaration when it carries one."""
+    if p.ladder_declaration is None:
+        return result
+    return {**result, "ladder_declaration": p.ladder_declaration.record()}
+
+
 def describe(read: ResultRead, declared: DeclaredThreshold, cells: dict[str, Any]) -> str:
     """The row's description, derived from what was read."""
     read_cells = [cell for cell, block in cells.items() if block.get("read")]
@@ -306,7 +323,12 @@ class ReadOperatingPointOperation:
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         result = str(payload.get("evaluation_result_id", "?"))[:8]
         weights = str(payload.get("declared_threshold_id", "?"))[:8]
-        return f"result {result} at the thresholds of weights {weights}"
+        declared = payload.get("ladder_declaration")
+        rung = ""
+        if isinstance(declared, dict) and declared.get("rung"):
+            label = f" {declared['label']}" if declared.get("label") else ""
+            rung = f"rung {declared['rung']}, {declared.get('variant')}{label}: "
+        return f"{rung}result {result} at the thresholds of weights {weights}"
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -317,7 +339,7 @@ class ReadOperatingPointOperation:
         existing = self._existing(session, p.evaluation_result_id, declared.weights_id)
         if existing is not None:
             emit("read_operating_point.already_read", None, {"id": str(existing.id)}, "info")
-            return OperationResult(result=self._result(existing))
+            return OperationResult(result=_declared(self._result(existing), p))
         with contextlib.ExitStack() as stack:
             read = read_result(
                 session, store, p.evaluation_result_id, ("weighted", "unweighted"), stack
@@ -347,7 +369,7 @@ class ReadOperatingPointOperation:
         session.add(row)
         session.flush()
         self._emit(emit, row, rows)
-        return OperationResult(result=self._result(row))
+        return OperationResult(result=_declared(self._result(row), p))
 
     @staticmethod
     def _existing(
