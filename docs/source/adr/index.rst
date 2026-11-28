@@ -12,7 +12,7 @@ ADRs come in two layers:
   PROTEA. They explain trade-offs of concrete code paths (KNN
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
-- **Strategic decisions** (``D1``-``D62``): plan-level decisions. The
+- **Strategic decisions** (``D1``-``D62``, and ``D66``): plan-level decisions. The
   ``D1``-``D31`` block was taken in the master plan revision 3 (2026-05-05)
   and drives the structure of the project, the deployment story, and the
   thesis writing cadence. Later records (``D34`` onward) were added as the
@@ -347,6 +347,10 @@ later revision) or *Superseded* (a named later decision replaces it).
      - :doc:`The embedding bank of the photos: every member sequence, eight models, padded batches on the cluster <D62-the-embedding-bank-of-the-photos>`
      - Accepted
      - T-PLATFORM
+   * - D66
+     - :doc:`The instrument publishes the champion's predictions every night, as a file, beside an editorial news file <D66-the-instrument-publishes-the-champion-every-night>`
+     - Proposed
+     - T-PLATFORM
 
 .. toctree::
    :maxdepth: 1
@@ -421,3 +425,4 @@ later revision) or *Superseded* (a named later decision replaces it).
    D60-one-universe-three-method-families
    D61-the-homology-table-of-a-cut
    D62-the-embedding-bank-of-the-photos
+   D66-the-instrument-publishes-the-champion-every-night
