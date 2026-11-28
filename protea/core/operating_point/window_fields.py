@@ -178,14 +178,14 @@ def arm_at_window(session: Session, prediction_set_id: str | uuid.UUID) -> ArmAt
     """Read one set as :class:`ArmAtWindow`: its row, its method's spec, its donor rule, its inputs."""
     from sqlalchemy import text
 
-    row = (
+    found = (
         session.execute(text(_PREDICTION_SET_SQL), {"id": str(prediction_set_id)})
         .mappings()
         .first()
     )
-    if row is None:
+    if found is None:
         raise WindowArmsDiffer(f"prediction set {prediction_set_id} is not in prediction_set")
-    row = dict(row)
+    row: dict[str, Any] = dict(found)
     meta = row.get("meta") or {}
     policy = meta.get("donor_policy") if isinstance(meta, Mapping) else None
     donor_set = policy.get("donor_set_id") if isinstance(policy, Mapping) else None
