@@ -2228,6 +2228,114 @@ Payload fields
      - The photo whose distinct member sequences are the population.
 
 
+declare_photo_member_set
+------------------------
+
+Declares a set of one photo's members chosen by their admission flags, a
+``photo_members`` query set: a breadth level of a donor pool, or the members a head is
+trained on. A job on ``protea.jobs``.
+
+A member's flags are the sets it entered the photo by (``truth``, ``superset``,
+``curated``, ``neighbour``). The rule (:class:`protea.core.cut_photo.members.FlagRule`)
+admits a member that carries at least one flag of ``any_of``, every flag of ``all_of``
+and no flag of ``none_of``; the cumulative breadth levels are ``any_of [truth]``
+(``experimental``), ``any_of [truth, superset]`` (``experimental-or-reviewed``) and
+``any_of [truth, superset, curated]`` (``plus-curated-inference``), and every member
+(``every-member``) is the photo itself, which needs no set. A member's admission route
+is its first flag in the order truth, superset, curated, neighbour
+(:func:`protea.core.cut_photo.members.admission_route`).
+
+The entries are the chosen members with a sequence at the cut, each with the id of
+that sequence; a member the rule chooses without one is counted and named, never
+entered. One SELECT names the chosen members, and everything comes from it: the dry run
+counts it, the artifact (the sorted accession list, one per line, whose sha256 is the
+population digest) is aggregated from it by the database, and the entries are written
+from it by one ``INSERT ... SELECT`` in the job's transaction, so the statements a run
+issues do not grow with the members it declares. The list goes to the store under
+``query-sets/photo-members/<photo>/<sha256>/accessions.txt``, and the description
+names the photo, the rule in words, its breadth level, the sample, the counts by route
+and the members without a sequence.
+
+It refuses a rule no member can satisfy, every member without a sample, a sample as
+large as the members the rule chooses, a rule that chooses no member with a sequence,
+and a set the photo already holds with the same bytes (one photo and one set of bytes
+are one set).
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``cut_photo_id``
+     - The photo whose members are chosen.
+   * - ``any_of``, ``all_of``, ``none_of``
+     - The flag rule, each a list of ``truth``, ``superset``, ``curated`` and
+       ``neighbour`` (empty by default).
+   * - ``sample``
+     - Optional, ``{"size": n, "seed": "..."}``: the first ``n`` chosen members with a
+       sequence in ascending ``sha256(seed|photo|accession)``.
+   * - ``dry_run``
+     - Count, name and hash the set without writing anything.
+   * - ``output_name``
+     - The set's name, which gets the digest's first twelve characters.
+
+
+declare_window_sample
+---------------------
+
+Declares a stratified sample of a window's targets, a ``window_sample`` query set of
+the window: the targets a smaller window over the same identity scores
+(``generate_evaluation_set`` restricted to it). A job on ``protea.jobs``.
+
+The units are the window's benchmark pairs, a target in each aspect where it gained
+terms, with its category in that aspect (its cell) read from the window's truth,
+fetched and verified against the sha256 its row records, and its identity band and
+length band (its stratum) read from the window's placement. The rule
+``equal_cells_proportional_strata`` (:mod:`protea.core.sampling.window_sample`) gives
+each of the nine cells ``units_per_cell`` units, or all of them when it has fewer; within
+a cell, one unit to each nonempty stratum first (the largest first when the quota is
+smaller than their number) and the rest in proportion to what each stratum holds beyond
+it, by largest remainder; within a stratum, units are taken in ascending
+``sha256(seed|window|accession)``. The targets are the union of the selected units'
+proteins, and a target keeps every cell it has, so each cell's realised count is at or
+above its quota.
+
+The entries are the targets with their sequence at the window's opening cut; the
+accession list and the allocation table (per cell and stratum: units, quota, selected,
+realised) go to the store under ``query-sets/window-samples/<window>/<sha256>/``, and
+the job result carries the table too. It refuses a window without a placement, a truth
+with no recorded sha256, a term the pivot does not hold, a target the placement does
+not, a target with no sequence at the opening cut, and a sample the window already
+holds. ``dry_run`` returns the table and writes nothing, so a size is reached by dry runs
+and only the last one is declared.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``evaluation_set_id``
+     - The window whose targets are sampled; it must have a placement.
+   * - ``units_per_cell``
+     - The quota of each cell of category and aspect.
+   * - ``seed``
+     - The declared seed of the hash order.
+   * - ``rule``
+     - ``equal_cells_proportional_strata``.
+   * - ``dry_run``
+     - Draw and report without writing anything.
+   * - ``output_name``
+     - The set's name, which gets the digest's first twelve characters.
+
+
 Registering a new operation
 ----------------------------
 

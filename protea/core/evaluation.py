@@ -773,6 +773,7 @@ def compute_evaluation_data_reconciled(
 # caller imports them from this module.
 from protea.core._evaluation_groundtruth import (  # noqa: E402
     deserialize_evaluation_data_from_bytes,
+    fetch_groundtruth_to_file,
     groundtruth_key_for,
     load_evaluation_data_for_set,
     read_groundtruth,
@@ -789,6 +790,7 @@ __all__ = [
     "TRUTH_PROFILES",
     "compute_evaluation_data_reconciled",
     "deserialize_evaluation_data_from_bytes",
+    "fetch_groundtruth_to_file",
     "groundtruth_key_for",
     "load_evaluation_data_for_set",
     "read_groundtruth",

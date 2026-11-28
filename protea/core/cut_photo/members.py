@@ -23,13 +23,21 @@ A truth-only photo (``neighbours_path`` None) has the first three sets and no
 neighbours: the photo of a cut that only ends a window, from which a method takes
 what each target gained and whether it is still reviewed, never what it predicts
 from (the author, 2026-11-16, for cut 205).
+
+The sets a member entered by are its admission flags, and two pure readings of them
+live here too: a :class:`FlagRule` chooses members by flag (``any_of``, ``all_of``,
+``none_of``), which is how a declared set of photo members and every breadth level of
+a donor pool are written, and :func:`admission_route` gives a member the one route
+its first flag names, in the order truth, superset, curated, neighbour.
 """
 
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -176,3 +184,153 @@ def _write_members(
     )
     out.mkdir(parents=True, exist_ok=True)
     pq.write_table(table, out / "members.parquet", compression="zstd")
+
+
+#: The four sets a photo member can have entered by (the flag columns of
+#: ``cut_photo_member``), in the order its admission route reads them.
+ADMISSION_FLAGS: tuple[str, ...] = ("truth", "superset", "curated", "neighbour")
+
+#: The route each flag names when it is a member's first: experimental, then
+#: reviewed, then curated inference, then the UniRef50 neighbours.
+ADMISSION_ROUTES: dict[str, str] = {
+    "truth": "experimental",
+    "superset": "reviewed",
+    "curated": "curated_inference",
+    "neighbour": "uniref_neighbour",
+}
+
+#: Every combination of flags a member can carry, as the members pass writes them:
+#: at least one set, and a neighbour by that set alone.
+MEMBER_FLAG_COMBINATIONS: tuple[tuple[bool, ...], ...] = tuple(
+    combination
+    for combination in itertools.product((False, True), repeat=len(ADMISSION_FLAGS))
+    if any(combination[:3]) != combination[3]
+)
+
+
+def _flags_of(flags: Mapping[str, Any]) -> tuple[bool, ...]:
+    """The four flags of a member, in the order of :data:`ADMISSION_FLAGS`."""
+    missing = [flag for flag in ADMISSION_FLAGS if flag not in flags]
+    if missing:
+        raise ValueError(f"a member's flags name all four sets; {missing} missing")
+    return tuple(bool(flags[flag]) for flag in ADMISSION_FLAGS)
+
+
+def admission_route(flags: Mapping[str, Any]) -> str:
+    """The route of a member: the one its first flag names, in the order truth, superset,
+    curated, neighbour.
+
+    Every member has exactly one, since it entered by at least one set; flags that name
+    no set are refused.
+    """
+    for flag, carried in zip(ADMISSION_FLAGS, _flags_of(flags), strict=True):
+        if carried:
+            return ADMISSION_ROUTES[flag]
+    raise ValueError("a member that entered by no set has no route, and no photo holds one")
+
+
+def _flag_list(name: str, values: Iterable[str]) -> tuple[str, ...]:
+    """The flags of one list of a rule, in the order of :data:`ADMISSION_FLAGS`."""
+    given = list(values)
+    unknown = sorted(set(given) - set(ADMISSION_FLAGS))
+    if unknown:
+        raise ValueError(f"{name} names {unknown}: the admission flags are {ADMISSION_FLAGS}")
+    if len(set(given)) != len(given):
+        raise ValueError(f"{name} names a flag twice: {given}")
+    return tuple(flag for flag in ADMISSION_FLAGS if flag in given)
+
+
+@dataclass(frozen=True)
+class FlagRule:
+    """Photo members chosen by their admission flags.
+
+    A member is admitted when it carries at least one flag of ``any_of`` (no condition
+    when it is empty), every flag of ``all_of`` and no flag of ``none_of``. The flags
+    are kept in the order of :data:`ADMISSION_FLAGS`, so two rules naming the same flags
+    in another order are one rule. A flag both required and excluded is refused, and so
+    is a rule no member could ever satisfy.
+    """
+
+    any_of: tuple[str, ...] = ()
+    all_of: tuple[str, ...] = ()
+    none_of: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for name in ("any_of", "all_of", "none_of"):
+            object.__setattr__(self, name, _flag_list(name, getattr(self, name)))
+        contradicted = sorted(set(self.none_of) & (set(self.any_of) | set(self.all_of)))
+        if contradicted:
+            raise ValueError(f"none_of excludes {contradicted}, which the rule also asks for")
+        if not self.admitted_combinations():
+            raise ValueError(
+                f"no photo member can satisfy {self.in_words()}: a neighbour entered by no "
+                "other set, and every member entered by at least one"
+            )
+
+    def admits(self, flags: Mapping[str, Any]) -> bool:
+        """Whether a member with these flags is in the set."""
+        carried = {flag: on for flag, on in zip(ADMISSION_FLAGS, _flags_of(flags), strict=True)}
+        return (
+            (not self.any_of or any(carried[flag] for flag in self.any_of))
+            and all(carried[flag] for flag in self.all_of)
+            and not any(carried[flag] for flag in self.none_of)
+        )
+
+    def admitted_combinations(self) -> frozenset[tuple[bool, ...]]:
+        """The combinations of :data:`MEMBER_FLAG_COMBINATIONS` the rule admits.
+
+        Two rules that admit the same combinations choose the same members of any photo.
+        """
+        return frozenset(
+            combination
+            for combination in MEMBER_FLAG_COMBINATIONS
+            if self.admits(
+                {flag: on for flag, on in zip(ADMISSION_FLAGS, combination, strict=True)}
+            )
+        )
+
+    @property
+    def admits_every_member(self) -> bool:
+        """Whether the rule chooses the whole photo, whatever its spelling."""
+        return self.admitted_combinations() == frozenset(MEMBER_FLAG_COMBINATIONS)
+
+    def in_words(self) -> str:
+        """The rule as a phrase a description can carry."""
+        if not (self.any_of or self.all_of or self.none_of):
+            return "every member"
+        parts = []
+        if self.any_of:
+            parts.append("entered by " + " or ".join(self.any_of))
+        if self.all_of:
+            parts.append("entered by " + " and ".join(self.all_of))
+        if self.none_of:
+            parts.append("not entered by " + " or ".join(self.none_of))
+        return "the members " + ", ".join(parts)
+
+    def declared(self) -> dict[str, list[str]]:
+        """The rule as a job result records it."""
+        return {
+            "any_of": list(self.any_of),
+            "all_of": list(self.all_of),
+            "none_of": list(self.none_of),
+        }
+
+
+#: The cumulative breadth levels of a donor pool, by the label set names and
+#: descriptions carry: experimental (truth), experimental or reviewed (truth or
+#: superset), plus curated inference, and every member of the photo.
+BREADTH_LEVELS: dict[str, FlagRule] = {
+    "experimental": FlagRule(any_of=("truth",)),
+    "experimental-or-reviewed": FlagRule(any_of=("truth", "superset")),
+    "plus-curated-inference": FlagRule(any_of=("truth", "superset", "curated")),
+    "every-member": FlagRule(),
+}
+
+
+def breadth_level_of(rule: FlagRule) -> str | None:
+    """The breadth level whose members a rule chooses, or None when it chooses none of them."""
+    chosen = rule.admitted_combinations()
+    for label, level in BREADTH_LEVELS.items():
+        if level.admitted_combinations() == chosen:
+            return label
+    return None

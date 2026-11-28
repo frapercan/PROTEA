@@ -60,9 +60,13 @@ from protea.core.operations.declare_exam_population import (
     DeclareExamPopulationOperation,
 )
 from protea.core.operations.declare_member_taxa import DeclareMemberTaxaOperation
+from protea.core.operations.declare_photo_member_set import (
+    DeclarePhotoMemberSetOperation,
+)
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenanceOperation,
 )
+from protea.core.operations.declare_window_sample import DeclareWindowSampleOperation
 from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchOperation,
     EncodeResidueSparseOperation,
@@ -218,6 +222,10 @@ _UNIVERSE: tuple[_Row, ...] = (
     (RunInterProScanBatchOperation, replace(_DERIVED, status="mirror")),
     (AnalyzeAnnotationEvolutionOperation, _DERIVED),
     (DeclareCorpusPopulationOperation, _DERIVED),
+    # A photo's members by admission flag (a donor pool's breadth, a head's members), and
+    # a stratified sample of a window's targets: declared query sets the ladder reads.
+    (DeclarePhotoMemberSetOperation, _DERIVED),
+    (DeclareWindowSampleOperation, _DERIVED),
     (ComputeInformationAccretionOperation, _DERIVED),
     (GenerateEvaluationSetOperation, _DERIVED),
     (ExportEvaluationTargetsOperation, _DERIVED),

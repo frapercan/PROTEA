@@ -127,6 +127,12 @@ def test_the_vocabulary_is_closed_and_says_what_it_cannot_say():
         # selection and a confirmation half, and it has no evaluation window at
         # all, which is also why these exams do not fit ADR-D55's exploration.
         "exam_population",
+        # The seventh and eighth, 2026-11-28: a photo's members chosen by their
+        # admission flags (a donor pool's breadth, a head's members), which derive
+        # from the photo and from no window, and a stratified sample of a window's
+        # targets, which derives from its window.
+        "photo_members",
+        "window_sample",
         "legacy_undeclared",
     }
 

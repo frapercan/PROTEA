@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -47,8 +48,35 @@ QUERY_SET_SOURCES: tuple[str, ...] = (
     #: fit ADR-D55's exploration unit. Its artifact is a MANIFEST, because an
     #: exam population is several files and a row has one uri.
     "exam_population",
+    #: The members of one cut photo chosen by their admission flags, or a
+    #: hash-ordered sample of them (``declare_photo_member_set``): a donor
+    #: pool's breadth, or the members a head is trained on. It derives from
+    #: the photo (``cut_photo_id``) and from no window.
+    "photo_members",
+    #: A stratified sample of a window's targets (``declare_window_sample``),
+    #: drawn from the window's own truth and placement: the targets a smaller
+    #: window over the same identity scores.
+    "window_sample",
     "legacy_undeclared",
 )
+
+#: A set of photo members is declared like the corpus and the exam populations:
+#: its photo, a uri with its sha, a description and a job, and no window.
+PHOTO_MEMBERS_DECLARED_CHECK = (
+    "source_kind <> 'photo_members' OR ("
+    "cut_photo_id IS NOT NULL AND artifact_uri IS NOT NULL AND content_sha256 IS NOT NULL "
+    "AND description IS NOT NULL AND job_id IS NOT NULL AND evaluation_set_id IS NULL)"
+)
+#: A window sample derives from its window, with a uri, its sha, a description and a job.
+WINDOW_SAMPLE_DECLARED_CHECK = (
+    "source_kind <> 'window_sample' OR ("
+    "evaluation_set_id IS NOT NULL AND artifact_uri IS NOT NULL "
+    "AND content_sha256 IS NOT NULL AND description IS NOT NULL AND job_id IS NOT NULL)"
+)
+#: Only a set of photo members names a photo.
+PHOTO_ON_MEMBER_SETS_CHECK = "cut_photo_id IS NULL OR source_kind = 'photo_members'"
+#: The rows the photo-member idempotence index covers.
+PHOTO_MEMBERS_PREDICATE = "source_kind = 'photo_members'"
 
 if TYPE_CHECKING:
     from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -94,6 +122,13 @@ class QuerySet(Base):
     where it goes. ``source_kind`` says which of them must be present, and the
     CHECK constraints make an undeclared derived set unexpressible rather than
     discouraged.
+
+    Two kinds derive from something other than a window's delta: a set of
+    ``photo_members`` names the cut photo it chose its members from
+    (``cut_photo_id``), and a ``window_sample`` names the window whose targets it
+    sampled (``evaluation_set_id``). Both carry the sorted accession list as
+    their artifact, so their sha256 is the population digest of
+    :func:`protea.core.query_population.population_of`.
     """
 
     __tablename__ = "query_set"
@@ -151,6 +186,23 @@ class QuerySet(Base):
             "AND evaluation_set_id IS NULL)",
             name="ck_query_set_exam_is_declared",
         ),
+        CheckConstraint(
+            PHOTO_MEMBERS_DECLARED_CHECK, name="ck_query_set_photo_members_are_declared"
+        ),
+        CheckConstraint(
+            WINDOW_SAMPLE_DECLARED_CHECK, name="ck_query_set_window_sample_is_declared"
+        ),
+        CheckConstraint(PHOTO_ON_MEMBER_SETS_CHECK, name="ck_query_set_photo_on_member_sets"),
+        # One photo plus one set of bytes is one set of photo members. The window
+        # constraint above cannot say it: this kind has no window, and two NULLs do
+        # not collide.
+        Index(
+            "uq_query_set_photo_members_content",
+            "cut_photo_id",
+            "content_sha256",
+            unique=True,
+            postgresql_where=text(PHOTO_MEMBERS_PREDICATE),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -175,6 +227,14 @@ class QuerySet(Base):
         ForeignKey("evaluation_set.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
+    )
+    #: The cut photo a ``photo_members`` set chose its members from, and NULL on
+    #: every other kind. RESTRICT for the reason ``evaluation_set_id`` gives: a
+    #: photo a set derives from is not a photo to delete under it.
+    cut_photo_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cut_photo.id", ondelete="RESTRICT", name="fk_query_set_cut_photo_id"),
+        nullable=True,
     )
     #: Where the bytes this set was registered from live.
     artifact_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)

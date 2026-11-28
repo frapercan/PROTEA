@@ -536,6 +536,26 @@ transforms to a pool in place and in chunks, from that artifact's values.
    :members:
    :show-inheritance:
 
+Declared samples
+----------------
+
+``protea.core.sampling`` draws a declared sample in hash order, with no random
+state: members are taken in ascending sha256 of ``seed|scope|accession``, the scope
+being the id of what is sampled, so a sample is drawn again identically on any
+machine and independently from two scopes with one seed.
+``protea.core.sampling.window_sample`` is the rule ``declare_window_sample`` applies
+to a window's benchmark pairs, ``equal_cells_proportional_strata``: a quota per cell
+of category and aspect, spread over the strata of identity band and length band by
+largest remainder after one unit each.
+
+.. automodule:: protea.core.sampling
+   :members:
+   :show-inheritance:
+
+.. automodule:: protea.core.sampling.window_sample
+   :members:
+   :show-inheritance:
+
 Provenance
 ----------
 
