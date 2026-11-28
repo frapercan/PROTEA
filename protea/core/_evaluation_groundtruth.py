@@ -25,7 +25,11 @@ from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 
-from protea.core._artifact_identity import ArtifactMismatch, fetch_and_verify
+from protea.core._artifact_identity import (
+    ArtifactMismatch,
+    fetch_and_verify,
+    fetch_verified_to_file,
+)
 from protea.core.evaluation import _GROUNDTRUTH_BUCKETS, EvaluationData
 
 
@@ -139,9 +143,40 @@ def read_groundtruth(session: Session, eval_set) -> GroundTruthRead:
     key hides a row that points elsewhere, and preferring the uri hides a
     renamed object.
     """
-    from protea.infrastructure.settings import load_settings
-    from protea.infrastructure.storage import get_artifact_store
+    key = _checked_key(eval_set)
+    expected = getattr(eval_set, "groundtruth_sha256", None)
+    blob = fetch_and_verify(
+        _store(),
+        key,
+        expected,
+        f"the ground truth of evaluation set {eval_set.id}",
+        on_unverified=lambda msg: warnings.warn(msg, RuntimeWarning, stacklevel=2),
+    )
+    return GroundTruthRead(blob=blob, verified=expected is not None, key=key)
 
+
+def fetch_groundtruth_to_file(eval_set, dest: Path) -> Path:
+    """A window's truth parquet streamed into ``dest``, verified against its recorded sha256.
+
+    The same door as :func:`read_groundtruth`, with the same derived key checked
+    against the row's uri, for a reader that must not go on unverified and need not
+    hold the bytes: a window derived from another one reads its parent's truth this
+    way. A row with no sha256 is refused, never read in silence.
+    """
+    key = _checked_key(eval_set)
+    expected = getattr(eval_set, "groundtruth_sha256", None)
+    if not expected:
+        raise ArtifactMismatch(
+            f"evaluation set {eval_set.id} records no groundtruth_sha256, so its truth "
+            "cannot be verified, and a set derived from it would rest on unverified bytes."
+        )
+    return fetch_verified_to_file(
+        _store(), key, expected, dest, f"the ground truth of evaluation set {eval_set.id}"
+    )
+
+
+def _checked_key(eval_set) -> str:
+    """The key a window's id derives, refused when the row's uri names another object."""
     key = groundtruth_key_for(eval_set.id)
     stored = (eval_set.groundtruth_uri or "").rstrip("/")
     if stored and not stored.endswith(key):
@@ -151,17 +186,14 @@ def read_groundtruth(session: Session, eval_set) -> GroundTruthRead:
             "which object holds this window's truth, and guessing which would hide "
             "either a row pointing elsewhere or an object that was renamed."
         )
+    return key
 
-    store = get_artifact_store(load_settings(Path(__file__).resolve().parents[2]))
-    expected = getattr(eval_set, "groundtruth_sha256", None)
-    blob = fetch_and_verify(
-        store,
-        key,
-        expected,
-        f"the ground truth of evaluation set {eval_set.id}",
-        on_unverified=lambda msg: warnings.warn(msg, RuntimeWarning, stacklevel=2),
-    )
-    return GroundTruthRead(blob=blob, verified=expected is not None, key=key)
+
+def _store():
+    from protea.infrastructure.settings import load_settings
+    from protea.infrastructure.storage import get_artifact_store
+
+    return get_artifact_store(load_settings(Path(__file__).resolve().parents[2]))
 
 
 def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[EvaluationData, uuid.UUID]:

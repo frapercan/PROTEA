@@ -107,9 +107,15 @@ class TestTheSeam:
         # Refused rather than resolved by preferring either: the derived key
         # would hide a row pointing elsewhere, the stored uri would hide a
         # renamed object.
-        from protea.core.evaluation import read_groundtruth
+        from protea.core.evaluation import fetch_groundtruth_to_file, read_groundtruth
 
-        code = _code_of(read_groundtruth)
+        # Both doors, the one that holds the bytes and the one that streams them to a
+        # file, go through the same check.
+        from protea.core._evaluation_groundtruth import _checked_key
+
+        assert "_checked_key" in _code_of(read_groundtruth)
+        assert "_checked_key" in _code_of(fetch_groundtruth_to_file)
+        code = _code_of(_checked_key)
         assert "groundtruth_key_for" in code and "endswith" in code
         assert "ArtifactMismatch" in code
 

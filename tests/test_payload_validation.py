@@ -84,9 +84,13 @@ from protea.core.operations.declare_exam_population import (
     DeclareExamPopulationPayload,
 )
 from protea.core.operations.declare_member_taxa import DeclareMemberTaxaPayload
+from protea.core.operations.declare_photo_member_set import (
+    DeclarePhotoMemberSetPayload,
+)
 from protea.core.operations.declare_query_set_provenance import (
     DeclareQuerySetProvenancePayload,
 )
+from protea.core.operations.declare_window_sample import DeclareWindowSamplePayload
 from protea.core.operations.encode_residue_sparse import (
     EncodeResidueSparseBatchPayload,
     EncodeResidueSparsePayload,
@@ -419,6 +423,30 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "cut_photo_id": "photo-211",
         },
         ("cut_photo_id",),
+    ),
+    # A set of photo members is chosen by the four admission flags and nothing else.
+    (
+        "declare_photo_member_set",
+        DeclarePhotoMemberSetPayload,
+        {
+            "cut_photo_id": "b98ba58b-fbb3-43cd-a7c6-412a657b826f",
+            "any_of": ["truth", "reviewed"],
+            "output_name": "donors-level-2",
+        },
+        ("any_of", 1),
+    ),
+    # A window sample names its rule: a second rule would draw another set.
+    (
+        "declare_window_sample",
+        DeclareWindowSamplePayload,
+        {
+            "evaluation_set_id": "4228a366-3dc4-4c30-b4a4-287482a59edf",
+            "units_per_cell": 300,
+            "seed": "ladder-toy-1",
+            "rule": "proportional",
+            "output_name": "ladder-toy-targets-194-211",
+        },
+        ("rule",),
     ),
     # A lexicon bank, by its lexicon's registered weights and its manifest (ADR-D63).
     (
