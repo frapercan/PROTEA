@@ -128,6 +128,13 @@ class Settings:
     smtp_password: str | None = None
     smtp_from_addr: str | None = None
 
+    # Whether the API keeps its cached aggregates warm (PROTEA_API_PREWARM_ENABLED).
+    # True, the default, starts one task per aggregate that computes it at start
+    # and again before each time to live runs out, for as long as the process
+    # runs. False starts no such task: each aggregate is computed when a request
+    # reads it. See protea.api.app._build_lifespan.
+    api_prewarm_enabled: bool = True
+
     # The environment this process declares (PROTEA_ENVIRONMENT). Only "dev"
     # changes startup: the API and every worker then refuse to start unless
     # the database and the AMQP vhost in their URLs carry the two dev names
@@ -266,6 +273,7 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
         smtp_user: str | None = None
         smtp_password: str | None = None
         smtp_from_addr: str | None = None
+        api_prewarm_enabled: bool = True
         allowed_origins: list[str] | None = Field(default=None)
         environment: str | None = None
         dev_database_name: str = _DEFAULT_DEV_DATABASE_NAME
@@ -398,6 +406,7 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
         smtp_user=raw.smtp_user,
         smtp_password=raw.smtp_password,
         smtp_from_addr=raw.smtp_from_addr,
+        api_prewarm_enabled=raw.api_prewarm_enabled,
         environment=raw.environment,
         dev_database_name=raw.dev_database_name,
         dev_amqp_vhost=raw.dev_amqp_vhost,
