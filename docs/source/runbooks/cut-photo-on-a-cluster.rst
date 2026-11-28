@@ -241,6 +241,56 @@ and no data is sent but the recipes.
    ``load_embedding_bank`` with the manifest's sha256. It verifies everything
    again before writing, then loads shard by shard and can be rerun.
 
+The own segment encoder's bank
+------------------------------
+
+The segment encoder (``jepa-segments``, ``protea.core.own_encoder``) is trained on
+the cut of a complete lexicon bank (ADR-D63) already in the bank directory, and its
+vectors join that directory as one more configuration's bank. It reads no label and
+no protein language model; nothing is downloaded and the only data sent is the
+member list.
+
+1. **Declare the training population** as a file of member md5s, one per line: for
+   the instance of a cut, the members of the photos up to that cut (for instance
+   211, the photos of 160, 177, 194 and 211). Its sha256 is the population's
+   declaration; the encoder's record repeats it.
+2. **Measure first** with a five-minute ``sample`` job; it records the held-out
+   loss every minute, the tokens per second and the card's peak in
+   ``ENCODER_DIR/sample-<job>/own-encoder.json``, whose status is
+   ``measurement``::
+
+     sbatch -p gpu_partition --gres=gpu:1 --constraint=b200 -c 16 --mem=16G \
+       -t 00:15:00 own_encoder_bank.sh PYTHON CODE_DIR BANK_DIR lexico-93k \
+       ENCODER_DIR REVISION sample MEMBERS 5
+
+   The whole lexico-93k cut (2,523,987 sequences, 9,632,941 segments) loads in
+   about 4 seconds and 1.3 GB on the desktop's CPU.
+
+3. **Train** for the plan (55 minutes of training time), the memory from the
+   sample's peak times 1.5 and the limit the plan plus its measured tail::
+
+     sbatch -p gpu_partition --gres=gpu:1 --constraint=b200 -c 16 --mem=MEM \
+       -t 01:15:00 own_encoder_bank.sh PYTHON CODE_DIR BANK_DIR lexico-93k \
+       ENCODER_DIR REVISION train MEMBERS 55 65
+
+   A job that runs out of time first exits 4: submit it again and it resumes from
+   ``state.pt``. The run writes ``encoder.npz`` and ``own-encoder.json`` (status
+   ``complete``), whose ``model_name`` is ``jepa-segments/<sha256 of
+   encoder.npz>``.
+4. **Vectors**: one shard first (``FIRST`` equal to ``LAST``), then the rest; the
+   job that leaves no shard missing writes ``bank-<config>.json`` (exit 3 when
+   refused)::
+
+     sbatch -p gpu_partition --gres=gpu:1 --constraint=b200 -c 8 --mem=MEM \
+       -t 00:15:00 own_encoder_bank.sh PYTHON CODE_DIR BANK_DIR lexico-93k \
+       ENCODER_DIR REVISION vectors ENCODER_SHA256 0 0
+
+5. **Register the configuration** through ``POST /embeddings/configs`` with the
+   body ``protea.core.own_encoder.configuration`` returns for the encoder's sha256
+   and record (backend ``own-encoder``, no training release: the encoder fits no
+   annotation), then **fetch** ``bank-<config>.json`` and ``vectors/<config>/`` and
+   run ``load_embedding_bank`` with the manifest's sha256, as for any bank.
+
 The run at 211, measured
 ------------------------
 

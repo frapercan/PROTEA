@@ -19,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from protea.core import own_encoder
 from protea.core.embedding_identity import IDENTITY_FIELDS, derive_embedding_config_id
 from protea.infrastructure.orm.base import Base
 
@@ -43,6 +44,10 @@ from protea.infrastructure.orm.base import Base
 #: operation refuses any other tag, which is what makes the tag evidence
 #: about how the rows were produced instead of a label.
 INGESTED_METHOD_BACKEND = "ingested-method"
+
+#: The tag of the own segment encoder's configurations, spelt where the encoder is
+#: (``protea.core.own_encoder``, which a cluster node imports without this module).
+OWN_ENCODER_BACKEND = own_encoder.BACKEND
 
 #: Backends whose stored vectors are k-WTA codes: a fixed, small number of
 #: non-zero entries in a wide space, which makes a dense copy of the bank the
@@ -79,6 +84,10 @@ VALID_BACKENDS: frozenset[str] = frozenset(
         # written only by encode_residue_vocabulary (ADR-D51): per-residue codes in shards
         "residue-vocabulary",
         INGESTED_METHOD_BACKEND,
+        # the own segment encoder's bank (protea.core.own_encoder): a label-free encoder of
+        # our own, one configuration per trained encoder (``jepa-segments/<sha256 of its
+        # weights>``). Not in the leakage guard's FITTED_BACKENDS: it fits no annotation.
+        OWN_ENCODER_BACKEND,
     }
 )
 

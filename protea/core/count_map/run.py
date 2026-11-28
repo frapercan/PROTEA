@@ -19,7 +19,7 @@ import numpy as np
 
 from protea.core.count_map.fit import StrengthFit
 from protea.core.count_map.inputs import AspectProblem, Columns
-from protea.core.count_map.reading import CountMap, Rows, read
+from protea.core.count_map.reading import TOP, CountMap, Rows, ranks, read
 
 #: Every entry's date: the format's earliest, so the bytes do not carry the run's time.
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)
@@ -35,8 +35,12 @@ class AspectResult:
     record: dict[str, Any]
 
 
-def fit_and_read(columns: Columns, problem: AspectProblem, top: int) -> AspectResult:
-    """m fitted on the donors alone, then the targets read with it."""
+def fit_and_read(columns: Columns, problem: AspectProblem, top: int | None) -> AspectResult:
+    """m fitted on the donors alone, then the targets read with it.
+
+    A reading at the grid floor (``top`` None) also records how many of its rows
+    rank past the laboratory's fixed depth of 100 within their target.
+    """
     fit = StrengthFit(problem.carriers, problem.states, problem.group, problem.base_rate)
     m, bits, grid = fit.best()
     cmap = CountMap(fit.counts, fit.carried, problem.base_rate, m)
@@ -53,6 +57,8 @@ def fit_and_read(columns: Columns, problem: AspectProblem, top: int) -> AspectRe
         "rows": len(rows),
         "rows_from_a_unit": int((rows.unit >= 0).sum()),
     }
+    if top is None:
+        record["rows_past_rank_100"] = int((ranks(rows) > TOP).sum())
     return AspectResult(columns, cmap, rows, record)
 
 

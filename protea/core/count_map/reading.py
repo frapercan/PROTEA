@@ -13,12 +13,21 @@ pi(t) (a floored row loses its witness), the terms the target is denied at the
 cut (its NOT terms and their descendants) are taken out, and the ``top`` best
 terms per target are kept. Each row keeps its witness: the unit, and K and N
 after the exclusion. Ported from the laboratory's ``mapa_cuentas.py``.
+
+With ``top`` None there is no hand-fixed depth: the reading keeps every row the
+evaluator can count, every term whose score, rendered with four decimals as the
+evaluator reads it, is at or above the first threshold of its grid
+(:data:`GRID_FLOOR`); the prior's candidates are then every term whose base rate
+passes that floor. A lower score never counts at any threshold, so the floor
+changes no metric of the raw reading.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass
+from decimal import Decimal
 
 import numpy as np
 import scipy.sparse as sp
@@ -27,6 +36,30 @@ import scipy.sparse as sp
 TOP = 100
 #: How many support entries one chunk of pairs may expand to.
 CHUNK_SUPPORT = 30_000_000
+#: The first threshold of the evaluator's grid at its default step of 0.01
+#: (``tau_grid_for(0.01)[0]``, cafaeval's ``np.arange(0.01, 1, 0.01)``).
+GRID_FLOOR = 0.01
+
+
+def first_score_rendered_at_or_above(floor: float) -> float:
+    """The smallest float whose four-decimal rendering (``'%.4f'``) is at or above ``floor``.
+
+    The rendering rounds the exact binary value to the nearest four-decimal number,
+    so it reaches ``floor`` (a four-decimal number) exactly when the value exceeds
+    ``floor - 0.00005``; no float sits on that decimal boundary. Comparing scores
+    with this cut is the rendering's own rule without rendering millions of them.
+    """
+    boundary = Decimal(repr(floor)) - Decimal("0.00005")
+    cut = float(boundary)
+    while Decimal(cut) <= boundary:
+        cut = math.nextafter(cut, math.inf)
+    while Decimal(math.nextafter(cut, -math.inf)) > boundary:
+        cut = math.nextafter(cut, -math.inf)
+    return cut
+
+
+#: Scores at or above this render at or above :data:`GRID_FLOOR`; lower ones below it.
+FLOOR_CUT = first_score_rendered_at_or_above(GRID_FLOOR)
 
 
 @dataclass(frozen=True)
@@ -114,9 +147,16 @@ def _scored(cmap: CountMap, targets: Targets, q_c: np.ndarray, u_c: np.ndarray) 
     return Rows(q_c[r_][first], t_[first], v_[first], u_c[r_][first], k_[first], n_[first])
 
 
-def _with_prior(part: Rows, qs: np.ndarray, base_rate: np.ndarray, top: int) -> Rows:
+def _prior(base_rate: np.ndarray, top: int | None) -> np.ndarray:
+    """The prior's candidate terms: the ``top`` by base rate, or every one past the grid floor."""
+    if top is None:
+        return np.flatnonzero(base_rate >= FLOOR_CUT)
+    return np.argsort(-base_rate, kind="stable")[:top]
+
+
+def _with_prior(part: Rows, qs: np.ndarray, base_rate: np.ndarray, top: int | None) -> Rows:
     """The prior's candidates added and every score floored at pi; ties keep the unit's row."""
-    prior = np.argsort(-base_rate, kind="stable")[:top]
+    prior = _prior(base_rate, top)
     nan = np.full(len(qs) * len(prior), np.nan)
     candidates = Rows(
         np.repeat(qs, len(prior)),
@@ -142,14 +182,21 @@ def _with_prior(part: Rows, qs: np.ndarray, base_rate: np.ndarray, top: int) -> 
     return both.take(o[np.r_[True, key[1:] != key[:-1]]] if len(o) else o)
 
 
-def _finish(part: Rows, qs: np.ndarray, cmap: CountMap, denied: np.ndarray, top: int) -> Rows:
-    """Prior and floor, the denied terms out, the ``top`` best per target."""
+def _finish(
+    part: Rows, qs: np.ndarray, cmap: CountMap, denied: np.ndarray, top: int | None
+) -> Rows:
+    """Prior and floor, the denied terms out, the ``top`` best per target (or all past the grid floor)."""
+    if top is None:  # a unit row below the floor ends floored to a prior candidate, or out
+        part = part.take(np.flatnonzero(part.score >= FLOOR_CUT))
     rows = _with_prior(part, qs, cmap.base_rate, top)
     terms = cmap.counts.shape[1]
     if len(denied):
         key = rows.target * terms + rows.term
         hit = np.minimum(np.searchsorted(denied, key), len(denied) - 1)
         rows = rows.take(np.flatnonzero(denied[hit] != key))
+    if top is None:
+        rows = rows.take(np.flatnonzero(rows.score >= FLOOR_CUT))
+        return rows.take(np.lexsort((rows.term, -rows.score, rows.target)))
     o = np.lexsort((rows.term, -rows.score, rows.target))
     target = rows.target[o]
     starts = np.r_[0, np.flatnonzero(target[1:] != target[:-1]) + 1] if len(o) else o
@@ -157,8 +204,8 @@ def _finish(part: Rows, qs: np.ndarray, cmap: CountMap, denied: np.ndarray, top:
     return rows.take(o[rank < top])
 
 
-def read(cmap: CountMap, targets: Targets, top: int = TOP) -> Rows:
-    """Every target's ``top`` best terms of the aspect, with their witness."""
+def read(cmap: CountMap, targets: Targets, top: int | None = TOP) -> Rows:
+    """Every target's ``top`` best terms of the aspect (every one past the grid floor when None)."""
     units = targets.units.tocsr()
     units.sort_indices()
     terms = cmap.counts.shape[1]
@@ -177,4 +224,26 @@ def read(cmap: CountMap, targets: Targets, top: int = TOP) -> Rows:
     return concat(parts)
 
 
-__all__ = ["CHUNK_SUPPORT", "TOP", "CountMap", "Rows", "Targets", "concat", "read"]
+def ranks(rows: Rows) -> np.ndarray:
+    """Each row's rank within its target, from 1, in the reading's order (score down, then term)."""
+    order = np.lexsort((rows.term, -rows.score, rows.target))
+    target = rows.target[order]
+    starts = np.r_[0, np.flatnonzero(target[1:] != target[:-1]) + 1] if len(order) else order
+    rank = np.empty(len(order), dtype=np.int64)
+    rank[order] = np.arange(len(order)) - np.repeat(starts, np.diff(np.r_[starts, len(order)])) + 1
+    return rank
+
+
+__all__ = [
+    "CHUNK_SUPPORT",
+    "FLOOR_CUT",
+    "GRID_FLOOR",
+    "TOP",
+    "CountMap",
+    "Rows",
+    "Targets",
+    "concat",
+    "first_score_rendered_at_or_above",
+    "ranks",
+    "read",
+]

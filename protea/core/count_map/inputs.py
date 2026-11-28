@@ -2,11 +2,18 @@
 
 The donors are the ``truth`` members of the photo whose annotation set starts
 the window, each with its state at the cut (``protea.core._cut_state``). The
-targets are the window's own: the proteins its truth scores. Both are named by
-their sequence's md5 in the photo, which is how the lexicon bank and the
-segment families name their units. Per aspect, the columns are the pivot's
-terms of that aspect without its root, and a donor whose state holds none of
-them is not a donor of the aspect.
+targets are the window's own: the proteins its truth scores, or its declared
+target set. Both are named by their sequence's md5 in the photo, which is how
+the lexicon bank and the segment families name their units. Per aspect, the
+columns are the pivot's terms of that aspect without its root, and a donor whose
+state holds none of them is not a donor of the aspect.
+
+What a protein's reading leaves out (:data:`EXCLUSIONS`): ``sequence``, the
+donors that share its sequence (itself, its merged aliases and its identical
+twins), as the laboratory read it; or ``accession``, the protein's own accession
+only, the rule the platform's retrieval follows, under which a twin under
+another accession stays a donor. The fit leaves out of each donor's own reading
+the same group, so m is fitted for the reading it serves.
 """
 
 from __future__ import annotations
@@ -15,7 +22,7 @@ import io
 import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -29,6 +36,8 @@ from protea.core.count_map.reading import Targets
 #: The three roots, never a column: every annotated protein holds its aspect's.
 ROOTS = frozenset({"GO:0008150", "GO:0003674", "GO:0005575"})
 ASPECTS = ("P", "F", "C")
+#: What a protein's own reading leaves out: the donors sharing its sequence, or its accession.
+EXCLUSIONS = ("sequence", "accession")
 
 
 @dataclass(frozen=True)
@@ -140,6 +149,14 @@ def state_matrix(
     )
 
 
+class Who(NamedTuple):
+    """The donors and the targets of a map, by accession, and what a reading leaves out."""
+
+    donors: list[str]
+    targets: list[str]
+    exclusion: str = "sequence"
+
+
 @dataclass(frozen=True)
 class AspectProblem:
     """One aspect's donors and targets as matrices, with who each row is."""
@@ -159,24 +176,31 @@ def aspect_problem(
     negatives: Mapping[str, set[str]],
     md5_of: Mapping[str, str],
     units: tuple[Mapping[str, np.ndarray], int],
-    who: tuple[list[str], list[str]],
+    who: Who | tuple[list[str], list[str]],
 ) -> AspectProblem:
     """The aspect's donors (those whose state holds a column) and the targets, as matrices.
 
-    ``who`` is (the donors' accessions, the targets' accessions); ``units`` is
-    (md5 -> themes, the number of units).
+    ``who`` is the donors' and the targets' accessions and the exclusion (a pair
+    of lists excludes by sequence); ``units`` is (md5 -> themes, the number of units).
     """
+    who = Who(*who)
+    if who.exclusion not in EXCLUSIONS:
+        raise ValueError(f"exclusion {who.exclusion!r} is not one of {EXCLUSIONS}")
     index = columns.index()
-    held = {p: positives.get(p, {}).get(columns.aspect, set()) for p in who[0]}
-    states_all = state_matrix(who[0], held, index)
+    held = {p: positives.get(p, {}).get(columns.aspect, set()) for p in who.donors}
+    states_all = state_matrix(who.donors, held, index)
     keep = np.flatnonzero(np.diff(states_all.indptr) > 0)
-    donors = [who[0][i] for i in keep]
+    donors = [who.donors[i] for i in keep]
     states = states_all[keep].tocsr()
     donor_md5 = [md5_of[d] for d in donors]
-    _, group = np.unique(np.asarray(donor_md5, dtype=object), return_inverse=True)
+    by_sequence = who.exclusion == "sequence"
+    donor_key = donor_md5 if by_sequence else donors
+    _, group = np.unique(np.asarray(donor_key, dtype=object), return_inverse=True)
     carriers = unit_matrix(donor_md5, units[0], units[1])
     base_rate = np.asarray(states.sum(0)).ravel() / max(len(donors), 1)
-    targets = who[1]
+    targets = who.targets
+    target_md5 = [md5_of.get(t, "") for t in targets]  # no sequence: no units, nothing excluded
+    target_key = target_md5 if by_sequence else targets
     return AspectProblem(
         donors,
         carriers,
@@ -184,31 +208,38 @@ def aspect_problem(
         np.asarray(group, dtype=np.int64),
         base_rate,
         targets,
-        _target_view(targets, md5_of, (donor_md5, states), units, (negatives, index)),
+        _target_view(
+            (target_md5, target_key), (donor_key, states), units, (negatives, index), targets
+        ),
     )
 
 
 def _target_view(
-    targets: list[str],
-    md5_of: Mapping[str, str],
+    target_side: tuple[list[str], list[str]],
     donor_side: tuple[list[str], sp.csr_matrix],
     units: tuple[Mapping[str, np.ndarray], int],
     denied_side: tuple[Mapping[str, set[str]], Mapping[str, int]],
+    targets: list[str],
 ) -> Targets:
-    """The targets' units, what the donors sharing their sequence take out, and their denied terms."""
-    target_md5 = [md5_of.get(t, "") for t in targets]  # no sequence: no units, nothing excluded
-    donor_md5, states = donor_side
-    by_md5: dict[str, list[int]] = {}
-    for i, m in enumerate(donor_md5):
-        by_md5.setdefault(m, []).append(i)
+    """The targets' units, what their own exclusion takes out, and their denied terms.
+
+    ``target_side`` is (each target's md5, the key its exclusion matches) and
+    ``donor_side`` (each donor's key, the donors' states): the key is the md5 when
+    the exclusion is by sequence and the accession when it is by accession.
+    """
+    target_md5, target_key = target_side
+    donor_key, states = donor_side
+    by_key: dict[str, list[int]] = {}
+    for i, k in enumerate(donor_key):
+        by_key.setdefault(k, []).append(i)
     pick_r, pick_c = [], []
-    for i, m in enumerate(target_md5):
-        for d in by_md5.get(m, ()):
+    for i, k in enumerate(target_key):
+        for d in by_key.get(k, ()):
             pick_r.append(i)
             pick_c.append(d)
     pick = sp.csr_matrix(
         (np.ones(len(pick_r)), (np.asarray(pick_r, np.int64), np.asarray(pick_c, np.int64))),
-        shape=(len(targets), len(donor_md5)),
+        shape=(len(targets), len(donor_key)),
     )
     excluded = (pick @ states).tocsr()
     excluded_n = np.asarray(pick.sum(1)).ravel()
@@ -219,9 +250,11 @@ def _target_view(
 
 __all__ = [
     "ASPECTS",
+    "EXCLUSIONS",
     "ROOTS",
     "AspectProblem",
     "Columns",
+    "Who",
     "aspect_problem",
     "columns_of",
     "member_md5s",

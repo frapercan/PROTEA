@@ -55,6 +55,9 @@ class SetContext:
     #: The proteins the method was asked about (protea.core.query_population):
     #: a window's targets for a method that reads a window.
     population: dict[str, Any] | None = None
+    #: The query set that declares those proteins, when one does: the set then names
+    #: its population by it, as a predicted set does, and records no digest.
+    query_set_id: uuid.UUID | None = None
 
 
 def new_prediction_set(session: Session, method: Method, context: SetContext) -> PredictionSet:
@@ -81,6 +84,7 @@ def new_prediction_set(session: Session, method: Method, context: SetContext) ->
         },
         job_id=context.job_id,
         producer_git_sha=code_revision(),
+        query_set_id=context.query_set_id,
     )
     session.add(row)
     session.flush()

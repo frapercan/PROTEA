@@ -31,6 +31,9 @@ ENTRY_POINTS = {
     # torch only through protea.core.file_stage, which asks it about the card when it is
     # installed; the families run in the cluster's own environment, which has it.
     "protea.core.segment_families.build": frozenset({"pyarrow", "numpy", "torch"}),
+    # The own segment encoder trains and reads its vectors on a card in the same environment.
+    "protea.core.own_encoder.train": frozenset({"pyarrow", "numpy", "torch"}),
+    "protea.core.own_encoder.vectors": frozenset({"pyarrow", "numpy", "torch"}),
 }
 
 
@@ -91,6 +94,7 @@ def test_the_shipped_list_is_the_import_closure_and_the_job_scripts() -> None:
         "deploy/cluster/embedding_bank.sh",
         "deploy/cluster/lexicon_bank.sh",
         "deploy/cluster/segment_families.sh",
+        "deploy/cluster/own_encoder_bank.sh",
     }
     assert all((ROOT / name).is_file() for name in scripts)
 

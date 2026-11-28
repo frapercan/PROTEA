@@ -477,6 +477,28 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         },
         ("evaluation_set_id",),
     ),
+    # Its depth is a positive number of terms, or null for the grid floor; never zero.
+    (
+        "run_count_map",
+        RunCountMapPayload,
+        {
+            "evaluation_set_id": "6ab4cbfd-711d-432f-be6c-2ad1738cd438",
+            "lexicon_bank_id": "6ab4cbfd-711d-432f-be6c-2ad1738cd438",
+            "top": 0,
+        },
+        ("top",),
+    ),
+    # Its exclusion is the target's sequence or its accession, nothing else.
+    (
+        "run_count_map",
+        RunCountMapPayload,
+        {
+            "evaluation_set_id": "6ab4cbfd-711d-432f-be6c-2ad1738cd438",
+            "lexicon_bank_id": "6ab4cbfd-711d-432f-be6c-2ad1738cd438",
+            "exclusion": "twins",
+        },
+        ("exclusion",),
+    ),
     # A window's targets read from their own non-experimental annotations at t0.
     (
         "run_own_annotations",
