@@ -30,9 +30,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
+from protea.core.operations import score_prediction_set as scoring_operation
 from protea.core.operations._base_frame_recount import (
     DONOR_LEDGER_COLS,
     LEDGER_SELECT_COLS,
+    build_base_frame,
+    ledger_columns,
     recount_frame_aggregates,
 )
 from protea.core.operations._candidate_scoring import BASE_SCORE_COLS, vectorized_scores
@@ -128,6 +131,15 @@ class TestTheSimilarityVote:
     def test_a_row_without_a_ledger_has_none(self) -> None:
         rows = [_ledger([1], [0.2]), {"donor_k_positions": None, "donor_distances": None}]
         assert similarity_votes(rows, DepthCut(max_k_position=1), "Q") == [1.0, None]
+
+    def test_no_ledger_at_all_has_no_neighbourhood_to_check(self) -> None:
+        rows = [{"donor_k_positions": None, "donor_distances": None}] * 2
+        assert similarity_votes(rows, DepthCut(max_k_position=3), "Q") == [None, None]
+
+    def test_a_neighbourhood_of_no_similarity_has_no_vote(self) -> None:
+        """Every neighbour at distance 2 sums to 0: no fraction, rather than a division."""
+        rows = [_ledger([1], [2.0]), _ledger([1, 2], [2.0, 2.0])]
+        assert similarity_votes(rows, DepthCut(max_k_position=2), "Q") == [None, None]
 
 
 class TestTheNeighbourhoodAssertion:
@@ -292,11 +304,141 @@ class TestTheFrame:
         assert KERNEL_FRACTION not in out.columns
         assert not [c for c in DONOR_LEDGER_COLS if c in out.columns]
 
+    def test_an_empty_frame_under_a_cut_drops_what_the_cut_fetched(self) -> None:
+        columns = ["protein_accession", "go_id", "distance", *LEDGER_SELECT_COLS]
+        request = NeighbourhoodRequest(frozenset({SIMILARITY_VOTE}), by_aspect=True)
+        out = recount_frame_aggregates(
+            pd.DataFrame(columns=columns), DepthCut(max_k_position=2), request
+        )
+        assert out.empty
+        assert list(out.columns) == ["protein_accession", "go_id", "distance"]
+
+
+class _Result:
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[tuple[Any, ...]]:
+        return self._rows
+
+
+class _Session:
+    """Hands back whatever the SELECT builder built, as rows."""
+
+    def execute(self, rows: list[tuple[Any, ...]]) -> _Result:
+        return _Result(rows)
+
+
+class TestTheFrameBuilder:
+    _BASE = ("protein_accession", "go_id", "distance")
+
+    def test_the_select_adds_the_ledger_then_the_aspect(self) -> None:
+        """In the order the frame names them, or ranks and distances would swap."""
+        assert ledger_columns(False) == ()
+        assert [column.key for column in ledger_columns(True)] == list(LEDGER_SELECT_COLS)
+
+    def _rows(self, depth: int) -> list[tuple[Any, ...]]:
+        """Q1's candidates within ``depth``, in the SELECT's column order."""
+        rows = []
+        for term, (_term_id, aspect, ledger) in _TERMS.items():
+            if min(ledger["donor_k_positions"]) <= depth:
+                ledger_values = tuple(ledger[c] for c in DONOR_LEDGER_COLS)
+                rows.append(("Q1", term, min(ledger["donor_distances"]), *ledger_values, aspect))
+        return rows
+
+    def test_under_a_cut_it_reads_the_ledger_and_the_aspect_and_passes_the_request_on(
+        self,
+    ) -> None:
+        asked: list[bool] = []
+
+        def select_of(_ctx: Any, *, with_ledger: bool) -> list[tuple[Any, ...]]:
+            asked.append(with_ledger)
+            return self._rows(2)
+
+        ctx = MagicMock(
+            max_k_position=2,
+            max_sequence_rank=None,
+            neighbourhood=NeighbourhoodRequest(frozenset({SIMILARITY_VOTE}), by_aspect=True),
+        )
+        frame, raw = build_base_frame(_Session(), ctx, select_of, self._BASE)
+        assert asked == [True]
+        assert raw == 5
+        votes = dict(zip(frame["go_id"], frame[SIMILARITY_VOTE], strict=True))
+        assert votes == pytest.approx(
+            {"T1": 1.0, "T2": 0.95 / 1.85, "T3": 0.90 / 1.85, "T5": 0.80 / 1.50, "T6": 0.70 / 1.50}
+        )
+        assert not [c for c in LEDGER_SELECT_COLS if c in frame.columns]
+
+    def test_a_context_without_a_request_adds_no_signal(self) -> None:
+        ctx = MagicMock(spec=["max_k_position", "max_sequence_rank"])
+        ctx.max_k_position, ctx.max_sequence_rank = 2, None
+        frame, _raw = build_base_frame(_Session(), ctx, lambda _c, **_k: self._rows(2), self._BASE)
+        assert SIMILARITY_VOTE not in frame.columns and KERNEL_FRACTION not in frame.columns
+        assert list(frame["donor_count"]) == [2, 1, 1, 1, 1]
+
+
+class TestTheOperationChecksBeforeItWrites:
+    """``score_prediction_set`` asks what it can read before it creates the scored set."""
+
+    @pytest.fixture(autouse=True)
+    def _no_database(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(scoring_operation, "compute_missing_signals", lambda *a, **k: [])
+        monkeypatch.setattr(
+            scoring_operation, "assert_depth_unit_is_available", lambda *a, **k: None
+        )
+
+    @staticmethod
+    def _source(meta: dict[str, Any]) -> Any:
+        return MagicMock(id=uuid.uuid4(), meta=meta)
+
+    @staticmethod
+    def _config(weights: dict[str, float]) -> ScoringConfig:
+        return ScoringConfig(id=uuid.uuid4(), name="votes", formula="linear", weights=weights)
+
+    @staticmethod
+    def _payload(**depth: Any) -> Any:
+        return scoring_operation.ScorePredictionSetPayload(
+            prediction_set_id=str(uuid.uuid4()), scoring_config_id=str(uuid.uuid4()), **depth
+        )
+
+    def test_it_returns_what_the_configuration_weights(self) -> None:
+        got = scoring_operation.ScorePredictionSetOperation._what_it_can_read(
+            MagicMock(),
+            self._source({"aspect_separated_knn": True}),
+            self._config({SIMILARITY_VOTE: 1.0}),
+            self._payload(max_k_position=5),
+        )
+        assert got == NeighbourhoodRequest(frozenset({SIMILARITY_VOTE}), by_aspect=True)
+
+    def test_a_refusal_names_the_configuration_and_the_set(self) -> None:
+        source, config = self._source({}), self._config({KERNEL_FRACTION: 1.0})
+        with pytest.raises(
+            ValueError,
+            match=rf"scoring config {config.id} \('votes'\) over prediction set {source.id}: "
+            ".*at a depth",
+        ):
+            scoring_operation.ScorePredictionSetOperation._what_it_can_read(
+                MagicMock(), source, config, self._payload()
+            )
+
+    def test_a_signal_the_set_does_not_carry_is_refused_first(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            scoring_operation,
+            "compute_missing_signals",
+            lambda *a, **k: ["neighbor_kernel_fraction (column 'donor_distances': 0/3 rows)"],
+        )
+        with pytest.raises(ValueError, match="does not carry: neighbor_kernel_fraction"):
+            scoring_operation.ScorePredictionSetOperation._what_it_can_read(
+                MagicMock(), self._source({}), self._config({KERNEL_FRACTION: 1.0}), self._payload()
+            )
+
 
 class TestWhatAConfigurationAsksFor:
     _CUT = DepthCut(max_k_position=5)
 
-    def test_nothing_when_it_weighs_neither(self) -> None:
+    def test_nothing_when_it_weights_neither(self) -> None:
         weights = {"neighbor_vote_fraction": 1.0, SIMILARITY_VOTE: 0.0}
         assert neighbourhood_request(weights, {}, self._CUT) is None
 
