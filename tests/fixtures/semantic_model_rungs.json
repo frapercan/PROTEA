@@ -1,0 +1,122 @@
+{
+  "model": "frapercan/protein-function-prediction-semantic-model",
+  "version": "0.2.0",
+  "commit": "dd1e803cb8907811a51307d55ee80b9c02861dd1",
+  "ref": "concepts/rung-declarations",
+  "tag": null,
+  "concepts_sha256": "25595fe416f0acd9ef4a24636e3dad6ee94a16dcfa15d7816a70ca8e5ea61dfd",
+  "rungs": [
+    {
+      "id": "term_frequency",
+      "ladder_order": 10,
+      "ladder_position": "0",
+      "method_family": "explainable-units",
+      "status": "accepted"
+    },
+    {
+      "id": "own_annotations",
+      "ladder_order": 20,
+      "ladder_position": "1",
+      "method_family": "explainable-units",
+      "status": "accepted"
+    },
+    {
+      "id": "top_hit_identity",
+      "ladder_order": 30,
+      "ladder_position": "2a",
+      "method_family": "explainable-units",
+      "status": "accepted"
+    },
+    {
+      "id": "homology_vote",
+      "ladder_order": 40,
+      "ladder_position": "2b",
+      "method_family": "explainable-units",
+      "status": "accepted"
+    },
+    {
+      "id": "nearest_neighbour",
+      "ladder_order": 50,
+      "ladder_position": "3",
+      "method_family": "embedding-reranker",
+      "status": "accepted"
+    },
+    {
+      "id": "neighbourhood_vote",
+      "ladder_order": 60,
+      "ladder_position": "4",
+      "method_family": "embedding-reranker",
+      "status": "accepted"
+    },
+    {
+      "id": "reading_of_an_arm",
+      "ladder_order": 70,
+      "ladder_position": "5",
+      "method_family": null,
+      "status": "accepted"
+    },
+    {
+      "id": "search_space_transform",
+      "ladder_order": 80,
+      "ladder_position": "6",
+      "method_family": "embedding-reranker",
+      "status": "accepted"
+    },
+    {
+      "id": "recipe_across_language_models",
+      "ladder_order": 90,
+      "ladder_position": "6b",
+      "method_family": "embedding-reranker",
+      "status": "accepted"
+    },
+    {
+      "id": "regime_calibration",
+      "ladder_order": 100,
+      "ladder_position": "7",
+      "method_family": "embedding-reranker",
+      "status": "accepted"
+    },
+    {
+      "id": "calibrated_maximum",
+      "ladder_order": 110,
+      "ladder_position": "8",
+      "method_family": "embedding-reranker",
+      "status": "accepted"
+    },
+    {
+      "id": "own_annotation_ranker",
+      "ladder_order": 120,
+      "ladder_position": "9",
+      "method_family": "explainable-units",
+      "status": "accepted"
+    },
+    {
+      "id": "supervised_head",
+      "ladder_order": 130,
+      "ladder_position": "10",
+      "method_family": "embedding-reranker",
+      "status": "accepted"
+    },
+    {
+      "id": "reranker_over_sources",
+      "ladder_order": 140,
+      "ladder_position": "11a",
+      "method_family": "embedding-reranker",
+      "status": "accepted"
+    },
+    {
+      "id": "count_map",
+      "ladder_order": 160,
+      "ladder_position": "12a",
+      "method_family": "explainable-units",
+      "status": "accepted"
+    },
+    {
+      "id": "segment_encoder",
+      "ladder_order": 170,
+      "ladder_position": "12b",
+      "method_family": "world-model",
+      "status": "accepted"
+    }
+  ]
+}

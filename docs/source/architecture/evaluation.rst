@@ -696,6 +696,17 @@ until every error is small enough. The detectable effect and the verdict are rea
 the simultaneous bounds, and ``bca`` is refused with the family. Without these fields a
 comparison is what it was.
 
+**Declaring the rung.** A reading (``read_operating_point``) and a comparison
+(``compare_paired_panels``) may carry a ``ladder_declaration``
+(:mod:`protea.core.ladder_declaration`): the rung of the literature ladder it belongs to, a
+reading's variant or a comparison's role, the label that tells it from its siblings, the
+stack version where the rung reads one, and for a choice's confirmation the job of its
+pick. It is written before the read and recorded with the job, its payload and its
+result, so the record of each rung can be found later; the paired comparisons route
+returns it. The rungs, roles, variants and labels are constants in code, pinned by a test
+to a committed fixture of the semantic model's release; nothing reads the model at run
+time. Unset, a job is what it was.
+
 Checked against a second implementation
 ---------------------------------------
 

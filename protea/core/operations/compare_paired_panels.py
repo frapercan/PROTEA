@@ -294,6 +294,15 @@ def _threshold_loader(session: Session) -> Any:
     return load
 
 
+def _rung_of(payload: dict[str, Any]) -> str:
+    """The declared rung and role, as the summary's prefix; nothing when none is declared."""
+    declared = payload.get("ladder_declaration")
+    if not isinstance(declared, dict) or not declared.get("rung"):
+        return ""
+    label = f" {declared['label']}" if declared.get("label") else ""
+    return f"rung {declared['rung']}, {declared.get('role')}{label}: "
+
+
 def _declared_thresholds(p: ComparePairedPanelsPayload) -> dict[str, Any]:
     """The declared threshold ids, recorded only when the comparison was read at them."""
     if p.declared_threshold_id is None:
@@ -350,7 +359,7 @@ class ComparePairedPanelsOperation(Operation):
         else:
             varying = "one method held still"
         return (
-            f"{a} against {b}, {varying}, on {len(panels)} panels, "
+            f"{_rung_of(payload)}{a} against {b}, {varying}, on {len(panels)} panels, "
             f"{payload.get('n_resamples', 2000)} resamples, seed {payload.get('seed', 0)}"
         )
 
@@ -400,6 +409,8 @@ class ComparePairedPanelsOperation(Operation):
             result["method_axis"] = list(axis)
             result.update(simultaneous_block(family))
             result.update(_declared_thresholds(p))
+            if p.ladder_declaration is not None:
+                result["ladder_declaration"] = p.ladder_declaration.record()
         emit("compare_paired_panels.verdict", None, result["verdict"], "info")
         return OperationResult(
             result=result, progress_current=len(panels), progress_total=len(p.panels)
@@ -433,6 +444,11 @@ class ComparePairedPanelsOperation(Operation):
                 **(
                     {"interval_family": p.interval_family}
                     if p.interval_family != "per_panel"
+                    else {}
+                ),
+                **(
+                    {"ladder_declaration": p.ladder_declaration.record()}
+                    if p.ladder_declaration is not None
                     else {}
                 ),
             },

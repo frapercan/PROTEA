@@ -65,7 +65,8 @@ PANEL_FIELDS: tuple[str, ...] = (
     "minimum_detectable_effect",
 )
 
-#: What the page shows of the comparison as a whole.
+#: What the page shows of the comparison as a whole. ``ladder_declaration`` is the rung
+#: the comparison was declared to belong to before it was read, or None.
 COMPARISON_FIELDS: tuple[str, ...] = (
     "method_axis",
     "operating_point",
@@ -73,6 +74,7 @@ COMPARISON_FIELDS: tuple[str, ...] = (
     "n_resamples",
     "seed",
     "confidence",
+    "ladder_declaration",
 )
 
 

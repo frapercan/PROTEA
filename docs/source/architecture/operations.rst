@@ -2462,6 +2462,11 @@ Payload fields
        for the strata. A strata axis needs the window's placement.
    * - ``min_population``
      - Strata below this many proteins are flagged (30 by default).
+   * - ``ladder_declaration``
+     - Optional: the rung of the literature ladder the reading belongs to, declared before
+       the read (``rung``, ``variant``, ``label``, ``stack_version``;
+       :mod:`protea.core.ladder_declaration`). Recorded in the job's payload and result; it
+       changes nothing the reading computes.
 
 
 Registering a new operation
