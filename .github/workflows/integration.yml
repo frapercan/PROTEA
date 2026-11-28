@@ -114,4 +114,16 @@ jobs:
           PROTEA_ALLOW_DESTRUCTIVE_TESTS: "1"
           # The rabbitmq service above, for the tests marked broker.
           PROTEA_TEST_AMQP_URL: amqp://guest:guest@localhost:5672/
-        run: poetry run pytest --with-postgres -q
+        run: poetry run pytest --with-postgres --cov=protea --cov-report=xml -q
+
+      # The unit job measures coverage without Postgres, so every line that
+      # only a Postgres test reaches was reported as uncovered, however well
+      # it was tested here. This job runs the same suite with Postgres and a
+      # broker; its report goes up too, and Codecov merges the uploads of a
+      # commit. Same action and the same tolerance as the unit job: the
+      # upload feeds the external panel and gates nothing.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
