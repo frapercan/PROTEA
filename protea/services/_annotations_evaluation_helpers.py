@@ -257,13 +257,15 @@ def delete_eval_result_collect_keys(
 def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
     """Serialise an :class:`EvaluationSet` to its API dict shape.
 
-    ALL EIGHT IDENTITY COLUMNS ARE SERVED. This function used to send two of
-    them. ``uq_evaluation_set_identity`` names eight -- the annotation pair, the
+    ALL ELEVEN IDENTITY COLUMNS ARE SERVED. This function used to send two of
+    them. ``uq_evaluation_set_identity`` names eleven -- the annotation pair, the
     pivot, the two native snapshots, the truth profile, the term-of-interest
-    rule and the NOT codes -- and the model's own comment says why each one is
-    there: the same pair under a different propagation graph is a different
-    measurement by 21% of the PK bucket, and ``projected`` against ``as_closed``
-    is 646 proteins and 2.610 entries of difference on the 211 -> 227 window.
+    rule, the NOT codes, the target population, the binding rule and the
+    declared sample of the targets -- and the model's own comment says why each
+    one is there: the same pair under a different propagation graph is a
+    different measurement by 21% of the PK bucket, and ``projected`` against
+    ``as_closed`` is 646 proteins and 2.610 entries of difference on the
+    211 -> 227 window.
 
     Serving two of eight meant a reader could not tell two windows apart from
     the API at all, and the record holds exactly that case: ``7aa37929`` and
@@ -289,8 +291,11 @@ def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
         "not_codes": e.not_codes,
         # Which proteins the window may score.
         "target_population": e.target_population,
-        # Which protein-binding rule was asked for: the identity's last field.
+        # Which protein-binding rule was asked for.
         "binding_rule": e.binding_rule,
+        # The declared sample of its targets the window is kept to, the identity's
+        # last field; None for a window over its whole population.
+        "target_query_set_id": str(e.target_query_set_id) if e.target_query_set_id else None,
         # The window that replaced this one, when and why; all None while it stands.
         "superseded_by_id": str(e.superseded_by_id) if e.superseded_by_id else None,
         "superseded_at": e.superseded_at.isoformat() if e.superseded_at else None,

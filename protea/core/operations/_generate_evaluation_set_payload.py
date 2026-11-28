@@ -8,6 +8,7 @@ keeps importing it from ``protea.core.operations.generate_evaluation_set``.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from pydantic import field_validator, model_validator
@@ -84,6 +85,17 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     # is what the author chose for the four windows of the frame (ADR-D60,
     # 2026-11-16). Part of the identity: it changes the delta.
     target_population: str = TARGET_POPULATIONS[0]
+    # A declared sample of the window's targets (a ``window_sample`` query set):
+    # the window is then its parent's (the sample's window) kept to the sample's
+    # proteins, its truth the parent's verified truth filtered, never recomputed.
+    # Orthogonal to ``target_population``, which a named rule set may fix. Part of
+    # the identity. None scores the whole population, as every stored window does.
+    target_query_set_id: str | None = None
+
+    @field_validator("target_query_set_id", mode="before")
+    @classmethod
+    def _a_query_set_id(cls, value: Any) -> str | None:
+        return None if value is None else str(uuid.UUID(str(value)))
 
     @field_validator("target_population")
     @classmethod

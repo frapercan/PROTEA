@@ -15,6 +15,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -28,6 +29,7 @@ from protea.core.operations._cut_photo_channel_table import (
     channel_table_digest,
     declare_channel_table,
 )
+from protea.core.window_declarations import named_truth_rules
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.cut_photo import CutPhoto, CutPhotoMember
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -155,6 +157,32 @@ def sequence_ids(session: Session, photo: CutPhoto) -> dict[str, int]:
     return {accession: sequence_id for accession, sequence_id in rows}
 
 
+def lafa_stats(truth: EvaluationData, pivot: uuid.UUID, terms_of_interest: int) -> dict[str, Any]:
+    """The stats a LAFA build of this truth records: its frame, its counts and its steps."""
+    return {
+        **truth.stats(),
+        "lafa_workflow": "CAFA_forever@2ce2457",
+        "lafa_package": "democafa@1102e34",
+        "terms_of_interest": terms_of_interest,
+        "lafa_t0_pairs_after_trim": 4321,
+        "lafa_t1_pairs_after_trim": 5432,
+        "old_exp_binding_dropped": 0,
+        "new_exp_binding_dropped": 2,
+        "outside_population_delta_proteins": 17,
+        "population_swissprot_releases": ["2022_03", "2025_03"],
+        "population_in_both": 560000,
+        "population_sequence_changed": 180,
+        "population_proteins": 559820,
+        "mode": "lafa",
+        "pivot_ontology_snapshot_id": str(pivot),
+        "truth_profile": "own_graph",
+        "toi_rule": "both_ends_trimmed",
+        "not_codes": "experimental",
+        "binding_rule": "cafa",
+        "target_population": "swissprot_same_sequence",
+    }
+
+
 def make_homology_table(session: Session, photo: CutPhoto) -> HomologyTable:
     table = HomologyTable(
         cut_photo_id=photo.id,
@@ -189,35 +217,47 @@ def make_placed_window(
     placed: Mapping[str, tuple[float | None, int]],
     store_root: Path,
 ) -> EvaluationSet:
-    """A window opening on ``photo``'s corpus, its truth in a local store, and its placement.
+    """A window of LAFA's frame opening on ``photo``'s corpus, its truth in a local store,
+    and its placement.
 
-    ``aspects`` gives each GO term of the truth its aspect in the pivot; ``placed`` gives
-    each target its closest identity (None for no homolog) and its length.
+    The window closes on a corpus of its own graph, and its rules and stats are those a
+    LAFA build records (the pivot is the opening graph, every side closed under its
+    own). ``aspects`` gives each GO term of the truth its aspect, live at both ends;
+    ``placed`` gives each target its closest identity (None for no homolog) and its
+    length.
     """
+    closing_graph = OntologySnapshot(
+        obo_version=f"releases/photo-{photo.cut_release}-closing", obo_url="file:///dev/null"
+    )
+    session.add(closing_graph)
+    session.flush()
     closing = AnnotationSet(
-        source="goa", source_version="227", ontology_snapshot_id=photo.ontology_snapshot_id
+        source="goa", source_version="227", ontology_snapshot_id=closing_graph.id
     )
     session.add(closing)
     session.flush()
+    pivot = photo.ontology_snapshot_id
     window = EvaluationSet(
         old_annotation_set_id=photo.annotation_set_id,
         new_annotation_set_id=closing.id,
-        pivot_snapshot_id=photo.ontology_snapshot_id,
-        old_native_snapshot_id=photo.ontology_snapshot_id,
-        new_native_snapshot_id=photo.ontology_snapshot_id,
+        pivot_snapshot_id=pivot,
+        old_native_snapshot_id=pivot,
+        new_native_snapshot_id=closing_graph.id,
         truth_profile="own_graph",
         toi_rule="both_ends_trimmed",
         not_codes="experimental",
         target_population="swissprot_same_sequence",
         binding_rule="cafa",
         window_role="training",
-        stats={"pivot_ontology_snapshot_id": str(photo.ontology_snapshot_id), "mode": "lafa"},
+        truth_rules=named_truth_rules("lafa-frame").as_json(),
+        stats=lafa_stats(truth, pivot, len(aspects)),
     )
     session.add(window)
     session.flush()
     session.add_all(
-        GOTerm(go_id=go_id, aspect=aspect, ontology_snapshot_id=photo.ontology_snapshot_id)
+        GOTerm(go_id=go_id, aspect=aspect, ontology_snapshot_id=graph)
         for go_id, aspect in aspects.items()
+        for graph in (pivot, closing_graph.id)
     )
     store = LocalFsArtifactStore(store_root)
     local = serialize_evaluation_data_to_parquet(truth, store_root.parent / "truth.parquet")
@@ -264,6 +304,7 @@ def make_placed_window(
 __all__ = [
     "FLAGS",
     "Member",
+    "lafa_stats",
     "make_homology_table",
     "make_job",
     "make_photo",

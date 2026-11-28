@@ -40,6 +40,7 @@ from protea.core.operations._generate_evaluation_set_payload import (
     GenerateEvaluationSetPayload,
 )
 from protea.core.operations._holdout_guard import Claim, refuse_if_the_set_reads_the_holdout
+from protea.core.operations._window_on_sample import kept_to_the_sample
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.core.window_declarations import (
     SAME_SNAPSHOT_RULES,
@@ -73,6 +74,8 @@ class _Identity(NamedTuple):
     holds it too. ``target_population`` is the last: the three rules before it
     decide which terms are truth, it decides which proteins are targets.
     ``binding_rule`` came after it and is a truth rule like the first three.
+    ``target_query_set_id`` came after both: the declared sample of the targets
+    the window is kept to, or None for the whole population.
     """
 
     old_set_id: uuid.UUID
@@ -85,6 +88,23 @@ class _Identity(NamedTuple):
     not_codes: str = NOT_CODE_RULES[0]
     target_population: str = TARGET_POPULATIONS[0]
     binding_rule: str = REQUESTABLE_BINDING_RULES[0]
+    target_query_set_id: uuid.UUID | None = None
+
+    def as_columns(self) -> dict[str, Any]:
+        """The identity by the column names of ``uq_evaluation_set_identity``, in its order."""
+        return {
+            "old_annotation_set_id": self.old_set_id,
+            "new_annotation_set_id": self.new_set_id,
+            "pivot_snapshot_id": self.pivot_id,
+            "old_native_snapshot_id": self.old_native,
+            "new_native_snapshot_id": self.new_native,
+            "truth_profile": self.truth_profile,
+            "toi_rule": self.toi_rule,
+            "not_codes": self.not_codes,
+            "target_population": self.target_population,
+            "binding_rule": self.binding_rule,
+            "target_query_set_id": self.target_query_set_id,
+        }
 
 
 def _reconciled_window(ident: _Identity) -> ReconciledWindow:
@@ -248,9 +268,12 @@ def window_description(
         f"{ident.truth_profile}, {ident.toi_rule}, NOT {ident.not_codes}, "
         f"binding {ident.binding_rule}"
     )
+    targets = ident.target_population
+    if ident.target_query_set_id is not None:
+        targets += f" kept to the declared sample {ident.target_query_set_id}"
     return (
         f"The window {old_set.source} {old_set.source_version} -> {new_set.source} "
-        f"{new_set.source_version}: truth rules {rules}, targets {ident.target_population}, "
+        f"{new_set.source_version}: truth rules {rules}, targets {targets}, "
         f"role {ask.window_role or 'none'}."
     )
 
@@ -270,7 +293,7 @@ def _served_result(row: EvaluationSet) -> dict[str, Any]:
     }
 
 
-def _identity_fields(row_id: uuid.UUID, ident: _Identity) -> dict[str, str]:
+def _identity_fields(row_id: uuid.UUID, ident: _Identity) -> dict[str, str | None]:
     """The ids of a served row's identity, as the reuse event names them."""
     return {
         "evaluation_set_id": str(row_id),
@@ -281,6 +304,9 @@ def _identity_fields(row_id: uuid.UUID, ident: _Identity) -> dict[str, str]:
         "new_native_snapshot_id": str(ident.new_native),
         "target_population": ident.target_population,
         "binding_rule": ident.binding_rule,
+        "target_query_set_id": (
+            str(ident.target_query_set_id) if ident.target_query_set_id else None
+        ),
     }
 
 
@@ -374,6 +400,7 @@ class GenerateEvaluationSetOperation:
             p.not_codes,
             p.target_population,
             p.binding_rule,
+            uuid.UUID(p.target_query_set_id) if p.target_query_set_id else None,
         )
         # Before the reuse lookup, so a served row is compared with these.
         applied = _declared_rules(p.truth_rule_set, mode, ident, (old_set, new_set), emit)
@@ -382,9 +409,12 @@ class GenerateEvaluationSetOperation:
         if short is not None:
             return short
 
-        data, stats = self._compute_delta(session, ident, mode, emit)
-        data, stats = self._restrict_targets(session, ident, (data, stats), emit)
-        self._refuse_empty_delta(session, ident, stats)
+        if ident.target_query_set_id is not None:
+            data, stats = kept_to_the_sample(session, ident.as_columns(), ask.rules.as_json(), emit)
+        else:
+            data, stats = self._compute_delta(session, ident, mode, emit)
+            data, stats = self._restrict_targets(session, ident, (data, stats), emit)
+            self._refuse_empty_delta(session, ident, stats)
 
         eval_set = self._new_row(ident, ask, stats, job_id_from_payload(payload))
         eval_set.description = window_description((old_set, new_set), ident, ask)
@@ -406,16 +436,7 @@ class GenerateEvaluationSetOperation:
         which are the request and go to the identity columns as before.
         """
         return EvaluationSet(
-            old_annotation_set_id=ident.old_set_id,
-            new_annotation_set_id=ident.new_set_id,
-            pivot_snapshot_id=ident.pivot_id,
-            old_native_snapshot_id=ident.old_native,
-            new_native_snapshot_id=ident.new_native,
-            truth_profile=ident.truth_profile,
-            toi_rule=ident.toi_rule,
-            not_codes=ident.not_codes,
-            target_population=ident.target_population,
-            binding_rule=ident.binding_rule,
+            **ident.as_columns(),
             stats=stats,
             window_role=ask.window_role,
             truth_rules=ask.rules.as_json(),
@@ -584,22 +605,15 @@ class GenerateEvaluationSetOperation:
         propagation graph is a different measurement: on GOA 220 -> 227 the
         choice moves the PK bucket by 21 percent of its annotations. Looking
         one up by the pair alone would serve a caller a set that answers a
-        question they did not ask.
+        question they did not ask. The declared sample is NULL for the whole
+        population, so it is compared ``IS NOT DISTINCT FROM``, as the constraint does.
         """
+        columns = ident.as_columns()
+        target = columns.pop("target_query_set_id")
         return (
             session.query(EvaluationSet)
-            .filter_by(
-                old_annotation_set_id=ident.old_set_id,
-                new_annotation_set_id=ident.new_set_id,
-                pivot_snapshot_id=ident.pivot_id,
-                old_native_snapshot_id=ident.old_native,
-                new_native_snapshot_id=ident.new_native,
-                truth_profile=ident.truth_profile,
-                toi_rule=ident.toi_rule,
-                not_codes=ident.not_codes,
-                target_population=ident.target_population,
-                binding_rule=ident.binding_rule,
-            )
+            .filter_by(**columns)
+            .filter(EvaluationSet.target_query_set_id.is_not_distinct_from(target))
             .one_or_none()
         )
 

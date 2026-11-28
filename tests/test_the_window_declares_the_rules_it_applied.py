@@ -145,7 +145,7 @@ def _corpus(snapshot_id: uuid.UUID) -> MagicMock:
 def _session(*gets: object, existing: object = None) -> tuple[MagicMock, list]:
     session = MagicMock()
     session.get.side_effect = list(gets)
-    session.query.return_value.filter_by.return_value.one_or_none.return_value = existing
+    session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = existing
     added: list = []
 
     def _add(row):

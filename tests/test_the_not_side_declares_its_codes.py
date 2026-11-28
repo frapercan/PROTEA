@@ -220,7 +220,7 @@ class TestTheSeams:
             side.source_version = version
             side.ontology_snapshot_id = uuid.uuid4()
         session.get.side_effect = [old_set, new_set, MagicMock()]
-        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.query.return_value.filter_by.return_value.filter.return_value.one_or_none.return_value = None
         payload = {
             "old_annotation_set_id": str(uuid.uuid4()),
             "new_annotation_set_id": str(uuid.uuid4()),

@@ -74,12 +74,18 @@ def test_the_column_check_lists_the_requestable_rules() -> None:
 
 
 def test_the_identity_it_installs_is_the_models() -> None:
+    # The model's identity has one column more since: the declared sample of the
+    # targets (532d2c1db500), which comes after the ten this revision installs.
     identity = next(
         c
         for c in EvaluationSet.__table__.constraints
         if getattr(c, "name", "") == "uq_evaluation_set_identity"
     )
-    assert [c.name for c in identity.columns] == [*_module()._IDENTITY, "binding_rule"]
+    assert [c.name for c in identity.columns] == [
+        *_module()._IDENTITY,
+        "binding_rule",
+        "target_query_set_id",
+    ]
 
 
 def test_each_stored_row_is_given_the_rule_its_path_applied() -> None:
