@@ -30,13 +30,7 @@ from protea.core.operations.predict_go_terms import (
 #: Fields the batch accepts that the coordinator deliberately does not forward,
 #: each with the reason. Adding a name here is a decision, which is the point:
 #: it has to be argued for once instead of forgotten silently.
-DELIBERATELY_NOT_FORWARDED: dict[str, str] = {
-    "embedding_transform": (
-        "the coordinator refuses a payload that names one before any batch exists "
-        "(_refuse_what_the_search_does_not_run_yet), so a batch never has one to read; "
-        "it is forwarded, and leaves this list, with the search in a declared space"
-    ),
-}
+DELIBERATELY_NOT_FORWARDED: dict[str, str] = {}
 
 
 def _forwarded_field_names() -> set[str]:
@@ -65,6 +59,11 @@ def test_the_two_fields_that_were_actually_lost_are_forwarded() -> None:
     forwarded = _forwarded_field_names()
     assert "donor_policy" in forwarded
     assert "compute_protst" in forwarded
+
+
+def test_the_search_space_reaches_the_batch() -> None:
+    """Each batch maps its queries and its pool with the space the coordinator verified."""
+    assert "embedding_transform" in _forwarded_field_names()
 
 
 def test_the_serialiser_is_still_where_this_test_thinks_it_is() -> None:

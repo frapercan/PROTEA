@@ -47,6 +47,7 @@ from protea.core.operations.predict_go_terms._pool_admission import (
 )
 from protea.core.operations.predict_go_terms._reference_binary import fill_from_binary
 from protea.core.operations.predict_go_terms._reference_needs import reference_dtype_needs
+from protea.core.operations.predict_go_terms._search_space import SearchSpace, search_space
 from protea.core.operations.predict_go_terms._sparse_bank import (
     bank_bytes,
     bank_is_sparse,
@@ -69,11 +70,17 @@ class _PoolRequest(NamedTuple):
     and the donor policy decides both which proteins the query admits and where
     the result is cached. Passing them as one value is what stops a restricted
     pool being filtered on read but stored under the unrestricted name.
+
+    ``space`` is the declared search space (``._search_space``), None for the
+    configuration's own. It changes the float32 copies the search reads and is
+    part of the in-process key, never of the disk key: the disk cache holds the
+    raw pool, which every space of it reuses.
     """
 
     embedding_config_id: uuid.UUID
     annotation_set_id: uuid.UUID
     donor_policy: Any = None
+    space: SearchSpace | None = None
 
     @property
     def discriminator(self) -> str:
@@ -209,6 +216,17 @@ def _aspect_indices(accessions: Any, acc_to_idx: dict[str, int]) -> np.ndarray:
     )
 
 
+def _request_for(session: Session, ctx: Any) -> _PoolRequest:
+    """The pool a batch wants: its configuration, its annotation set, its donors, its space."""
+    p = ctx.p
+    return _PoolRequest(
+        ctx.embedding_config_id,
+        ctx.annotation_set_id,
+        getattr(p, "donor_policy", None),
+        search_space(session, p),
+    )
+
+
 class _ReferenceMixin:
     """Reference-pool cache management methods.
 
@@ -231,9 +249,7 @@ class _ReferenceMixin:
         """
         p = ctx.p
         need_cos, need_plain = reference_dtype_needs(p)
-        request = _PoolRequest(
-            ctx.embedding_config_id, ctx.annotation_set_id, getattr(p, "donor_policy", None)
-        )
+        request = _request_for(session, ctx)
         cache_key = self._process_cache_key(p, request, need_cos=need_cos, need_plain=need_plain)
         if cache_key not in _REF_CACHE:
             from protea.config.tuning import get_tuning
@@ -279,7 +295,8 @@ class _ReferenceMixin:
 
         Built in one place rather than at each site that needs it, because a key
         spelled twice is a key that can disagree with itself, and the disagreement
-        is silent by construction.
+        is silent by construction. The search space is part of it: a raw and a
+        whitened pool of the same rows are two entries (``SearchSpace.identity``).
         """
         return (
             p.embedding_config_id,
@@ -288,6 +305,7 @@ class _ReferenceMixin:
             need_cos,
             need_plain,
             request.discriminator,
+            None if request.space is None else request.space.identity,
         )
 
     def _load_reference_data(
@@ -317,8 +335,9 @@ class _ReferenceMixin:
         if transfer is not None:
             done["transfer"] = transfer
         emit("predict_go_terms_batch.load_references_done", None, done, "info")
+        transform = None if request.space is None else request.space.apply
         return _derive_reference_views(
-            accessions, embeddings, need_cos=need_cos, need_plain=need_plain
+            accessions, embeddings, need_cos=need_cos, need_plain=need_plain, transform=transform
         )
 
     def _load_ref_pool(

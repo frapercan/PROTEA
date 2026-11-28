@@ -36,6 +36,7 @@ from protea.core.operations.predict_go_terms._pool_admission import (
     channels_of_the_cut,
     positive_rows,
 )
+from protea.core.operations.predict_go_terms._search_space import search_space
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -182,6 +183,10 @@ class _FeatureLoadingMixin:
         have an embedding are included. What that leaves out is reported rather
         than left to be inferred from a row count: see
         :mod:`._missing_query_vectors`, which carries the measurement.
+
+        In a declared search space the queries are mapped with the statistics
+        the pool was mapped with (``._search_space``), so a bank vector asked as
+        a query lands where its row of the transformed pool is.
         """
         if p.query_set_id:
             query_set_id = uuid.UUID(p.query_set_id)
@@ -216,6 +221,9 @@ class _FeatureLoadingMixin:
         )
         # Rows return pgvector HalfVector instances (halfvec column since 2026-04-11).
         embeddings = np.array([r[1].to_list() for r in rows], dtype=np.float32)
+        space = search_space(session, p)
+        if space is not None:
+            space.apply(embeddings)
         return embeddings, valid_accessions
 
     def _load_sequences_for_proteins(

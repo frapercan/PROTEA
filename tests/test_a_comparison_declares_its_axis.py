@@ -419,6 +419,19 @@ class TestItDoesNotWidenInSilence:
 
         from protea.core.operations.predict_go_terms._receipt import run_receipt
 
+        import numpy as np
+
+        from protea.core.embedding_space.transforms import SpaceParameters
+        from protea.core.operations.predict_go_terms._search_space import SearchSpace
+
+        parameters = SpaceParameters(
+            mean=np.zeros(4),
+            variances=np.ones(4),
+            eigenvalues=np.ones(4),
+            eigenvectors=np.eye(4),
+            shrinkage=0.1,
+            removed_directions=1,
+        )
         written: set[str] = set()
         for backend, asked in (("numpy", None), ("faiss", ["P12345", "Q67890"])):
             payload = PredictGOTermsPayload(
@@ -432,13 +445,19 @@ class TestItDoesNotWidenInSilence:
                 donor_policy=DonorPolicy(reviewed_only=False, evidence_codes=["EXP"]),
                 reranker_model_id=str(uuid.uuid4()),
                 self_exclusion="accession" if asked else None,
+                embedding_transform="whiten" if asked else None,
             )
-            written |= set(run_receipt(payload, uuid.uuid4()))
+            space = SearchSpace("whiten", uuid.uuid4(), "a" * 64, 10, 4, parameters)
+            written |= set(run_receipt(payload, uuid.uuid4(), space if asked else None))
         classified = set(METHOD_IDENTITY_FIELDS) | set(EXECUTION_ONLY_FIELDS)
         assert written - classified == set(), "the receipt writes keys the seal does not know"
-        assert {"faiss", "rerankers", "query_population", "self_exclusion"} <= written, (
-            "the conditional blocks stopped being written"
-        )
+        assert {
+            "faiss",
+            "rerankers",
+            "query_population",
+            "self_exclusion",
+            "embedding_transform",
+        } <= written, "the conditional blocks stopped being written"
 
     def test_an_unrecorded_revision_is_not_a_shared_revision(self) -> None:
         # Two absences agree everywhere else in this seal, and correctly: two

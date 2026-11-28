@@ -21,7 +21,7 @@ recoverable at all, including for parameters nobody thought to copy today.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from protea_contracts import PredictGOTermsPayload
@@ -30,6 +30,9 @@ from protea_method._self_by_sequence import resolve_self_exclusion
 from protea.core import denials
 from protea.core.code_revision import code_revision, dependency_revisions
 from protea.core.query_population import population_of
+
+if TYPE_CHECKING:
+    from protea.core.operations.predict_go_terms._search_space import SearchSpace
 
 #: Payload flags that turn on an extra feature block during prediction.
 #: Recorded by name so a set can say what it computed without this module
@@ -48,12 +51,15 @@ _FEATURE_FLAGS = (
 )
 
 
-def run_receipt(p: PredictGOTermsPayload, job_id: UUID) -> dict[str, Any]:
+def run_receipt(
+    p: PredictGOTermsPayload, job_id: UUID, space: SearchSpace | None = None
+) -> dict[str, Any]:
     """The record of how a prediction set was produced.
 
     Kept deliberately close to the payload rather than prettified: this is
     provenance, and a value that has been reworded on the way in cannot be
-    compared against the payload it came from.
+    compared against the payload it came from. ``space`` is the declared search
+    space the coordinator read and verified (:func:`_space`).
     """
     receipt: dict[str, Any] = {
         "job_id": str(job_id),
@@ -87,16 +93,8 @@ def run_receipt(p: PredictGOTermsPayload, job_id: UUID) -> dict[str, Any]:
         # A list handed to the run declares the population as a query set would;
         # the set keeps its digest and the job keeps the list.
         receipt["query_population"] = population_of(p.query_accessions)
-    if p.search_backend == "faiss":
-        # Only meaningful under faiss, and misleading beside numpy, where
-        # the search is exact and these knobs did nothing.
-        receipt["faiss"] = {
-            "index_type": p.faiss_index_type,
-            "nlist": p.faiss_nlist,
-            "nprobe": p.faiss_nprobe,
-            "hnsw_m": p.faiss_hnsw_m,
-            "hnsw_ef_search": p.faiss_hnsw_ef_search,
-        }
+    receipt.update(_space(p, space))
+    receipt.update(_faiss(p))
     rerankers = {
         key: getattr(p, f"reranker_model_id{suffix}")
         for key, suffix in (("all", ""), ("nk", "_nk"), ("lk", "_lk"), ("pk", "_pk"))
@@ -130,6 +128,48 @@ def _self_exclusion(p: PredictGOTermsPayload) -> dict[str, Any]:
     if getattr(p, "self_exclusion", None) is not None:
         block["self_exclusion"] = rule
     return block
+
+
+def _faiss(p: PredictGOTermsPayload) -> dict[str, Any]:
+    """The faiss block, written only under faiss.
+
+    Only meaningful under faiss, and misleading beside numpy, where the search
+    is exact and these knobs did nothing.
+    """
+    if p.search_backend != "faiss":
+        return {}
+    return {
+        "faiss": {
+            "index_type": p.faiss_index_type,
+            "nlist": p.faiss_nlist,
+            "nprobe": p.faiss_nprobe,
+            "hnsw_m": p.faiss_hnsw_m,
+            "hnsw_ef_search": p.faiss_hnsw_ef_search,
+        }
+    }
+
+
+def _space(p: PredictGOTermsPayload, space: SearchSpace | None) -> dict[str, Any]:
+    """The ``embedding_transform`` block, written only by a run in a declared space.
+
+    The transform's name, the statistics it read (id and sha256), their ``n``
+    and ``d``, the Ledoit-Wolf shrinkage and the directions the elbow removes:
+    what a reader needs to know which space the neighbours were near in. A run
+    in the configuration's own space writes no block, so every stored receipt
+    reads as it did. ``space`` is the space the coordinator read and verified
+    (``._search_space.search_space``); a payload naming a transform without it
+    is refused, since the block would name a space and not the statistics that
+    define it.
+    """
+    transform = getattr(p, "embedding_transform", None)
+    if transform is None:
+        return {}
+    if space is None or space.transform != transform:
+        raise ValueError(
+            f"the receipt of a run in the space '{transform}' needs the statistics that "
+            "define it; the coordinator reads them before the prediction set is written"
+        )
+    return {"embedding_transform": space.record()}
 
 
 def _interpro_bp_graft() -> dict[str, Any] | None:

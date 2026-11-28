@@ -419,7 +419,11 @@ def _sparse_reference_views(
 
 
 def _dense_f32_views(
-    embeddings_f16: Any, *, need_cos: bool, need_plain: bool
+    embeddings_f16: Any,
+    *,
+    need_cos: bool,
+    need_plain: bool,
+    transform: Callable[[np.ndarray], None] | None = None,
 ) -> tuple[Any, Any]:
     """``(raw, cosine)`` f32 views of a dense bank, materialising only the read ones.
 
@@ -434,8 +438,16 @@ def _dense_f32_views(
     settled that nothing downstream reads the raw copy on this route. Reversing
     that decision without reading this returns a normalised bank to a caller
     asking for the raw one, which no test of shapes would catch.
+
+    ``transform`` maps the float32 rows into a declared search space, in place
+    and in chunks, before the cosine normalisation, so both views are of the
+    transformed space and no second copy of the pool is made (a pool of
+    2,560 dimensions is about 15.7 GB in float32). The half-precision bank, and
+    the disk cache it came from, stay raw. None leaves every value as it was.
     """
     emb_f32 = embeddings_f16.astype(np.float32)
+    if transform is not None:
+        transform(emb_f32)
     if not need_cos:
         return (emb_f32 if need_plain else None), None
     norms = np.linalg.norm(emb_f32, axis=1, keepdims=True)
@@ -451,6 +463,7 @@ def _derive_reference_views(
     *,
     need_cos: bool = True,
     need_plain: bool = True,
+    transform: Callable[[np.ndarray], None] | None = None,
 ) -> dict[str, Any]:
     """Build the per-process reference view dict used by the KNN path.
 
@@ -475,9 +488,12 @@ def _derive_reference_views(
     once: 11,21 + 22,41 + 22,41 = 56,0 GB, measured, on a machine with 30 GiB.
     That is not a bank that is merely large; a row with 64 non-zeros of 8192
     is the wrong shape for a dense copy at any size. See
-    :func:`_sparse_reference_views`.
+    :func:`_sparse_reference_views`. Nor does a search space (``transform``, see
+    :func:`_dense_f32_views`): a k-WTA bank has no dense copy to map.
     """
     if issparse(embeddings_f16):
+        if transform is not None:
+            raise ValueError("a sparse bank has no dense copy to map into a declared space")
         return _sparse_reference_views(
             accessions, embeddings_f16, need_cos=need_cos, need_plain=need_plain
         )
@@ -489,7 +505,7 @@ def _derive_reference_views(
             "embeddings_f32_cos": np.empty((0,), dtype=np.float32),
         }
     emb_f32, emb_f32_cos = _dense_f32_views(
-        embeddings_f16, need_cos=need_cos, need_plain=need_plain
+        embeddings_f16, need_cos=need_cos, need_plain=need_plain, transform=transform
     )
     return {
         "accessions": accessions,

@@ -897,6 +897,14 @@ Payload fields
        retrieved from the pool as it stands and the query is dropped after,
        so a query in the pool keeps one neighbour fewer; needs the flag true).
        ``"none"`` drops nobody.
+   * - ``embedding_transform``
+     - ``null``
+     - The space the search runs in: ``center``, ``standardize``, ``whiten``,
+       ``remove_dominant_directions`` or ``remove_dominant_directions_fixed_count``,
+       read from the statistics of the configuration's space at the run's cut photo
+       (``compute_embedding_space_statistics``). ``null`` is the configuration's own
+       space. Refused beside ``compute_v6_features``, over a sparse bank, and where
+       the cut has no statistics. See *Search space* below.
    * - ``donor_policy``
      - permissive
      - Which proteins may donate and which of their annotations: ``reviewed_only``,
@@ -999,12 +1007,42 @@ arm's identity on every surface that names an arm (``_arm_identity``: the donor
 policy column names the set and the channels, and ``self-excluded-after-retrieval``
 is a level of its own), in the window summary and in the window panel's labels.
 
+Search space
+~~~~~~~~~~~~
+
+``embedding_transform`` maps the pool and the queries with the label-free
+statistics of the configuration's space at the run's cut: the
+``embedding_space_statistics`` row of (configuration, photo), its artifact
+verified against the row's sha256 and read once per process
+(``protea.core.operations.predict_go_terms._search_space``). The transforms are
+``protea.core.embedding_space.transforms``.
+
+- **The pool** is mapped in the float32 copy the search reads, in place and in
+  chunks, after the half-precision vectors are widened and before the cosine
+  normalisation (``protea.core.disk_cache._dense_f32_views``). No second copy of
+  the pool is made: mapping a 2,560-dimension pool holds two or three float64
+  chunks of 4,096 rows beside it. The half-precision pool and its disk cache stay
+  raw, so a transformed run reuses a raw run's cache; the in-process cache key
+  carries the transform and the statistics' sha256.
+- **The queries** are mapped in the batch with the same statistics, so a bank
+  vector asked as a query lands on its row of the mapped pool (within 1e-6).
+  protea-method normalises the queries itself and takes the bank as normalised,
+  so it needs no change.
+- **The receipt** writes an ``embedding_transform`` block (the transform, the
+  statistics' id and sha256, ``n``, ``d``, the Ledoit-Wolf shrinkage and the
+  directions the elbow removes) only when a space was declared; the method seal
+  classifies it as identity.
+- **Refused** by the coordinator before any batch exists, and by a batch too: a
+  sparse bank, which has no dense copy to map; ``compute_v6_features``, whose PCA
+  state is fitted once per configuration on the raw space; an annotation set no
+  photo loaded; and a cut without statistics for the configuration.
+
 Reference cache
 ~~~~~~~~~~~~~~~
 
 Reference embeddings are loaded once per
 ``(embedding_config_id, annotation_set_id, aspect_separated_knn,
-need_cos, need_plain)`` tuple and stored as a process-level dict in
+need_cos, need_plain, donor policy, search space)`` tuple and stored as a process-level dict in
 ``_REF_CACHE`` (max 1 entry, LRU-evicted on config change). This avoids
 reloading hundreds of thousands of vectors for every batch.
 
