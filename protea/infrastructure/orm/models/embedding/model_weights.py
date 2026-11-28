@@ -44,6 +44,12 @@ WEIGHT_KINDS = (
     #: fitted strength. Fitted on GO labels at one cut, so it is registered with
     #: the annotation set it counted.
     "count_map",
+    #: A declared threshold per evaluator cell (``declare_operating_threshold``):
+    #: the grid argmax of the pooled ``f_micro_w`` over an arm's fitting windows,
+    #: with each window's own threshold and the pooled curve. A JSON document read
+    #: by ``read_operating_point`` and ``compare_paired_panels``; fitted on the
+    #: windows' labels, so registered with the latest window's t1 corpus.
+    "operating_threshold",
 )
 
 

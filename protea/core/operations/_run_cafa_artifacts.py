@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import requests
 from sqlalchemy.orm import Session
 
@@ -255,3 +256,43 @@ def _merge_weighted_metrics(dfs_best: dict, ns_results: dict[str, Any]) -> None:
             for col, field in col_to_field.items():
                 if col in row:
                     ns_results[ns][field] = round(float(row.get(col, 0)), 4)
+
+
+#: S's minimum in both weightings: the curve column, and the keys of its value and its
+#: threshold in a cell. cafaeval publishes the unweighted one as a best frame
+#: (``evaluation_best_s.tsv``) and the information-accretion weighted one only on
+#: its curve, ``evaluation_all.tsv``, where both are read here.
+_SMIN_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("s", "smin", "tau_smin"),
+    ("s_w", "smin_w", "tau_smin_w"),
+)
+
+
+def merge_smin(curve: Any, ns_results: dict[str, Any]) -> None:
+    """Add S's minimum and its threshold, in both weightings, to each namespace in place.
+
+    Read from the curve cafaeval writes as ``evaluation_all.tsv``: the
+    thresholds that kept a prediction, so the minimum is taken where cafaeval
+    takes its own (``idxmin``, the first, which is the lowest threshold on
+    ties). The weighted pair is written only when the run had an
+    information-accretion table, and a namespace the result does not report
+    gains nothing.
+    """
+    if curve is None or curve.empty:
+        return
+    flat = curve.reset_index()
+    for ns_long, group in flat.groupby("ns", sort=True):
+        ns = _NS_LABELS.get(str(ns_long))
+        if ns is None or ns not in ns_results:
+            continue
+        ordered = group.sort_values("tau", kind="stable")
+        taus = ordered["tau"].to_numpy(dtype=np.float64)
+        for column, value_key, tau_key in _SMIN_SPECS:
+            if column not in ordered.columns:
+                continue
+            values = ordered[column].to_numpy(dtype=np.float64)
+            if not np.isfinite(values).any():
+                continue
+            at = int(np.nanargmin(values))
+            ns_results[ns][value_key] = round(float(values[at]), 4)
+            ns_results[ns][tau_key] = round(float(taus[at]), 4)

@@ -238,13 +238,41 @@ def _resample_arm(
     return _read_curves(curves, tau_index)
 
 
+#: A threshold column for both arms, or one per arm: ``(arm, baseline)``. One
+#: integer is the historical form (one declared tau for the comparison); a pair
+#: reads each arm at its own declared threshold.
+TauIndex = int | None | tuple[int | None, int | None]
+
+
+def arm_taus(tau_index: TauIndex) -> tuple[int | None, int | None]:
+    """The column each arm is read at: the pair given, or one value for both."""
+    if isinstance(tau_index, tuple):
+        return tau_index
+    return tau_index, tau_index
+
+
+def draw_pair(
+    counts: np.ndarray, a: PanelArrays, b: PanelArrays, tau_index: TauIndex
+) -> tuple[np.ndarray, ...]:
+    """``(deltas, a values, b values, a columns, b columns)`` of one block of multiplicities.
+
+    The same multiplicities are applied to both arms, which is what makes the
+    resample paired; each arm is read at its own column when the comparison
+    declares one per arm.
+    """
+    tau_a, tau_b = arm_taus(tau_index)
+    va, ia = _resample_arm(counts, a, tau_a)
+    vb, ib = _resample_arm(counts, b, tau_b)
+    return va - vb, va, vb, ia, ib
+
+
 def paired_bootstrap(
     a: PanelArrays,
     b: PanelArrays,
     *,
     n_resamples: int,
     seed: int | np.random.SeedSequence,
-    tau_index: int | None = None,
+    tau_index: TauIndex = None,
 ) -> Draws:
     """Protein-level paired bootstrap at the caller's operating point.
 
@@ -253,7 +281,7 @@ def paired_bootstrap(
     existing caller gets without saying anything. An integer holds the
     threshold at that column in both arms and in every resample, which is the
     procedure that matches an estimator reported at a threshold fixed in
-    advance.
+    advance; a pair holds each arm at its own declared column.
 
     The two arms must already be aligned on the protein axis; the caller owns
     the population rule. One count vector is built per resample and used twice,
@@ -267,16 +295,14 @@ def paired_bootstrap(
     while done < n_resamples:
         size = min(_CHUNK, n_resamples - done)
         counts = _counts_matrix(rng, a.n, size)
-        va, ia = _resample_arm(counts, a, tau_index)
-        vb, ib = _resample_arm(counts, b, tau_index)
-        blocks.append((va - vb, va, vb, ia, ib))
+        blocks.append(draw_pair(counts, a, b, tau_index))
         done += size
     stacked = [np.concatenate([block[i] for block in blocks]) for i in range(5)]
     return Draws(stacked[0], stacked[1], stacked[2], stacked[3], stacked[4])
 
 
 def jackknife_deltas(
-    a: PanelArrays, b: PanelArrays, *, tau_index: int | None = None
+    a: PanelArrays, b: PanelArrays, *, tau_index: TauIndex = None
 ) -> np.ndarray:
     """Leave-one-protein-out deltas, at the same operating point as the resample.
 
@@ -293,14 +319,14 @@ def jackknife_deltas(
     only symptom would be an interval quietly corrected in the wrong direction.
     """
     out = []
-    for arm in (a, b):
+    for arm, column in zip((a, b), arm_taus(tau_index), strict=True):
         totals_tp = arm.tp.sum(axis=0)
         totals_pred = arm.pred.sum(axis=0)
         total_gt = arm.n_gt.sum()
         curves = micro_curve(
             totals_tp - arm.tp, totals_pred - arm.pred, (total_gt - arm.n_gt)[:, None]
         )
-        out.append(_read_curves(curves, tau_index)[0])
+        out.append(_read_curves(curves, column)[0])
     return out[0] - out[1]
 
 

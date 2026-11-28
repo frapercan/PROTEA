@@ -60,6 +60,9 @@ from protea.core.operations.declare_exam_population import (
     DeclareExamPopulationOperation,
 )
 from protea.core.operations.declare_member_taxa import DeclareMemberTaxaOperation
+from protea.core.operations.declare_operating_threshold import (
+    DeclareOperatingThresholdOperation,
+)
 from protea.core.operations.declare_photo_member_set import (
     DeclarePhotoMemberSetOperation,
 )
@@ -131,6 +134,7 @@ from protea.core.operations.predict_go_terms import (
 from protea.core.operations.predict_go_terms_from_interpro import (
     PredictGOTermsFromInterProOperation,
 )
+from protea.core.operations.read_operating_point import ReadOperatingPointOperation
 from protea.core.operations.refresh_goa_release_dates import (
     RefreshGoaReleaseDatesOperation,
 )
@@ -454,6 +458,8 @@ _EVALUATION: tuple[_Row, ...] = (
     (PlaceWindowTargetsOperation, _EVALUATED),
     (StratifyEvaluationOperation, _EVALUATED),
     (ComparePairedPanelsOperation, _EVALUATED),
+    (DeclareOperatingThresholdOperation, _EVALUATED),
+    (ReadOperatingPointOperation, _EVALUATED),
     (SealEvaluationFramesOperation, _EVALUATED),
     (AuditEvaluationFramesOperation, replace(_EVALUATED, status="review")),
     (AuditPerProteinArtifactsOperation, replace(_EVALUATED, status="review")),

@@ -73,14 +73,12 @@ different statistic.
 from __future__ import annotations
 
 import contextlib
-from typing import Annotated, Any, Literal
+from typing import Any
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
-from protea.core.method_seal import METHOD_IDENTITY_FIELDS
+from protea.core.contracts.operation import EmitFn, Operation, OperationResult
 from protea.core.operations._paired_panels_artifact import (
     SETTINGS,
     GridMeta,
@@ -93,33 +91,30 @@ from protea.core.operations._paired_panels_method import _method_gate
 from protea.core.operations._paired_panels_panel import (
     PanelConfig,
     Side,
+    finish_panel,
     load_side,
     panel_result,
+    prepare_panel,
     resolve_tau_index,
     tally,
+)
+from protea.core.operations._paired_panels_payload import (
+    ALL_PANELS,
+    ComparePairedPanelsPayload,
+)
+from protea.core.operations._paired_panels_simultaneous import (
+    declared_tau_indices,
+    simultaneous_block,
+    simultaneous_resamples,
 )
 from protea.core.operations._paired_panels_stratum import (
     Restriction,
     stratum_label,
     stratum_population,
-    validate_stratum,
 )
 from protea.core.utils import contract_payload
 
-#: The nine panels, category by aspect, in canonical report order. There is no
-#: tenth entry and there is no aggregate over them.
-ALL_PANELS: tuple[str, ...] = (
-    "NK:MFO",
-    "NK:BPO",
-    "NK:CCO",
-    "LK:MFO",
-    "LK:BPO",
-    "LK:CCO",
-    "PK:MFO",
-    "PK:BPO",
-    "PK:CCO",
-)
-
+__all__ = ["ALL_PANELS", "ComparePairedPanelsOperation", "ComparePairedPanelsPayload"]
 
 #: Which closed vocabulary each Stratum axis draws from. Written here rather
 #: than inferred, so a seventh axis added to Stratum fails this operation's
@@ -162,210 +157,6 @@ _PROVENANCE_SQL = text(
     "       frame, temporal_window, frame_digest, leakage_role, results"
     "  FROM evaluation_result WHERE id = :id"
 )
-
-
-class ComparePairedPanelsPayload(ProteaPayload, frozen=True):
-    """Which two results are being compared, over which panels, at what precision.
-
-    ``weighting`` is a closed vocabulary and not a bool, and there is no
-    ``auto``: asking for the weighted estimator against an artefact that carries
-    no weighted components is a refusal, never a silent fallback. That is the
-    requirement expressed in the type rather than in a comment somebody has to
-    read.
-
-    ``operating_point`` is a closed vocabulary for the same argument. Two
-    semantics give two intervals from the same bytes and neither is recoverable
-    from the numbers afterwards, so the choice belongs on the job row beside
-    the seed. There is no ``auto`` here either, for a sharper version of the
-    reason: the only thing an ``auto`` could do is take the argmax, which is
-    not a fallback but the other semantics, silently. Hence the two refusals
-    below, which are one rule read in both directions: a declared threshold
-    exactly when something reads it.
-
-    Unknown keys are refused. ``{"artifact_root": ...}`` is a plausible typo of
-    ``artifacts_root``, and without this it validates, resolves to no local
-    root, sends the operation to the object store, finds nothing there and
-    returns a successful job full of nulls.
-    """
-
-    model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
-
-    evaluation_result_id: Annotated[str, Field(description="system A, the arm under test")]
-    baseline_evaluation_result_id: Annotated[str, Field(description="system B, the baseline")]
-    panels: Annotated[
-        list[str],
-        Field(default_factory=lambda: list(ALL_PANELS), description="category:aspect keys"),
-    ]
-    n_resamples: Annotated[int, Field(default=2000, ge=1000)]
-    seed: Annotated[int, Field(default=0, ge=0)]
-    confidence: Annotated[float, Field(default=0.95, gt=0.5, lt=1.0)]
-    power: Annotated[float, Field(default=0.80, gt=0.5, lt=1.0)]
-    weighting: Literal["ia_weighted", "unweighted"] = "ia_weighted"
-    operating_point: Literal["reselected_per_resample", "fixed"] = "reselected_per_resample"
-    declared_tau: Annotated[
-        float | None,
-        Field(
-            default=None,
-            gt=0.0,
-            lt=1.0,
-            description=(
-                "the threshold a fixed operating point is read at, required by "
-                "operating_point='fixed' and refused otherwise. It must be one the "
-                "artefact's grid carries: a tau off the grid is refused and never snapped "
-                "to its neighbour, because a comparison reported at a threshold it was not "
-                "evaluated at is not recoverable from its own result."
-            ),
-        ),
-    ]
-    min_population: Annotated[int, Field(default=30, ge=1)]
-    interval_method: Literal["bca", "percentile"] = "bca"
-    effect_of_interest: Annotated[
-        float | None,
-        Field(
-            default=None,
-            gt=0.0,
-            lt=1.0,
-            description=(
-                "the smallest difference worth detecting, on the estimator's own scale. A "
-                "null is read against this and never against the observed difference: "
-                "without it a panel whose interval covers zero is reported as null_unread, "
-                "because nothing in the data says which effects matter."
-            ),
-        ),
-    ]
-    population_rule: Literal["intersect", "require_identical"] = "intersect"
-    min_jaccard: Annotated[float, Field(default=0.95, gt=0.0, le=1.0)]
-    restrict_to_stratum: Annotated[
-        dict[str, str] | None,
-        Field(
-            default=None,
-            description=(
-                "axis -> band, restricting the paired population to one stratum. "
-                "None compares the whole panel, which is what every result before "
-                "this field existed did."
-            ),
-        ),
-    ]
-    allow_frame_mismatch: bool = False
-    method_axis: Annotated[
-        list[str],
-        Field(
-            default_factory=list,
-            description=(
-                "the prediction_set fields this comparison claims to be varying, e.g. "
-                "['annotation_set_id'] for a bank contrast. Everything else in the method "
-                "must agree, field by field, and a field that moved and was not named here "
-                "is a refusal that names it with both its values. The empty default is the "
-                "claim that the method is held entirely still, which is what a comparison "
-                "of two scoring configs or two rerankers over one prediction method asserts."
-            ),
-        ),
-    ]
-    artifacts_root: str | None = None
-    baseline_artifacts_root: str | None = None
-
-    @field_validator("evaluation_result_id", "baseline_evaluation_result_id")
-    @classmethod
-    def _non_empty(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("an evaluation result id is required; there is nothing to compare")
-        return value.strip()
-
-    @field_validator("panels")
-    @classmethod
-    def _known_panels(cls, value: list[str]) -> list[str]:
-        if not value:
-            raise ValueError("omit panels to take all nine; an empty list compares nothing")
-        duplicated = sorted({key for key in value if value.count(key) > 1})
-        if duplicated:
-            raise ValueError(
-                f"panels {duplicated} are listed more than once; each panel would be "
-                "resampled twice and reported once, and the progress count would say 1/2 "
-                "for one panel"
-            )
-        unknown = [key for key in value if key not in ALL_PANELS]
-        if unknown:
-            raise ValueError(
-                f"unknown panels {unknown}; the nine are {list(ALL_PANELS)}. There is no "
-                "aggregate over them: the nine panels are nine populations, so a mean over "
-                "them is a different estimator needing a joint resample over the union with "
-                "per-panel membership tracked, which this operation does not compute."
-            )
-        return value
-
-    @field_validator("method_axis")
-    @classmethod
-    def _known_axis(cls, value: list[str]) -> list[str]:
-        """An axis field that is not method identity is refused here, not later.
-
-        There is no ``allow_method_mismatch`` to pair with ``allow_frame_mismatch``,
-        and that is the design. A frame mismatch is waived because the two numbers
-        were measured differently and somebody may still want to look; a method
-        mismatch has a waiver already, and it is to NAME the field, which costs one
-        list entry and makes the job row say what the comparison was of. A boolean
-        that waived the whole seal at once would put the campaign back where D2
-        found it, with a delta attributable to nothing.
-        """
-        unknown = sorted(set(value) - set(METHOD_IDENTITY_FIELDS))
-        if unknown:
-            raise ValueError(
-                f"method_axis names {unknown}, which is not method identity. The fields "
-                f"that can be an axis are {list(METHOD_IDENTITY_FIELDS)}. A misspelled "
-                "axis declares nothing and would be refused one gate later under the "
-                "wrong name."
-            )
-        repeated = sorted({key for key in value if value.count(key) > 1})
-        if repeated:
-            raise ValueError(f"method_axis lists {repeated} more than once")
-        return value
-
-    @field_validator("restrict_to_stratum")
-    @classmethod
-    def _known_stratum(cls, value: dict[str, str] | None) -> dict[str, str] | None:
-        return validate_stratum(value)
-
-    @model_validator(mode="after")
-    def _coherent(self) -> ComparePairedPanelsPayload:
-        if self.evaluation_result_id == self.baseline_evaluation_result_id:
-            raise ValueError(
-                "a result compared against itself yields a zero delta and a zero-width "
-                "interval, which reads as a decisive null"
-            )
-        if bool(self.artifacts_root) != bool(self.baseline_artifacts_root):
-            raise ValueError(
-                "give both artifacts_root and baseline_artifacts_root or neither; one local "
-                "and one remote is two different resolutions of where the bytes are"
-            )
-        if self.operating_point == "fixed" and self.declared_tau is None:
-            raise ValueError(
-                "operating_point='fixed' needs declared_tau: the threshold has to come from "
-                "the caller. The only other place it could come from is the argmax of the "
-                "panel curve, and taking that would reinstate the max-over-tau selection a "
-                "fixed operating point exists to remove, under the name that says it was "
-                "removed. Declare the tau the campaign reads its primary metric at."
-            )
-        if self.operating_point != "fixed" and self.declared_tau is not None:
-            raise ValueError(
-                f"declared_tau={self.declared_tau} was given with "
-                f"operating_point={self.operating_point!r}, which re-selects the threshold "
-                "inside every resample and reads nothing at the declared one. Recording a "
-                "threshold no arithmetic used tells a later reader that a decision was taken "
-                "when it was not. Set operating_point='fixed', or drop declared_tau."
-            )
-        return self
-
-    @property
-    def alpha(self) -> float:
-        return 1.0 - self.confidence
-
-    @property
-    def variant(self) -> str:
-        return "weighted" if self.weighting == "ia_weighted" else "unweighted"
-
-    @property
-    def estimator(self) -> str:
-        """The metric's own name. ``f_micro_w`` never labels an unweighted number."""
-        return "f_micro_w" if self.weighting == "ia_weighted" else "f_micro"
 
 
 def _provenance(session: Session, result_id: str) -> dict[str, Any]:
@@ -492,6 +283,27 @@ def _refuse_if_nothing_was_comparable(
     )
 
 
+def _threshold_loader(session: Session) -> Any:
+    """Read a declared threshold's weights from the store, verified, once per id."""
+    from protea.core.operating_point import load_declared_threshold
+    from protea.core.operations._operating_point_reads import operating_point_store
+
+    def load(weights_id: str) -> Any:
+        return load_declared_threshold(session, weights_id, operating_point_store())
+
+    return load
+
+
+def _declared_thresholds(p: ComparePairedPanelsPayload) -> dict[str, Any]:
+    """The declared threshold ids, recorded only when the comparison was read at them."""
+    if p.declared_threshold_id is None:
+        return {}
+    return {
+        "declared_threshold_id": p.declared_threshold_id,
+        "baseline_declared_threshold_id": p.baseline_declared_threshold_id,
+    }
+
+
 class ComparePairedPanelsOperation(Operation):
     """Paired interval on the campaign's own estimator, one per panel."""
 
@@ -573,19 +385,21 @@ class ComparePairedPanelsOperation(Operation):
             # grid known to be declared by both sides, so one column index can
             # serve both arms. Resolved before it, a grid disagreement would
             # surface as an off-grid tau, the right refusal under a wrong name.
-            cfg = self._config(sides, p)
+            cfg = self._config(sides, p, declared_tau_indices(p, sides, _threshold_loader(session)))
             keep = (
                 stratum_population(session, p.restrict_to_stratum, prov_b, emit)
                 if p.restrict_to_stratum
                 else None
             )
-            panels = self._panels(sides, p, cfg, emit, keep=keep)
+            panels, family = self._panels(sides, p, cfg, emit, keep=keep)
             _refuse_if_nothing_was_comparable(sides, panels)
             result = self._result(sides, p, cfg, panels, mismatch, artifact_mismatch)
             # Recorded beside the number, not only emitted. A delta whose stored
             # result does not say which field it is a delta IN is the shape the
             # nine invalid deltas had, and an event is not in the result.
             result["method_axis"] = list(axis)
+            result.update(simultaneous_block(family))
+            result.update(_declared_thresholds(p))
         emit("compare_paired_panels.verdict", None, result["verdict"], "info")
         return OperationResult(
             result=result, progress_current=len(panels), progress_total=len(p.panels)
@@ -615,6 +429,12 @@ class ComparePairedPanelsOperation(Operation):
                 "confidence": p.confidence,
                 "power": p.power,
                 "panels": list(p.panels),
+                **_declared_thresholds(p),
+                **(
+                    {"interval_family": p.interval_family}
+                    if p.interval_family != "per_panel"
+                    else {}
+                ),
             },
             "info",
         )
@@ -682,13 +502,20 @@ class ComparePairedPanelsOperation(Operation):
         return artifact_mismatch
 
     @staticmethod
-    def _config(sides: tuple[Side, Side], p: ComparePairedPanelsPayload) -> PanelConfig:
+    def _config(
+        sides: tuple[Side, Side],
+        p: ComparePairedPanelsPayload,
+        declared: dict[str, tuple[int, int]] | None = None,
+    ) -> PanelConfig:
         """The payload's request, resolved against the grid the artefacts declare.
 
         Every emission below reads the operating point off this object and not
         off the payload: what the resampler was handed is what a reader of a
-        stored comparison needs, and what was asked for is not.
+        stored comparison needs, and what was asked for is not. ``declared``
+        holds each panel's two declared columns when each arm is read at its own
+        declared threshold.
         """
+        one_tau = p.operating_point != "fixed" or p.declared_tau is not None
         return PanelConfig(
             alpha=p.alpha,
             power=p.power,
@@ -697,7 +524,11 @@ class ComparePairedPanelsOperation(Operation):
             min_population=p.min_population,
             force_percentile=p.interval_method == "percentile",
             effect_of_interest=p.effect_of_interest,
-            tau_index=resolve_tau_index(sides, p.operating_point, p.declared_tau),
+            tau_index=(
+                resolve_tau_index(sides, p.operating_point, p.declared_tau) if one_tau else None
+            ),
+            declared=declared,
+            family=p.interval_family,
         )
 
     @staticmethod
@@ -707,19 +538,34 @@ class ComparePairedPanelsOperation(Operation):
         cfg: PanelConfig,
         emit: EmitFn,
         keep: frozenset[str] | None = None,
-    ) -> dict[str, dict[str, Any]]:
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, Any] | None]:
+        """Every panel's answer, and the family's record when they share one stream.
+
+        The reported name carries the restriction, so a stratum's delta and the
+        whole panel's delta cannot be filed under one key and later read as two
+        measurements of the same thing.
+        """
         rule = (p.population_rule, p.min_jaccard)
+        reported = {key: stratum_label(key, p.restrict_to_stratum) for key in p.panels}
+
+        def narrow(key: str) -> Restriction | None:
+            return Restriction(keep, reported[key]) if keep is not None else None
+
         out: dict[str, dict[str, Any]] = {}
-        for key in p.panels:
-            # The reported name carries the restriction, so a stratum's delta
-            # and the whole panel's delta cannot be filed under one key and
-            # later read as two measurements of the same thing.
-            reported = stratum_label(key, p.restrict_to_stratum)
-            narrow = Restriction(keep, reported) if keep is not None else None
-            panel = panel_result(sides, key, cfg, ALL_PANELS.index(key), rule, narrow)
-            _emit_panel(panel, reported, p, cfg, emit)
-            out[reported] = panel
-        return out
+        if cfg.family != "simultaneous":
+            for key in p.panels:
+                panel = panel_result(sides, key, cfg, ALL_PANELS.index(key), rule, narrow(key))
+                _emit_panel(panel, reported[key], p, cfg, emit)
+                out[reported[key]] = panel
+            return out, None
+        steps = {key: prepare_panel(sides, key, cfg, rule, narrow(key)) for key in p.panels}
+        prepared = {k: v for k, v in steps.items() if not isinstance(v, dict)}
+        resampled, family = simultaneous_resamples(prepared, cfg)
+        for key, step in steps.items():
+            panel = step if isinstance(step, dict) else finish_panel(step, cfg, resampled[key])
+            _emit_panel(panel, reported[key], p, cfg, emit)
+            out[reported[key]] = panel
+        return out, family
 
     @staticmethod
     def _result(

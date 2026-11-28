@@ -2370,6 +2370,100 @@ Payload fields
      - The set's name, which gets the digest's first twelve characters.
 
 
+declare_operating_threshold
+---------------------------
+
+Declares a threshold per evaluator cell from one arm's raw evaluations on its fitting
+windows (role ``training``), and registers it as ``operating_threshold`` weights. A job
+on ``protea.evaluations``.
+
+Per cell, the per-protein grids the evaluations stored (``per_protein_grid.parquet``,
+the information-accretion weighted population) are pooled over the windows, each
+(protein, window) one unit, and ``f_micro_w(tau) = 2 sum tp_w / (sum pred_w + sum
+n_gt_w)`` is computed on the evaluator's grid; the declared threshold is its argmax,
+the lowest threshold on ties (:func:`protea.core.operating_point.grid.pooled_threshold`).
+On raw scores this is a transport diagnostic: F at it on the selection window shows how
+a raw scale travels between windows. A reading's own threshold, on calibrated scores, is
+declared by its fit, which pools its out-of-fold grids the same way.
+
+The artifact is a JSON document, content-addressed under
+``model-weights/operating_threshold/``: the declared block every reader reads (the grid
+step and, per cell, ``tau`` and ``at_grid_edge``) and, per cell, the threshold's column,
+``f_micro_w`` and half of it, the units pooled, the pooled curve and each window's own
+threshold and value. The weights are registered as fitted on the t1 corpus of the window
+that ends last. Asking again with the same results returns the same weights.
+
+It refuses before writing anything: a result read on a percentile scale, a window that is
+not a fitting window, two results on one window, results evaluated on different grids or
+under different evaluator options, and results that are not one arm at several windows,
+judged by the one list of fields an arm may vary in across windows
+(:mod:`protea.core.operating_point.window_fields`), naming the field.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``name``
+     - The weights' name, a file-name stem.
+   * - ``evaluation_result_ids``
+     - The arm's raw results on its fitting windows, each window once.
+   * - ``variant``
+     - ``f_micro_w``, the metric whose argmax is declared.
+   * - ``ties``
+     - ``lowest_tau``.
+   * - ``reading``
+     - ``raw``; a percentile reading is refused.
+
+
+read_operating_point
+--------------------
+
+Reads one evaluation result at the per-cell thresholds a weights row declares, and writes
+one ``evaluation_operating_point`` row. A job on ``protea.evaluations``. The weights are
+of a kind that declares per-cell thresholds (``operating_threshold`` today), and their
+artifact is read only after its bytes hash to the registered sha256.
+
+Per cell, the result's per-protein grid is read at the declared column with the
+evaluator's own formulas (:func:`protea.core.operating_point.grid.metric_curves`):
+``f_micro_w``, ``f_w``, the micro and macro precisions and recalls, the coverage and S in
+both weightings; S's minimum in both weightings with its threshold; the oracle maximum of
+``f_micro_w`` and of ``f_w`` with its threshold and edge, and the oracle threshold's
+distance from half the oracle value. A declared threshold off the result's grid is
+refused, never snapped to a neighbour. Per stratum inside each cell (the window's
+identity band by length band, from its placement), the same numbers with the stratum's
+size go to a parquet under ``operating-points/<result>/<weights>/``, named on the row by
+URI and sha256; a stratum under ``min_population`` is flagged and never withheld.
+
+On a window of LAFA's frame the row also records the 3 x 3 table of the t0 category
+(:mod:`protea.core.t0_category`, what a method may key by) against the evaluator's
+category over the window's benchmark pairs. A result and a weights row are read once:
+asking again returns the row already written.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``evaluation_result_id``
+     - The result read.
+   * - ``declared_threshold_id``
+     - The weights whose artifact declares the per-cell thresholds.
+   * - ``axes``
+     - ``category`` and ``aspect`` (the cell, always), and ``homology`` and ``length``
+       for the strata. A strata axis needs the window's placement.
+   * - ``min_population``
+     - Strata below this many proteins are flagged (30 by default).
+
+
 Registering a new operation
 ----------------------------
 

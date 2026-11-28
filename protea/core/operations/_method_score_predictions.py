@@ -24,12 +24,11 @@ import os
 import tempfile
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.csv as pcsv
 from sqlalchemy import text
 
+from protea.core.operating_point.grid import render_scores
 from protea.core.scoring import MethodScoreMissing
 
 if TYPE_CHECKING:
@@ -129,9 +128,10 @@ def method_rows(session: Session, ctx: WritePredictionsContext) -> pa.Table:
 def scored_table(session: Session, ctx: WritePredictionsContext) -> pa.Table:
     """The stored scores of ``ctx``'s proteins, ordered by protein and term, four decimals.
 
-    Columns ``protein_accession``, ``go_id`` and ``score`` (text). The one
-    rendering of a set's scores: the evaluator's prediction file and the CAFA
-    export of the API are both this table.
+    Columns ``protein_accession``, ``go_id`` and ``score`` (text), rendered by
+    :func:`protea.core.operating_point.grid.render_scores`: the evaluator's
+    prediction file, the CAFA export of the API and a fit's out-of-fold scores
+    are all written by that one function.
     """
     rows = method_rows(session, ctx)
     missing = rows["method_score"].null_count
@@ -140,18 +140,7 @@ def scored_table(session: Session, ctx: WritePredictionsContext) -> pa.Table:
             f"{missing} of {rows.num_rows} rows of prediction set {ctx.pred_set_id} carry no "
             f"method_score: {_SCORE_IT}"
         )
-    order = pc.sort_indices(
-        rows, sort_keys=[("protein_accession", "ascending"), ("go_id", "ascending")]
-    )
-    rows = rows.take(order)
-    scores = np.char.mod("%.4f", rows["method_score"].to_numpy())
-    return pa.table(
-        {
-            "protein_accession": rows["protein_accession"],
-            "go_id": rows["go_id"],
-            "score": pa.array(scores.tolist(), type=pa.string()),
-        }
-    )
+    return render_scores(rows.rename_columns(["protein_accession", "go_id", "score"]))
 
 
 def write_method_predictions(session: Session, ctx: WritePredictionsContext) -> int:

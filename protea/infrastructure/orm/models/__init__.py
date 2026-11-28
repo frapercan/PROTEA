@@ -4,6 +4,7 @@ from .annotation.cut_photo import (  # noqa: F401
     CutPhoto,
     CutPhotoMember,
 )
+from .annotation.evaluation_operating_point import EvaluationOperatingPoint  # noqa: F401
 from .annotation.evaluation_result import EvaluationResult  # noqa: F401
 from .annotation.evaluation_set import EvaluationSet  # noqa: F401
 from .annotation.evidence_channel import (  # noqa: F401
