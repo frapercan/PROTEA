@@ -32,7 +32,6 @@ threshold of a cell.
 
 from __future__ import annotations
 
-import os
 import signal
 import threading
 from collections.abc import Iterator, Mapping, Sequence
@@ -472,13 +471,6 @@ def pooled_threshold(
 def tau_grid_of(th_step: float) -> np.ndarray:
     """cafaeval's grid at ``th_step``, ``np.arange(th_step, 1, th_step)``, float accumulation kept."""
     return np.arange(th_step, 1, th_step)
-
-
-def scratch_dir(root: str | Path, name: str) -> Path:
-    """A working folder under ``root``, created if absent."""
-    path = Path(root) / name
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 __all__ = [
