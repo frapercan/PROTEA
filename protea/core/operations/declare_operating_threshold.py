@@ -16,7 +16,8 @@ out-of-fold grids the same way.
 The document (``operating_threshold`` weights, JSON, content-addressed in the
 store) carries the declared block every reader reads
 (:func:`protea.core.operating_point.declared_block`) and, per cell, the pooled
-curve, the units pooled, ``F*_fit`` and ``F*_fit / 2``, and each window's own
+curve, the units pooled, ``F*_fit``, ``F*_fit / 2`` and the threshold's distance
+from it (where a calibrated scale would put its optimum), and each window's own
 threshold and value. The weights are registered as fitted on the latest
 window's t1 corpus, since the windows' labels chose the threshold.
 
@@ -163,6 +164,7 @@ def _document(p: DeclareOperatingThresholdPayload, reads: list[ResultRead], pool
                     "tau_index": found.index,
                     "f_micro_w": found.value,
                     "half_f_micro_w": found.half_value,
+                    "distance_from_half": abs(found.tau - found.half_value),
                     "units": found.units,
                     "at_grid_edge": found.at_grid_edge,
                     "curve": list(found.curve),
@@ -260,6 +262,7 @@ class DeclareOperatingThresholdOperation:
                 "tau": found.tau,
                 "f_micro_w": found.value,
                 "half_f_micro_w": found.half_value,
+                "distance_from_half": abs(found.tau - found.half_value),
                 "units": found.units,
                 "at_grid_edge": found.at_grid_edge,
                 "window_taus": {w: tau for w, (tau, _) in found.window_taus.items()},

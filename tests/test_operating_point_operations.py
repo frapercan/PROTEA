@@ -507,6 +507,9 @@ def test_a_threshold_is_the_argmax_of_the_pooled_fitting_windows(
         assert declared.tau(key) == hand.tau
         assert document["cells"][key]["f_micro_w"] == pytest.approx(hand.value)
         assert document["cells"][key]["units"] == 6
+        assert document["cells"][key]["distance_from_half"] == pytest.approx(
+            abs(hand.tau - hand.value / 2)
+        )
         assert document["cells"][key]["curve"] == pytest.approx(list(hand.curve))
     assert "LK:CCO" in document["absent_cells"]
     last = pg.get(EvaluationSet, results[-1].evaluation_set_id)
