@@ -12,7 +12,11 @@ The rule is protea-method's ``resolve_self_exclusion``: ``self_exclusion`` when
 the payload names it, otherwise ``exclude_self_neighbour`` (true is "sequence",
 false is "none"). "sequence" drops the query and its twins, other proteins with
 the identical sequence. "accession" drops the query only and keeps its twins as
-donors, since they are other proteins annotated by others.
+donors, since they are other proteins annotated by others. Both first ask as
+many neighbours deeper as the drop can cost. "accession_after_retrieval" asks
+for none: it retrieves the asked depth from the pool as it stands and then
+drops the query by name, as LAFA's search does, so a query in the pool keeps one
+neighbour fewer and any other keeps them all.
 """
 
 from __future__ import annotations

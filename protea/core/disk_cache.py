@@ -18,7 +18,9 @@ Files (under ``_DISK_CACHE_DIR``):
 
 Invalidation: ``AnnotationSet`` rows are immutable once loaded, so the
 cache stays valid for as long as the files exist. Delete the files
-manually to force a reload after a model change.
+manually to force a reload after a model change. The tuning switch
+``reference_pool_disk_write`` (default on) turns the writes off, so a
+pool one run reads is built in memory and leaves nothing behind.
 """
 
 from __future__ import annotations
@@ -133,7 +135,17 @@ class RefPoolKey(NamedTuple):
 #: ordered pool fingerprints to ``dc280304d5dce097``. Without this bump the
 #: ordering fix is a silent no-op on any machine with a warm cache, which is both
 #: of them.
-_CACHE_EPOCH = 4
+#:
+#: BUMPED TO 5 on 2026-11-28: a pool admits a donor only through a POSITIVE row
+#: that passes the policy's filters (``predict_go_terms._pool_admission``). Under
+#: epoch 4 the pool's query admitted a protein through any row of the annotation
+#: set, NOT rows included, while the per-aspect indices and the donation loader
+#: read positive rows only. So a unified pool held donors whose admitted rows were
+#: all NOT rows: they took neighbour slots and donated nothing. The key's fields
+#: did not move, so an epoch-4 pool would be served under the corrected meaning;
+#: the epoch is what keeps it from being read. The aspect indices address the
+#: unified pool by position, and their accessions are the same under both epochs.
+_CACHE_EPOCH = 5
 
 
 def _cache_key(
@@ -407,7 +419,11 @@ def _sparse_reference_views(
 
 
 def _dense_f32_views(
-    embeddings_f16: Any, *, need_cos: bool, need_plain: bool
+    embeddings_f16: Any,
+    *,
+    need_cos: bool,
+    need_plain: bool,
+    transform: Callable[[np.ndarray], None] | None = None,
 ) -> tuple[Any, Any]:
     """``(raw, cosine)`` f32 views of a dense bank, materialising only the read ones.
 
@@ -422,8 +438,16 @@ def _dense_f32_views(
     settled that nothing downstream reads the raw copy on this route. Reversing
     that decision without reading this returns a normalised bank to a caller
     asking for the raw one, which no test of shapes would catch.
+
+    ``transform`` maps the float32 rows into a declared search space, in place
+    and in chunks, before the cosine normalisation, so both views are of the
+    transformed space and no second copy of the pool is made (a pool of
+    2,560 dimensions is about 15.7 GB in float32). The half-precision bank, and
+    the disk cache it came from, stay raw. None leaves every value as it was.
     """
     emb_f32 = embeddings_f16.astype(np.float32)
+    if transform is not None:
+        transform(emb_f32)
     if not need_cos:
         return (emb_f32 if need_plain else None), None
     norms = np.linalg.norm(emb_f32, axis=1, keepdims=True)
@@ -439,6 +463,7 @@ def _derive_reference_views(
     *,
     need_cos: bool = True,
     need_plain: bool = True,
+    transform: Callable[[np.ndarray], None] | None = None,
 ) -> dict[str, Any]:
     """Build the per-process reference view dict used by the KNN path.
 
@@ -463,9 +488,12 @@ def _derive_reference_views(
     once: 11,21 + 22,41 + 22,41 = 56,0 GB, measured, on a machine with 30 GiB.
     That is not a bank that is merely large; a row with 64 non-zeros of 8192
     is the wrong shape for a dense copy at any size. See
-    :func:`_sparse_reference_views`.
+    :func:`_sparse_reference_views`. Nor does a search space (``transform``, see
+    :func:`_dense_f32_views`): a k-WTA bank has no dense copy to map.
     """
     if issparse(embeddings_f16):
+        if transform is not None:
+            raise ValueError("a sparse bank has no dense copy to map into a declared space")
         return _sparse_reference_views(
             accessions, embeddings_f16, need_cos=need_cos, need_plain=need_plain
         )
@@ -477,7 +505,7 @@ def _derive_reference_views(
             "embeddings_f32_cos": np.empty((0,), dtype=np.float32),
         }
     emb_f32, emb_f32_cos = _dense_f32_views(
-        embeddings_f16, need_cos=need_cos, need_plain=need_plain
+        embeddings_f16, need_cos=need_cos, need_plain=need_plain, transform=transform
     )
     return {
         "accessions": accessions,
@@ -633,6 +661,7 @@ def _load_reference_pool_cached(
     expected_count: int | None = None,
     emit: Callable[[str, dict[str, Any]], None] | None = None,
     freshness_seconds: int = 0,
+    write: bool = True,
 ) -> tuple[list[str], np.ndarray]:
     """Return ``(accessions, embeddings)`` for the reference pool with disk-cache.
 
@@ -647,7 +676,13 @@ def _load_reference_pool_cached(
     entirely; a ``refpool.cache_hit_fresh`` audit event is emitted instead of
     ``refpool.cache_hit``.  ``emit`` receives ``refpool.cache_hit`` /
     ``refpool.cache_hit_fresh`` / ``refpool.cache_stale`` /
-    ``refpool.cache_write`` events; pass ``None`` to stay quiet.
+    ``refpool.cache_write`` / ``refpool.cache_not_written`` events; pass
+    ``None`` to stay quiet.
+
+    ``write`` False (the tuning switch ``reference_pool_disk_write``) serves a
+    miss from ``db_loader`` and writes nothing: a pool read by one run only is
+    built in the worker's memory instead of on a disk the next pool may need.
+    A cache already on disk is still read.
     """
     emb_path, _ = _disk_cache_paths(*key)
     if freshness_seconds > 0 and _is_cache_fresh(
@@ -673,6 +708,11 @@ def _load_reference_pool_cached(
     if cached is not None:
         _emit_cache_hit(emit, emb_path, cached)
         return cached["accessions"], cached["embeddings"]
+    if not write:
+        accessions, embeddings = db_loader()
+        if emit is not None:
+            emit("refpool.cache_not_written", {"path": str(emb_path), "rows": len(accessions)})
+        return accessions, embeddings
     return _load_and_write_cache(key, db_loader, emit, emb_path)
 
 

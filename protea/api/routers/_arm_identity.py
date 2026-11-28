@@ -23,6 +23,20 @@ than the record holds: nothing in an old row says which semantics ran, only
 that they cannot be established. Naming the level by the revision says exactly
 what is known.
 
+WHY THE DONOR SET AND THE CHANNELS ARE NAMED. A run restricted to a declared
+set of photo members, or to evidence channels, without evidence codes read
+'permissive' while the column looked only at the codes: two breadth levels of
+one model, or the recipe arm and the mirror arm, were one level. The column
+now names the set (its first eight characters, as this project names sets) and
+the channels in the policy's order, appended to the old reading, so every arm
+recorded before either existed renders exactly as it did.
+
+WHY THE EXCLUSION AFTER RETRIEVAL IS ITS OWN LEVEL. Such a run excludes the
+query, so its flag is true, and the column read it as 'self-excluded', the
+level of the exclusion by sequence, which asks deeper and drops the twins too.
+LAFA's search retrieves the asked depth and then drops the query alone, so a
+query in the pool keeps one neighbour fewer: another retriever, another level.
+
 WHY DEPTH IS HERE TOO. Three different quantities used to be folded into one
 column called ``depth`` by a COALESCE: ``ps.limit_per_entry``, which is the
 RETRIEVAL depth and decides which candidates were ever fetched, and
@@ -42,14 +56,30 @@ from __future__ import annotations
 #: A select-list fragment. Expects the prediction set aliased ``ps``.
 #: Interpolated into ``text()`` and never near user input.
 ARM_IDENTITY_COLUMNS = """
-           CASE
-               WHEN ps.meta -> 'donor_policy' ->> 'evidence_codes' IS NULL
-                   THEN 'permissive'
-               ELSE 'evidence-gated'
-           END                                      AS donor_policy,
+           concat_ws(' + ',
+               CASE
+                   WHEN ps.meta -> 'donor_policy' ->> 'evidence_codes' IS NOT NULL
+                       THEN 'evidence-gated'
+                   WHEN ps.meta -> 'donor_policy' ->> 'donor_set_id' IS NULL
+                    AND jsonb_typeof(ps.meta -> 'donor_policy' -> 'evidence_channels')
+                        IS DISTINCT FROM 'array'
+                       THEN 'permissive'
+               END,
+               'donor set ' || left(ps.meta -> 'donor_policy' ->> 'donor_set_id', 8),
+               CASE
+                   WHEN jsonb_typeof(ps.meta -> 'donor_policy' -> 'evidence_channels') = 'array'
+                       THEN 'channels ' || (
+                           SELECT string_agg(ch.channel, '+' ORDER BY ch.ordinal)
+                             FROM jsonb_array_elements_text(
+                                      ps.meta -> 'donor_policy' -> 'evidence_channels')
+                                  WITH ORDINALITY AS ch(channel, ordinal))
+               END
+           )                                        AS donor_policy,
            CASE
                WHEN ps.meta ->> 'self_exclusion' = 'accession'
                    THEN 'self-excluded-by-accession'
+               WHEN ps.meta ->> 'self_exclusion' = 'accession_after_retrieval'
+                   THEN 'self-excluded-after-retrieval'
                WHEN ps.meta ->> 'exclude_self_neighbour' IS NULL
                    THEN 'self-unrecorded'
                WHEN (ps.meta ->> 'exclude_self_neighbour')::boolean

@@ -32,6 +32,11 @@ from protea.core.operations.predict_go_terms._photo_sequences import (
     photo_sequences,
     photo_taxa,
 )
+from protea.core.operations.predict_go_terms._pool_admission import (
+    channels_of_the_cut,
+    positive_rows,
+)
+from protea.core.operations.predict_go_terms._search_space import search_space
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -138,9 +143,9 @@ class _FeatureLoadingMixin:
 
         Returns the raw rows; the join to ``go_term`` is added only when
         aspect filtering is requested so the common (non-aspect-separated)
-        path stays as fast as before. ``qualifier IS NULL`` is preserved
-        explicitly because SQL ``LIKE`` returns NULL for NULL inputs and
-        would otherwise drop those rows.
+        path stays as fast as before. Only positive rows are read
+        (``_pool_admission.positive_rows``, which keeps the rows with no
+        qualifier explicitly).
         """
         q = session.query(
             ProteinGOAnnotation.protein_accession,
@@ -150,10 +155,7 @@ class _FeatureLoadingMixin:
         ).filter(
             ProteinGOAnnotation.annotation_set_id == annotation_set_id,
             ProteinGOAnnotation.protein_accession.in_(chunk),
-            (
-                ProteinGOAnnotation.qualifier.is_(None)
-                | ~ProteinGOAnnotation.qualifier.like("%NOT%")
-            ),
+            positive_rows(),
         )
         if aspect is not None:
             q = q.join(ProteinGOAnnotation.go_term).filter(GOTerm.aspect == aspect)
@@ -164,7 +166,8 @@ class _FeatureLoadingMixin:
         # 2,801,404 stored rows came to carry an evidence code the policy
         # excludes, and how 1,300 cells with no experimental prior were
         # predicted from the protein's own IEA row.
-        return _restrict_annotations(q, donor_policy).all()
+        channels_at = channels_of_the_cut(session, annotation_set_id, donor_policy)
+        return _restrict_annotations(q, donor_policy, channels_at).all()
 
     def _load_query_embeddings(
         self,
@@ -180,6 +183,10 @@ class _FeatureLoadingMixin:
         have an embedding are included. What that leaves out is reported rather
         than left to be inferred from a row count: see
         :mod:`._missing_query_vectors`, which carries the measurement.
+
+        In a declared search space the queries are mapped with the statistics
+        the pool was mapped with (``._search_space``), so a bank vector asked as
+        a query lands where its row of the transformed pool is.
         """
         if p.query_set_id:
             query_set_id = uuid.UUID(p.query_set_id)
@@ -214,6 +221,9 @@ class _FeatureLoadingMixin:
         )
         # Rows return pgvector HalfVector instances (halfvec column since 2026-04-11).
         embeddings = np.array([r[1].to_list() for r in rows], dtype=np.float32)
+        space = search_space(session, p)
+        if space is not None:
+            space.apply(embeddings)
         return embeddings, valid_accessions
 
     def _load_sequences_for_proteins(
@@ -301,14 +311,20 @@ class _FeatureLoadingMixin:
         p: PredictGOTermsBatchPayload,
         accessions: list[str],
     ) -> dict[str, int | None]:
+        """Accession to taxon of the queries: the member's at the cut on a photo's run.
+
+        With a query set too. A set of photo members or a window sample names
+        the cut's members, and ``protein.taxonomy_id`` is today's entry, empty
+        for a protein a photo inserted, so reading it left the query side of
+        every taxonomy feature null on a run that declared its population.
+        """
         from protea.config.tuning import get_tuning
 
         chunk_size = get_tuning().operation.annotation_chunk_size
         acc_set = set(accessions)
-        if not p.query_set_id:
-            photo = photo_of(session, p.annotation_set_id)
-            if photo is not None:
-                return photo_taxa(session, photo, sorted(acc_set), chunk_size)
+        photo = photo_of(session, p.annotation_set_id)
+        if photo is not None:
+            return photo_taxa(session, photo, sorted(acc_set), chunk_size)
         result: dict[str, int | None] = {acc: None for acc in acc_set}
         acc_list = list(acc_set)
         for i in range(0, len(acc_list), chunk_size):

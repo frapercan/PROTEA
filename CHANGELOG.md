@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Behaviour changes
+
+* **predict:** the reference pool admits a donor only through a positive (non-NOT) row that passes the donor policy's filters, as the per-aspect indices and the donation loader already did. Aspect-separated retrieval is unchanged, its candidate rows byte-identical; unified retrieval no longer admits a donor whose admitted rows are all NOT rows, which took a neighbour slot and donated nothing. **Unified runs made before this change are not reproduced by it.** The pool cache key's epoch moves from `e4` to `e5`, so no pool cached under the old admission is served.
+
 ## [0.8.0](https://github.com/frapercan/PROTEA/compare/v0.7.2...v0.8.0) (2026-05-07)
 
 

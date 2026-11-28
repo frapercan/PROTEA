@@ -22,6 +22,7 @@ from protea.core.operations.predict_go_terms._common import (
 )
 from protea.core.operations.predict_go_terms._photo_sequences import member_sequences, photo_of
 from protea.core.operations.predict_go_terms._receipt import run_receipt
+from protea.core.operations.predict_go_terms._search_space import SearchSpace, search_space
 from protea.core.utils import contract_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -86,77 +87,68 @@ def _refuse_an_undeclared_corpus(count: int) -> None:
     )
 
 
-_SEARCH_IN_A_DECLARED_SPACE = (
-    "the search in a declared space (branch feat/embedding-transform-in-the-search)"
-)
-_DONOR_SET_AND_CHANNELS = (
-    "the donor set, the evidence channels and the exclusion after retrieval in the search "
-    "(branch feat/donor-set-and-channels)"
-)
+def _refuse_donors_the_cut_does_not_declare(session: Session, p: PredictGOTermsPayload) -> None:
+    """Refuse a donor set or channels the run's cut photo does not declare.
 
-#: Each field protea-contracts 1.8.0 named before this revision's search could
-#: run it, with the change that makes the search run it. An entry leaves with
-#: the code it names.
-_IN_THE_SEARCH_WITH: dict[str, str] = {
-    "embedding_transform": _SEARCH_IN_A_DECLARED_SPACE,
-    "donor_policy.donor_set_id": _DONOR_SET_AND_CHANNELS,
-    "donor_policy.evidence_channels": _DONOR_SET_AND_CHANNELS,
-    "self_exclusion 'accession_after_retrieval'": _DONOR_SET_AND_CHANNELS,
-}
-
-
-def _refuse_what_the_search_does_not_run_yet(p: PredictGOTermsPayload) -> None:
-    """Refuse a field the contract names and this revision's search does not run yet.
-
-    WHY. protea-contracts 1.8.0 lets a predict payload name four things: the
-    space the search runs in, a declared set of donors, the evidence channels a
-    donation may come through, and the query leaving its own neighbourhood after
-    retrieval. The payload validates all four, and ``extra="forbid"`` refuses only
-    a field the contract does not know. Without this, a run naming the space or a
-    donor restriction would search as though it were unset while its job still
-    asked for it, and for the two donor fields its receipt and the name of its
-    pool's cache would say the restriction was applied. The exclusion after
-    retrieval would reach protea-method's search untested through this path, and
-    the arm identity would read the run as one that excluded the query by
-    sequence. Either way the rows of one search are filed under the name of
-    another. Each refusal names the change that runs the field, and leaves with
-    it.
-
-    It reads nothing but the payload, so it refuses before any lookup.
+    A donor set is a declared set of the members of one photo
+    (``declare_photo_member_set``), and the run's donors are the members of the
+    photo that loaded its annotation set: a set of another photo's members, a
+    set of another kind or no photo at all would restrict the pool by a list
+    that is not the corpus at this cut, under a cache key and a receipt that
+    say it is. Evidence channels are read at the photo's cut, with the channel
+    table it was classified with, so an annotation set no photo loaded has none.
     """
-    asked: list[str] = []
-    if p.embedding_transform is not None:
-        asked.append("embedding_transform")
-    if p.donor_policy.donor_set_id is not None:
-        asked.append("donor_policy.donor_set_id")
-    if p.donor_policy.evidence_channels is not None:
-        asked.append("donor_policy.evidence_channels")
-    if p.self_exclusion == "accession_after_retrieval":
-        asked.append("self_exclusion 'accession_after_retrieval'")
-    if not asked:
+    policy = p.donor_policy
+    if policy.donor_set_id is None and policy.evidence_channels is None:
         return
-    by_change: dict[str, list[str]] = {}
-    for field in asked:
-        by_change.setdefault(_IN_THE_SEARCH_WITH[field], []).append(field)
-    named = "; ".join(
-        f"{_listed(fields)} {'comes' if len(fields) == 1 else 'come'} with {change}"
-        for change, fields in by_change.items()
-    )
-    them = "it" if len(asked) == 1 else "them"
-    raise ValueError(
-        f"this revision's search does not run what the payload asks for: {named}. Run here, "
-        "its rows would be filed under a request they do not answer, so the run is refused; "
-        f"leave {them} unset until that code is deployed"
-    )
+    photo = photo_of(session, p.annotation_set_id)
+    if photo is None:
+        named = (
+            "donor_policy.donor_set_id" if policy.donor_set_id else "donor_policy.evidence_channels"
+        )
+        raise ValueError(
+            f"{named} restricts the donors at a cut, and annotation set "
+            f"{p.annotation_set_id} was loaded by no cut photo"
+        )
+    if policy.donor_set_id is None:
+        return
+    try:
+        donor_set = session.get(QuerySet, uuid.UUID(policy.donor_set_id))
+    except ValueError:
+        donor_set = None
+    if donor_set is None:
+        raise ValueError(f"donor set {policy.donor_set_id} is not a query set")
+    if donor_set.source_kind != "photo_members" or donor_set.cut_photo_id != photo:
+        raise ValueError(
+            f"donor set {policy.donor_set_id} is a {donor_set.source_kind} set "
+            f"(photo {donor_set.cut_photo_id}); the donors of this run are the members of "
+            f"photo {photo}, so only a photo_members set of that photo may restrict them"
+        )
 
 
-def _listed(names: list[str]) -> str:
-    """``a``, ``a and b``, ``a, b and c``."""
-    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+def _donor_bits(policy: dict[str, Any], self_exclusion: str | None) -> list[str]:
+    """The donor set, the channels and the exclusion after retrieval, as a job summary says them."""
+    bits: list[str] = []
+    if policy.get("donor_set_id"):
+        bits.append(f"donors={str(policy['donor_set_id'])[:8]}")
+    if policy.get("evidence_channels"):
+        bits.append(f"channels={len(policy['evidence_channels'])}")
+    if self_exclusion == "accession_after_retrieval":
+        bits.append("query-left-after-retrieval")
+    return bits
+
+
+def _space_bit(transform: str | None) -> list[str]:
+    """The declared search space, as a job summary says it."""
+    return [] if not transform else [f"space={transform}"]
 
 
 def _new_prediction_set(
-    p: PredictGOTermsPayload, ids: tuple[Any, Any, Any], queries: int, parent_job_id: UUID
+    p: PredictGOTermsPayload,
+    ids: tuple[Any, Any, Any],
+    queries: int,
+    parent_job_id: UUID,
+    space: SearchSpace | None = None,
 ) -> PredictionSet:
     """The set this run writes into: its inputs, its receipt, what it is and who made it."""
     embedding_config_id, annotation_set_id, ontology_snapshot_id = ids
@@ -167,7 +159,7 @@ def _new_prediction_set(
         query_set_id=uuid.UUID(p.query_set_id) if p.query_set_id else None,
         limit_per_entry=p.limit_per_entry,
         distance_threshold=p.distance_threshold,
-        meta=run_receipt(p, parent_job_id),
+        meta=run_receipt(p, parent_job_id, space),
         description=(
             f"Nearest-neighbour transfer from embedding configuration {embedding_config_id} "
             f"over annotation set {annotation_set_id}, {queries} queries, at most "
@@ -240,6 +232,8 @@ class PredictGOTermsOperation:
             bits.append(backend)
         if p.get("aspect_separated_knn"):
             bits.append("aspect-knn")
+        bits.extend(_donor_bits(p.get("donor_policy") or {}, p.get("self_exclusion")))
+        bits.extend(_space_bit(p.get("embedding_transform")))
         if p.get("compute_alignments"):
             bits.append("+align")
         if p.get("compute_taxonomy"):
@@ -250,11 +244,14 @@ class PredictGOTermsOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = PredictGOTermsPayload.model_validate(contract_payload(payload))
-        _refuse_what_the_search_does_not_run_yet(p)
         parent_job_id = UUID(payload["_job_id"])
         embedding_config_id, annotation_set_id, ontology_snapshot_id, config = (
             self._validate_inputs(session, p)
         )
+        _refuse_donors_the_cut_does_not_declare(session, p)
+        # Read and verified once here, before any batch exists, so a space the
+        # search cannot run is refused whole and the receipt records its values.
+        space = search_space(session, p)
         self._emit_start(emit, p, config.model_name)
         dispatch = _RerankerDispatch(
             single=self._resolve_reranker_binding(session, p, emit),
@@ -267,7 +264,7 @@ class PredictGOTermsOperation:
             return OperationResult(result={"batches": 0, "queries": 0})
 
         ids = (embedding_config_id, annotation_set_id, ontology_snapshot_id)
-        prediction_set = _new_prediction_set(p, ids, len(query_accessions), parent_job_id)
+        prediction_set = _new_prediction_set(p, ids, len(query_accessions), parent_job_id, space)
         session.add(prediction_set)
         session.flush()
 
@@ -427,13 +424,13 @@ class PredictGOTermsOperation:
             # is JSON-serialised onto AMQP. Both were silently dropped before,
             # see test_coordinator_forwards_payload_fields.
             "donor_policy": (p.donor_policy.model_dump(mode="json") if p.donor_policy else None),
-            # Retriever, not donor policy: who may be a neighbour, not which
-            # annotations may donate. Measured 2026-08-28 with self-retrieval
-            # allowed: the query was its own nearest neighbour for 95.0 per
-            # cent of candidate rows at depth 1.
+            # Retriever, not donor policy: who may be a neighbour, not which annotations may
+            # donate. Measured 2026-08-28 with self-retrieval allowed: the query was its own
+            # nearest neighbour for 95.0 per cent of candidate rows at depth 1.
             "exclude_self_neighbour": getattr(p, "exclude_self_neighbour", False),
-            # By sequence (the query and its twins) or by accession (it alone).
+            # Who leaves with the query and when; the space both sides are mapped into.
             "self_exclusion": getattr(p, "self_exclusion", None),
+            "embedding_transform": p.embedding_transform,
             "compute_protst": getattr(p, "compute_protst", False),
             "compute_ia": getattr(p, "compute_ia", False),
             "ia_file": getattr(p, "ia_file", None),
@@ -561,12 +558,8 @@ def _accessions_with_a_vector(
     """The queries with a vector of the config, by the photo's sequences on a photo's run."""
     photo = photo_of(session, p.annotation_set_id)
     if photo is not None:
-        # A photo's run: each query searches with its sequence at the cut.
-        if p.compute_alignments:
-            raise ValueError(
-                "alignments read today's sequences, and this run transfers from a photo; "
-                "run it with compute_alignments off"
-            )
+        # A photo's run: each query searches with its sequence at the cut, and
+        # its alignments read the same sequences (``photo_sequences``).
         members = member_sequences(photo)
         q = session.query(members.c.accession).join(
             SequenceEmbedding,

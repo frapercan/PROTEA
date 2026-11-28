@@ -28,11 +28,11 @@ from protea.core.disk_cache import (
     _save_anno_csr_to_disk,
     pool_fingerprint,
 )
-from protea.core.operations.predict_go_terms._batch_op_reference import (
+from protea.core.operations.predict_go_terms._aspect_caches import (
     _check_index_addresses_pool,
     _find_missing_aspects,
-    _PoolRequest,
 )
+from protea.core.operations.predict_go_terms._batch_op_reference import _PoolRequest
 
 CFG = uuid.uuid4()
 ANN = uuid.uuid4()

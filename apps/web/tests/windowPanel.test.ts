@@ -3,8 +3,10 @@
 import { describe, expect, it } from "vitest";
 import {
   armLabel,
+  armModel,
   armShort,
   bandOf,
+  channelsLabel,
   bandRanking,
   championSteps,
   modelName,
@@ -78,6 +80,55 @@ describe("the names people read", () => {
     expect(armLabel(bySequence)).toBe("ESM-2 650M · embedding_only · k=30");
     expect(sameExclusion(byAccession.arm, bySequence.arm)).toBe(false);
     expect(sameExclusion(bySequence.arm, result("old", { depth: 30, self_exclusion: null }).arm)).toBe(true);
+  });
+
+  it("says when the query left only after the asked depth was retrieved", () => {
+    const afterRetrieval = result("lafa", { depth: 5, self_exclusion: "accession_after_retrieval" });
+    expect(armLabel(afterRetrieval)).toBe("ESM-2 650M · embedding_only · k=5 · query left after retrieval");
+    expect(armShort(afterRetrieval)).toBe("650M emb k=5 after");
+    const byAccession = result("acc", { depth: 5, self_exclusion: "accession" });
+    expect(sameExclusion(afterRetrieval.arm, byAccession.arm)).toBe(false);
+  });
+
+  it("tells the breadth levels and the channel sets of one model apart", () => {
+    const level = result("l1", { donor_set: { id: "0d1e2f3a-0000", name: "donors-level-1-experimental-211" } });
+    const unnamed = result("l2", { donor_set: { id: "9f8e7d6c-0000", name: null } });
+    const recipe = result("r", {
+      channels: ["truth", "curated", "phylogenetic", "orthology_electronic", "reviewed_field_electronic"],
+    });
+    const mirror = result("m", {
+      channels: [
+        "truth",
+        "curated",
+        "phylogenetic",
+        "orthology_electronic",
+        "reviewed_field_electronic",
+        "signature_electronic",
+      ],
+    });
+    const truth = result("t", { channels: ["truth"], donor_set: level.arm.donor_set });
+    expect(armModel(level)).toBe("ESM-2 650M · donors-level-1-experimental-211");
+    expect(armModel(unnamed)).toBe("ESM-2 650M · donor set 9f8e7d6c");
+    expect(armModel(recipe)).toBe("ESM-2 650M · recipe channels");
+    expect(armModel(mirror)).toBe("ESM-2 650M · recipe + signatures");
+    expect(armModel(truth)).toBe("ESM-2 650M · donors-level-1-experimental-211 · truth channel");
+    expect(armShort(recipe)).toBe("650M · recipe channels emb k=30");
+    expect(modelsOf([level, recipe, mirror, result("plain")])).toEqual([
+      "ESM-2 650M · donors-level-1-experimental-211",
+      "ESM-2 650M · recipe channels",
+      "ESM-2 650M · recipe + signatures",
+      "ESM-2 650M",
+    ]);
+    expect(sameExclusion(level.arm, unnamed.arm)).toBe(false);
+    expect(sameExclusion(recipe.arm, mirror.arm)).toBe(false);
+    expect(sameExclusion(recipe.arm, result("again", { channels: recipe.arm.channels }).arm)).toBe(true);
+  });
+
+  it("names the channels as people do", () => {
+    expect(channelsLabel(null)).toBeNull();
+    expect(channelsLabel([])).toBeNull();
+    expect(channelsLabel(["orthology_electronic"])).toBe("orthology_electronic channel");
+    expect(channelsLabel(["truth", "curated"])).toBe("channels truth, curated");
   });
 
   it("names a method built on the own annotations by its own name, never as them", () => {

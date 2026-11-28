@@ -235,6 +235,69 @@ def test_the_fragment_separates_the_regimes_it_claims_to(postgres_url: str) -> N
         session.rollback()
 
 
+def test_the_fragment_names_the_donor_set_the_channels_and_the_exclusion_after_retrieval(
+    postgres_url: str,
+) -> None:
+    """Each new field of the donor policy is a level of its own, and nothing old moves.
+
+    Without the set and the channels in the name, a breadth level and the
+    recipe arm read 'permissive' beside the unrestricted arm. Without its own
+    branch, a run whose query left after retrieval read 'self-excluded', the
+    level of the exclusion by sequence.
+    """
+    from protea.infrastructure.orm.base import Base
+
+    engine = create_engine(postgres_url, future=True)
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+
+    revision = {"features": [], "code_revision": "b" * 40, "exclude_self_neighbour": True}
+    level = "0d1e2f3a-0000-4000-8000-000000000001"
+    recipe = [
+        "truth",
+        "curated",
+        "phylogenetic",
+        "orthology_electronic",
+        "reviewed_field_electronic",
+    ]
+    regimes = {
+        "every member": {**revision, "donor_policy": {}},
+        "level": {**revision, "donor_policy": {"donor_set_id": level}},
+        "recipe": {**revision, "donor_policy": {"evidence_channels": recipe}},
+        "level and truth": {
+            **revision,
+            "donor_policy": {"donor_set_id": level, "evidence_channels": ["truth"]},
+        },
+        "codes and truth": {
+            **revision,
+            "donor_policy": {"evidence_codes": ["EXP"], "evidence_channels": ["truth"]},
+        },
+        "after retrieval": {
+            **revision,
+            "donor_policy": {},
+            "self_exclusion": "accession_after_retrieval",
+        },
+    }
+    with Session(engine) as session:
+        parents = make_parents(session)
+        ids = {name: make_prediction_set(session, parents, meta) for name, meta in regimes.items()}
+        rows = _identity_rows(session, ids)
+        session.rollback()
+
+    donors = {name: row[0] for name, row in rows.items()}
+    assert donors == {
+        "every member": "permissive",
+        "level": "donor set 0d1e2f3a",
+        "recipe": "channels truth+curated+phylogenetic+orthology_electronic"
+        "+reviewed_field_electronic",
+        "level and truth": "donor set 0d1e2f3a + channels truth",
+        "codes and truth": "evidence-gated + channels truth",
+        "after retrieval": "permissive",
+    }
+    assert rows["after retrieval"][1] == "self-excluded-after-retrieval"
+    assert rows["every member"][1] == "self-excluded"
+
+
 def _identity_rows(
     session: Session, ids: dict[str, uuid.UUID]
 ) -> dict[str, tuple[str, ...]]:

@@ -287,7 +287,7 @@ class TestTheCollectorActuallyPinsTheOrder:
         query.filter = lambda *a, **k: query
         session = MagicMock()
         session.query.return_value = query
-        with patch.object(refmod, "_restrict_annotations", lambda q, p: q):
+        with patch.object(refmod, "_restrict_annotations", lambda q, p, channels_at=None: q):
             return PredictGOTermsBatchOperation._collect_aspect_annotations(
                 session, ["P"], ANN, None
             )

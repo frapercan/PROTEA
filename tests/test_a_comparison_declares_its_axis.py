@@ -419,6 +419,19 @@ class TestItDoesNotWidenInSilence:
 
         from protea.core.operations.predict_go_terms._receipt import run_receipt
 
+        import numpy as np
+
+        from protea.core.embedding_space.transforms import SpaceParameters
+        from protea.core.operations.predict_go_terms._search_space import SearchSpace
+
+        parameters = SpaceParameters(
+            mean=np.zeros(4),
+            variances=np.ones(4),
+            eigenvalues=np.ones(4),
+            eigenvectors=np.eye(4),
+            shrinkage=0.1,
+            removed_directions=1,
+        )
         written: set[str] = set()
         for backend, asked in (("numpy", None), ("faiss", ["P12345", "Q67890"])):
             payload = PredictGOTermsPayload(
@@ -432,13 +445,19 @@ class TestItDoesNotWidenInSilence:
                 donor_policy=DonorPolicy(reviewed_only=False, evidence_codes=["EXP"]),
                 reranker_model_id=str(uuid.uuid4()),
                 self_exclusion="accession" if asked else None,
+                embedding_transform="whiten" if asked else None,
             )
-            written |= set(run_receipt(payload, uuid.uuid4()))
+            space = SearchSpace("whiten", uuid.uuid4(), "a" * 64, 10, 4, parameters)
+            written |= set(run_receipt(payload, uuid.uuid4(), space if asked else None))
         classified = set(METHOD_IDENTITY_FIELDS) | set(EXECUTION_ONLY_FIELDS)
         assert written - classified == set(), "the receipt writes keys the seal does not know"
-        assert {"faiss", "rerankers", "query_population", "self_exclusion"} <= written, (
-            "the conditional blocks stopped being written"
-        )
+        assert {
+            "faiss",
+            "rerankers",
+            "query_population",
+            "self_exclusion",
+            "embedding_transform",
+        } <= written, "the conditional blocks stopped being written"
 
     def test_an_unrecorded_revision_is_not_a_shared_revision(self) -> None:
         # Two absences agree everywhere else in this seal, and correctly: two
@@ -654,3 +673,46 @@ def test_the_self_exclusion_rule_is_an_axis_of_the_method() -> None:
     with pytest.raises(CrossedMethodAxes, match="self_exclusion"):
         assert_one_axis(["metric"], by_accession, by_sequence)
     assert_one_axis(["self_exclusion"], by_accession, by_sequence)
+
+
+def test_the_exclusion_after_retrieval_and_the_donor_fields_are_axes_of_the_method() -> None:
+    """LAFA's search and a declared breadth or channel set each move one named field.
+
+    The query leaving after retrieval is a value of ``self_exclusion``; a donor set
+    and a channel set are restrictions inside ``donor_policy``. A comparison across
+    either has to declare it, and declaring it is enough.
+    """
+    shared: dict[str, Any] = {
+        "annotation_set_id": "cbb35a32-44e4-4e39-b524-05b4b7433727",
+        "ontology_snapshot_id": "6b78af68-eb01-477e-a599-fcde11ff0135",
+        "code_revision": "8699bfd7eec382aadd03f471b127f8be6f71cffd",
+        "aspect_separated_knn": False,
+        "expand_votes_to_ancestors": False,
+    }
+    by_accession = _pset(_BANK_220, **shared, meta={"self_exclusion": "accession"})
+    after = _pset(_BANK_165, **shared, meta={"self_exclusion": "accession_after_retrieval"})
+    with pytest.raises(CrossedMethodAxes, match="self_exclusion"):
+        assert_one_axis([], after, by_accession)
+    assert assert_one_axis(["self_exclusion"], after, by_accession) == ("self_exclusion",)
+
+    every_member = _pset(_BANK_220, **shared)
+    breadth = {"donor_set_id": "0d1e2f3a-0000-4000-8000-000000000001"}
+    level_one = _pset(
+        _BANK_165,
+        **shared,
+        meta={"donor_policy": {**every_member["meta"]["donor_policy"], **breadth}},
+    )
+    recipe = _pset(
+        _BANK_165,
+        **shared,
+        meta={
+            "donor_policy": {
+                **every_member["meta"]["donor_policy"],
+                "evidence_channels": ["truth", "curated"],
+            }
+        },
+    )
+    for restricted in (level_one, recipe):
+        with pytest.raises(CrossedMethodAxes, match="donor_policy"):
+            assert_one_axis([], restricted, every_member)
+        assert assert_one_axis(["donor_policy"], restricted, every_member) == ("donor_policy",)

@@ -150,6 +150,12 @@ _IDENTITY_META: tuple[str, ...] = (
     # (protea.core.denials): it changes which candidates exist.
     "denials",
     "donor_policy",
+    # The space the neighbour search ran in (predict_go_terms._search_space): the
+    # transform and the statistics that define it, by id and sha256. Neighbours
+    # near in the whitened space are not the raw space's, so it is the method.
+    # Written only by a run in a declared space; two absences agree, as two runs
+    # in the configuration's own space do.
+    "embedding_transform",
     # The window a native method read its inputs from (run_own_annotations,
     # run_count_map): its targets, its cut's state and its frame's rules, the
     # NOT codes among them, which no other field names whole.
