@@ -10,16 +10,25 @@ For the window named by ``evaluation_set_id`` (t0 -> t1):
 2. Every protein's state at t0 (``protea.core._cut_state.window_state``): the
    window's own rules, with t0's NOT terms alone; a window of LAFA's frame states
    it as that frame states an end, under t0's own ontology.
-3. The donors are the photo's truth members and the targets the proteins the
-   window's truth scores, both by their sequence md5 in the photo. A target the
-   photo gives no sequence is read from the prior alone, and counted.
+3. The donors are the photo's truth members and the targets the window's: its
+   declared sample when it is kept to one (read from the query set, the truth never
+   read), the proteins its truth scores otherwise
+   (``protea.core.operations._window_targets``); both by their sequence md5 in the
+   photo. A target the photo gives no sequence is read from the prior alone, and
+   counted.
 4. Per aspect, m is fitted on the donors alone and the targets are read
-   (``protea.core.count_map``).
+   (``protea.core.count_map``). A reading leaves out of a target's units the donors
+   that share its sequence (``exclusion`` ``sequence``, the laboratory's rule) or
+   only the target's own accession (``accession``, the rule the platform's retrieval
+   follows; twins under other accessions stay donors), and keeps the ``top`` best
+   terms per target and aspect, or, with ``top`` null, every term the evaluator can
+   count (the grid floor).
 5. The map is registered as ``count_map`` weights fitted on t0's annotation set;
    the method row is derived from its spec (instance at t0; pins: the lexicon,
    the bank's manifest, the families' manifest when they give the units, the
    map); one prediction set holds its ``method_score``
-   rows and one explanation per row.
+   rows and one explanation per row, and names the targets by the query set that
+   declares them when one does, by their digest otherwise.
 
 It reads GO labels at t0 and nothing later, so its instance is the cut and it
 names no training window. The same method over the same window again is a
@@ -42,16 +51,17 @@ from sqlalchemy.orm import Session
 
 from protea.core import lafa_frame
 from protea.core._cut_state import CutState, window_state
-from protea.core._evaluation_groundtruth import load_evaluation_data_for_set
 from protea.core.contracts.method import Family, InstanceCut, MethodSpec, Pin
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.count_map.inputs import (
+    Who,
     aspect_problem,
     columns_of,
     family_units,
     member_md5s,
     theme_units,
 )
+from protea.core.count_map.reading import GRID_FLOOR
 from protea.core.count_map.run import AspectResult, fit_and_read, map_bytes
 from protea.core.method_write import (
     SetContext,
@@ -60,6 +70,7 @@ from protea.core.method_write import (
     ensure_method,
     new_prediction_set,
 )
+from protea.core.operations._window_targets import WindowTargets, window_targets
 from protea.core.query_population import population_of
 from protea.core.source_guards import SourceGuardError
 from protea.core.utils import contract_payload, job_id_from_payload
@@ -80,6 +91,22 @@ LAFA_STATE = (
     "named and closed under t0's own ontology as LAFA's frame states an end, each NOT term "
     "of t0 and everything under it taken out first"
 )
+#: What a reading leaves out of a target's units, by the payload's ``exclusion``; the
+#: words are the recipe's. The fit leaves the same group out of each donor's reading.
+EXCLUSION = {
+    "sequence": "the donors that share the target's sequence md5",
+    "accession": (
+        "the target's own accession only, in the fit and in the reading: donors that share "
+        "its sequence under another accession stay"
+    ),
+}
+#: The recipe's words for a reading at the grid floor.
+FLOOR = (
+    "every term whose four-decimal rendering is at or above the first threshold of the "
+    f"evaluator's grid, {GRID_FLOOR}, with no top"
+)
+#: The longest short name a method may have (ADR-D58), its code plus "-<cut>".
+SHORT_NAME_MAX = 64
 
 
 class CountMapRefused(SourceGuardError):
@@ -91,7 +118,10 @@ class RunCountMapPayload(ProteaPayload, frozen=True):
 
     ``units`` are the lexicon's themes, or the families of one ``scope`` of the
     segment families named by ``segment_families_id``; the two fields go
-    together and only with families.
+    together and only with families. ``top`` is the reading's depth per target and
+    aspect, or null for the grid floor (every term the evaluator can count);
+    ``exclusion`` is what a target's reading leaves out: the donors sharing its
+    sequence, or its own accession only.
     """
 
     evaluation_set_id: str
@@ -99,7 +129,8 @@ class RunCountMapPayload(ProteaPayload, frozen=True):
     units: Literal["themes", "families"] = "themes"
     segment_families_id: str | None = None
     scope: Literal["strict", "permissive"] | None = None
-    top: PositiveInt = 100
+    top: PositiveInt | None = 100
+    exclusion: Literal["sequence", "accession"] = "sequence"
 
     @field_validator("evaluation_set_id", "lexicon_bank_id", "segment_families_id", mode="before")
     @classmethod
@@ -175,7 +206,7 @@ def resolve(session: Session, p: RunCountMapPayload) -> Sources:
 
 @dataclass(frozen=True)
 class Gathered:
-    """What the cut says: states, donors, targets, sequences and units."""
+    """What the cut says: states, donors, targets, sequences and units; and the targets' spelling."""
 
     state: CutState
     donors: list[str]
@@ -183,14 +214,16 @@ class Gathered:
     md5_of: dict[str, str]
     units: tuple[dict[str, np.ndarray], int]
     without_sequence: int
+    #: How the set names its targets: the query set that declares them, or their digest.
+    spelling: WindowTargets | None = None
 
 
 def gather(session: Session, store: Any, src: Sources) -> Gathered:
     """Every input of the fit and the reading, read at t0."""
     state = window_state(session, src.eset)
     donor_md5 = member_md5s(session, src.photo.id)
-    truth, _ = load_evaluation_data_for_set(session, src.eset)
-    targets = sorted(set(truth.nk) | set(truth.lk) | set(truth.pk))
+    spelling = window_targets(session, src.eset)
+    targets = spelling.accessions
     target_md5 = member_md5s(session, src.photo.id, targets)
     md5_of = {**donor_md5, **target_md5}
     wanted = set(md5_of.values())
@@ -206,10 +239,11 @@ def gather(session: Session, store: Any, src: Sources) -> Gathered:
         md5_of,
         (units, n_units),
         sum(1 for t in targets if t not in target_md5),
+        spelling,
     )
 
 
-def fit_all(data: Gathered, top: int, emit: EmitFn) -> list[AspectResult]:
+def fit_all(data: Gathered, p: RunCountMapPayload, emit: EmitFn) -> list[AspectResult]:
     """Each aspect fitted on its donors and read on the targets."""
     results = []
     for aspect, columns in columns_of(data.state.aspect).items():
@@ -224,7 +258,7 @@ def fit_all(data: Gathered, top: int, emit: EmitFn) -> list[AspectResult]:
             data.state.negatives,
             data.md5_of,
             data.units,
-            (data.donors, data.targets),
+            Who(data.donors, data.targets, p.exclusion),
         )
         if not problem.donors:
             emit(
@@ -234,7 +268,7 @@ def fit_all(data: Gathered, top: int, emit: EmitFn) -> list[AspectResult]:
                 "warning",
             )
             continue
-        result = fit_and_read(columns, problem, top)
+        result = fit_and_read(columns, problem, p.top)
         summary = {k: v for k, v in result.record.items() if k != "grid"}
         emit(
             "run_count_map.aspect", f"{aspect}: m {result.record['strength']:.3g}", summary, "info"
@@ -276,14 +310,34 @@ def register_map(
 
 
 def map_code(src: Sources, p: RunCountMapPayload) -> str:
-    """The map's code, which names its method and its weights alike.
+    """The map's code, which names its weights and begins its method's.
 
     A window of LAFA's frame states t0 its own way, so the same map over it is a
     variant at the same cut, and a variant needs a code of its own
-    (``method_short_name``); every other window keeps the code it had.
+    (``method_short_name``); so does a map whose donors are left out by accession,
+    whose strength is fitted for that reading. Every other map keeps the code it had.
     """
     lafa = src.eset.truth_profile == lafa_frame.PROFILE
-    return f"count-map-{p.label}-{src.lexicon.name}" + ("-lafa" if lafa else "")
+    code = f"count-map-{p.label}-{src.lexicon.name}" + ("-lafa" if lafa else "")
+    return code + ("-accession" if p.exclusion == "accession" else "")
+
+
+def method_code(src: Sources, p: RunCountMapPayload) -> str:
+    """The method's code: the map's, and ``-grid`` for a reading at the grid floor.
+
+    The depth changes the reading and not the map, so the two readings of one map
+    share its weights and are two methods.
+    """
+    return map_code(src, p) + ("-grid" if p.top is None else "")
+
+
+def refuse_a_name_too_long(src: Sources, p: RunCountMapPayload) -> None:
+    """Refuse, before anything is read, a method whose short name ADR-D58 cannot hold."""
+    name = f"{method_code(src, p)}-{src.photo.cut_release}"
+    if len(name) > SHORT_NAME_MAX:
+        raise CountMapRefused(
+            f"the method's short name {name!r} is longer than {SHORT_NAME_MAX} characters"
+        )
 
 
 def method_spec(src: Sources, weights: ModelWeights, p: RunCountMapPayload) -> MethodSpec:
@@ -306,9 +360,10 @@ def method_spec(src: Sources, weights: ModelWeights, p: RunCountMapPayload) -> M
             ),
         )
     lafa = src.eset.truth_profile == lafa_frame.PROFILE
+    floored = {} if p.top is not None else {"floor": FLOOR}
     return MethodSpec(
         family=Family.EXPLAINABLE_UNITS,
-        code=map_code(src, p),
+        code=method_code(src, p),
         instance=InstanceCut(src.photo.cut_release, src.photo.ontology_snapshot_id),
         recipe={
             "source": "count map (ADR-D65)",
@@ -316,10 +371,11 @@ def method_spec(src: Sources, weights: ModelWeights, p: RunCountMapPayload) -> M
             **scoped,
             "donors": "the photo's truth members",
             "state": LAFA_STATE if lafa else RECONCILED_STATE,
-            "exclusion": "the donors that share the target's sequence md5",
+            "exclusion": EXCLUSION[p.exclusion],
             "strength": "per aspect, the leave-group-out bits of the donors: 29 points on log m in [1e-3, 1e4], then 30 golden steps",
             "reading": "the best unit per term, floored at the base rate, NOT terms at t0 and their descendants out, roots out",
             "top": p.top,
+            **floored,
         },
         pins=(*pins, Pin("count-map", weights.sha256, (f"model_weights:{weights.id}",))),
         runtime="native",
@@ -349,6 +405,22 @@ def _rows(
             yield targets[int(rows.target[i])], term_ids[go_id], float(rows.score[i]), why
 
 
+def written_depth(results: list[AspectResult], top: int | None) -> int:
+    """The set's ``limit_per_entry``: three times the depth, or the most rows a target received.
+
+    At the grid floor no depth was asked for, so the set says what it wrote, as the
+    other native writers do.
+    """
+    if top is not None:
+        return 3 * top
+    per_target: dict[int, int] = {}
+    for result in results:
+        targets, counts = np.unique(result.rows.target, return_counts=True)
+        for target, count in zip(targets.tolist(), counts.tolist(), strict=True):
+            per_target[target] = per_target.get(target, 0) + count
+    return max(per_target.values(), default=0)
+
+
 def term_ids(session: Session, snapshot_id: uuid.UUID) -> dict[str, int]:
     rows = session.execute(
         text("SELECT go_id, id FROM go_term WHERE ontology_snapshot_id = :s"), {"s": snapshot_id}
@@ -370,13 +442,18 @@ class RunCountMapOperation:
         units = payload.get("units", "themes")
         if units == "families":
             units = f"families ({payload.get('scope', '')})"
-        return f"count map of {units} for window {str(payload.get('evaluation_set_id', ''))[:8]}"
+        depth = "at the grid floor" if "top" in payload and payload["top"] is None else ""
+        by = "by accession" if payload.get("exclusion") == "accession" else ""
+        extra = ", ".join(x for x in (depth, by) if x)
+        window = str(payload.get("evaluation_set_id", ""))[:8]
+        return f"count map of {units} for window {window}" + (f" ({extra})" if extra else "")
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = RunCountMapPayload.model_validate(contract_payload(payload))
         src = resolve(session, p)
+        refuse_a_name_too_long(src, p)
         store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
         data = gather(session, store, src)
         emit(
@@ -386,10 +463,13 @@ class RunCountMapOperation:
                 "donors": len(data.donors),
                 "targets": len(data.targets),
                 "targets_without_a_sequence": data.without_sequence,
+                "targets_from_a_declared_set": bool(
+                    data.spelling and data.spelling.from_a_declared_set
+                ),
             },
             "info",
         )
-        results = fit_all(data, p.top, emit)
+        results = fit_all(data, p, emit)
         name = f"{map_code(src, p)}-{src.photo.cut_release}"
         weights = register_map(session, store, src, results, name)
         method = ensure_method(session, method_spec(src, weights, p))
@@ -413,13 +493,14 @@ class RunCountMapOperation:
         emit: EmitFn,
     ) -> OperationResult:
         src, data, results, method = run
+        spelling = data.spelling or WindowTargets(data.targets, None, None)
         pset = new_prediction_set(
             session,
             method,
             SetContext(
                 annotation_set_id=src.photo.annotation_set_id,
                 ontology_snapshot_id=src.eset.pivot_snapshot_id,
-                limit_per_entry=3 * p.top,
+                limit_per_entry=written_depth(results, p.top),
                 description=(
                     f"The count map of {src.units} at cut {src.photo.cut_release}, "
                     f"read on the {len(data.targets):,} targets of window {src.eset.id}."
@@ -433,7 +514,8 @@ class RunCountMapOperation:
                     },
                 },
                 job_id=job_id_from_payload(payload),
-                population=population_of(data.targets),
+                population=None if spelling.from_a_declared_set else population_of(data.targets),
+                query_set_id=spelling.query_set_id,
             ),
         )
         ids = term_ids(session, src.eset.pivot_snapshot_id)

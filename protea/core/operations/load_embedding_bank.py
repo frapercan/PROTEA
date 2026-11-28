@@ -43,7 +43,10 @@ from protea.core.source_guards import SourceGuardError
 from protea.core.utils import contract_payload, job_id_from_payload
 from protea.infrastructure.orm.models.annotation.cut_photo import CutPhoto
 from protea.infrastructure.orm.models.embedding.embedding_bank import EmbeddingBank
-from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
+from protea.infrastructure.orm.models.embedding.embedding_config import (
+    OWN_ENCODER_BACKEND,
+    EmbeddingConfig,
+)
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
 
@@ -209,15 +212,47 @@ def store_manifest(bank_dir: Path, config_id: uuid.UUID, manifest_sha256: str) -
     return str(store.put(key, manifest_path(bank_dir, config_id)))
 
 
+def _model_slug(model: str) -> str:
+    """The model's part of a bank's short name.
+
+    A hub name gives its last part (``ElnaggarLab/ankh-base`` gives ``ankh-base``).
+    A model named by the digest of its weights (``jepa-segments/<sha256>``, the own
+    encoder) gives its name and the digest's first twelve characters, so two
+    encoders' banks get two names.
+    """
+    head, _, tail = model.rpartition("/")
+    base = f"{head}-{tail[:12]}" if head and re.fullmatch(r"[0-9a-f]{64}", tail) else tail
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]", "-", base.lower())).strip("-")
+
+
+def _own_encoder_description(manifest: dict[str, Any], cuts: list[int]) -> str:
+    """The long descriptor of the own segment encoder's bank (``protea.core.own_encoder``)."""
+    own = manifest["own_encoder"]
+    lexicon = own["lexicon"]
+    return (
+        f"The embedding bank of the own segment encoder {own['name']} (method family "
+        f"{own['family']}, label-free, weights sha256 {str(own['encoder_sha256'])[:12]}) over the "
+        f"{manifest['sequences']:,} unique member sequences of the photos of cuts "
+        f"{', '.join(map(str, cuts))} (ADR-D62): the target encoder's mean over a protein's "
+        f"first {own['segments_read']} segments of the lexicon {lexicon['name']}'s cut (bank "
+        f"manifest {str(lexicon['bank_manifest_sha256'])[:12]}), {manifest['dim']} dimensions "
+        f"stored as halfvec, not normalised. Trained on {own['members']['md5s']:,} member "
+        f"sequences (list sha256 {str(own['members']['sha256'])[:12]}); computed on "
+        f"{manifest['card']}."
+    )
+
+
 def descriptors(manifest: dict[str, Any]) -> tuple[str, str]:
     """ADR-D58's short and long descriptors, derived from the manifest, never typed."""
     recipe = manifest["recipe"]
     model = str(recipe["model_name"])
-    slug = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]", "-", model.rsplit("/", 1)[-1].lower()))
+    slug = _model_slug(model)
     cuts = sorted(int(p["cut_release"]) for p in manifest["photos"])
-    short = f"bank-{slug.strip('-')}-cuts-{'-'.join(map(str, cuts))}"
+    short = f"bank-{slug}-cuts-{'-'.join(map(str, cuts))}"
     if len(short) > 64:
-        short = f"bank-{slug.strip('-')}-cuts-{cuts[0]}-to-{cuts[-1]}"[:64]
+        short = f"bank-{slug}-cuts-{cuts[0]}-to-{cuts[-1]}"[:64]
+    if recipe.get("model_backend") == OWN_ENCODER_BACKEND:
+        return short, _own_encoder_description(manifest, cuts)
     software = manifest["software"]
     backends = str(software.get("protea-backends_commit") or software.get("protea-backends"))
     layers = ", ".join(map(str, recipe["layer_indices"]))
