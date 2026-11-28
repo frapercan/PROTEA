@@ -7,11 +7,11 @@ the evidence channels a donation may come through
 neighbourhood after retrieval (``self_exclusion`` ``"accession_after_retrieval"``).
 The payload validates all four, and ``extra="forbid"`` cannot refuse a field the
 contract knows. Until the code that runs each one lands, a run that named it
-would file its rows under a request they do not answer (the search would ignore
-the space and the donor restrictions, and the arm identity would read the
-exclusion after retrieval as the exclusion by sequence), so the coordinator
-refuses it before reading anything, naming the change that runs it. Everything
-a stored payload could ask for still passes.
+would file its rows under a request they do not answer, so the coordinator
+refuses it before reading anything, naming the change that runs it. The donor
+set, the channels and the exclusion after retrieval run in the search now
+(``tests/test_donor_set_and_channels_in_the_search.py``); the space is still
+refused. Everything a stored payload could ask for still passes.
 
 The contract's channel vocabulary is pinned here too. ``EvidenceChannel`` names
 PROTEA's partition so a payload can ask for channels without importing the
@@ -37,7 +37,6 @@ from protea.core.operations.predict_go_terms._coordinator import (
 )
 
 _SPACE = "feat/embedding-transform-in-the-search"
-_DONORS = "feat/donor-set-and-channels"
 
 
 def _fields(**overrides: Any) -> dict[str, Any]:
@@ -65,31 +64,20 @@ def test_a_search_space_is_refused_naming_the_search_in_a_declared_space(transfo
     message = _refusal(_payload(embedding_transform=transform))
     assert "embedding_transform" in message
     assert _SPACE in message
-    assert _DONORS not in message
 
 
-def test_a_donor_set_is_refused_naming_the_donor_set_change() -> None:
-    message = _refusal(_payload(donor_policy={"donor_set_id": str(uuid.uuid4())}))
-    assert "donor_policy.donor_set_id" in message
-    assert _DONORS in message
-    assert _SPACE not in message
+def test_the_donor_set_the_channels_and_the_exclusion_after_retrieval_now_pass() -> None:
+    """The search runs them, so the guard that stood for them is gone."""
+    p = _payload(
+        donor_policy={"donor_set_id": str(uuid.uuid4()), "evidence_channels": ["truth"]},
+        exclude_self_neighbour=True,
+        self_exclusion="accession_after_retrieval",
+    )
+    _refuse_what_the_search_does_not_run_yet(p)
 
 
-def test_evidence_channels_are_refused_naming_the_donor_set_change() -> None:
-    message = _refusal(_payload(donor_policy={"evidence_channels": ["truth", "curated"]}))
-    assert "donor_policy.evidence_channels" in message
-    assert _DONORS in message
-
-
-def test_the_exclusion_after_retrieval_is_refused_naming_the_donor_set_change() -> None:
-    p = _payload(exclude_self_neighbour=True, self_exclusion="accession_after_retrieval")
-    message = _refusal(p)
-    assert "accession_after_retrieval" in message
-    assert _DONORS in message
-
-
-def test_every_field_named_at_once_is_listed_in_one_refusal_with_each_change_once() -> None:
-    """One round trip shows all of them, grouped by the change that runs them."""
+def test_the_space_beside_the_donor_fields_is_refused_alone() -> None:
+    """One refusal, naming the one field still waiting and nothing that runs."""
     p = _payload(
         embedding_transform="whiten",
         donor_policy={"donor_set_id": "set", "evidence_channels": ["truth"]},
@@ -97,15 +85,10 @@ def test_every_field_named_at_once_is_listed_in_one_refusal_with_each_change_onc
         self_exclusion="accession_after_retrieval",
     )
     message = _refusal(p)
-    for field in (
-        "embedding_transform",
-        "donor_policy.donor_set_id",
-        "donor_policy.evidence_channels",
-        "accession_after_retrieval",
-    ):
-        assert field in message
+    assert "embedding_transform" in message
     assert message.count(_SPACE) == 1
-    assert message.count(_DONORS) == 1
+    for runs in ("donor_set_id", "evidence_channels", "accession_after_retrieval"):
+        assert runs not in message
 
 
 @pytest.mark.parametrize(
@@ -118,6 +101,7 @@ def test_every_field_named_at_once_is_listed_in_one_refusal_with_each_change_onc
         (False, "sequence"),
         (True, "accession"),
         (False, "accession"),
+        (True, "accession_after_retrieval"),
     ],
 )
 def test_every_exclusion_a_stored_payload_could_name_still_passes(

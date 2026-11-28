@@ -124,3 +124,32 @@ class TestTheSelfExclusionRuleIsRecorded:
         r = run_receipt(_payload(), uuid.uuid4())
         assert r["exclude_self_neighbour"] is False
         assert "self_exclusion" not in r
+
+    def test_the_exclusion_after_retrieval_is_recorded_with_its_flag(self):
+        r = run_receipt(
+            _payload(exclude_self_neighbour=True, self_exclusion="accession_after_retrieval"),
+            uuid.uuid4(),
+        )
+        assert (r["exclude_self_neighbour"], r["self_exclusion"]) == (
+            True,
+            "accession_after_retrieval",
+        )
+
+
+class TestTheDonorSetAndTheChannelsTravelInThePolicy:
+    """Recorded inside ``donor_policy`` when set, absent when not, so old receipts keep their bytes."""
+
+    def test_a_donor_set_and_channels_are_recorded(self):
+        donors = str(uuid.uuid4())
+        policy = DonorPolicy(donor_set_id=donors, evidence_channels=["curated", "truth"])
+        r = run_receipt(_payload(donor_policy=policy), uuid.uuid4())
+        assert r["donor_policy"]["donor_set_id"] == donors
+        assert r["donor_policy"]["evidence_channels"] == ["truth", "curated"]
+
+    def test_unset_they_leave_the_policy_as_it_was_recorded(self):
+        r = run_receipt(_payload(), uuid.uuid4())
+        assert r["donor_policy"] == {
+            "reviewed_only": False,
+            "evidence_codes": ["EXP", "IDA"],
+            "exclude_reference_prefixes": [],
+        }

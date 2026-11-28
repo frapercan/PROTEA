@@ -4,7 +4,8 @@ The page that listed a window's results downloaded every result's whole row,
 artefact keys and digests included, to show nine numbers a row: about 11 KB a
 result, 4.5 MB at the 420 results of a batch. The panel needs less and needs it
 side by side: what each arm is (model, scoring, method, how many neighbours it
-read, whether a target's own sequence could vote, how its scores were read),
+read, whether a target's own sequence could vote, who could donate and through
+which evidence channels, how its scores were read),
 the f_micro_w of each cell with the threshold it peaks at and whether that
 threshold is the grid's edge, and the strata profiles the stratification left
 on the result (``results["strata"]``). One query gives all of it.
@@ -60,10 +61,18 @@ _SUMMARY = text(
                     ps.meta ->> 'self_exclusion') AS self_exclusion,
            coalesce(cand.meta -> 'donor_policy' -> 'evidence_codes',
                     ps.meta -> 'donor_policy' -> 'evidence_codes') AS donor_codes,
+           coalesce(cand.meta -> 'donor_policy' ->> 'donor_set_id',
+                    ps.meta -> 'donor_policy' ->> 'donor_set_id') AS donor_set_id,
+           donor_set.name AS donor_set_name,
+           coalesce(cand.meta -> 'donor_policy' -> 'evidence_channels',
+                    ps.meta -> 'donor_policy' -> 'evidence_channels') AS donor_channels,
            j.payload ->> 'score_reading' AS job_reading
     FROM evaluation_result r
     JOIN prediction_set ps ON ps.id = r.prediction_set_id
     LEFT JOIN prediction_set cand ON cand.id::text = ps.meta ->> 'scored_from'
+    LEFT JOIN query_set donor_set
+           ON donor_set.id::text = coalesce(cand.meta -> 'donor_policy' ->> 'donor_set_id',
+                                            ps.meta -> 'donor_policy' ->> 'donor_set_id')
     LEFT JOIN embedding_config ec ON ec.id = ps.embedding_config_id
     LEFT JOIN annotation_set trained ON trained.id = ec.trained_on_annotation_set_id
     LEFT JOIN scoring_config sc ON sc.id::text = ps.meta ->> 'scoring_config_id'
@@ -131,6 +140,17 @@ def _donors(codes: list[str] | None) -> str | None:
     return "experimental" if set(codes) <= set(EXPERIMENTAL_EVIDENCE) else "all"
 
 
+def _donor_set(row: dict[str, Any]) -> dict[str, Any] | None:
+    """The declared set of photo members the donors were restricted to, by id and name.
+
+    ``None`` when the arm named none: every member of the photo, or every protein
+    of an annotation set no photo loaded, could donate.
+    """
+    if not row.get("donor_set_id"):
+        return None
+    return {"id": row["donor_set_id"], "name": row.get("donor_set_name")}
+
+
 def summary_row(row: dict[str, Any], frame: Frame | None = None) -> dict[str, Any]:
     """One result as the panel shows it, on the window ``frame`` spans.
 
@@ -164,11 +184,16 @@ def summary_row(row: dict[str, Any], frame: Frame | None = None) -> dict[str, An
             "method": row["method"],
             "depth": depth,
             "exclude_self": None if exclude is None else exclude == "true",
-            # Who left with the query: its twins too ("sequence") or nobody
-            # ("accession"). None when the run left it to the flag.
+            # Who left with the query: its twins too ("sequence"), nobody
+            # ("accession"), or nobody and after retrieval
+            # ("accession_after_retrieval"). None when the run left it to the flag.
             "self_exclusion": row["self_exclusion"],
             # Which annotations it transferred: two donor policies of one model are two arms.
             "donors": _donors(row.get("donor_codes")),
+            # Which members could donate, and through which channels: a breadth
+            # level and a channel set of one model are arms of their own too.
+            "donor_set": _donor_set(row),
+            "channels": row.get("donor_channels"),
             "reading": (results.get("reading") or {}).get("score_reading")
             or row["job_reading"]
             or "raw",

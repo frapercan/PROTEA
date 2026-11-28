@@ -128,6 +128,8 @@ def test_a_neighbour_arm_reads_its_cut_its_exclusion_and_its_reading() -> None:
         "exclude_self": True,
         "self_exclusion": None,
         "donors": None,
+        "donor_set": None,
+        "channels": None,
         "reading": "percentile_rank",
         "leak": "not_fitted",
         "training_release": None,
@@ -150,6 +152,31 @@ def test_two_donor_policies_of_one_model_are_two_arms() -> None:
 def test_an_arm_that_excluded_only_the_query_says_so() -> None:
     arm = summary_row(_row(self_exclusion="accession"), FRAME)["arm"]
     assert (arm["exclude_self"], arm["self_exclusion"]) == (True, "accession")
+
+
+def test_an_arm_whose_query_left_after_retrieval_says_so() -> None:
+    arm = summary_row(_row(self_exclusion="accession_after_retrieval"), FRAME)["arm"]
+    assert (arm["exclude_self"], arm["self_exclusion"]) == (True, "accession_after_retrieval")
+
+
+def test_a_breadth_level_and_a_channel_set_of_one_model_are_arms_of_their_own() -> None:
+    recipe = [
+        "truth",
+        "curated",
+        "phylogenetic",
+        "orthology_electronic",
+        "reviewed_field_electronic",
+    ]
+    level = _row(donor_set_id="d0", donor_set_name="donors-level-1-experimental-211")
+    arm = summary_row(level, FRAME)["arm"]
+    assert arm["donor_set"] == {"id": "d0", "name": "donors-level-1-experimental-211"}
+    assert arm["channels"] is None
+    assert summary_row(_row(donor_channels=recipe), FRAME)["arm"]["channels"] == recipe
+    # A set the store no longer names still says which set it was.
+    assert summary_row(_row(donor_set_id="d1"), FRAME)["arm"]["donor_set"] == {
+        "id": "d1",
+        "name": None,
+    }
 
 
 def test_an_uncut_set_reads_what_its_candidates_retrieved() -> None:

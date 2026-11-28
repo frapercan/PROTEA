@@ -884,6 +884,29 @@ Payload fields
        so every query receives candidates in every aspect even when its
        nearest neighbours in a unified index happen to be annotated only
        in one or two. A common cause of BPO recall ceilings.
+   * - ``exclude_self_neighbour``
+     - ``false``
+     - Whether the query is excluded from its own neighbourhood. Recorded on
+       every receipt, false included.
+   * - ``self_exclusion``
+     - ``null``
+     - Who leaves with the query: ``"sequence"`` (its twins too, the flag's
+       meaning when this is unset), ``"accession"`` (the query alone), both
+       asking as many neighbours deeper as the drop can cost; or
+       ``"accession_after_retrieval"`` (LAFA's own search: the asked depth is
+       retrieved from the pool as it stands and the query is dropped after,
+       so a query in the pool keeps one neighbour fewer; needs the flag true).
+       ``"none"`` drops nobody.
+   * - ``donor_policy``
+     - permissive
+     - Which proteins may donate and which of their annotations: ``reviewed_only``,
+       ``evidence_codes``, ``exclude_reference_prefixes``, ``admitted_by_release``,
+       and the two restrictions read at the run's cut photo, ``donor_set_id`` (a
+       ``photo_members`` query set of that photo; the coordinator refuses any other
+       set, and a run over an annotation set no photo loaded) and
+       ``evidence_channels`` (the channels of ``CHANNELS``; a row's channel is read
+       with the photo's channel table and the member's review status at the cut).
+       Combined, every restriction applies. See *Donor pool* below.
    * - ``reranker_model_id``
      - ``null``
      - Optional UUID of a registered ``RerankerModel`` (typically produced
@@ -938,6 +961,44 @@ applied/skipped/mean_score/etc.) but is not persisted.
    worker emits ``reranker.skipped`` with ``reason=contracts_unavailable``
    and proceeds with KNN ordering.
 
+Donor pool
+~~~~~~~~~~
+
+The reference pool is every protein with a vector of the configuration and an
+annotation the donor policy admits, and the same rows are the ones a donor may
+donate. Three readers apply the policy, and they share one definition of each
+predicate (``protea.core.operations.predict_go_terms._pool_admission``): the
+pool's query, the build of the per-aspect indices and their annotation arrays,
+and the per-batch donation loader.
+
+- **Admission through a positive row.** A donor is admitted only through a row
+  that passes the policy's filters and whose qualifier carries no ``NOT``. The
+  aspect indices and the donation loader always read positive rows only; the
+  pool's query did not, so a unified pool held donors whose admitted rows were
+  all ``NOT`` rows, which took neighbour slots and donated nothing.
+  Aspect-separated retrieval is unchanged (its indices only ever held donors
+  with a positive row in the aspect, and its candidate rows are byte-identical);
+  unified retrieval no longer admits such donors. **Unified runs made before this
+  change are not reproduced by it**: their prediction sets carry the earlier code
+  revision, and the method seal refuses to compare two code revisions without
+  evidence. The pool cache's epoch moved from ``e4`` to ``e5`` with it, so no
+  pool cached under the old admission is ever served.
+- **Donor set.** ``donor_set_id`` keeps the donors a declared set of photo members
+  lists (``declare_photo_member_set``), by one ``EXISTS`` semi-join on
+  ``query_set_entry``; the aspect indices are cut from the unified pool, so both
+  retrievals follow.
+- **Evidence channels.** ``evidence_channels`` admits a row whose channel at the
+  cut is listed: ``evidence_channel_of`` with the photo's channel table, the row's
+  code, reference and with/from, and the member's ``superset`` flag (a field
+  translation is ``reviewed_field_electronic`` on a reviewed entry and
+  ``signature_electronic`` on an unreviewed one). Every channel but ``no_data``
+  admits exactly what every evidence code but ``ND`` does.
+
+The donor set, the channels and the exclusion after retrieval are part of the
+arm's identity on every surface that names an arm (``_arm_identity``: the donor
+policy column names the set and the channels, and ``self-excluded-after-retrieval``
+is a level of its own), in the window summary and in the window panel's labels.
+
 Reference cache
 ~~~~~~~~~~~~~~~
 
@@ -967,6 +1028,14 @@ For high-dimensional PLMs (ESM2-3B at 2560 dims), each f32 copy of a
 500 K-vector pool is roughly 5 GB. Materialising only the copy the run
 actually reads reduces peak RAM from around 53 GB to around 21 GB for
 ESM2-3B (see ADR :doc:`/adr/D41-lean-f32-refpool-highdim-plm`).
+
+On a miss the pool is written to the disk cache (``PROTEA_REF_CACHE_DIR``): the
+half-precision vectors and accessions, and per aspect the index array, its pool
+fingerprint and the annotation arrays. The tuning switch
+``reference_pool_disk_write`` (``PROTEA_TUNING__operation__reference_pool_disk_write``,
+default on) turns the writes off for a pool only one run reads: the pool is built
+in the worker's memory and nothing is written, and the same pool is served
+either way. A cache already on disk is still read.
 
 Batch and write workers
 ~~~~~~~~~~~~~~~~~~~~~~~

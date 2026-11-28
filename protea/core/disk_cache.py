@@ -18,7 +18,9 @@ Files (under ``_DISK_CACHE_DIR``):
 
 Invalidation: ``AnnotationSet`` rows are immutable once loaded, so the
 cache stays valid for as long as the files exist. Delete the files
-manually to force a reload after a model change.
+manually to force a reload after a model change. The tuning switch
+``reference_pool_disk_write`` (default on) turns the writes off, so a
+pool one run reads is built in memory and leaves nothing behind.
 """
 
 from __future__ import annotations
@@ -133,7 +135,17 @@ class RefPoolKey(NamedTuple):
 #: ordered pool fingerprints to ``dc280304d5dce097``. Without this bump the
 #: ordering fix is a silent no-op on any machine with a warm cache, which is both
 #: of them.
-_CACHE_EPOCH = 4
+#:
+#: BUMPED TO 5 on 2026-11-28: a pool admits a donor only through a POSITIVE row
+#: that passes the policy's filters (``predict_go_terms._pool_admission``). Under
+#: epoch 4 the pool's query admitted a protein through any row of the annotation
+#: set, NOT rows included, while the per-aspect indices and the donation loader
+#: read positive rows only. So a unified pool held donors whose admitted rows were
+#: all NOT rows: they took neighbour slots and donated nothing. The key's fields
+#: did not move, so an epoch-4 pool would be served under the corrected meaning;
+#: the epoch is what keeps it from being read. The aspect indices address the
+#: unified pool by position, and their accessions are the same under both epochs.
+_CACHE_EPOCH = 5
 
 
 def _cache_key(
@@ -633,6 +645,7 @@ def _load_reference_pool_cached(
     expected_count: int | None = None,
     emit: Callable[[str, dict[str, Any]], None] | None = None,
     freshness_seconds: int = 0,
+    write: bool = True,
 ) -> tuple[list[str], np.ndarray]:
     """Return ``(accessions, embeddings)`` for the reference pool with disk-cache.
 
@@ -647,7 +660,13 @@ def _load_reference_pool_cached(
     entirely; a ``refpool.cache_hit_fresh`` audit event is emitted instead of
     ``refpool.cache_hit``.  ``emit`` receives ``refpool.cache_hit`` /
     ``refpool.cache_hit_fresh`` / ``refpool.cache_stale`` /
-    ``refpool.cache_write`` events; pass ``None`` to stay quiet.
+    ``refpool.cache_write`` / ``refpool.cache_not_written`` events; pass
+    ``None`` to stay quiet.
+
+    ``write`` False (the tuning switch ``reference_pool_disk_write``) serves a
+    miss from ``db_loader`` and writes nothing: a pool read by one run only is
+    built in the worker's memory instead of on a disk the next pool may need.
+    A cache already on disk is still read.
     """
     emb_path, _ = _disk_cache_paths(*key)
     if freshness_seconds > 0 and _is_cache_fresh(
@@ -673,6 +692,11 @@ def _load_reference_pool_cached(
     if cached is not None:
         _emit_cache_hit(emit, emb_path, cached)
         return cached["accessions"], cached["embeddings"]
+    if not write:
+        accessions, embeddings = db_loader()
+        if emit is not None:
+            emit("refpool.cache_not_written", {"path": str(emb_path), "rows": len(accessions)})
+        return accessions, embeddings
     return _load_and_write_cache(key, db_loader, emit, emb_path)
 
 
