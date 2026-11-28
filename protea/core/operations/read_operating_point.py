@@ -200,11 +200,14 @@ def strata_rows(
                 meta.tau_grid,
             )
             setting, aspect = cell.split(":")
+            placed: dict[str, str] = {}
+            for axis, band in zip(axes, bands, strict=True):
+                placed[axis] = band
             yield {
                 "cell": cell,
                 "setting": setting,
                 "aspect": aspect,
-                **dict(zip(axes, bands, strict=True)),
+                **placed,
                 "n": reading["n_targets"],
                 "n_w": reading["n_targets_w"],
                 "small": reading["n_targets"] < p.min_population,

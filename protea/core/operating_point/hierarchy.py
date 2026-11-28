@@ -238,7 +238,7 @@ def _counts(before: pa.Table, after: pa.Table) -> RestorationCounts:
     """Rows in and out, and how many (protein, term) scores rose or appeared."""
     keys = ["protein_accession", "go_id"]
     old = before.to_pandas().groupby(keys, sort=False)["score"].max().rename("before")
-    new = after.to_pandas().set_index(keys)["score"].rename("after")
+    new = after.to_pandas().groupby(keys, sort=False)["score"].max().rename("after")
     joined = new.to_frame().join(old, how="left")
     added = int(joined["before"].isna().sum())
     raised = int((joined["after"] > joined["before"]).sum())
