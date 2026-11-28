@@ -86,6 +86,75 @@ def _refuse_an_undeclared_corpus(count: int) -> None:
     )
 
 
+_SEARCH_IN_A_DECLARED_SPACE = (
+    "the search in a declared space (branch feat/embedding-transform-in-the-search)"
+)
+_DONOR_SET_AND_CHANNELS = (
+    "the donor set, the evidence channels and the exclusion after retrieval in the search "
+    "(branch feat/donor-set-and-channels)"
+)
+
+#: Each field protea-contracts 1.8.0 named before this revision's search could
+#: run it, with the change that makes the search run it. An entry leaves with
+#: the code it names.
+_IN_THE_SEARCH_WITH: dict[str, str] = {
+    "embedding_transform": _SEARCH_IN_A_DECLARED_SPACE,
+    "donor_policy.donor_set_id": _DONOR_SET_AND_CHANNELS,
+    "donor_policy.evidence_channels": _DONOR_SET_AND_CHANNELS,
+    "self_exclusion 'accession_after_retrieval'": _DONOR_SET_AND_CHANNELS,
+}
+
+
+def _refuse_what_the_search_does_not_run_yet(p: PredictGOTermsPayload) -> None:
+    """Refuse a field the contract names and this revision's search does not run yet.
+
+    WHY. protea-contracts 1.8.0 lets a predict payload name four things: the
+    space the search runs in, a declared set of donors, the evidence channels a
+    donation may come through, and the query leaving its own neighbourhood after
+    retrieval. The payload validates all four, and ``extra="forbid"`` refuses only
+    a field the contract does not know. Without this, a run naming the space or a
+    donor restriction would search as though it were unset while its job still
+    asked for it, and for the two donor fields its receipt and the name of its
+    pool's cache would say the restriction was applied. The exclusion after
+    retrieval would reach protea-method's search untested through this path, and
+    the arm identity would read the run as one that excluded the query by
+    sequence. Either way the rows of one search are filed under the name of
+    another. Each refusal names the change that runs the field, and leaves with
+    it.
+
+    It reads nothing but the payload, so it refuses before any lookup.
+    """
+    asked: list[str] = []
+    if p.embedding_transform is not None:
+        asked.append("embedding_transform")
+    if p.donor_policy.donor_set_id is not None:
+        asked.append("donor_policy.donor_set_id")
+    if p.donor_policy.evidence_channels is not None:
+        asked.append("donor_policy.evidence_channels")
+    if p.self_exclusion == "accession_after_retrieval":
+        asked.append("self_exclusion 'accession_after_retrieval'")
+    if not asked:
+        return
+    by_change: dict[str, list[str]] = {}
+    for field in asked:
+        by_change.setdefault(_IN_THE_SEARCH_WITH[field], []).append(field)
+    named = "; ".join(
+        f"{_listed(fields)} {'comes' if len(fields) == 1 else 'come'} with {change}"
+        for change, fields in by_change.items()
+    )
+    them = "it" if len(asked) == 1 else "them"
+    raise ValueError(
+        f"this revision's search does not run what the payload asks for: {named}. Run here, "
+        "its rows would be filed under a request they do not answer, so the run is refused; "
+        f"leave {them} unset until that code is deployed"
+    )
+
+
+def _listed(names: list[str]) -> str:
+    """``a``, ``a and b``, ``a, b and c``."""
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def _new_prediction_set(
     p: PredictGOTermsPayload, ids: tuple[Any, Any, Any], queries: int, parent_job_id: UUID
 ) -> PredictionSet:
@@ -181,6 +250,7 @@ class PredictGOTermsOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = PredictGOTermsPayload.model_validate(contract_payload(payload))
+        _refuse_what_the_search_does_not_run_yet(p)
         parent_job_id = UUID(payload["_job_id"])
         embedding_config_id, annotation_set_id, ontology_snapshot_id, config = (
             self._validate_inputs(session, p)
