@@ -75,9 +75,9 @@ def rows_of(
             "left_out_without_a_self_score": twins_left_out,
             "targets_with_twins_left_out": targets_left_out,
         },
-        "target_sequences_without_a_self_score": len(target_md5s - set(data.self_bits))
-        if data.self_bits
-        else None,
+        "target_sequences_without_a_self_score": None
+        if data.self_bits is None
+        else len(target_md5s - set(data.self_bits)),
     }
     return rows, counts
 

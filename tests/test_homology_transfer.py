@@ -64,6 +64,8 @@ def test_the_variants_must_mean_something_under_the_rule() -> None:
 def test_global_identity_is_identical_residues_over_the_longer_sequence() -> None:
     assert global_identity(0.5, 100, 200, 120) == 50 / 200
     assert global_identity(0.333, 3, 3, 9) == 1 / 9
+    # A rounded fident over a long gapped alignment cannot count more than the shorter sequence.
+    assert global_identity(1.0, 1001, 1000, 1001) == 1000 / 1001
     assert twin_hit("q", 312.0, 150).global_identity == 1.0
 
 

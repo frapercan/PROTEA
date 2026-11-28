@@ -20,7 +20,8 @@ Their variants:
 
 - ``identity``: ``local`` is MMseqs2's ``fident``, the identity over the alignment;
   ``global`` is ``nident / max(qlen, slen)``, with ``nident = round(fident x
-  alnlen)`` (the table's search ran with ``--seq-id-mode 0``). A twin is 1 either way.
+  alnlen)`` (the table's search ran with ``--seq-id-mode 0``) held to the shorter
+  sequence's length. A twin is 1 either way.
 - ``denominator`` of a vote: ``any_aspect`` sums the weight of every voter that
   carries an admitted term; ``same_aspect`` only of those carrying one in the
   term's aspect.
@@ -115,8 +116,13 @@ class Hit(NamedTuple):
 
 
 def global_identity(fident: float, alnlen: int, qlen: int, slen: int) -> float:
-    """``nident / max(qlen, slen)`` with ``nident = round(fident x alnlen)``."""
-    return round(fident * alnlen) / max(qlen, slen)
+    """``nident / max(qlen, slen)`` with ``nident = round(fident x alnlen)``.
+
+    No alignment holds more identical residues than the shorter sequence has, and a
+    ``fident`` printed with three decimals can overshoot that by a residue on a long
+    gapped alignment, so ``nident`` is held to it.
+    """
+    return min(round(fident * alnlen), qlen, slen) / max(qlen, slen)
 
 
 def twin_hit(md5: str, self_bits: float | None, length: int | None) -> Hit:

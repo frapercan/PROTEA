@@ -2450,7 +2450,8 @@ The rules (:mod:`protea.core.homology.transfer`): ``top_hit_identity``, the larg
 identity among the voters carrying a term (CAFA's and LAFA's BLAST baseline);
 ``bitscore_vote`` (S1), ``sum bits x I(t) / sum bits``; ``bitscore_identity_vote``
 (S2), ``sum bits x ID x I(t) / sum bits x ID``. Identity is ``local`` (``fident``) or
-``global`` (``nident / max(qlen, slen)``, ``nident = round(fident x alnlen)``); a vote's
+``global`` (``nident / max(qlen, slen)``, ``nident = round(fident x alnlen)``, held to
+the shorter sequence's length); a vote's
 denominator sums every voter carrying an admitted term (``any_aspect``) or those
 carrying one in the term's aspect (``same_aspect``); ``multiplicity`` counts every
 donor accession or every donor sequence once; ``hit_cap`` reads the first hits by bit

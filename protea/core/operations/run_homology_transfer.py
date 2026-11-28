@@ -304,7 +304,8 @@ class Gathered:
     hits: dict[str, list[Hit]]
     donors: dict[str, list[str]]
     states: DonorRows
-    self_bits: dict[str, float]
+    #: The target sequences' self scores; None for a rule that reads no bit score.
+    self_bits: dict[str, float] | None
     lengths: dict[str, int]
 
 
@@ -326,7 +327,7 @@ def gather(
     donors = donors_by_md5(session, src.photo, wanted, p.donor_policy.donor_set_id)
     accessions = {a for found in donors.values() for a in found}
     states = donor_states(session, src, accessions, p.donor_policy)
-    scores = self_bits(_store(), src.scores, set(md5_of.values())) if src.scores else {}
+    scores = self_bits(_store(), src.scores, set(md5_of.values())) if src.scores else None
     lengths = sequence_lengths(session, wanted) if p.identity == "global" else {}
     return Gathered(targets, md5_of, hits, donors, states, scores, lengths)
 
@@ -344,7 +345,8 @@ def target_hits(data: Gathered, md5: str, rule: TransferRule) -> list[Hit]:
             )
             for h in found
         ]
-    return [*found, transfer.twin_hit(md5, data.self_bits.get(md5), data.lengths.get(md5))]
+    self_score = (data.self_bits or {}).get(md5)
+    return [*found, transfer.twin_hit(md5, self_score, data.lengths.get(md5))]
 
 
 def donors_for(data: Gathered, accession: str, self_exclusion: str) -> Mapping[str, list[str]]:
